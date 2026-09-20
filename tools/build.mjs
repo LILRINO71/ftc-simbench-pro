@@ -91,6 +91,18 @@ fs.writeFileSync(path.join(DIST, 'index.html'), page, 'utf8');
 fs.writeFileSync(path.join(DIST, 'CNAME'), DOMAIN + '\n', 'utf8');
 fs.writeFileSync(path.join(DIST, '.nojekyll'), '', 'utf8');
 
+// Cloudflare Pages / Netlify read this. The page is one file that changes every
+// deploy, so it must never be cached hard; everything else here is immutable.
+fs.writeFileSync(path.join(DIST, '_headers'),
+  `/*\n` +
+  `  X-Content-Type-Options: nosniff\n` +
+  `  Referrer-Policy: strict-origin-when-cross-origin\n` +
+  `  Permissions-Policy: gamepad=(self), geolocation=(), camera=(), microphone=()\n` +
+  `/index.html\n` +
+  `  Cache-Control: public, max-age=0, must-revalidate\n` +
+  `/\n` +
+  `  Cache-Control: public, max-age=0, must-revalidate\n`, 'utf8');
+
 const kb = (s) => (s.length / 1024).toFixed(0) + ' KB';
 console.log(`FTC SimBench Pro ${pkg.version} build ${build}${MIN ? (STRINGS ? ' [ship +strings]' : ' [ship]') : ' [dev]'}`);
 console.log(`  dist/index.html    ${kb(page)}   (js ${kb(js)}, css ${kb(css)})`);

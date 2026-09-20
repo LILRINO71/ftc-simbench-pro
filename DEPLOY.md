@@ -16,7 +16,8 @@ That writes `dist/`:
 |---|---|
 | `index.html` | the app, one self-contained file |
 | `fragment.html` | the same app without `<html>`/`<head>`, for embedding |
-| `CNAME` | `app.ftc-simbench.com` — GitHub Pages and some hosts read this |
+| `CNAME` | `app.ftc-simbench.com` — read by GitHub Pages; Cloudflare ignores it harmlessly |
+| `_headers` | cache and security headers, read by Cloudflare Pages and Netlify |
 | `.nojekyll` | stops Jekyll eating files that start with `_` |
 
 Two external requests remain at runtime: Google Fonts and the three.js CDN. To be fully
@@ -25,13 +26,35 @@ dependency-free" below.
 
 ## Hosting: pick one
 
-**Cloudflare Pages (recommended).** Free, serves from a private repo, custom domains and HTTPS
-included, and the build can run on their side.
-1. Cloudflare dashboard → Workers & Pages → Create → Pages → Connect to Git → pick
-   `LILRINO71/ftc-simbench-pro` (authorise the private repo).
-2. Build command `npm run build:ship`, output directory `dist`.
-3. Custom domains → `app.ftc-simbench.com`. If the domain is already on Cloudflare DNS the record
-   is created for you; otherwise add the `CNAME` they show you at your registrar.
+**Cloudflare Pages — this is the one to use.** Free, builds straight from the *private* repo, and it
+hands you a working `https://<project>.pages.dev` link before you own any domain. GitHub Pages
+cannot do this: it refuses Pages on a private repo unless you pay
+(`422: Your current plan does not support GitHub Pages for this repository`).
+
+1. Sign in at <https://dash.cloudflare.com> (a free account is enough).
+2. **Compute (Workers & Pages) → Create → Pages → Connect to Git.**
+3. Authorise GitHub, and when it asks which repositories, give it
+   **LILRINO71/ftc-simbench-pro**. It stays private; Cloudflare just reads it.
+4. Set up the build:
+   - **Framework preset:** None
+   - **Build command:** `npm run build:ship`
+   - **Build output directory:** `dist`
+   - Nothing else. No environment variables, no secrets. (`.node-version` in the repo pins Node 22,
+     and there are no dependencies to install.)
+5. **Save and Deploy.** The first build takes about a minute. The link appears at the top of the
+   page as `https://ftc-simbench-pro.pages.dev` — that is your shareable link, and every push to
+   `main` rebuilds it automatically.
+
+Later, when you own the domain: **Custom domains → Set up a domain → `app.ftc-simbench.com`**.
+If the domain's DNS is on Cloudflare the record is made for you; otherwise add the CNAME they show
+you at your registrar. TLS is automatic either way.
+
+What Cloudflare runs is exactly what you can run locally, so there are no surprises:
+
+```bash
+npm install
+npm run build:ship
+```
 
 **Netlify.** Same shape: build `npm run build:ship`, publish `dist`, then Domain settings → add
 `app.ftc-simbench.com`.
