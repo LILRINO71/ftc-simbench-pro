@@ -166,7 +166,8 @@ export function minifyJS(src, opts = {}) {
     if ((t.t === 'nl' || t.t === 'sp') && (!prev || prev.t === 'nl' || prev.t === 'sp')) continue;
     out += t.v;
   }
-  out = out.replace(/\n{2,}/g, '\n').trim();
+  // NB: no tidy-up pass over the finished text. A regex like /\n{2,}/ would also
+  // reach inside template literals, and the sample OpModes live in those.
   return opts.strings ? hideStrings(out) : out;
 }
 
@@ -185,8 +186,7 @@ function hideStrings(src) {
     const prevTok = toks[i - 1];
     const isKey = nextTok && nextTok.t === 'punc' && nextTok.v === ':';
     const isMember = prevTok && prevTok.t === 'punc' && (prevTok.v === '.' || prevTok.v === '?.');
-    let value;
-    try { value = JSON.parse(t.v[0] === "'" ? JSON.stringify(unquote(t.v)) : t.v); } catch (e) { value = null; }
+    const value = decodeStringLiteral(t.v);
     if (isKey || isMember || value === null || value.length < 3) { out += t.v; continue; }
     let id = index.get(value);
     if (id === undefined) { id = table.length; table.push(value); index.set(value, id); }
@@ -200,14 +200,41 @@ function hideStrings(src) {
   return prelude + out;
 }
 
-const unquote = (lit) => {
+/* The value a JS string literal denotes, or null when this pass can't be sure.
+   Null is the safe answer: the literal is then left exactly as it was. */
+export function decodeStringLiteral(lit) {
+  if (typeof lit !== 'string' || lit.length < 2) return null;
+  const q = lit[0];
+  if ((q !== '"' && q !== "'") || lit[lit.length - 1] !== q) return null;
   const body = lit.slice(1, -1);
-  return body.replace(/\\(['"\\nrtbfv0]|u[0-9a-fA-F]{4}|x[0-9a-fA-F]{2})/g, (m, g) => {
-    const simple = { n: '\n', r: '\r', t: '\t', b: '\b', f: '\f', v: '\v', 0: '\0', "'": "'", '"': '"', '\\': '\\' };
-    if (simple[g] !== undefined) return simple[g];
-    return String.fromCharCode(parseInt(g.slice(1), 16));
-  });
-};
+  let out = '';
+  for (let i = 0; i < body.length; i++) {
+    const c = body[i];
+    if (c !== '\\') { if (c === q) return null; out += c; continue; }
+    const e = body[++i];
+    if (e === undefined) return null;
+    const simple = { n: '\n', r: '\r', t: '\t', b: '\b', f: '\f', v: '\v', '0': '\0', "'": "'", '"': '"', '\\': '\\', '/': '/', '\n': '' };
+    if (Object.prototype.hasOwnProperty.call(simple, e)) {
+      if (e === '0' && /[0-9]/.test(body[i + 1] || '')) return null;   // legacy octal: not worth guessing
+      out += simple[e]; continue;
+    }
+    if (e === 'x' || e === 'u') {
+      let hex;
+      if (e === 'x') { hex = body.substr(i + 1, 2); i += 2; }
+      else if (body[i + 1] === '{') {                                   // \u{1F41D}
+        const end = body.indexOf('}', i + 2); if (end < 0) return null;
+        hex = body.slice(i + 2, end); i = end;
+      } else { hex = body.substr(i + 1, 4); i += 4; }
+      if (!/^[0-9a-fA-F]+$/.test(hex)) return null;
+      const cp = parseInt(hex, 16);
+      if (cp > 0x10FFFF) return null;
+      out += String.fromCodePoint(cp); continue;
+    }
+    if (/[0-9]/.test(e)) return null;                                   // octal escape
+    out += e;                                                           // \q is just q
+  }
+  return out;
+}
 
 export function minifyCSS(src) {
   let out = src.replace(/\/\*[\s\S]*?\*\//g, '');

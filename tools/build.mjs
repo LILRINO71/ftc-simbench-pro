@@ -31,7 +31,11 @@ const STRINGS = argv.includes('--strings');
 // An inline script must never contain a literal closing script tag.
 const safe = (s) => s.replace(/<\/(script)/gi, '<\\/$1');
 
-const engine = ORDER.map((n) => `// ---- src/${n}.js ----\n${rd('src', n + '.js')}`).join('\n');
+// A dev build tolerates a module that isn't written yet; a ship build never does.
+const missing = ORDER.filter((n) => !fs.existsSync(path.join(ROOT, 'src', n + '.js')));
+if (missing.length && MIN) { console.error(`ship build refused: src/${missing.join('.js, src/')}.js missing`); process.exit(1); }
+if (missing.length) console.warn(`  ! dev build without: ${missing.join(', ')}`);
+const engine = ORDER.filter((n) => !missing.includes(n)).map((n) => `// ---- src/${n}.js ----\n${rd('src', n + '.js')}`).join('\n');
 const build = crypto.createHash('sha256').update(engine).digest('hex').slice(0, 8);
 const banner = `/*! FTC SimBench Pro ${pkg.version} (${build}) — Copyright (c) 2026 LILRINO71. All rights reserved.\n` +
   `    Proprietary. Not open source. Includes the BIOBUZZ Shot Sim (MIT, (c) 2026 LILRINO71). */\n`;

@@ -18,11 +18,15 @@ test('minifier: the awkward corners of JS survive', () => {
     ['division after )', '(() => { const f = () => 8; return f() / 2 / 2; })()', 2],
     ['increment spacing', '(() => { let a = 1, b = 1; return a + + b; })()', 2],
     ['keyword then regex', '(() => typeof /x/ )()', 'object'],
+    // a blank line inside a template literal is content: the sample OpModes are template literals
+    ['blank line in a template', '(function () {\n  const java = `a;\n\nb;`\n  return java\n})()', 'a;\n\nb;'],
+    ['indentation in a template', '(() => `x\n    y`)()', 'x\n    y'],
   ];
   for (const [what, src, want] of cases) {
     const min = minifyJS(src);
     assert.deepEqual(run(min), want, `${what}: minified to ${min}`);
-    assert.ok(!/\n\s+/.test(min), `${what}: indentation left behind`);
+    // whitespace inside a template literal is content, so only check the rest
+    if (!src.includes('`')) assert.ok(!/\n\s+/.test(min), `${what}: indentation left behind`);
   }
 });
 
@@ -46,6 +50,7 @@ function digest(E) {
   d.devices = code.devices.map((x) => x.name).sort();
   d.bindings = (code.bindings || []).length;
   const cad = JSON.parse(JSON.stringify(E.SAMPLE_CAD));
+  cad.solids = E.sampleSolids();          // the app boots with these; mass and drivetrain need them
   E.classifyMechs(cad.mechs);
   const map = E.autoMap(code.devices, cad.mechs);
   d.findings = E.analyze(code, cad, map, { payloadKg: 0.18, duty: 0.3, trust: 'code' }).map((f) => f.key + ':' + f.sev);

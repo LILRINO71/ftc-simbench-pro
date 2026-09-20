@@ -1194,6 +1194,7 @@ function analyzeAll(){
   if(!CODE||!CAD) return;
   FINDINGS=analyze(CODE,CAD,MAP,OPTS);
   renderFindings(); renderTables(); renderRig(); renderCoverage();
+  Status.render(); MathTab.invalidate();
 }
 /* Rebuild the simulation after a rig or hardware change, keeping the Driver
    Station where it was — a running OpMode restarts, like re-deploying code. */
@@ -1233,6 +1234,7 @@ function loadCAD(cad,label,cls){
   if(CODE){ MAP=autoMap(CODE.devices,CAD.mechs); applyDeviceMemory(); rebuild(); }
   if(restored) $("#cadStatus").textContent=label+" · rig restored";
   syncOptionControls();
+  DRIVE_CACHE={key:null,val:null}; Physics.sync(); MathTab.invalidate();
 }
 
 /* ============================================================
@@ -1275,6 +1277,7 @@ function takeRobotConfig(file){ readText(file,text=>setRobotConfig(text,file.nam
 function routeFile(file){
   const n=file.name.toLowerCase();
   if(/\.(step|stp)$/.test(n)) takeCAD(file);
+  else if(/\.ftcsim$/.test(n)) Session.take(file);
   else if(/\.xml$/.test(n)) takeRobotConfig(file);
   else takeCode(file);
 }
@@ -1534,8 +1537,324 @@ function frame(now){
     const lp=$("#loopPill");
     lp.textContent=Sim.phase==="running"?Sim.t.toFixed(1)+" s · 50 Hz":Sim.phase; lp.className="pill"+(Sim.phase==="running"?" live":"");
     $$(".bindrow").forEach(r=>r.classList.toggle("active",!!Sim.pad[activePad][r.dataset.btn]));
+    MathTab.tick(); Status.render();
   }); }
   requestAnimationFrame(frame);
+}
+
+/* ============================================================
+   PRO — one status light, the walkthrough, .ftcsim workspaces,
+   GitHub import, the physics panel and the portfolio math sheet.
+   Everything here stays quiet until it has something to say.
+   ============================================================ */
+
+/* ---------- the one light -------------------------------- */
+const Status={
+  cur:null,
+  compute(){
+    const rt={ stalled:[], missing:[], blocked:!!(Sim&&Sim.blocked), slipping:!!(Sim&&Sim.slipping) };
+    return statusOf(FINDINGS,rt);
+  },
+  render(){
+    const s=this.compute();
+    const chip=$("#statusChip"); if(!chip) return;
+    if(this.cur&&this.cur.level===s.level&&this.cur.label===s.label&&this.cur.items.length===s.items.length){ this.cur=s; return; }
+    const wasWorse=this.cur&&s.rank>this.cur.rank;
+    this.cur=s;
+    chip.className="status-chip "+s.level;
+    $("#statusLabel").textContent=s.label;
+    chip.title=s.headline;
+    $("#statusHead").textContent=s.level==="go"?"Nothing to report":s.headline;
+    setHTML($("#statusList"), s.items.length
+      ? s.items.map((i,n)=>`<button class="row ${i.level}" data-go="${esc(i.where)}" data-n="${n}"><i></i><span>${esc(i.text)}</span></button>`).join("")
+      : `<p class="ok">Code, CAD and configuration agree. Nothing is over its limit.</p>`);
+    // only a new problem is allowed to interrupt; warnings never open themselves
+    if(wasWorse&&s.level==="stop") this.open(true);
+  },
+  open(b){
+    const p=$("#statusPanel"); if(!p) return;
+    p.hidden=b===undefined?!p.hidden:!b;
+    $("#statusChip").setAttribute("aria-expanded",String(!p.hidden));
+  },
+  wire(){
+    $("#statusChip").addEventListener("click",()=>this.open());
+    $("#statusClose").addEventListener("click",()=>this.open(false));
+    $("#statusList").addEventListener("click",e=>{
+      const b=e.target.closest("button[data-go]"); if(!b) return;
+      const nav=$('.tabs[data-tabs="right"]'), tab=b.dataset.go==="robot"?"checks":b.dataset.go;
+      if(b.dataset.go==="robot") selectTab($('.tabs[data-tabs="left"]'),"robot");
+      else selectTab(nav,tab);
+      this.open(false);
+    });
+    document.addEventListener("click",e=>{
+      if(!$("#statusPanel").hidden&&!e.target.closest(".status-wrap")) this.open(false);
+      if(!$("#sessionMenu").hidden&&!e.target.closest(".menu-wrap")) Menu.open(false);
+    });
+  },
+};
+
+const Menu={
+  open(b){
+    const m=$("#sessionMenu");
+    m.hidden=b===undefined?!m.hidden:!b;
+    $("#sessionBtn").setAttribute("aria-expanded",String(!m.hidden));
+  },
+};
+
+/* ---------- the walkthrough ------------------------------ */
+const Tour={
+  i:0, hi:null,
+  wire(){
+    $("#helpBtn").addEventListener("click",()=>this.start(0));
+    $("#replayTour").addEventListener("click",()=>{ Menu.open(false); this.start(0); });
+    $("#tourClose").addEventListener("click",()=>this.close());
+    $("#tourBack").addEventListener("click",()=>this.go(this.i-1));
+    $("#tourNext").addEventListener("click",()=>{ if(this.i>=TOUR.length-1) this.close(); else this.go(this.i+1); });
+    $("#tourSkip").addEventListener("change",e=>store.set("ftcbench.tour.seen",e.target.checked?"1":"0"));
+    $("#tourOverlay").addEventListener("click",e=>{ if(e.target===$("#tourOverlay")) this.close(); });
+    addEventListener("keydown",e=>{
+      if($("#tourOverlay").hidden) return;
+      if(e.key==="Escape") this.close();
+      else if(e.key==="ArrowRight") this.go(this.i+1);
+      else if(e.key==="ArrowLeft") this.go(this.i-1);
+    });
+    setHTML($("#tourDots"),TOUR.map(()=>"<i></i>").join(""));
+    if(store.get("ftcbench.tour.seen","0")!=="1") setTimeout(()=>this.start(0),450);
+  },
+  start(n){ $("#tourOverlay").hidden=false; $("#tourSkip").checked=store.get("ftcbench.tour.seen","0")==="1"; this.go(n); },
+  close(){
+    $("#tourOverlay").hidden=true; this.light(null);
+    store.set("ftcbench.tour.seen","1");
+  },
+  go(n){
+    this.i=Math.max(0,Math.min(TOUR.length-1,n));
+    const s=TOUR[this.i];
+    $("#tourStep").textContent=(this.i+1)+" / "+TOUR.length;
+    $("#tourTitle").textContent=s.title;
+    setHTML($("#tourBody"),s.body);
+    $("#tourTip").textContent=s.tip||"";
+    $("#tourTip").hidden=!s.tip;
+    $("#tourBack").disabled=this.i===0;
+    $("#tourNext").textContent=this.i===TOUR.length-1?"Get started":"Next";
+    $$("#tourDots i").forEach((d,k)=>d.classList.toggle("on",k===this.i));
+    if(s.tab){
+      const side=["teleop","java","robot","tune"].indexOf(s.tab)>=0?"left":"right";
+      const nav=$(`.tabs[data-tabs="${side}"]`);
+      if(nav&&nav.querySelector(`button[data-tab="${s.tab}"]`)) selectTab(nav,s.tab);
+    }
+    this.light(s.target?$(s.target):null);
+  },
+  light(el){
+    if(this.hi) this.hi.classList.remove("tour-hi");
+    this.hi=el; if(el) el.classList.add("tour-hi");
+  },
+};
+
+/* ---------- .ftcsim workspaces --------------------------- */
+function download(name,text,mime){
+  const blob=new Blob([text],{type:mime||"text/plain;charset=utf-8"});
+  const url=URL.createObjectURL(blob), a=document.createElement("a");
+  a.href=url; a.download=name; document.body.appendChild(a); a.click();
+  setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); },0);
+}
+const Session={
+  name(){ return ((CAD&&CAD.name)||"robot").replace(/\.(step|stp)$/i,"").replace(/[^\w.-]+/g,"-")+".ftcsim"; },
+  save(){
+    if(typeof packSession!=="function"||!CAD){ this.toast("nothing to save yet"); return; }
+    const e=entry(CURRENT_ID);
+    const text=packSession(sessionFromBench({
+      cad:CAD, code:CODE, java:e?e.source:"", opName:e?e.file:"", map:MAP, opts:OPTS,
+      chassis:Sim.chassis, alliance:Shots.alliance, rig:exportRig(),
+      savedISO:new Date().toISOString(),
+    }));
+    download(this.name(),text,"application/json");
+    this.toast("saved "+this.name()+" · "+(text.length/1048576).toFixed(1)+" MB");
+  },
+  take(file){
+    readText(file,text=>{
+      const r=unpackSession(text);
+      if(!r.ok){ this.toast("that .ftcsim wouldn't open — "+r.error); return; }
+      this.apply(r.session,file.name);
+    },m=>this.toast(m));
+  },
+  apply(s,fileName){
+    try{
+      if(s.cad){
+        const cad=s.cad; cad.name=cad.name||fileName;
+        classifyMechs(cad.mechs);
+        loadCAD(cad,(cad.name||fileName)+" · from workspace","ok");
+      }
+      if(s.java) addOpModeFromText(s.opName||"Workspace.java",s.java);
+      if(s.map&&Object.keys(s.map).length) { MAP=s.map; rebuild(); }
+      if(s.opts){ for(const k of ["payloadKg","duty","trust","front","baseModel","shooterModel","mu","physics"]) if(s.opts[k]!==undefined) OPTS[k]=s.opts[k]; syncOptionControls(); Physics.sync(); }
+      if(s.alliance) setAlliance(s.alliance,false);
+      if(s.chassis&&isFinite(s.chassis.x)){
+        Sim.chassis={x:s.chassis.x,y:s.chassis.y,h:s.chassis.h||0};
+        if(Field.ok&&Sim.footprint) Field.collide(Sim.chassis,Sim.footprint,Sim.obstacles);
+        OPTS.startPose=Object.assign({},Sim.chassis);
+      }
+      this.toast("opened "+(fileName||"workspace")+(s.saved?" · saved "+String(s.saved).slice(0,10):""));
+    }catch(e){ this.toast("that workspace didn't load — "+e.message); }
+  },
+  toast(msg){
+    const el=$("#cadStatus"); if(el) el.textContent=msg;
+  },
+};
+
+/* ---------- import from GitHub --------------------------- */
+const GH={
+  open(b){
+    $("#ghOverlay").hidden=b===false;
+    if(b!==false) setTimeout(()=>$("#ghUrl").focus(),30);
+  },
+  say(msg,bad){ const s=$("#ghStatus"); s.textContent=msg; s.className="gh-status"+(bad?" bad":""); },
+  async find(){
+    const ref=parseRepoRef($("#ghUrl").value);
+    if(!ref){ this.say("that doesn't look like a public GitHub repo or .java file",true); return; }
+    const urls=rawUrlsFor(ref);
+    setHTML($("#ghList"),"");
+    this.say("looking in "+ref.owner+"/"+ref.repo+" …");
+    try{
+      if(ref.kind==="file"){ await this.take(urls.raw(ref.path),ref.path); return; }
+      const res=await fetch(urls.tree,{headers:{Accept:"application/vnd.github+json"}});
+      if(res.status===403){ this.say("GitHub is rate-limiting this browser — try again in a few minutes, or paste a link to the .java file itself",true); return; }
+      if(!res.ok){ this.say("GitHub said "+res.status+" — is the repository public?",true); return; }
+      const tree=await res.json();
+      const files=pickOpModes(tree.tree||[],{under:ref.path});
+      if(!files.length){ this.say("no .java files in there",true); return; }
+      this.say(files.length+" Java file"+(files.length===1?"":"s")+" — pick one to load");
+      setHTML($("#ghList"),files.map((f,i)=>
+        `<button type="button" data-i="${i}"><b>${esc(f.name)}</b><span>${esc(f.path)}</span>${f.sample?'<span class="tag">sample</span>':""}</button>`).join(""));
+      $("#ghList").onclick=e=>{ const b=e.target.closest("button[data-i]"); if(!b) return;
+        const f=files[+b.dataset.i]; this.take(urls.raw(f.path),f.path); };
+    }catch(e){ this.say("couldn't reach GitHub — "+e.message,true); }
+  },
+  async take(url,path){
+    this.say("fetching "+path+" …");
+    try{
+      const r=await fetch(url);
+      if(!r.ok){ this.say("couldn't fetch that file ("+r.status+")",true); return; }
+      const src=await r.text();
+      if(src.length>400000){ this.say("that file is suspiciously large",true); return; }
+      addOpModeFromText(path.split("/").pop(),src);
+      if(!javaLooksLikeOpMode(src)) this.say("loaded, but that file has no @TeleOp or @Autonomous — the bench may find nothing to run",true);
+      else { this.open(false); }
+    }catch(e){ this.say("couldn't fetch that file — "+e.message,true); }
+  },
+  wire(){
+    $("#importGh").addEventListener("click",()=>{ Menu.open(false); this.open(true); });
+    $("#ghClose").addEventListener("click",()=>this.open(false));
+    $("#ghGo").addEventListener("click",()=>this.find());
+    $("#ghUrl").addEventListener("keydown",e=>{ if(e.key==="Enter") this.find(); });
+    $("#ghOverlay").addEventListener("click",e=>{ if(e.target===$("#ghOverlay")) this.open(false); });
+    const last=store.get("ftcbench.gh.last","");
+    if(last) $("#ghUrl").value=last;
+    $("#ghUrl").addEventListener("change",e=>store.set("ftcbench.gh.last",e.target.value));
+  },
+};
+
+/* ---------- physics panel -------------------------------- */
+const Physics={
+  props:null,
+  recompute(){
+    if(typeof massProps!=="function"||!CAD){ this.props=null; return null; }
+    try{ this.props=massProps(CAD,{payloadKg:OPTS.payloadKg}); }catch(e){ this.props=null; }
+    if(this.props) Sim.props=this.props;
+    return this.props;
+  },
+  sync(){
+    $$("#physSeg button").forEach(b=>b.classList.toggle("on",b.dataset.phys===(OPTS.physics||"rigid")));
+    const mu=OPTS.mu==null?0.9:OPTS.mu;
+    $("#muSlider").value=mu; $("#muVal").textContent=mu.toFixed(2);
+    const p=this.recompute(), pill=$("#physPill");
+    if(!p){ pill.textContent="—"; setHTML($("#massRead"),'<i>No mass properties yet — load a CAD assembly with solid parts.</i>'); return; }
+    pill.textContent=(OPTS.physics==="kinematic"?"kinematic":"rigid body");
+    const d=typeof driveFromCAD==="function"?safeDrive():null;
+    const mm=v=>(v*1000).toFixed(0)+" mm";
+    setHTML($("#massRead"),[
+      `<span>mass <b>${p.kg.toFixed(2)} kg</b></span>`,
+      `<span>COM <b>${mm(p.com.x)}, ${mm(p.com.y)}</b> <i>from origin</i></span>`,
+      `<span>height <b>${mm(p.comHeight==null?p.com.z:p.comHeight)}</b></span>`,
+      `<span>I<sub>zz</sub> <b>${p.Izz.toFixed(3)}</b> <i>kg·m²</i></span>`,
+      d?`<span>drive <b>${esc(d.kind)}</b> <i>${d.wheels.length} wheels · ${Math.round((d.confidence||0)*100)}% sure</i></span>`:"",
+      p.confidence!=null?`<span><i>mass confidence ${Math.round(p.confidence*100)} %</i></span>`:"",
+    ].join(""));
+  },
+  wire(){
+    $("#physSeg").addEventListener("click",e=>{ const b=e.target.closest("button"); if(!b) return;
+      OPTS.physics=b.dataset.phys; store.set("ftcbench.physics",OPTS.physics); this.sync(); reloadSim(); });
+    $("#muSlider").addEventListener("input",e=>{ OPTS.mu=+e.target.value; $("#muVal").textContent=OPTS.mu.toFixed(2);
+      store.set("ftcbench.mu",String(OPTS.mu)); if(Sim.rig) Sim.rig.mu=OPTS.mu; });
+  },
+};
+let DRIVE_CACHE={key:null,val:null};
+function safeDrive(){
+  const key=(CAD&&CAD.name)+"|"+(CAD&&CAD.solids?CAD.solids.length:0);
+  if(DRIVE_CACHE.key===key) return DRIVE_CACHE.val;
+  let val=null;
+  try{ val=driveFromCAD(CAD); }catch(e){ val=null; }
+  DRIVE_CACHE={key,val};
+  return val;
+}
+
+/* ---------- the math sheet ------------------------------- */
+const MathTab={
+  dirty:true, report:null,
+  invalidate(){ this.dirty=true; },
+  bench(){ return { cad:CAD, code:CODE, map:MAP, opts:OPTS, sim:Sim, shots:Shots, field:Field, drive:safeDrive(), props:Physics.props }; },
+  build(){
+    if(typeof mathReport!=="function") return null;
+    try{ this.report=mathReport(this.bench()); }catch(e){ this.report={sections:[{id:"err",title:"Couldn't build the math",rows:[{label:"error",value:e.message}]}]}; }
+    this.dirty=false;
+    return this.report;
+  },
+  tick(){ if(this.dirty&&paneVisible("math")) this.render(); },
+  render(){
+    const r=this.build();
+    if(!r){ setHTML($("#mathBody"),'<div class="msec"><p class="intro">The math exporter isn\'t in this build.</p></div>'); return; }
+    const rows=(r.sections||[]).reduce((n,s)=>n+((s.rows||[]).length),0);
+    $("#mathPill").textContent=rows+" line"+(rows===1?"":"s");
+    setHTML($("#mathBody"),(r.sections||[]).map(s=>
+      `<div class="msec${s.warn?" warn":""}">
+         <h4>${esc(s.title||s.id||"")}</h4>
+         ${s.intro?`<p class="intro">${esc(s.intro)}</p>`:""}
+         ${(s.rows||[]).map(w=>`<div class="mrow">
+            <div class="lbl">${esc(w.label||"")}${w.source?`<span class="src">${esc(w.source)}</span>`:""}</div>
+            <div class="val">${esc(w.value==null?"":String(w.value))}${w.unit?" "+esc(w.unit):""}</div>
+            ${w.expr?`<div class="expr">${esc(w.expr)}</div>`:""}
+            ${w.note?`<div class="note">${esc(w.note)}</div>`:""}
+          </div>`).join("")}
+       </div>`).join(""));
+  },
+  text(){ const r=this.build(); return r&&typeof mathText==="function"?mathText(r):""; },
+  md(){ const r=this.build(); return r&&typeof mathMarkdown==="function"?mathMarkdown(r):this.text(); },
+  wire(){
+    $("#mathCopy").addEventListener("click",()=>{
+      const t=this.text(), b=$("#mathCopy");
+      const done=ok=>{ b.textContent=ok?"Copied":"Couldn't copy"; setTimeout(()=>{ b.textContent="Copy"; },1400); };
+      if(navigator.clipboard&&navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(()=>done(true),()=>done(false));
+      else done(false);
+    });
+    const dl=()=>download(((CAD&&CAD.name)||"robot").replace(/\.(step|stp)$/i,"")+"-math.md",this.md(),"text/markdown;charset=utf-8");
+    $("#mathDl").addEventListener("click",dl);
+    $("#exportMath").addEventListener("click",()=>{ Menu.open(false); dl(); });
+  },
+};
+
+/* ---------- Pro boot ------------------------------------- */
+function proBoot(){
+  OPTS.physics=store.get("ftcbench.physics","rigid")==="kinematic"?"kinematic":"rigid";
+  OPTS.mu=+store.get("ftcbench.mu","0.9")||0.9;
+  Status.wire(); Tour.wire(); GH.wire(); Physics.wire(); MathTab.wire();
+  $("#sessionBtn").addEventListener("click",()=>Menu.open());
+  $("#saveSession").addEventListener("click",()=>{ Menu.open(false); Session.save(); });
+  $("#openSession").addEventListener("click",()=>{ Menu.open(false); $("#sessionFile").click(); });
+  $("#sessionFile").addEventListener("change",e=>{ const f=e.target.files[0]; if(f) Session.take(f); e.target.value=""; });
+  addEventListener("keydown",e=>{
+    if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="s"){ e.preventDefault(); Session.save(); }
+    if(e.key==="Escape"&&!$("#ghOverlay").hidden) GH.open(false);
+  });
+  Physics.sync(); Status.render();
 }
 
 /* ============================================================
@@ -1675,6 +1994,7 @@ function frame(now){
     if(q.get("start")==="1") dsStart();
   }catch(e){}
 
+  proBoot();
   saveRig();
   RAILS_READY=true;
   requestAnimationFrame(frame);
