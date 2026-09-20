@@ -1,0 +1,25 @@
+<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>
+<!-- Test fixture shaped like a Control Hub + Expansion Hub configuration.
+     Deliberate problems for CompetitionTeleOp.java:
+       wristR     configured as a continuous-rotation servo, code uses Servo
+       FrontRight capitalisation differs from the code's "frontRight"
+       intakeFlap configured but never used -->
+<Robot type="FirstInspires-FTC">
+    <Webcam name="Webcam 1" serialNumber="VendorProduct:vendor=0x046d|product=0x0825" />
+    <LynxUsbDevice name="Control Hub Portal" serialNumber="(embedded)" parentModuleAddress="173">
+        <LynxModule name="Expansion Hub 2" port="2">
+            <goBILDA5202SeriesMotor name="lift" port="0" />
+            <Servo name="wristL" port="0" />
+            <ContinuousRotationServo name="wristR" port="1" />
+            <Servo name="intakeFlap" port="5" />
+        </LynxModule>
+        <LynxModule name="Control Hub" port="173">
+            <goBILDA5202SeriesMotor name="frontLeft" port="0" />
+            <goBILDA5202SeriesMotor name="backLeft" port="1" />
+            <goBILDA5202SeriesMotor name="FrontRight" port="2" />
+            <goBILDA5202SeriesMotor name="backRight" port="3" />
+            <Servo name="grip" port="0" />
+            <ControlHubImuBHI260AP name="imu" port="0" bus="0" />
+        </LynxModule>
+    </LynxUsbDevice>
+</Robot>

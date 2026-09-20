@@ -1,0 +1,30 @@
+FTC SimBench Pro — Proprietary Software Licence
+Copyright (c) 2026 LILRINO71. All rights reserved.
+
+This software and its source code are confidential and proprietary. They are NOT
+open source and are NOT covered by the MIT licence of the public "ftc-sim-bench"
+project from which this work was forked.
+
+No permission is granted to copy, modify, merge, publish, distribute, sublicense,
+sell, reverse engineer, or create derivative works from this software or any part
+of it, except as expressly permitted in writing by the copyright holder.
+
+Access to this repository does not grant any licence to its contents. If you have
+received this code without written permission from the copyright holder, you must
+delete it and notify the copyright holder.
+
+THIRD-PARTY COMPONENTS
+  vendor/biobuzz-shot-sim — BIOBUZZ Shot Sim engine and measured field data,
+  MIT licence, Copyright (c) 2026 LILRINO71. Its licence text is retained at
+  vendor/biobuzz-shot-sim/LICENSE and applies to those files only.
+  three.js (loaded at runtime from a CDN) — MIT licence, Copyright (c) 2010-2026
+  three.js authors.
+
+NO WARRANTY
+The simulation in this software is an engineering model, not a measurement of a
+real robot. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO
+EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+OTHER LIABILITY ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+USE OR OTHER DEALINGS IN THE SOFTWARE.

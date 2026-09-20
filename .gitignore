@@ -1,0 +1,11 @@
+node_modules/
+.DS_Store
+Thumbs.db
+
+# Robot CAD stays out of the repo (team IP, and far too large).
+# The only STEP file tracked is the small hand-written test fixture.
+*.step
+*.stp
+*.STEP
+*.STP
+!tests/fixtures/*.step

@@ -1,0 +1,13 @@
+{
+  "name": "ftc-simbench-pro",
+  "version": "3.0.0",
+  "private": true,
+  "description": "FTC SimBench Pro — drop in a STEP assembly and a Java OpMode and get a rigid-body-accurate simulation of the robot on the 2026-27 BIOBUZZ field.",
+  "license": "UNLICENSED",
+  "scripts": {
+    "build": "node tools/build.mjs",
+    "build:ship": "node tools/build.mjs --min",
+    "test": "node tools/test.mjs",
+    "sync-shot-sim": "node tools/sync-shot-sim.mjs"
+  }
+}

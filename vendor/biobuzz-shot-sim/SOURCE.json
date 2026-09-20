@@ -1,0 +1,11 @@
+{
+  "repo": "https://github.com/LILRINO71/biobuzz-shot-sim",
+  "commit": "427b5e90a965ac1c14679a602a574d2c3b7fa561",
+  "files": [
+    "src/engine.js",
+    "data/field.json",
+    "data/motors.json",
+    "data/shooter.json",
+    "LICENSE"
+  ]
+}

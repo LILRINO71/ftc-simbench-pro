@@ -1,0 +1,309 @@
+<div class="app" id="app">
+
+  <!-- ===================== Driver Station bar ===================== -->
+  <header class="dsbar">
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+        <path class="bm-hex" d="M16 2.6 27.6 9.3v13.4L16 29.4 4.4 22.7V9.3Z"/>
+        <path class="bm-arc" d="M9.3 21c2-6.4 8.2-9.8 14-8"/>
+        <circle class="bm-dot" cx="23.4" cy="13" r="2.2"/>
+      </svg>
+      <div class="brand-text"><b>FTC Sim Bench</b><span>BIOBUZZ · 2026–27</span></div>
+    </div>
+
+    <div class="op-pick">
+      <label for="opSelect">OpMode</label>
+      <div class="op-select-wrap">
+        <select id="opSelect" aria-label="OpMode"></select>
+        <span class="kind" id="opKind">TeleOp</span>
+      </div>
+    </div>
+
+    <div class="ds-controls" role="group" aria-label="Driver Station controls">
+      <button class="ds-btn" id="btnInit">INIT</button>
+      <button class="ds-btn go" id="btnStart"><svg viewBox="0 0 10 10" aria-hidden="true"><path d="M2 1l7 4-7 4z"/></svg>START</button>
+      <button class="ds-btn stop" id="btnStop"><svg viewBox="0 0 10 10" aria-hidden="true"><rect x="1.5" y="1.5" width="7" height="7" rx="1"/></svg>STOP</button>
+    </div>
+
+    <div class="ds-clock-wrap">
+      <div class="ds-clock" id="dsClock" aria-live="off">2:00</div>
+      <div class="ds-clock-bar"><i id="dsBar"></i></div>
+    </div>
+    <label class="practice"><input type="checkbox" id="practice"> no time limit</label>
+
+    <div class="ds-status">
+      <span class="pill" id="phasePill">—</span>
+      <div class="ctrl-wrap">
+        <button class="ctrl-chip" id="ctrlChip" type="button" aria-expanded="false" aria-controls="ctrlPanel" title="Plug in a controller">
+          <svg viewBox="0 0 24 16" aria-hidden="true"><path d="M6.5 1.5h11c2.6 0 4.4 1.7 5 4.4l.8 4.3c.5 2.7-2.4 4.4-4.3 2.5l-2.3-2.2H7.3L5 12.7c-1.9 1.9-4.8.2-4.3-2.5l.8-4.3c.6-2.7 2.4-4.4 5-4.4z" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M6.5 5v4M4.5 7h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="16.5" cy="5.6" r="1.1" fill="currentColor"/><circle cx="18.8" cy="8" r="1.1" fill="currentColor"/></svg>
+          <span id="ctrlLabel">Controller</span>
+        </button>
+        <div class="ctrl-panel" id="ctrlPanel" hidden>
+          <div class="ctrl-head"><b>Controllers</b><span class="spacer"></span><button class="btn-sm" id="ctrlClose" type="button">Done</button></div>
+          <div id="ctrlList"></div>
+          <div class="slide"><label for="deadzone">Stick deadzone</label>
+            <input type="range" id="deadzone" min="0" max="0.3" step="0.01" value="0.08">
+            <span class="v" id="deadzoneVal">0.08</span></div>
+          <p class="hint" id="ctrlNote">Plug in an Xbox, PlayStation or Logitech controller and press any button on it — browsers only report a controller after a button press.</p>
+        </div>
+      </div>
+      <button class="theme-btn" id="themeBtn" type="button" aria-label="Switch to light theme" title="Switch to light theme"></button>
+    </div>
+  </header>
+
+  <!-- ===================== left: code and robot ===================== -->
+  <aside class="rail rail-left" id="railLeft" aria-label="Code and robot">
+    <nav class="tabs" role="tablist" data-tabs="left">
+      <button role="tab" data-tab="teleop" aria-selected="true">TeleOp</button>
+      <button role="tab" data-tab="java" aria-selected="false">Java</button>
+      <button role="tab" data-tab="robot" aria-selected="false">Robot <span class="count" id="rigCount"></span></button>
+      <button role="tab" data-tab="tune" aria-selected="false">Tune</button>
+      <span class="spacer"></span>
+      <button class="rail-btn" type="button" data-rail="left" title="Hide this panel  [" aria-label="Hide the left panel">
+        <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M7.5 2.5 4 6l3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+    </nav>
+    <button class="rail-strip" type="button" data-rail="left" aria-label="Show the left panel"><span>TeleOp · Java · Robot · Tune</span></button>
+
+    <section class="pane" data-pane="teleop">
+      <div class="sec" data-sec="tele">
+        <div class="sec-head"><h3>TeleOp</h3><span class="count" id="teleCount"></span><span class="spacer"></span>
+          <button class="btn-sm" id="addOpMode" type="button">+ .java</button></div>
+        <div class="oplist" id="opListTele"></div>
+        <input type="file" id="codeFile" accept=".java,.txt" multiple hidden>
+      </div>
+      <div class="sec" data-sec="auto">
+        <div class="sec-head"><h3>Autonomous</h3><span class="count" id="autoCount"></span></div>
+        <div class="oplist" id="opListAuto"></div>
+      </div>
+      <div class="sec" data-sec="howto">
+        <div class="sec-head"><h3>Driving</h3></div>
+        <ul class="howto">
+          <li><b>Drag the robot</b> on the field to move it. Shift-drag or right-drag turns it.</li>
+          <li><b>Plug in a controller</b> and press a button — it becomes gamepad1 or gamepad2.</li>
+          <li><b>Keys</b> <kbd>I</kbd><kbd>J</kbd><kbd>K</kbd><kbd>L</kbd> drive, <kbd>U</kbd><kbd>O</kbd> turn, <kbd>A</kbd><kbd>B</kbd><kbd>X</kbd><kbd>Y</kbd>, <kbd>Q</kbd><kbd>E</kbd> bumpers, arrows d-pad, <kbd>F</kbd> fire. Each key goes to the gamepad your code reads it from.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="pane pane-java" data-pane="java" hidden>
+      <div class="java-bar"><span class="mono" id="srcName"></span><span class="spacer"></span>
+        <span class="pill" id="covPill">—</span>
+        <button class="btn-sm primary" id="reparse" type="button">Re-analyze</button></div>
+      <div class="editor" id="editor">
+        <div class="ed-gutter" id="edGutter" aria-hidden="true"></div>
+        <div class="ed-main">
+          <pre class="ed-hl" id="edHl" aria-hidden="true"></pre>
+          <textarea class="ed-ta" id="srcbox" spellcheck="false" wrap="off" autocomplete="off" autocapitalize="off" aria-label="Java source"></textarea>
+        </div>
+      </div>
+      <div class="sec" data-sec="coverage" data-collapsed="1">
+        <div class="sec-head"><h3>What the bench runs</h3></div>
+        <div id="coverage"></div>
+      </div>
+    </section>
+
+    <section class="pane" data-pane="robot" hidden>
+      <div class="sec" data-sec="cad">
+        <div class="sec-head"><h3>Robot CAD</h3><span class="spacer"></span><span class="mono dim" id="vpDims">—</span></div>
+        <div class="drop ok" id="cadDrop" tabindex="0" role="button" aria-label="Load a STEP CAD file">
+          <div class="dt">STEP / STP assembly</div>
+          <div class="ds" id="cadStatus">sample: fulll.step (measured)</div>
+        </div>
+        <input type="file" id="cadFile" accept=".step,.stp,.STEP,.STP" hidden>
+      </div>
+      <div class="sec" data-sec="models">
+        <div class="sec-head"><h3>Drawn parts</h3></div>
+        <div class="form2">
+          <span>CAD front</span>
+          <div class="seg" id="frontSeg" aria-label="Which way the CAD's front faces"><button data-front="+x">+x</button><button data-front="+y">+y</button><button data-front="-x">−x</button><button data-front="-y">−y</button></div>
+          <span>Drive base</span>
+          <div class="seg" id="baseSeg"><button data-mode="auto">auto</button><button data-mode="show">show</button><button data-mode="hide">hide</button></div>
+          <span>Shooter</span>
+          <div class="seg" id="shooterSeg"><button data-mode="auto">auto</button><button data-mode="show">show</button><button data-mode="hide">hide</button></div>
+        </div>
+        <p class="hint">When the code drives but the CAD has no wheels, the bench draws a mecanum base under it; when the code shoots and the CAD has no flywheel, it draws one. The honey outline on the floor is what bumps into the field.</p>
+      </div>
+      <div class="sec" data-sec="hwmap">
+        <div class="sec-head"><h3>Hardware map</h3><span class="pill" id="mapPill">—</span><span class="spacer"></span>
+          <div class="seg" id="trustSeg" title="Where servo and motor types come from"><button data-trust="code" class="on">code</button><button data-trust="cad">CAD</button></div></div>
+        <div class="scrollx"><table class="grid" id="mapTable"></table></div>
+        <p class="hint" id="trustNote">Servo and motor types come from your declarations and comments. The CAD is used for geometry only.</p>
+      </div>
+      <div class="sec" data-sec="cfgxml" data-collapsed="1">
+        <div class="sec-head"><h3>Robot configuration</h3><span class="spacer"></span>
+          <button class="btn-sm" id="cfgClear" type="button" hidden>Remove</button></div>
+        <div class="drop" id="cfgDrop" tabindex="0" role="button" aria-label="Load a robot configuration XML file">
+          <div class="dt">Configuration .xml</div>
+          <div class="ds" id="cfgStatus">From the FIRST folder on the Control Hub. Every hardwareMap name gets checked.</div>
+        </div>
+        <input type="file" id="cfgFile" accept=".xml" hidden>
+      </div>
+      <div class="sec" data-sec="rig" data-collapsed="1">
+        <div class="sec-head"><h3>Kinematic rig</h3><span class="pill" id="guessPill">—</span><span class="spacer"></span>
+          <button class="btn-sm" id="addJoint" type="button">+ Joint</button></div>
+        <p class="hint">The rig is the model everything runs on, and it's yours — detection only seeds it. Edits save with this CAD.</p>
+        <div class="scrollx"><table class="grid" id="rigTable"></table></div>
+      </div>
+      <div class="sec" data-sec="chain" data-collapsed="1">
+        <div class="sec-head"><h3>What moves with what</h3><span class="pill" id="rigPill">—</span></div>
+        <div id="rigChain"></div>
+        <div class="slide"><label for="turretSlider">Turret radius</label>
+          <input type="range" id="turretSlider" min="15" max="250" step="5" value="55">
+          <span class="v" id="turretVal">55 %</span></div>
+      </div>
+      <div class="sec" data-sec="assembly" data-collapsed="1">
+        <div class="sec-head"><h3>Assembly</h3><span class="pill" id="partPill">—</span></div>
+        <div class="scroll-list"><table class="grid" id="treeTable"></table></div>
+      </div>
+      <div class="sec" data-sec="portable" data-collapsed="1">
+        <div class="sec-head"><h3>Portable rig</h3><span class="spacer"></span>
+          <button class="btn-sm" id="rigCopy" type="button">Copy</button>
+          <button class="btn-sm" id="rigApply" type="button">Apply</button>
+          <button class="btn-sm" id="rigReset" type="button">Re-detect</button></div>
+        <textarea id="rigJson" class="srcbox small" spellcheck="false" aria-label="Rig JSON"></textarea>
+        <p class="hint">Commit this next to your OpMode — next season starts from last season's rig.</p>
+      </div>
+    </section>
+
+    <section class="pane" data-pane="tune" hidden>
+      <div class="sec" data-sec="cfgvars">
+        <div class="sec-head"><h3>Config variables</h3><span class="pill" id="cfgVarPill">—</span></div>
+        <p class="hint" id="cfgVarNote"></p>
+        <div id="cfgVars"></div>
+      </div>
+      <div class="sec" data-sec="assume" data-collapsed="1">
+        <div class="sec-head"><h3>Assumptions</h3></div>
+        <div class="slide"><label for="massSlider">Payload at end effector</label>
+          <input type="range" id="massSlider" min="0" max="500" step="10" value="180">
+          <span class="v" id="massVal">180 g</span></div>
+        <div class="slide"><label for="dutySlider">Usable share of stall torque</label>
+          <input type="range" id="dutySlider" min="10" max="60" step="1" value="30">
+          <span class="v" id="dutyVal">30 %</span></div>
+        <p class="hint">These only feed the torque check. Stall torque is a ceiling, not a working load — 25–35 % is a sensible share for a servo that must hold position.</p>
+      </div>
+    </section>
+  </aside>
+
+  <!-- ===================== centre: the field ===================== -->
+  <main class="stage" id="stage">
+    <div class="viewport" id="viewport">
+      <div class="vp-top">
+        <div class="vp-title" id="vpTitle">—</div>
+        <div class="seg seg-dark" id="viewSeg">
+          <button data-v="iso" class="on">robot</button><button data-v="side">side</button><button data-v="top">top</button><button data-v="field">driver</button>
+        </div>
+        <div class="vp-fill"></div>
+      </div>
+      <div class="vp-hint" id="vpHint" hidden></div>
+      <div class="vp-tip" id="vpTip" hidden>Drag to move · shift-drag to turn</div>
+      <div class="vp-bottom">
+        <div class="pip" id="pip" hidden>
+          <button class="pip-head" id="pipHead" type="button" aria-expanded="true"><span>Arm torque</span><span id="pipDeg">—</span></button>
+          <div id="mech"></div>
+        </div>
+        <div class="vp-readout">
+          <span id="vpPose">—</span>
+          <button class="btn-ghost" id="resetPose" type="button" title="Back to the start position on your alliance wall">Reset pose</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="dock" id="dock">
+      <section class="cell cell-pad" aria-label="Gamepad">
+        <div class="cell-head">
+          <button class="dock-btn" id="dockToggle" type="button" aria-expanded="true" title="Fold the dock away" aria-label="Fold the dock away">
+            <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+          <h3>Gamepad</h3><span class="live-dot" id="padLive" hidden title="A real controller is driving this gamepad"></span><span class="spacer"></span>
+          <div class="seg" id="padSeg"><button data-pad="1">gamepad1</button><button data-pad="2" class="on">gamepad2</button></div></div>
+        <div class="cell-body">
+          <div class="padwrap" id="padwrap"></div>
+          <div class="bindlist" id="bindlist"></div>
+        </div>
+      </section>
+      <section class="cell cell-tele" aria-label="Driver Station telemetry">
+        <div class="cell-head"><h3>Telemetry</h3><span class="spacer"></span><span class="pill" id="loopPill">—</span></div>
+        <div class="cell-body"><div class="ds-panel" id="dsPanel"></div></div>
+      </section>
+      <section class="cell cell-acts" aria-label="Actuators">
+        <div class="cell-head"><h3>Actuators</h3><span class="spacer"></span><span class="pill" id="tickPill">—</span></div>
+        <div class="cell-body"><div class="gauges" id="gauges"></div></div>
+      </section>
+    </div>
+  </main>
+
+  <!-- ===================== right: results ===================== -->
+  <aside class="rail rail-right" id="railRight" aria-label="Results">
+    <nav class="tabs" role="tablist" data-tabs="right">
+      <button class="rail-btn" type="button" data-rail="right" title="Hide this panel  ]" aria-label="Hide the right panel">
+        <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M4.5 2.5 8 6 4.5 9.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      <button role="tab" data-tab="shot" aria-selected="true">Shot <span class="count" id="shotCount"></span></button>
+      <button role="tab" data-tab="checks" aria-selected="false">Checks <span class="count" id="checkCount"></span></button>
+      <button role="tab" data-tab="graph" aria-selected="false">Graph</button>
+      <button role="tab" data-tab="compare" aria-selected="false">Compare</button>
+    </nav>
+    <button class="rail-strip" type="button" data-rail="right" aria-label="Show the right panel"><span>Shot · Checks · Graph · Compare</span></button>
+
+    <section class="pane" data-pane="shot">
+      <div class="verdict" id="shotVerdict" aria-live="polite"></div>
+      <div class="sec" data-sec="shooter">
+        <div class="sec-head"><h3>Your shooter</h3><span class="spacer"></span>
+          <button class="btn-sm primary" id="fireBtn" type="button" title="Launch one ball now (F)">Fire <kbd>F</kbd></button></div>
+        <div class="shot-live" id="shotLive"></div>
+        <div class="shot-pick">
+          <label>Flywheel <select id="shotDev" aria-label="Flywheel motor"></select></label>
+          <label>Feeder <select id="shotFeed" aria-label="Feeder"></select></label>
+        </div>
+        <p class="hint">A ball launches when the feeder leaves its rest position (a servo) or runs (a motor), at the speed your code gives the flywheel. Each shot wanders like a real one.</p>
+      </div>
+      <div class="sec" data-sec="hives">
+        <div class="sec-head"><h3>HIVEs</h3><span class="spacer"></span><button class="btn-sm" id="fieldReset" type="button">Reset field</button></div>
+        <div id="hiveRows"></div>
+        <div class="shot-log" id="shotLog"></div>
+      </div>
+      <div class="sec" data-sec="setup" data-collapsed="1">
+        <div class="sec-head"><h3>Setup</h3><span class="spacer"></span>
+          <label class="practice"><input type="checkbox" id="arcToggle" checked> show arc</label></div>
+        <div class="form2">
+          <span>Alliance</span><div class="seg" id="allySeg"><button data-al="red">red</button><button data-al="blue">blue</button></div>
+          <span>Ball</span><div class="seg" id="ballSeg"><button data-ball="pollen">POLLEN</button><button data-ball="nectar">NECTAR</button></div>
+          <span>Shooter</span><div class="seg" id="typeSeg"><button data-type="single">hood</button><button data-type="dual">two wheels</button></div>
+          <span>Shoots</span><div class="seg" id="mountSeg"><button data-mount="0">forward</button><button data-mount="180">backward</button></div>
+          <span>Precision</span><div class="seg" id="precSeg"><button data-prec="dialed">dialed-in</button><button data-prec="typical">typical</button><button data-prec="rough">rough</button></div>
+          <label for="hoodSlider">Launch angle</label>
+          <div class="slide"><input type="range" id="hoodSlider" min="40" max="88" step="1"><span class="v" id="hoodVal"></span></div>
+          <label for="h0Slider">Exit height</label>
+          <div class="slide"><input type="range" id="h0Slider" min="4" max="29" step="0.5"><span class="v" id="h0Val"></span></div>
+          <label for="motorSel">Motor</label><select id="motorSel"></select>
+          <label for="wheelSel">Wheel</label><select id="wheelSel"></select>
+          <label for="gearIn">Motor : wheel</label><div><input class="mini" id="gearIn" type="number" step="0.05" min="0.25" max="4"> <span class="dim">wheel turns per motor turn</span></div>
+        </div>
+        <p class="hint">Ball flight, drag, spin, the CELL lip and the frame come from the <a href="https://github.com/LILRINO71/biobuzz-shot-sim" target="_blank" rel="noopener">BIOBUZZ Shot Sim</a>. The setup saves with this robot's rig.</p>
+      </div>
+    </section>
+
+    <section class="pane" data-pane="checks" hidden>
+      <div class="score" id="score"></div>
+      <div id="findings"></div>
+      <div id="ignoredWrap"></div>
+    </section>
+
+    <section class="pane" data-pane="graph" hidden>
+      <div class="graph-bar">
+        <div class="seg" id="winSeg"><button data-w="10">10 s</button><button data-w="30" class="on">30 s</button><button data-w="60">60 s</button></div>
+        <span class="spacer"></span>
+        <button class="btn-sm" id="graphPause" type="button">Pause</button>
+        <button class="btn-sm" id="graphClear" type="button">Clear</button>
+      </div>
+      <div class="charts" id="charts"></div>
+      <div class="legend" id="legend"></div>
+    </section>
+
+    <section class="pane" data-pane="compare" hidden>
+      <div class="cmp-pick">
+        <label>A <select id="cmpA" aria-label="First OpMode"></select></label>
+        <label>B <select id="cmpB" aria-label="Second OpMode"></select></label>
+      </div>
+      <div id="compare"></div>
+    </section>
+  </aside>
+</div>
