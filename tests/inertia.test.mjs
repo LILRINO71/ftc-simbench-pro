@@ -55,8 +55,9 @@ test('partMass: a known part number uses its published mass, and can be switched
 
   const d = E.partMass(motor, { vendor: false });
   assert.equal(d.how, 'density');
-  // 0.043*0.043*0.11 = 2.034e-4 m^3 x 3200 x 0.85 = 0.5532 kg
-  assert.ok(Math.abs(d.kg - 0.55323) < 1e-4, `density motor ${d.kg}`);
+  // 0.043*0.043*0.11 = 2.034e-4 m^3 x 3200 x 0.63 = 0.4100 kg. (A bounding box
+  // is a worse stand-in than the real hull, which lands within 20 % of 0.310.)
+  assert.ok(Math.abs(d.kg - 0.41003) < 1e-4, `density motor ${d.kg}`);
   // the density fallback must at least be the right order of magnitude
   assert.ok(d.kg > 0.5 * v.kg && d.kg < 2.5 * v.kg, `density ${d.kg} vs vendor ${v.kg}`);
 });
@@ -95,17 +96,95 @@ test('inertiaOf: parallel axis theorem against a hand calculation', () => {
   assert.ok(r.I.zz > r.I.xx * 50, 'the carried term must dominate the local one');
 });
 
-test('inertiaOf: products of inertia keep their sign', () => {
-  // Point masses on the +x+y diagonal give sum(m dx dy) > 0; mirror one axis
-  // and it must flip. A sign error here tilts every principal axis the wrong way.
+test('inertiaOf: the tensor off-diagonals are negated products, and keep their sign', () => {
+  // Point masses on the +x+y diagonal give sum(m dx dy) > 0, so the TENSOR
+  // entry Ixy is negative. Mirror one axis and both must flip. A sign error
+  // here tilts every principal axis the wrong way.
   const pair = (sy) => E.inertiaOf([
     { kg: 1, com: { x: 0.2, y: sy * 0.3, z: 0 } },
     { kg: 1, com: { x: -0.2, y: -sy * 0.3, z: 0 } }
   ]);
   const up = pair(1), down = pair(-1);
-  assert.ok(Math.abs(up.I.xy - 0.12) < 1e-12, `+diagonal Ixy ${up.I.xy}`);
-  assert.ok(Math.abs(down.I.xy + 0.12) < 1e-12, `-diagonal Ixy ${down.I.xy}`);
-  assert.ok(Math.abs(up.I.xz) < 1e-15 && Math.abs(up.I.yz) < 1e-15, 'a planar pair has no xz/yz product');
+  assert.ok(Math.abs(up.products.xy - 0.12) < 1e-12, `+diagonal product ${up.products.xy}`);
+  assert.ok(Math.abs(up.I.xy + 0.12) < 1e-12, `tensor entry is the negative: ${up.I.xy}`);
+  assert.ok(Math.abs(down.products.xy + 0.12) < 1e-12, `-diagonal product ${down.products.xy}`);
+  assert.ok(Math.abs(down.I.xy - 0.12) < 1e-12, `mirrored tensor entry ${down.I.xy}`);
+  assert.ok(Math.abs(up.I.xz) < 1e-15 && Math.abs(up.I.yz) < 1e-15, 'a planar pair has no xz/yz term');
+});
+
+test('inertiaOf: a brick tells the three axes apart', () => {
+  // 3 kg, 0.4 x 0.2 x 0.1 m, about its own centre. By hand, m/12*(b^2+c^2):
+  //   Ixx = 3/12*(0.2^2+0.1^2) = 0.0125    (y,z)
+  //   Iyy = 3/12*(0.4^2+0.1^2) = 0.0425    (x,z)
+  //   Izz = 3/12*(0.4^2+0.2^2) = 0.0500    (x,y)
+  // A cube can't catch an axis mix-up; this can.
+  const r = E.inertiaOf([{ kg: 3, com: { x: 0, y: 0, z: 0 }, box: { L: 0.4, W: 0.2, H: 0.1 } }]);
+  assert.ok(Math.abs(r.I.xx - 0.0125) < 1e-12, `Ixx ${r.I.xx}`);
+  assert.ok(Math.abs(r.I.yy - 0.0425) < 1e-12, `Iyy ${r.I.yy}`);
+  assert.ok(Math.abs(r.I.zz - 0.0500) < 1e-12, `Izz ${r.I.zz}`);
+  assert.ok(r.I.zz > r.I.yy && r.I.yy > r.I.xx, 'the long axis carries the most');
+});
+
+test('vendor masses go to the device, never to the bracket holding it', () => {
+  const plate = (s, c) => ({ pts: boxPts(s, c) });
+  // a real 12 V pack: ~168 x 46 x 43 mm, 0.55 kg -> ~1650 kg/m^3, believable
+  const pack = E.partMass(Object.assign({ name: 'Battery 12V 3000mAh', kind: 'electronics' }, plate([0.168, 0.046, 0.043])), {});
+  assert.equal(pack.how, 'vendor');
+  assert.ok(Math.abs(pack.kg - 0.55) < 1e-9);
+  for (const [name, size] of [['Battery strap', [0.15, 0.02, 0.002]], ['XT30 battery cable', [0.2, 0.01, 0.01]], ['Battery mount bracket', [0.09, 0.05, 0.03]]]) {
+    const m = E.partMass(Object.assign({ name, kind: 'belt' }, plate(size)), {});
+    assert.equal(m.how, 'density', `${name} must not inherit the battery's mass`);
+    assert.ok(m.kg < 0.1, `${name} came out at ${m.kg} kg`);
+  }
+  // the gate is density-based too: a 5203 name on a 2 cm^3 blob is not a motor
+  const tiny = E.partMass({ name: '5203-2402-0019 shaft spacer', part: '5203-2402-0019', kind: 'metal', pts: boxPts([0.02, 0.02, 0.005]) }, {});
+  assert.equal(tiny.how, 'density', 'a 155,000 kg/m^3 motor is not a motor');
+});
+
+test('the fills are pinned to parts with published masses', () => {
+  // Each of these would drift silently if a MATERIALS row were edited.
+  const cyl = (r, h, c, n = 48) => {
+    const out = [];
+    for (let i = 0; i < n; i++) { const t = i / n * Math.PI * 2;
+      out.push([c[0] + r * Math.cos(t), c[1] + r * Math.sin(t), c[2] - h / 2], [c[0] + r * Math.cos(t), c[1] + r * Math.sin(t), c[2] + h / 2]); }
+    return out;
+  };
+  // goBILDA 104 mm mecanum, 47.5 mm wide: published 0.335 kg
+  const wheel = E.partMass({ name: 'drive wheel', kind: 'wheel', pts: cyl(0.052, 0.0475, [0, 0, 0]) }, { vendor: false });
+  assert.ok(rel(wheel.kg, 0.335) < 0.15, `mecanum by density ${wheel.kg.toFixed(3)} kg vs 0.335 published`);
+  // 1120 series U-channel, 240 mm: published ~0.116 kg
+  const chan = E.partMass({ name: '1120 U-Channel 240mm', kind: 'metal', pts: boxPts([0.240, 0.048, 0.024]) }, {});
+  assert.ok(rel(chan.kg, 0.116) < 0.25, `240 mm channel ${chan.kg.toFixed(3)} kg vs 0.116 published`);
+  // a gearmotor that isn't on the vendor list still has to weigh like one
+  const motor = E.partMass({ name: 'planetary gearmotor', kind: 'motor', pts: cyl(0.0185, 0.070, [0, 0, 0]).concat(boxPts([0.043, 0.043, 0.026], [0, 0, 0.048])) }, {});
+  assert.ok(rel(motor.kg, 0.310) < 0.20, `gearmotor by density ${motor.kg.toFixed(3)} kg vs 0.310 published`);
+  // 3 mm polycarbonate plate, 200 x 150: 1200 kg/m^3 x 90 cm^3 = 0.108 kg
+  const lexan = E.partMass({ name: 'guard', kind: 'clear', pts: boxPts([0.200, 0.150, 0.003]) }, {});
+  assert.ok(rel(lexan.kg, 0.108) < 0.15, `polycarbonate plate ${lexan.kg.toFixed(3)} kg vs 0.108`);
+});
+
+test('a materials override changes one field, not the whole kind', () => {
+  const part = { name: 'block', kind: 'metal', pts: boxPts([0.1, 0.1, 0.1]) };
+  const base = E.partMass(part, {});
+  const denser = E.partMass(part, { materials: { metal: { density: 5400 } } });
+  assert.equal(denser.fill, base.fill, 'the fill survives');
+  assert.ok(rel(denser.kg, base.kg * 2) < 1e-9, 'twice the density is twice the mass');
+  const fuller = E.partMass(part, { materials: { metal: { fill: base.fill * 2 } } });
+  assert.equal(fuller.density, base.density, 'the density survives');
+  assert.ok(rel(fuller.kg, base.kg * 2) < 1e-9);
+});
+
+test('a payload placed half-way keeps the default for the rest', () => {
+  const rig = [{ name: 'deck', kind: 'metal', pts: boxPts([0.3, 0.3, 0.02], [0, 0, 0.05]) },
+    { name: 'tower', kind: 'metal', pts: boxPts([0.05, 0.05, 0.3], [0, 0, 0.2]) }];
+  const dry = E.massProps(rig, {});
+  const full = E.massProps(rig, { payloadKg: 0.5 });
+  const half = E.massProps(rig, { payloadKg: 0.5, payloadAt: { x: 0.12, y: 0.02 } });
+  assert.ok(full.comHeight > dry.comHeight, 'a payload on top raises the COM');
+  assert.ok(half.comHeight > dry.comHeight, 'a half-given placement must not drop it to the floor');
+  assert.ok(Math.abs(half.comHeight - full.comHeight) < 1e-12, 'z fell back to the top of the rig');
+  const junk = E.massProps(rig, { payloadKg: 0.5, payloadAt: { x: 0.12, y: 0.02, z: NaN } });
+  assert.ok(Math.abs(junk.comHeight - half.comHeight) < 1e-12, 'NaN is not a placement');
 });
 
 test('massProps: scaling every point by 2 gives 8x the mass and 32x Izz', () => {

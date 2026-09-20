@@ -79,10 +79,12 @@ function pickOpModes(entries, opts) {
     const sample = /\/(samples?|external|ftc_?app|examples?)\//i.test("/" + p + "/") || /^(Concept|Sensor|Robot|Basic)[A-Z]/.test(name);
     const teamcode = /(^|\/)TeamCode\//i.test(p) || /\/teamcode\//i.test(p);
     const named = /(teleop|auto|opmode|drive|shoot|aim)/i.test(name);
+    // classes teams keep beside their OpModes but never run
+    const support = /^(Constants?|Config|Configuration|Hardware\w*|Tuning|Subsystem\w*|Util\w*|Robot|Drawing|Localizer\w*|\w*Test)\.java$/i.test(name);
     out.push({
       path: p, name, size: (e && e.size) || 0,
-      score: (teamcode ? 4 : 0) + (named ? 2 : 0) - (sample ? 5 : 0),
-      sample,
+      score: (teamcode ? 4 : 0) + (named ? 2 : 0) - (sample ? 5 : 0) - (support ? 3 : 0),
+      sample, support,
     });
   }
   out.sort((a, b) => b.score - a.score || a.path.localeCompare(b.path));

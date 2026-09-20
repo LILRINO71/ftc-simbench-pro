@@ -60,10 +60,11 @@ function convexHull(pts){
 
 /* The eight corners of the points' axis-aligned box, for parts too flat
    or too small to hull. */
+const THIN_T=0.0015;                          // a sheet still gets some thickness
 function boxCorners(pts){
   const mn=[Infinity,Infinity,Infinity], mx=[-Infinity,-Infinity,-Infinity];
   for(const p of pts) for(let k=0;k<3;k++){ if(p[k]<mn[k]) mn[k]=p[k]; if(p[k]>mx[k]) mx[k]=p[k]; }
-  const t=0.0015;                             // a sheet still gets some thickness
+  const t=THIN_T;
   for(let k=0;k<3;k++) if(mx[k]-mn[k]<t){ const c=(mx[k]+mn[k])/2; mn[k]=c-t/2; mx[k]=c+t/2; }
   const out=[];
   for(let i=0;i<8;i++) out.push([i&1?mx[0]:mn[0], i&2?mx[1]:mn[1], i&4?mx[2]:mn[2]]);

@@ -96,13 +96,16 @@ function mdAssigned(code, name) {
   });
   return out;
 }
-/* What the code commands a device to, through a variable if need be. */
+/* What the code commands a device to, through a variable if need be.
+   A target kept in a variable is declared at rest — "double target = 0" — and
+   then written wherever the driver picks a speed, so the declared value alone
+   says nothing. Take both: the declaration and every assignment to it. */
 function mdCommanded(code, devName, op) {
   const out = [];
   mdWalk(code, (st) => {
     if (st.kind !== "call" || st.dev !== devName || st.op !== op) return;
     const v = mdStatic(st.ast, code);
-    if (v !== null) { out.push(v); return; }
+    if (v !== null) out.push(v);
     if (st.ast && st.ast.o === "id") mdAssigned(code, st.ast.v).forEach((x) => out.push(x));
   });
   return out;
@@ -207,9 +210,12 @@ function mdMassSection(X) {
     expr: parts.length ? "m = " + mdTerms(parts.map((p) => mdNum(p.kg)), 6) + " = " + mdNum(m.kg) + " kg"
                        : "m = " + mdNum(m.kg) + " kg",
     value: m.kg, unit: "kg",
-    note: parts.length ? "each of the " + parts.length + " parts is listed below with where its mass came from"
-                       : "the mass model didn't break this down by part",
-    source: "CAD" });
+    note: m.assumed
+      ? "ASSUMED: the CAD has no solid parts to weigh" + (mdNo(m.cadKg) && m.cadKg > 0 ? " (it accounts for only " + mdNum(m.cadKg) + " kg)" : "") +
+        ", so the bench is running a typical competition robot. Weigh yours and say so here before a judge asks."
+      : parts.length ? "each of the " + parts.length + " parts is listed below with where its mass came from"
+                     : "the mass model didn't break this down by part",
+    source: m.assumed ? "assumption" : "CAD" });
 
   const com = m.com || {};
   const zc = mdNo(m.comHeight) ? m.comHeight : (mdNo(com.z) ? com.z : null);
@@ -262,7 +268,8 @@ function mdMassSection(X) {
 function mdDriveSection(X) {
   const D = X.drv, drive = X.drive, rows = [];
   const kind = (drive && drive.kind) || (X.dt && X.dt.style) || null;
-  const intro = (kind ? "The bench reads this base as a " + kind + " on " + (D.nWheel || "an unknown number of") + " wheels. " : "") +
+  const intro = (kind ? "The bench is running this base as " + (kind === "unknown" ? "an unrecognised drivetrain" : kind) +
+    " on " + (D.nWheel || "an unknown number of") + " wheels. " : "") +
     "Speed comes from the motor's free speed through the gearbox to the wheel; the matrix is what turns a wanted chassis motion into wheel speeds; " +
     "the odometry constant is what turns encoder ticks back into metres travelled.";
 
@@ -611,22 +618,33 @@ function mdShooterSection(X) {
     rows.push(mdMiss("kinetic energy at launch", "needs the exit speed and the ball mass above"));
   }
 
-  let win = null, pose = X.opts.pose || null;
-  try {
-    if (S && typeof Field !== "undefined" && Field.ok) {
+  // The window can only come from the Shot tab's own configuration, because
+  // that is the hood angle and alliance the team is actually shooting with.
+  // Nothing here writes to it: a report must not change what it reports on.
+  let win = null, pose = X.opts.pose || null, why = "";
+  const hood = S && S.cfg && mdNo(S.cfg.hoodDeg) ? S.cfg.hoodDeg : null;
+  if (!S || typeof Field === "undefined" || !Field.ok) {
+    why = "the BIOBUZZ Shot Sim field isn't loaded, so no shot can be flown";
+  } else if (!S.cfg) {
+    why = "the Shot tab hasn't been set up yet, so there is no hood angle or alliance to fly a shot with";
+  } else {
+    try {
       if (!pose) pose = Field.startPose(S.alliance || "red", (typeof Sim !== "undefined" && Sim.footprint) || null);
-      win = S.window(pose, pose.h * 180 / Math.PI + (cfg.mountDeg || 0));
-    }
-  } catch (e) { win = null; }
+      win = S.window(pose, pose.h * 180 / Math.PI + (S.cfg.mountDeg || 0));
+      if (!win) why = "at a " + mdNum(hood) + "° hood no exit speed at all scores from where the robot starts, on its starting heading — " +
+        "turn toward the CELL, or change the hood angle, and this row fills in";
+    } catch (e) { win = null; why = "the Shot Sim could not fly a shot from this pose"; }
+  }
   if (win && mdNo(win.lo) && mdNo(win.hi)) {
     rows.push({ label: "scoring speed window", symbols: "v ∈ [v_lo, v_hi]  at hood θ",
-      expr: "v ∈ [" + mdNum(win.lo) + ", " + mdNum(win.hi) + "] m/s  at hood " + mdNum(cfg.hoodDeg) + "° from (" +
+      expr: "v ∈ [" + mdNum(win.lo) + ", " + mdNum(win.hi) + "] m/s  at hood " + mdNum(hood) + "° from (" +
         mdNum(pose.x / IN) + ", " + mdNum(pose.y / IN) + ") in",
       value: (win.hi - win.lo), unit: "m/s wide",
-      note: "the Shot Sim flies the ball with drag, the CELL lip and the HIVE frame in the way; a wider window is a shot that forgives a slow flywheel",
+      note: "the Shot Sim flies the ball with drag, the CELL lip and the HIVE frame in the way; a wider window is a shot that forgives a slow flywheel" +
+        (mdNo(vExit) ? (vExit >= win.lo && vExit <= win.hi ? " — this robot's " + mdNum(vExit) + " m/s lands inside it" : " — this robot's " + mdNum(vExit) + " m/s is outside it") : ""),
       source: "Shot Sim" });
   } else {
-    rows.push(mdMiss("scoring speed window", "the BIOBUZZ Shot Sim field isn't loaded, so no shot can be flown"));
+    rows.push(mdMiss("scoring speed window", why));
   }
 
   return { id: "shooter", title: "Shooter", intro, rows, warn: "" };

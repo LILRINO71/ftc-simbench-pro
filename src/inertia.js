@@ -12,9 +12,9 @@
    oriented box, and a massless rig reports zeros.
    ============================================================ */
 
-/* The same 1.5 mm floor boxCorners() uses, so a sheet part has a thickness
-   here and in the view. */
-const MASS_MIN_T = 0.0015;
+/* The very same floor boxCorners() uses — taken from it, not restated, so the
+   mass model and the 3-D view can never drift apart. */
+const MASS_MIN_T = THIN_T;
 
 /* Density x fill for each solidKind(). The fills are the honest part:
      metal     6061-T6 aluminium is 2700. A goBILDA 1120 U-channel measures
@@ -25,14 +25,17 @@ const MASS_MIN_T = 0.0015;
      servo     a servo is a solid brick of plastic, steel gears and copper.
                A goBILDA 2000 series is ~84 g in ~54 cm^3 -> ~1550 effective;
                the hull usually swallows the mounting ears, hence 0.85 fill.
-     motor     a Yellow Jacket is steel, magnets and a planetary stack:
-               ~0.31 kg in ~0.10 dm^3 -> ~3000 effective. Nearly solid.
-     wheel     rubber/plastic tread on a mostly empty hub; a 104 mm mecanum
-               is ~0.33 kg but its hull disc is ~1.4 dm^3 of mostly nothing.
+     motor     a Yellow Jacket is steel, magnets and a planetary stack. The
+               part is ~0.31 kg, but its CONVEX HULL is not the part: hulling
+               a 37x70 mm can with a 43x43x26 mm gearbox measures ~0.153 dm^3,
+               so the fill that lands on 0.31 kg is 0.63, not 0.85.
+     wheel     rubber/plastic tread on a mostly empty hub. A 104 mm mecanum
+               hulls to ~0.40 dm^3 (measured with hullVolume, not guessed) and
+               weighs 0.335 kg, so 1400 x 0.60.
      electronics  PCBs in plastic shells: heavy where the copper and the
                connectors are, air everywhere else.
-     clear     polycarbonate 1200. A flat sheet hulls to a thin slab so the
-               fill is high; a bent guard over-reads, hence not 1.0.
+     clear     polycarbonate 1200. A flat sheet's hull IS the sheet, so the
+               fill is nearly 1; only a bent guard over-reads.
      printed   PLA/PETG 1240 at the 20-30% infill + 3 perimeters everyone
                prints FTC parts at -> ~0.35 of the envelope.
      belt      rubber/cable. The hull of a belt loop or a wire run is almost
@@ -41,10 +44,10 @@ const MASS_MIN_T = 0.0015;
 const MATERIALS = {
   metal:       {density:2700, fill:0.18, label:"aluminium structure"},
   servo:       {density:1800, fill:0.85, label:"servo"},
-  motor:       {density:3200, fill:0.85, label:"gearmotor"},
-  wheel:       {density:1400, fill:0.45, label:"wheel/tread"},
+  motor:       {density:3200, fill:0.63, label:"gearmotor"},
+  wheel:       {density:1400, fill:0.60, label:"wheel/tread"},
   electronics: {density:1500, fill:0.35, label:"electronics"},
-  clear:       {density:1200, fill:0.55, label:"polycarbonate"},
+  clear:       {density:1200, fill:0.90, label:"polycarbonate"},
   printed:     {density:1240, fill:0.35, label:"3D print"},
   belt:        {density:1200, fill:0.10, label:"belt/cable"},
   fastener:    {density:7850, fill:0.55, label:"steel fastener"}
@@ -64,6 +67,13 @@ const VENDOR_MASS = [
   {re:/\bREV-31-1153\b|\bexpansion hub\b/i, kg:0.190, label:"REV Expansion Hub"},
   {re:/\bbattery\b/i,                 kg:0.550, label:"12 V 3000 mAh NiMH pack"}
 ];
+
+/* Hardware that lives *next to* a known device and borrows its name in the
+   assembly tree. A battery strap is not a battery. These go by density. */
+const VENDOR_NOT = /\b(mount|mounts|bracket|strap|clamp|cable|wire|harness|clip|spacer|standoff|cover|lid|guard|holder|tray|adapter|shim|plate|label|decal|sticker|screw|bolt|nut)\b/i;
+/* …and a published mass is only believable when the part it lands on is
+   roughly the right size. Outside this band, the name matched something else. */
+const VENDOR_DENSITY = {lo:300, hi:9000};
 
 /* Axis-aligned box of a point set: centre and the three side lengths.
    No points at all gives a zero box at the origin, never Infinity. */
@@ -105,9 +115,18 @@ function hullVolume(pts){
 
 /* The vendor row for a solid, matched on its part number and its name — a
    STEP export often carries the number only in the name. */
-function vendorMassFor(solid){
+function vendorMassFor(solid, volume){
   const s = ((solid&&solid.part) || "") + " " + ((solid&&solid.name) || "");
-  for(const v of VENDOR_MASS) if(v.re.test(s)) return v;
+  if(VENDOR_NOT.test(s)) return null;
+  for(const v of VENDOR_MASS){
+    if(!v.re.test(s)) continue;
+    // a 0.55 kg battery in a 3 cm^3 hull is a cable, not a battery
+    if(Number.isFinite(volume) && volume > 0){
+      const d = v.kg/volume;
+      if(d < VENDOR_DENSITY.lo || d > VENDOR_DENSITY.hi) return null;
+    }
+    return v;
+  }
   return null;
 }
 
@@ -121,12 +140,16 @@ function partMass(solid, opts){
   const pts = (solid && solid.pts) || [];
   const vol = hullVolume(pts);
   if(opts.vendor !== false){
-    const v = vendorMassFor(solid);
+    const v = vendorMassFor(solid, vol);
     // density here is the back-computed effective density, for display only
     if(v) return {kg:v.kg, how:"vendor", density:(vol>0 ? v.kg/vol : 0), fill:1, volume:vol,
                   why:"published mass, "+v.label};
   }
-  const tbl = opts.materials ? Object.assign({}, MATERIALS, opts.materials) : MATERIALS;
+  let tbl = MATERIALS;
+  if(opts.materials){                        // merge per kind: {metal:{density:5000}} keeps metal's fill
+    tbl = Object.assign({}, MATERIALS);
+    for(const k in opts.materials) tbl[k] = Object.assign({}, MATERIALS[k] || MATERIALS.metal, opts.materials[k]);
+  }
   const kind = (solid && solid.kind) || "metal";
   const mat = tbl[kind] || tbl.metal || MATERIALS.metal;
   const density = Number.isFinite(mat.density) ? mat.density : 0;
@@ -140,9 +163,10 @@ function partMass(solid, opts){
    a part with no box is a point mass — a battery, a held game element.
    COM is sum(m_i r_i)/sum(m_i); the tensor is each part's own box inertia
    (m/12)(b^2+c^2) carried to the assembly COM by I = I_cm + m d^2.
-   xy/xz/yz are the PRODUCTS of inertia sum(m dx dy); the inertia tensor's
-   off-diagonal entries are their negatives. Zero total mass returns zeros
-   and the plain centroid of the points given, never NaN. */
+   I is the INERTIA TENSOR: I.xy/xz/yz are its off-diagonal entries, already
+   negated, so [[xx,xy,xz],[xy,yy,yz],[xz,yz,zz]] is the matrix. The raw
+   products sum(m dx dy) come back separately as `products`. Zero total mass
+   returns zeros and the plain centroid of the points given, never NaN. */
 function inertiaOf(parts){
   const list = [];
   for(const p of (parts||[])){
@@ -152,12 +176,13 @@ function inertiaOf(parts){
                L:Math.max(0,g(b.L)), W:Math.max(0,g(b.W)), H:Math.max(0,g(b.H))});
   }
   const I = {xx:0, yy:0, zz:0, xy:0, xz:0, yz:0};
+  const products = {xy:0, xz:0, yz:0};
   let M=0, cx=0, cy=0, cz=0;
   for(const p of list){ M+=p.kg; cx+=p.kg*p.x; cy+=p.kg*p.y; cz+=p.kg*p.z; }
   if(!(M>0)){
     let n=0, gx=0, gy=0, gz=0;
     for(const p of list){ n++; gx+=p.x; gy+=p.y; gz+=p.z; }
-    return {I, kg:0, com:(n ? {x:gx/n, y:gy/n, z:gz/n} : {x:0, y:0, z:0})};
+    return {I, products, kg:0, com:(n ? {x:gx/n, y:gy/n, z:gz/n} : {x:0, y:0, z:0})};
   }
   cx/=M; cy/=M; cz/=M;
   for(const p of list){
@@ -165,10 +190,12 @@ function inertiaOf(parts){
     I.xx += m/12*(p.W*p.W + p.H*p.H) + m*(dy*dy + dz*dz);
     I.yy += m/12*(p.L*p.L + p.H*p.H) + m*(dx*dx + dz*dz);
     I.zz += m/12*(p.L*p.L + p.W*p.W) + m*(dx*dx + dy*dy);
-    I.xy += m*dx*dy; I.xz += m*dx*dz; I.yz += m*dy*dz;
+    products.xy += m*dx*dy; products.xz += m*dx*dz; products.yz += m*dy*dz;
   }
+  I.xy = -products.xy; I.xz = -products.xz; I.yz = -products.yz;
   for(const k in I) if(!Number.isFinite(I[k])) I[k]=0;
-  return {I, kg:M, com:{x:cx, y:cy, z:cz}};
+  for(const k in products) if(!Number.isFinite(products[k])) products[k]=0;
+  return {I, products, kg:M, com:{x:cx, y:cy, z:cz}};
 }
 
 /* The whole rig: mass, COM in robot-space metres, and the inertia tensor
@@ -201,8 +228,10 @@ function massProps(cad, opts){
   const payload = (Number.isFinite(opts.payloadKg) && opts.payloadKg > 0) ? opts.payloadKg : 0;
   if(payload){
     const dry = inertiaOf(items);                                      // where the structure balances…
-    const at = opts.payloadAt || {x:dry.com.x, y:dry.com.y, z:zTop};   // …then load it on top
-    items.push({kg:payload, com:{x:+at.x||0, y:+at.y||0, z:+at.z||0}, box:{L:0, W:0, H:0}});
+    const at = opts.payloadAt || {};                                   // …then load it on top
+    const pick = (v, d) => Number.isFinite(+v) ? +v : d;               // half a placement keeps the rest
+    items.push({kg:payload, box:{L:0, W:0, H:0},
+                com:{x:pick(at.x, dry.com.x), y:pick(at.y, dry.com.y), z:pick(at.z, zTop)}});
     parts.push({name:"payload", kg:payload, how:"given"});
   }
   for(const e of (opts.extra || [])){
@@ -214,5 +243,5 @@ function massProps(cad, opts){
   const r = inertiaOf(items);
   const vendorFrac = r.kg > 0 ? vendorKg/r.kg : 0;
   const confidence = items.length ? Math.max(0, Math.min(0.9, 0.40 + 0.5*vendorFrac)) : 0;
-  return {kg:r.kg, com:r.com, I:r.I, Izz:r.I.zz, comHeight:r.com.z, parts, confidence};
+  return {kg:r.kg, com:r.com, I:r.I, products:r.products, Izz:r.I.zz, comHeight:r.com.z, parts, confidence};
 }

@@ -1684,7 +1684,8 @@ const Session={
         classifyMechs(cad.mechs);
         loadCAD(cad,(cad.name||fileName)+" · from workspace","ok");
       }
-      if(s.java) addOpModeFromText(s.opName||"Workspace.java",s.java);
+      // the file name if the workspace kept one, else what the OpMode calls itself
+      if(s.java) addOpModeFromText(s.opName||((s.code&&s.code.opmode)||"Workspace").replace(/[^\w.-]+/g,"")+".java",s.java);
       if(s.map&&Object.keys(s.map).length) { MAP=s.map; rebuild(); }
       if(s.opts){ for(const k of ["payloadKg","duty","trust","front","baseModel","shooterModel","mu","physics"]) if(s.opts[k]!==undefined) OPTS[k]=s.opts[k]; syncOptionControls(); Physics.sync(); }
       if(s.alliance) setAlliance(s.alliance,false);
@@ -1766,18 +1767,21 @@ const Physics={
     $$("#physSeg button").forEach(b=>b.classList.toggle("on",b.dataset.phys===(OPTS.physics||"rigid")));
     const mu=OPTS.mu==null?0.9:OPTS.mu;
     $("#muSlider").value=mu; $("#muVal").textContent=mu.toFixed(2);
-    const p=this.recompute(), pill=$("#physPill");
+    this.recompute();
+    // show what the simulation is actually running on, not a second opinion
+    const p=(Sim.rig&&Sim.rig.props)||this.props, pill=$("#physPill");
     if(!p){ pill.textContent="—"; setHTML($("#massRead"),'<i>No mass properties yet — load a CAD assembly with solid parts.</i>'); return; }
-    pill.textContent=(OPTS.physics==="kinematic"?"kinematic":"rigid body");
-    const d=typeof driveFromCAD==="function"?safeDrive():null;
+    pill.textContent=!Sim.rig?"no drivetrain":(OPTS.physics==="kinematic"?"kinematic":"rigid body");
+    const cadDrive=safeDrive(), drawn=!(cadDrive&&cadDrive.kind!=="unknown")&&!!(Sim.rig&&Sim.rig.drive);
+    const d=driveInUse();
     const mm=v=>(v*1000).toFixed(0)+" mm";
     setHTML($("#massRead"),[
-      `<span>mass <b>${p.kg.toFixed(2)} kg</b></span>`,
+      `<span>mass <b>${p.kg.toFixed(2)} kg</b>${p.assumed?' <i>assumed — the CAD has no solid parts to weigh</i>':""}</span>`,
       `<span>COM <b>${mm(p.com.x)}, ${mm(p.com.y)}</b> <i>from origin</i></span>`,
       `<span>height <b>${mm(p.comHeight==null?p.com.z:p.comHeight)}</b></span>`,
       `<span>I<sub>zz</sub> <b>${p.Izz.toFixed(3)}</b> <i>kg·m²</i></span>`,
-      d?`<span>drive <b>${esc(d.kind)}</b> <i>${d.wheels.length} wheels · ${Math.round((d.confidence||0)*100)}% sure</i></span>`:"",
-      p.confidence!=null?`<span><i>mass confidence ${Math.round(p.confidence*100)} %</i></span>`:"",
+      d?`<span>drive <b>${esc(d.kind)}</b> <i>${(d.wheels||[]).length} wheels · ${drawn?"placed from your code":Math.round((d.confidence||0)*100)+"% sure from the CAD"}</i></span>`:"",
+      (p.confidence!=null&&!p.assumed)?`<span><i>mass confidence ${Math.round(p.confidence*100)} %</i></span>`:"",
     ].join(""));
   },
   wire(){
@@ -1787,6 +1791,13 @@ const Physics={
       store.set("ftcbench.mu",String(OPTS.mu)); if(Sim.rig) Sim.rig.mu=OPTS.mu; });
   },
 };
+/* The drivetrain the bench is actually driving: what the CAD gave us when it
+   recognised one, otherwise the base the simulator built from your code. */
+function driveInUse(){
+  const cad=safeDrive();
+  if(cad&&cad.kind&&cad.kind!=="unknown") return cad;
+  return (Sim.rig&&Sim.rig.drive)||cad||null;
+}
 let DRIVE_CACHE={key:null,val:null};
 function safeDrive(){
   const key=(CAD&&CAD.name)+"|"+(CAD&&CAD.solids?CAD.solids.length:0);
@@ -1801,7 +1812,13 @@ function safeDrive(){
 const MathTab={
   dirty:true, report:null,
   invalidate(){ this.dirty=true; },
-  bench(){ return { cad:CAD, code:CODE, map:MAP, opts:OPTS, sim:Sim, shots:Shots, field:Field, drive:safeDrive(), props:Physics.props }; },
+  /* The math has to describe the robot the bench is actually running — the
+     same mass and the same wheels, assumptions included. */
+  bench(){
+    return { cad:CAD, code:CODE, map:MAP, opts:OPTS, sim:Sim, shots:Shots, field:Field,
+             mass:(Sim.rig&&Sim.rig.props)||Physics.props,
+             drive:driveInUse() };
+  },
   build(){
     if(typeof mathReport!=="function") return null;
     try{ this.report=mathReport(this.bench()); }catch(e){ this.report={sections:[{id:"err",title:"Couldn't build the math",rows:[{label:"error",value:e.message}]}]}; }
@@ -1820,7 +1837,7 @@ const MathTab={
          ${s.intro?`<p class="intro">${esc(s.intro)}</p>`:""}
          ${(s.rows||[]).map(w=>`<div class="mrow">
             <div class="lbl">${esc(w.label||"")}${w.source?`<span class="src">${esc(w.source)}</span>`:""}</div>
-            <div class="val">${esc(w.value==null?"":String(w.value))}${w.unit?" "+esc(w.unit):""}</div>
+            <div class="val">${esc(w.value==null?"":(typeof w.value==="number"?mdNum(w.value,3):String(w.value)))}${w.unit?" "+esc(w.unit):""}</div>
             ${w.expr?`<div class="expr">${esc(w.expr)}</div>`:""}
             ${w.note?`<div class="note">${esc(w.note)}</div>`:""}
           </div>`).join("")}

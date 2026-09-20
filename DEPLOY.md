@@ -68,6 +68,17 @@ The ship build strips every comment, collapses layout, and can move string liter
 encoded table (`--strings`). `tests/ship.test.mjs` runs the entire engine test suite against the
 minified bundle, so the ship build is proven to behave identically to the readable one.
 
+Measured on this build:
+
+| build | page | JS |
+|---|---|---|
+| `npm run build` (dev) | 615 KB | 435 KB |
+| `npm run build:ship` (`--min`) | 468 KB | 320 KB |
+| `--min --strings` | 547 KB | 400 KB |
+
+Note the last row: base64 costs a third on top of the strings it hides, so the obfuscated build is
+**80 KB bigger**, not smaller. Take it only if hiding strings is worth the download.
+
 That raises the effort of lifting the physics model. It is not security, and nothing that runs in
 a browser can be. If a part of this ever has to be genuinely unavailable to users, it has to move
 behind an API you control, with the browser sending inputs and receiving results.

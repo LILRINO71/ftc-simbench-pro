@@ -28,7 +28,7 @@ const EXPORTS = [
   'Dyn', 'tractionLimit', 'motorTorque', 'wheelLoads',
   'FTCSIM_MAGIC', 'packSession', 'unpackSession', 'sessionFromBench',
   'mathReport', 'mathText', 'mathMarkdown',
-  'parseRepoRef', 'rawUrlsFor', 'pickOpModes',
+  'parseRepoRef', 'rawUrlsFor', 'pickOpModes', 'javaLooksLikeOpMode',
   'TOUR', 'statusOf', 'STATUS_RANK',
 ];
 

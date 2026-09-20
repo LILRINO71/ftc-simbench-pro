@@ -12,6 +12,8 @@ drive and shoot on the 2026-27 BIOBUZZ field — then hands you the math behind 
 Ships as one self-contained HTML file. No accounts, no install, no server: everything runs in the
 browser, so a team can open it on the laptop that's already in the pit.
 
+![The bench: the robot on the BIOBUZZ field with the physics panel and the math sheet open](docs/math.png)
+
 ## Run it
 
 ```bash
@@ -39,6 +41,14 @@ Deployment to `app.ftc-simbench.com` is in [DEPLOY.md](DEPLOY.md).
 | **Show Math** | `mathdoc.js` prints the equations for *your* robot with your numbers substituted — gear ratios, holding torque, odometry, traction limits, feedforward — and exports as Markdown for an Engineering Portfolio. |
 | **Workspaces** | `session.js` bundles the parsed CAD, the map, the code and the pose into a `.ftcsim` file. Drag it back in and you're where you left off, with no STEP to re-parse. |
 | **Controllers** | Any standard gamepad, assigned to gamepad1 or gamepad2, with rumble. |
+
+### The walkthrough, once, on first load
+
+![The first-run walkthrough highlighting the CAD drop target, with an X to dismiss it](docs/tour.png)
+
+### The physics panel: what the bench is really driving
+
+![The physics panel showing 12 kg assumed, the centre of mass, yaw inertia and the tile grip slider](docs/physics.png)
 
 ## Layout
 

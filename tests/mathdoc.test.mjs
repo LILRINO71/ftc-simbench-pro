@@ -3,7 +3,7 @@
 // worked out by hand; each test states the arithmetic it is checking.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { loadEngine, sampleBench } from './load.mjs';
+import { loadEngine, loadWithField, sampleBench } from './load.mjs';
 
 const E = loadEngine();
 
@@ -94,10 +94,11 @@ const near = (a, b, tol, what) => assert.ok(Math.abs(a - b) <= tol, `${what}: go
 test('v_max: the hand calculation reaches the text', () => {
   // n_motor = 435 rpm * 13.7 = 5959.5 rpm
   // w_free  = 5959.5 * 2pi/60 = 624.0774 rad/s
-  // v_max   = 624.0774 * 0.048 / 13.7 = 2.186548 m/s
+  // v_max   = 624.0774 * 0.048 / 13.7 = 2.1865485 m/s
+  //           (equivalently the wheel's own 435 rpm = 45.5531 rad/s times r)
   const rep = E.mathReport(rigBench());
   const r = row(sec(rep, 'drive'), /maximum linear speed/);
-  near(r.value, 2.186548, 1e-5, 'v_max');
+  near(r.value, 2.1865485, 1e-6, 'v_max');
   assert.equal(r.unit, 'm/s');
 
   // the same number, printed, and the inputs it came from printed beside it
@@ -334,6 +335,91 @@ test('per-part masses carry how each one was obtained', () => {
 
 test('no shooter section when the robot has no flywheel', () => {
   assert.equal(sec(E.mathReport(rigBench()), 'shooter'), undefined);
+});
+
+/* ========================================================== shooter ==== */
+/* A second engine, with the BIOBUZZ Shot Sim's measured field switched on —
+   the shooter section is the only one that needs it. */
+const F = loadWithField();
+
+function shooterBench(opts) {
+  const b = sampleBench(F, F.SHOOTER_JAVA);
+  F.Shots.cfg = null;                          // the Shot tab, as the app leaves it
+  F.Shots.adopt(b.code);
+  b.opts = Object.assign(b.opts, opts || {});
+  return b;
+}
+
+test('flywheel speed comes from the velocity the OpMode commands, not its rest value', () => {
+  // the OpMode holds the target in a variable declared "double target = 0" and
+  // writes FAR_VELOCITY = 1280 tick/s into it; 0 is the rest state, not the shot
+  // n = 60 * 1280 / 28 = 2742.857 rpm  (6000 rpm motor, 1:1, so 28 ticks/rev)
+  const s = sec(F.mathReport(shooterBench()), 'shooter');
+  const n = row(s, /flywheel speed/);
+  near(n.value, 2742.857143, 1e-5, 'flywheel rpm');
+  assert.equal(n.source, 'code');
+  assert.ok(n.expr.includes('1280'), `the commanded velocity is not substituted: "${n.expr}"`);
+});
+
+test('surface speed is pi*d*n/60, with the diameter in metres', () => {
+  // v = pi * 0.096 m * 1280/28 rev/s = 0.3015929 * 45.714286 = 13.787104 m/s
+  const s = sec(F.mathReport(shooterBench()), 'shooter');
+  const v = row(s, /surface speed/);
+  near(v.value, 13.787104, 1e-5, 'surface speed');
+  assert.equal(v.unit, 'm/s');
+  // the exit speed is a fraction of it: a ball never leaves faster than the rim
+  const x = row(s, /exit speed/);
+  assert.ok(x.value > 0 && x.value < v.value, `exit ${x.value} should be under rim ${v.value}`);
+  assert.equal(x.source, 'Shot Sim');
+});
+
+test('kinetic energy uses kilograms, not grams', () => {
+  // a POLLEN is 24.9 g = 0.0249 kg; leaving it in grams would inflate E by 1000
+  const s = sec(F.mathReport(shooterBench()), 'shooter');
+  const m = row(s, /mass/), e = row(s, /kinetic energy/), x = row(s, /exit speed/);
+  near(m.value, 0.0249, 1e-12, 'ball mass');
+  assert.equal(m.unit, 'kg');
+  near(e.value, 0.5 * m.value * x.value * x.value, 1e-12, 'E = 1/2 m v^2');
+  assert.ok(e.value > 0.1 && e.value < 5, `a shot is joules, not kilojoules: ${e.value} J`);
+});
+
+test('the scoring window fills in when the robot is aimed at the CELL', () => {
+  // from 60 in back on the red side, turned 20 deg off the wall, a 75 deg hood
+  // has one narrow band of exit speeds that scores, a little over 6 m/s
+  const b = shooterBench({ pose: { x: -60 * F.IN, y: 0, h: -20 * Math.PI / 180 } });
+  const s = sec(F.mathReport(b), 'shooter');
+  const w = row(s, /scoring speed window/);
+  assert.equal(w.source, 'Shot Sim');
+  assert.ok(/hood 75/.test(w.expr), `the hood angle should be substituted: "${w.expr}"`);
+  assert.ok(/\(-60, 0\) in/.test(w.expr), `the pose should be printed in inches: "${w.expr}"`);
+
+  const band = /\[([\d.]+), ([\d.]+)\] m\/s/.exec(w.expr);
+  assert.ok(band, `the window should print as a band: "${w.expr}"`);
+  const lo = +band[1], hi = +band[2];
+  assert.ok(lo < hi, `the window is inverted: ${lo} to ${hi}`);
+  assert.ok(lo > 4 && hi < 9, `a steep BIOBUZZ shot is about 6 m/s, got ${lo} to ${hi}`);
+  near(w.value, hi - lo, 0.02, 'the reported width is the printed band');
+
+  // and the section cross-checks itself: this robot's own exit speed sits in it
+  const x = row(s, /exit speed/);
+  assert.ok(x.value >= lo && x.value <= hi, `exit ${x.value} should be inside ${lo}..${hi}`);
+  assert.ok(/lands inside it/.test(w.note), `expected the note to say so: "${w.note}"`);
+});
+
+test('an unaimed robot is told why there is no window, not that the sim is missing', () => {
+  // the field IS loaded here: the honest answer is that nothing scores from
+  // the start pose, and the note must say that rather than blame the sim
+  const w = row(sec(F.mathReport(shooterBench()), 'shooter'), /scoring speed window/);
+  assert.ok(/^missing:/.test(w.note));
+  assert.ok(/hood/.test(w.note) && /CELL/.test(w.note), `expected an aiming note: "${w.note}"`);
+  assert.ok(!/isn't loaded/.test(w.note), 'must not claim the Shot Sim is missing when it is loaded');
+});
+
+test('the shooter section is clean and well formed too', () => {
+  const rep = F.mathReport(shooterBench());
+  assert.ok(sec(rep, 'shooter'), 'the shooter section should be present');
+  assertClean(F.mathText(rep), 'mathText(shooter)');
+  assertClean(F.mathMarkdown(rep), 'mathMarkdown(shooter)');
 });
 
 test('mathText and mathMarkdown survive an empty report', () => {

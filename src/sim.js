@@ -34,6 +34,12 @@ const Sim={
     this.base=robotBase(cad,this.drivetrain,opts&&opts.baseModel,opts&&opts.front);
     this.footprint=footprintOf(cad,opts&&opts.front,this.base);
     this.obstacles=Field.ok?Field.obstacles(this.footprint.h):[];
+    // the physical rig underneath: mass, wheels, motors. Null means we fall
+    // back to the old kinematic glide, which is also what "kinematic" asks for.
+    this.physics=(opts&&opts.physics)||"rigid";
+    this.rig=buildRig(cad,this.drivetrain,this.base,this.dev,opts);
+    this.dstate=this.rig?Dyn.reset(this.rig):null;
+    this.slipping=false;
     this.phase="loaded";
   },
   /* INIT: everything before waitForStart() — directions, PID objects, start positions. */
@@ -235,6 +241,19 @@ const Sim={
     const dtn=this.drivetrain;
     if(!dtn||!dtn.ok){ this.vel={x:0,y:0}; return; }
     const x0=this.chassis.x, y0=this.chassis.y;
+    if(this.rig&&this.physics!=="kinematic"){
+      this.stepRigid(dt);
+      const xi=this.chassis.x, yi=this.chassis.y;       // where the physics wanted to be
+      if(Field.ok) this.bump=Field.collide(this.chassis,this.footprint,this.obstacles);
+      else {
+        const LIM=1.78;
+        this.chassis.x=Math.max(-LIM,Math.min(LIM,this.chassis.x));
+        this.chassis.y=Math.max(-LIM,Math.min(LIM,this.chassis.y));
+      }
+      this.vel={x:(this.chassis.x-x0)/dt, y:(this.chassis.y-y0)/dt};
+      this.stopAgainst(this.chassis.x-xi, this.chassis.y-yi);
+      return;
+    }
     let L=0,R=0,nl=0,nr=0,strafe=0;
     for(const w of dtn.wheels){
       const s=this.dev[w.dev]; if(!s) continue;
@@ -260,7 +279,84 @@ const Sim={
     }
     // what the robot actually did, walls included — a moving shot carries it
     this.vel={x:(this.chassis.x-x0)/dt, y:(this.chassis.y-y0)/dt};
+  },
+
+  /* One step of real chassis dynamics: motor torque through the wheels,
+     limited by what the tiles will take, against the robot's own mass and
+     yaw inertia. Velocities come back in the chassis frame. */
+  stepRigid(dt){
+    const cmd=this.rig.devs.map(n=>{ const s=this.dev[n]; return s?s.act:0; });
+    const st=Dyn.step(this.dstate,cmd,this.rig,dt);
+    this.dstate=st;
+    const c=Math.cos(this.chassis.h), s=Math.sin(this.chassis.h);
+    this.chassis.x += (st.v.x*c - st.v.y*s)*dt;
+    this.chassis.y += (st.v.x*s + st.v.y*c)*dt;
+    this.chassis.h += st.omega*dt;
+    this.slipping=(st.slip||[]).some(k=>Math.abs(k)>0.3);
+  },
+
+  /* A wall stops a robot, it doesn't throw it back. (px,py) is how far the
+     field had to push to get the robot out of something, so it points out of
+     whatever was hit: take that component out of the velocity and leave the
+     rest, and the robot sits against the HIVE instead of bouncing off it.
+     Reading the push back as velocity — displacement over dt — looks right
+     and is very wrong: it hands the robot metres per second it never had. */
+  stopAgainst(px,py){
+    const L=Math.hypot(px,py);
+    if(!(L>1e-12)||!this.dstate) return;
+    const nx=px/L, ny=py/L, h=this.chassis.h, c=Math.cos(h), s=Math.sin(h);
+    const v=this.dstate.v;
+    let wx=v.x*c-v.y*s, wy=v.x*s+v.y*c;              // chassis frame -> world
+    const into=wx*nx+wy*ny;
+    if(into<0){ wx-=into*nx; wy-=into*ny; }          // only the part driving in
+    this.dstate.v={x:wx*c+wy*s, y:-wx*s+wy*c};
   }
 };
+
+/* The rig the chassis dynamics runs on: one wheel per driven motor, placed
+   from the CAD when its wheels are in the assembly and from the drawn base
+   when they are not. The code always says which corner a motor drives, even
+   for a CAD that has no wheels at all, so there is always something to run. */
+/* A competition robot with a battery and a full build on it, for when the CAD
+   can't say. 12 kg sits in the middle of what FTC robots actually weigh; the
+   limit is 19 kg. */
+const ASSUMED_KG=12, ASSUMED_MIN_KG=2;
+function buildRig(cad,dtn,base,dev,opts){
+  if(!dtn||!dtn.ok||typeof Dyn==="undefined"||typeof massProps!=="function") return null;
+  const o=opts||{};
+  let props=massProps(cad,{payloadKg:o.payloadKg});
+  // A STEP with no solid parts (or a CAD of one mechanism) weighs nothing, and
+  // a 0.2 kg robot accelerates like nothing on Earth. Rather than pretend, run
+  // a typical competition robot and say so — ASSUMED_KG is flagged all the way
+  // out to the Math tab, where it reads as an assumption, not a measurement.
+  if(!(props.kg>ASSUMED_MIN_KG)){
+    const L=(base&&base.L)||0.40, W=(base&&base.W)||0.36;
+    props={kg:ASSUMED_KG, com:{x:0,y:0,z:0.11}, comHeight:0.11,
+           I:{xx:0,yy:0,zz:ASSUMED_KG*(L*L+W*W)/12}, Izz:ASSUMED_KG*(L*L+W*W)/12,
+           parts:[], confidence:0.15, assumed:true, cadKg:props.kg};
+  }
+  const geo=(typeof driveFromCAD==="function")?driveFromCAD(cad):null;
+  const corners={};
+  if(geo&&geo.wheels) for(const w of geo.wheels) if(w.corner) corners[w.corner]=w;
+  const L=(base&&base.L)||0.40, W=(base&&base.W)||0.36, R=(base&&base.wheelR)||0.048;
+  const kind=(geo&&geo.kind&&geo.kind!=="unknown")?geo.kind:(dtn.style==="mecanum"?"mecanum":"tank");
+  const wheels=[], devs=[], motors=[];
+  for(const w of dtn.wheels){
+    const corner=(w.front?"F":w.back?"B":"")+(w.left?"L":w.right?"R":"");
+    const g=corner.length===2?corners[corner]:null;
+    // the standard mecanum X when the CAD doesn't say: FL and BR one way,
+    // FR and BL the other
+    const x=g?g.x:(w.front?L/2:(w.back?-L/2:0));
+    const y=g?g.y:(w.left?W/2:-W/2);
+    const roller=kind!=="mecanum"?0
+      :(g&&g.roller?g.roller:(((w.front&&w.left)||(w.back&&w.right))?1:-1));
+    wheels.push({x, y, z:0, r:(g&&g.r>0.015)?g.r:R, roller, corner:corner.length===2?corner:null});
+    devs.push(w.dev);
+    const s=dev&&dev[w.dev];
+    motors.push((s&&s.spec)||null);
+  }
+  return {props, drive:{kind, wheels}, motors, devs, gear:1,
+          mu:(Number.isFinite(o.mu)&&o.mu>0)?o.mu:undefined};
+}
 const clamp01=v=>Math.max(0,Math.min(1,v));
 const SLEW=8;                                   // motor power change per second (power units / s)
