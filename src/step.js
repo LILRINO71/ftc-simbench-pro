@@ -585,6 +585,21 @@ function parseSTEP(text, onProgress, opts){
                 partName:out.partName||null, hasActuator:!!out.hw,
                 axis, pivot, kind:out.hw?null:"fixed", distalTo:null, cluster});
   }
+  /* Drive hardware is not a joint. A drive motor — or a swerve module's
+     steering servo — sits on its wheel: within a hand's width of a drive
+     wheel's centre in plan, at wheel height. Left as mechanisms they were
+     typed as arm joints, the wheel beside each was drawn as part of that
+     "arm", and an OpMode's lift motor could be mapped onto one, so raising
+     the lift swung a wheel and a corner of the chassis round a drive motor. */
+  if(frame&&typeof frameWheels==="function"){
+    const dw=dtOnFloor(frameWheels(solids),[0,0,1]);
+    for(const m of mechs){
+      if(!m.pivot||!m.hasActuator||!dw.length) continue;
+      const onWheel=dw.some(w=>Math.hypot(m.pivot[0]-w.c[0],m.pivot[1]-w.c[1])<Math.min(0.10,2.2*w.r) &&
+                               m.pivot[2]<w.c[2]+2.2*w.r);
+      if(onWheel){ m.kind="fixed"; m.drive=true; }
+    }
+  }
   classifyMechs(mechs);
 
   return {name:null, units:unitName, points:P, pointCount:P.length, solids,

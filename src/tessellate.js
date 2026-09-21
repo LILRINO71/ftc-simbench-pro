@@ -30,7 +30,8 @@ function mechOwner(cad,turretScale){
     if(L2>1e-12) t=Math.max(0,Math.min(1,((p[0]-a[0])*ab[0]+(p[1]-a[1])*ab[1]+(p[2]-a[2])*ab[2])/L2));
     return Math.hypot(p[0]-a[0]-ab[0]*t, p[1]-a[1]-ab[1]*t, p[2]-a[2]-ab[2]*t);
   };
-  const segs=M.filter(m=>m.pivot).map(m=>({id:m.id, m, a:m.pivot, b:m.distalTo||m.pivot}));
+  // the view's rule: only links that can move claim parts
+  const segs=M.filter(m=>m.pivot&&m.kind!=="fixed").map(m=>({id:m.id, m, a:m.pivot, b:m.distalTo||m.pivot}));
   const radialTo=(p,m)=>{
     const a=m.pivot, ax=m.axis, d=[p[0]-a[0],p[1]-a[1],p[2]-a[2]];
     const t=d[0]*ax[0]+d[1]*ax[1]+d[2]*ax[2];
@@ -45,7 +46,8 @@ function mechOwner(cad,turretScale){
     const root=M.filter(x=>x.id===id)[0];
     if(root&&root.parent==="chassis"&&root.kind==="revolute-yaw"){
       const turretR=Math.max(size*0.10,(root.lever||size*0.3)*ts);
-      if(root.axis&&radialTo(p,root)>turretR) id="chassis";
+      // and nothing beneath its own bearing: the battery under a turret stays put
+      if(root.axis&&(radialTo(p,root)>turretR||p[2]<root.pivot[2]-0.02)) id="chassis";
     }
     return id;
   };

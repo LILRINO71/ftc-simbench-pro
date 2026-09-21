@@ -23,10 +23,12 @@ const T = new Function('"use strict";\n' + engineBundle().replace(/^"use strict"
   fs.readFileSync(path.join(ROOT, 'src', 'tessellate.js'), 'utf8') +
   '\nreturn { parseSTEP, mechOwner, solidGroups, tessMatch, tessAssign, tessBuckets, tessNames, OCCT_PARAMS };')();
 
-const OCCT_PATH = process.env.OCCT_IMPORT_JS ||
-  'C:\\Users\\hiheo\\AppData\\Local\\Temp\\claude\\C--Users-hiheo-Claude\\4b805a14-c01f-4a62-a002-ee14af4baa67\\scratchpad\\occt\\node_modules\\occt-import-js';
+// occt-import-js is a devDependency: the exact geometry is the feature, so a
+// machine without it fails here rather than skipping into a false green
+const require = createRequire(import.meta.url);
+const OCCT_PATH = process.env.OCCT_IMPORT_JS || require.resolve('occt-import-js');
 let occtP = null;
-const occt = () => (occtP ||= fs.existsSync(OCCT_PATH) ? createRequire(import.meta.url)(OCCT_PATH)() : Promise.resolve(null));
+const occt = () => (occtP ||= require(OCCT_PATH)());
 const tess = async (name) => { const oc = await occt(); return oc && oc.ReadStepFile(new TextEncoder().encode(stepOf(name)), T.OCCT_PARAMS); };
 
 const boxOf = (pts) => { const mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
@@ -36,7 +38,7 @@ for (const name of NAMES) {
   describe('exact meshes: ' + name, () => {
     test('every mesh finds its part, in the canonical frame, to the millimetre', async (t) => {
       const res = await tess(name);
-      if (!res) { t.skip('occt-import-js not found at ' + OCCT_PATH); return; }
+      assert.ok(res, 'occt-import-js did not load from ' + OCCT_PATH);
       assert.ok(res.success);
       const cad = T.parseSTEP(stepOf(name));
       const mt = T.tessMatch(cad, res);
@@ -62,7 +64,7 @@ for (const name of NAMES) {
 
     test('wheels ride the chassis; every matched mesh rides its part\'s mechanism', async (t) => {
       const res = await tess(name);
-      if (!res) { t.skip('occt-import-js not found'); return; }
+      assert.ok(res, 'occt-import-js did not load');
       const cad = T.parseSTEP(stepOf(name));
       const asg = T.tessAssign(cad, res, 0.55), sg = T.solidGroups(cad, 0.55);
       asg.solid.forEach((i, j) => { if (i >= 0) assert.equal(asg.group[j], sg[i], 'mesh ' + j + ' (' + asg.names[j] + ')'); });
@@ -75,7 +77,7 @@ for (const name of NAMES) {
 
     test('draw buckets: one per (group, colour), every triangle kept once', async (t) => {
       const res = await tess(name);
-      if (!res) { t.skip('occt-import-js not found'); return; }
+      assert.ok(res, 'occt-import-js did not load');
       const cad = T.parseSTEP(stepOf(name));
       const asg = T.tessAssign(cad, res, 0.55), list = T.tessBuckets(cad, res, asg);
       const tris = res.meshes.reduce((s, m) => s + m.index.array.length / 3, 0);
@@ -98,7 +100,7 @@ for (const name of NAMES) {
 
 test('mecanum-zup: the arm\'s meshes move with the arm, the drive stays on the chassis', async (t) => {
   const res = await tess('mecanum-zup');
-  if (!res) { t.skip('occt-import-js not found'); return; }
+  assert.ok(res, 'occt-import-js did not load');
   const cad = T.parseSTEP(stepOf('mecanum-zup'));
   const asg = T.tessAssign(cad, res, 0.55);
   const inMech = asg.group.filter((g) => g !== 'chassis').length;

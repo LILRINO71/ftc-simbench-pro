@@ -158,7 +158,9 @@ const View={
       return Math.hypot(p[0]-q[0],p[1]-q[1],p[2]-q[2]);
     };
     /* every link's own span: its pivot out to whatever it carries */
-    const segs=M.filter(m=>m.pivot).map(m=>({id:m.id, m, a:m.pivot, b:m.distalTo||m.pivot}));
+    // only links that can move claim parts: a fixed mount (and drive hardware,
+    // which the parser marks fixed) leaves its neighbours on the chassis
+    const segs=M.filter(m=>m.pivot&&m.kind!=="fixed").map(m=>({id:m.id, m, a:m.pivot, b:m.distalTo||m.pivot}));
     /* Points far out from a root joint's axis are frame, not turret — they
        stay behind while the column above the joint swings. */
     const radialTo=(p,m)=>{
@@ -178,7 +180,8 @@ const View={
       const root=M.filter(x=>x.id===id)[0];
       if(root && root.parent==="chassis" && root.kind==="revolute-yaw"){
         const turretR=Math.max(size*0.10, (root.lever||size*0.3)*this.turretScale);
-        if(radialTo(p,root)>turretR) id="chassis";
+        // and nothing beneath its own bearing: the battery under a turret stays put
+        if(radialTo(p,root)>turretR||p[2]<root.pivot[2]-0.02) id="chassis";
       }
       return id;
     };

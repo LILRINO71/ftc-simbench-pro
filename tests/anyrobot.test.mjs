@@ -10,14 +10,11 @@
 // other stick 0) for 2 s and the DRIVETRAIN CENTRE must stay put (< 5 mm) while the
 // heading goes past 90 degrees — in 'rigid' physics and in 'kinematic'.
 //
-// Where the drivetrain centre is, on the field: the Sim drives a pose (x, y, h) and the
-// view hangs the CAD off it. Today (src/view3d.js) the CAD is centred on its bounding box
-// and turned by FRONTS[front], so a CAD point p lands at
-//     pose + Rz(h) * Rz(FRONTS[front]) * (p - bboxCentre)      (CAD x,y taken as the plan)
-// Once a robot frame is wired into the Sim (any object on Sim with a toRobot() — the
-// robotFrame() contract), the pose is that frame's origin instead:
-//     pose + Rz(h) * toRobot(p).xy
-// The test measures whichever the engine is actually using.
+// Where the drivetrain centre is, on the field: THE placement contract, robotToWorld()
+// in src/frame.js, which the physics, the collisions and the view all use. The TRUE
+// drivetrain centre (from the ground truth) is pushed through the engine's own cad.frame,
+// so if the engine picks the wrong origin the point orbits and the test sees it — and it
+// takes the worst moment of the run, not start-vs-end, which a full turn could hide.
 //
 // Tests that fail are the answer to the question, not a reason to loosen it.
 import { test, describe } from 'node:test';
@@ -42,11 +39,10 @@ const E = loadWithField(bundle);
 const robotFrame = E.robotFrame || new Function(bundle + '\nreturn typeof robotFrame === "function" ? robotFrame : undefined;')();
 void loadEngine; void sampleBench;
 
-/* OpenCascade, if it is on this machine. */
-const OCCT_PATH = process.env.OCCT_IMPORT_JS ||
-  'C:\\Users\\hiheo\\AppData\\Local\\Temp\\claude\\C--Users-hiheo-Claude\\4b805a14-c01f-4a62-a002-ee14af4baa67\\scratchpad\\occt\\node_modules\\occt-import-js';
+/* OpenCascade: a devDependency, so its absence is a failure, not a skip. */
+const OCCT_PATH = process.env.OCCT_IMPORT_JS || createRequire(import.meta.url).resolve('occt-import-js');
 let occtP = null;
-const occt = () => (occtP ||= fs.existsSync(OCCT_PATH) ? createRequire(import.meta.url)(OCCT_PATH)() : Promise.resolve(null));
+const occt = () => (occtP ||= createRequire(import.meta.url)(OCCT_PATH)());
 
 /* ---- geometry helpers ---- */
 const AX = { '+x': [1, 0, 0], '-x': [-1, 0, 0], '+y': [0, 1, 0], '-y': [0, -1, 0], '+z': [0, 0, 1], '-z': [0, 0, -1] };
@@ -296,7 +292,7 @@ for (const name of NAMES) {
 
     test('OpenCascade tessellates every part', async (t) => {
       const oc = await occt();
-      if (!oc) { t.skip('occt-import-js not found at ' + OCCT_PATH + ' (set OCCT_IMPORT_JS)'); return; }
+      assert.ok(oc, 'occt-import-js did not load from ' + OCCT_PATH);
       const r = oc.ReadStepFile(new TextEncoder().encode(stepOf(name)), { linearUnit: 'meter', linearDeflectionType: 'bounding_box_ratio', linearDeflection: 0.001, angularDeflection: 0.5 });
       assert.ok(r.success, 'occt could not read the file');
       const empty = r.meshes.filter((m) => !(m.index && m.index.array.length && m.attributes.position.array.length)).length;
@@ -319,10 +315,14 @@ for (const name of NAMES) {
       for (const w of d.wheels) assert.ok(Math.abs(w.r - T.drive.radius) < 0.003, 'wheel radius ' + mm(w.r) + ' vs true ' + mm(T.drive.radius) + why);
     });
 
-    test('massProps: right mass class, COM inside the wheelbase', () => {
+    test('massProps: mass within the stated accuracy of the model, COM inside the wheelbase', () => {
       const cad = cadOf(name), mp = E.massProps(cad), map = truthInCad(T, cad);
       const com = [mp.com.x, mp.com.y, mp.com.z];
-      assert.equal(massClass(mp.kg), T.massClass, 'mass ' + mp.kg.toFixed(2) + ' kg vs true ' + T.massKg + ' kg (x' + (mp.kg / T.massKg).toFixed(2) + ')');
+      // CAD-derived mass is volume x density x an honest fill factor: good to
+      // about +/-30 %, which is exactly why the Math tab calls it an estimate.
+      // A mass class let 0 kg pass on 13 of 14 robots; this band does not.
+      const ratio = mp.kg / T.massKg;
+      assert.ok(ratio > 0.65 && ratio < 1.4, 'mass ' + mp.kg.toFixed(2) + ' kg vs true ' + T.massKg + ' kg (x' + ratio.toFixed(2) + ')');
       // plan coordinates in the cad's own axes: along front, and along up x front
       const up = AX[map.up], fw = AX[map.front], lf = cross(up, fw);
       const plan = (p) => [dot(p, fw), dot(p, lf)];
