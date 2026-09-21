@@ -176,7 +176,13 @@ public class KiwiTeleOp extends LinearOpMode {
 }
 `;
 /* Swerve: drive motors carry the speed, steering servos the direction. A pure turn
-   points every module tangentially and drives them all the same way. */
+   needs every module along the counter-clockwise tangent: FL 135, FR 45, BL 225, BR 315
+   degrees. A module only sweeps +/-90 degrees (the bench's default calibration: 0.5 is
+   straight ahead, 0..1 is 180 degrees, higher is counter-clockwise), so — like all real
+   swerve code — FL and BL turn to the opposite angle and run their wheel backwards.
+   (The first version of this OpMode drove all four the same way with mirrored servo
+   offsets; worked through by hand, its left and right torques cancel under ANY single
+   servo convention, so it could never have turned.) */
 const SWERVE_JAVA = `package org.firstinspires.ftc.teamcode;
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
@@ -205,13 +211,13 @@ public class SwerveTeleOp extends LinearOpMode {
         waitForStart();
         while (opModeIsActive()) {
             double turn = gamepad1.right_stick_x;
-            leftFrontSteer.setPosition(0.5 + 0.25 * turn);
-            rightFrontSteer.setPosition(0.5 - 0.25 * turn);
-            leftBackSteer.setPosition(0.5 - 0.25 * turn);
-            rightBackSteer.setPosition(0.5 + 0.25 * turn);
-            leftFront.setPower(turn);
+            leftFrontSteer.setPosition(0.5 - 0.25 * turn);
+            rightFrontSteer.setPosition(0.5 + 0.25 * turn);
+            leftBackSteer.setPosition(0.5 + 0.25 * turn);
+            rightBackSteer.setPosition(0.5 - 0.25 * turn);
+            leftFront.setPower(-turn);
             rightFront.setPower(turn);
-            leftBack.setPower(turn);
+            leftBack.setPower(-turn);
             rightBack.setPower(turn);
         }
     }

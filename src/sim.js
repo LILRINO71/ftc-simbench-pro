@@ -257,6 +257,21 @@ const Sim={
       this.stopAgainst(this.chassis.x-xi, this.chassis.y-yi);
       return;
     }
+    // Kinematic mode for anything that isn't a left/right base: forward
+    // kinematics from the rig's real wheels. The left/right average below
+    // can't turn a kiwi or a swerve at all.
+    const rk=this.rig&&this.rig.drive.kind;
+    if(this.rig&&rk!=="tank"&&rk!=="mecanum"){
+      this.steerModules();
+      const SPD=1.15;                          // m/s of rim at full power, as below
+      const W=this.rig.drive.wheels, fk=fkFromIk(ikMatrix(rk,W));
+      const t=chassisFromWheels(fk,this.rig.devs.map(n=>{ const sd=this.dev[n]; return (sd?sd.act:0)*SPD; }));
+      const h=this.chassis.h, c=Math.cos(h), s=Math.sin(h);
+      this.chassis.x+=(t.vx*c-t.vy*s)*dt; this.chassis.y+=(t.vx*s+t.vy*c)*dt; this.chassis.h+=t.omega*dt;
+      if(Field.ok) this.bump=Field.collide(this.chassis,this.footprint,this.obstacles);
+      this.vel={x:(this.chassis.x-x0)/dt, y:(this.chassis.y-y0)/dt};
+      return;
+    }
     let L=0,R=0,nl=0,nr=0,strafe=0;
     for(const w of dtn.wheels){
       const s=this.dev[w.dev]; if(!s) continue;
@@ -287,7 +302,16 @@ const Sim={
   /* One step of real chassis dynamics: motor torque through the wheels,
      limited by what the tiles will take, against the robot's own mass and
      yaw inertia. Velocities come back in the chassis frame. */
+  /* Point every swerve module where its steering actuator says. */
+  steerModules(){
+    const r=this.rig; if(!r||!r.steer) return;
+    const c=r.steerCfg;
+    r.steer.forEach((n,i)=>{ const s=n&&this.dev[n]; if(!s) return;
+      r.drive.wheels[i].alpha=c.sense*(s.act-c.zero)*c.travel; });
+  },
+
   stepRigid(dt){
+    this.steerModules();
     const cmd=this.rig.devs.map(n=>{ const s=this.dev[n]; return s?s.act:0; });
     const st=Dyn.step(this.dstate,cmd,this.rig,dt);
     this.dstate=st;
@@ -366,9 +390,29 @@ function buildRig(cad,dtn,base,dev,opts){
   const weakTank=geo&&geo.kind==="tank"&&(geo.confidence||0)<0.5;
   if(weakTank&&dtn.style==="mecanum") kind="mecanum";
   const wheels=[], devs=[], motors=[];
+  // Pair each driven motor with a real CAD wheel: by corner when the layout
+  // has corners, otherwise by direction — "back" is the wheel behind the
+  // centre, "leftFront" the one out front-left. Without this a kiwi (three
+  // wheels, no corners) got three synthetic forward-facing wheels and could
+  // not turn at all.
+  const taken=new Set();
+  const pick=w=>{
+    const corner=(w.front?"F":w.back?"B":"")+(w.left?"L":w.right?"R":"");
+    if(corner.length===2&&corners[corner]&&!taken.has(corners[corner])) return corners[corner];
+    const dx=w.front?1:(w.back?-1:0), dy=w.left?1:(w.right?-1:0);
+    if((!dx&&!dy)||!cadWheels.length) return null;
+    const h=Math.atan2(dy,dx);
+    let best=null, bd=Infinity;
+    for(const g of cadWheels){
+      if(taken.has(g)) continue;
+      let d=Math.abs(Math.atan2(g.y,g.x)-h); if(d>Math.PI) d=2*Math.PI-d;
+      if(d<bd){ bd=d; best=g; }
+    }
+    return bd<1.4?best:null;                  // within ~80 degrees, or it's only a guess
+  };
   for(const w of dtn.wheels){
     const corner=(w.front?"F":w.back?"B":"")+(w.left?"L":w.right?"R":"");
-    const g=corner.length===2?corners[corner]:null;
+    const g=pick(w); if(g) taken.add(g);
     const x=g?g.x:span?(w.front?span.x1:(w.back?span.x0:(span.x0+span.x1)/2)):(w.front?L/2:(w.back?-L/2:0));
     const y=g?g.y:span?(w.left?span.y1:span.y0):(w.left?W/2:-W/2);
     // the standard mecanum X when nothing says otherwise: FL and BR one way,
@@ -376,12 +420,31 @@ function buildRig(cad,dtn,base,dev,opts){
     const roller=kind!=="mecanum"?0
       :(g&&g.roller?g.roller:(((w.front&&w.left)||(w.back&&w.right))?1:-1));
     const r=(g&&g.r>0.015)?g.r:(span&&span.r>0.015?span.r:R);
-    wheels.push({x, y, z:0, r, roller, corner:corner.length===2?corner:null});
+    // non-mecanum wheels roll along the CAD's own drive direction (a kiwi's
+    // wheels point round the circle, an X-drive's at 45 degrees)
+    const alpha=(kind!=="mecanum"&&g&&Number.isFinite(g.alpha))?g.alpha:0;
+    wheels.push({x, y, z:0, r, roller, alpha, corner:corner.length===2?corner:null});
     devs.push(w.dev);
     const sd=dev&&dev[w.dev];
     motors.push((sd&&sd.spec)||null);
   }
-  return {props, drive:{kind, wheels, from:g0(geo)}, motors, devs, gear:1,
+  // Swerve: each module's steering actuator is whatever the code drives that
+  // isn't a drive motor and sits on the same corner (leftFrontSteer steers
+  // leftFront). How a servo position maps to a module angle depends on the
+  // horn and the gearing, which no CAD shows, so it is an explicit
+  // calibration: 0.5 is straight ahead, the full 0..1 sweep is travelDeg,
+  // counter-clockwise for a higher position unless sense is -1.
+  let steer=null;
+  if(kind==="swerve"){
+    const drive=new Set(devs);
+    const same=(a,b)=>a.front===b.front&&a.back===b.back&&a.left===b.left&&a.right===b.right;
+    const cands=Object.keys(dev||{}).filter(n=>!drive.has(n)&&dev[n]);
+    steer=dtn.wheels.map(w=>cands.find(n=>{ const c=wheelCorner(n); return (c.front||c.back||c.left||c.right)&&same(c,w); })||null);
+    if(!steer.some(Boolean)) steer=null;
+  }
+  const sw=o.swerve||{};
+  return {props, drive:{kind, wheels, from:g0(geo)}, motors, devs, gear:1, steer,
+          steerCfg:{zero:Number.isFinite(sw.zero)?sw.zero:0.5, travel:(Number.isFinite(sw.travelDeg)?sw.travelDeg:180)*Math.PI/180, sense:sw.sense===-1?-1:1},
           mu:(Number.isFinite(o.mu)&&o.mu>0)?o.mu:undefined};
 }
 // where the wheel geometry came from, for the physics panel and the math sheet
