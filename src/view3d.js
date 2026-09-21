@@ -111,11 +111,15 @@ const View={
   load(cad){
     while(this.world.children.length){ const o=this.world.children[0]; this.world.remove(o); this.dispose(o); }
     const bb=cad.bbox;
-    this.c=[0,1,2].map(i=>(bb.min[i]+bb.max[i])/2);
+    // A canonical CAD (src/frame.js) already has its origin at the drivetrain
+    // centre on the floor — the point the physics turns the robot about — so it
+    // is drawn from there. Centring on the bounding box instead made a robot
+    // with an intake out the front swing it round like a door when it turned.
+    this.c=cad.frame?[0,0,0]:[0,1,2].map(i=>(bb.min[i]+bb.max[i])/2);
     const size=Math.max(bb.max[0]-bb.min[0],bb.max[1]-bb.min[1],bb.max[2]-bb.min[2])||0.5;
     this.size=size; this.cad=cad;
     this.floorY=0;
-    this.lift0=this.c[2]-bb.min[2];            // the CAD's centre above its own bottom
+    this.lift0=cad.frame?0:this.c[2]-bb.min[2];   // canonical: the floor is already z = 0
     this.look=null;
 
     this.fieldG=new THREE.Group(); this.world.add(this.fieldG);
@@ -273,17 +277,19 @@ const View={
   buildFootprint(fp){
     if(this.footG){ this.chassisG.remove(this.footG); this.dispose(this.footG); }
     const g=new THREE.Group(), y=0.003;
+    // the box sits (ox, oy) off the drivetrain centre, exactly as the collisions have it
+    const ox=fp.ox||0, oy=fp.oy||0;
     const pts=[[fp.hx,fp.hy],[fp.hx,-fp.hy],[-fp.hx,-fp.hy],[-fp.hx,fp.hy],[fp.hx,fp.hy]]
-      .map(p=>new THREE.Vector3(p[0],y,-p[1]));
+      .map(p=>new THREE.Vector3(ox+p[0],y,-(oy+p[1])));
     g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),
       new THREE.LineBasicMaterial({color:FIELD_COL.honey,transparent:true,opacity:0.5})));
     const a=Math.min(fp.hx,fp.hy)*0.4;
     const tri=new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(fp.hx+a*0.9,y,0), new THREE.Vector3(fp.hx+0.01,y,-a*0.6), new THREE.Vector3(fp.hx+0.01,y,a*0.6)]);
+      new THREE.Vector3(ox+fp.hx+a*0.9,y,-oy), new THREE.Vector3(ox+fp.hx+0.01,y,-oy-a*0.6), new THREE.Vector3(ox+fp.hx+0.01,y,-oy+a*0.6)]);
     g.add(new THREE.Mesh(tri,new THREE.MeshBasicMaterial({color:FIELD_COL.honey,transparent:true,opacity:0.75,side:THREE.DoubleSide})));
     const hb=new THREE.Mesh(new THREE.BoxGeometry(2*fp.hx,Math.max(0.1,fp.h),2*fp.hy),new THREE.MeshBasicMaterial({visible:false}));
-    hb.position.y=Math.max(0.1,fp.h)/2; g.add(hb);
-    this.hitBox=hb; this.footG=g; this.fpShown=fp.hx+"|"+fp.hy+"|"+fp.h;
+    hb.position.set(ox,Math.max(0.1,fp.h)/2,-oy); g.add(hb);
+    this.hitBox=hb; this.footG=g; this.fpShown=fp.hx+"|"+fp.hy+"|"+fp.h+"|"+ox+"|"+oy;
     this.chassisG.add(g);
   },
 
@@ -622,7 +628,7 @@ const View={
     const sk=mod&&cfg?[mod.ox,mod.mount,cfg.hoodDeg,cfg.h0In,cfg.wheelMm,cfg.ball,base?base.H:0].join("|"):"";
     if(sk!==this.shooterKey){ this.shooterKey=sk; this.buildShooter(mod); }
     const fp=Sim.footprint;
-    if(fp&&(!this.footG||this.fpShown!==fp.hx+"|"+fp.hy+"|"+fp.h)) this.buildFootprint(fp);
+    if(fp&&(!this.footG||this.fpShown!==fp.hx+"|"+fp.hy+"|"+fp.h+"|"+(fp.ox||0)+"|"+(fp.oy||0))) this.buildFootprint(fp);
     // wheels roll with their motors, the flywheel with the shooter
     for(const w of this.wheels){ const s=w.dev&&Sim.dev[w.dev]; if(s) w.spin.rotation.z-=s.act*(s.spec.rpm||312)/60*2*Math.PI*dt; }
     if(this.fly) this.fly.g.rotation.z-=Math.min(26,Shots.spin()*140)*dt;

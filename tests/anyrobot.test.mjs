@@ -222,36 +222,41 @@ const opModeFor = (T) => (T.drive.kind === 'tank' ? TANK_JAVA : T.drive.kind ===
 /* ---- the spin ---- */
 const START = { x: 1.0, y: 1.0, h: 0 };            // open floor: 0.65 m from the nearest HIVE leg, 0.79 m from the walls
 
-function pivotedPlan(cad, T) {
-  // where the drivetrain centre sits relative to the pose the Sim drives, in the robot's plan
-  const S = E.Sim, map = truthInCad(T, cad), wc = T.wheelCentroid ? map.toCad(T.wheelCentroid) : null;
-  const fr = Object.values(S).find((v) => v && typeof v === 'object' && typeof v.toRobot === 'function');
-  if (fr) { const r = wc ? fr.toRobot(wc) : [0, 0, 0]; return { q: [r[0], r[1]], how: 'Sim robot frame (toRobot)' }; }
-  const b = cad.bbox, c = [(b.min[0] + b.max[0]) / 2, (b.min[1] + b.max[1]) / 2];
-  const d = wc ? [wc[0] - c[0], wc[1] - c[1]] : [0, 0];   // no wheels: the drawn base is centred on the pose
-  const a = E.FRONTS[map.front] || 0;
-  return { q: [d[0] * Math.cos(a) - d[1] * Math.sin(a), d[0] * Math.sin(a) + d[1] * Math.cos(a)],
-    how: 'view convention: CAD centred on its ' + (map.canonical ? 'canonical ' : '') + 'bbox, FRONTS[' + map.front + ']' };
+/* Where the TRUE drivetrain centre (the fixture's ground truth, raw CAD
+   coordinates) sits in the coordinates the ENGINE draws and drives with — its
+   own cad.frame. If the engine chose the wrong origin this point isn't at 0,
+   and it orbits the pose as the robot turns: exactly the user's bug. */
+function trueCentreInEngine(cad, T) {
+  const c = T.wheelCentroid || [0, 1, 2].map((k) => (T.bbox.min[k] + T.bbox.max[k]) / 2);
+  if (!cad.frame) return c.slice();
+  const R = cad.frame.R, O = cad.frame.origin, d = [c[0] - O[0], c[1] - O[1], c[2] - O[2]];
+  return [dot(R[0], d), dot(R[1], d), dot(R[2], d)];
 }
-const worldOf = (ch, q) => [ch.x + q[0] * Math.cos(ch.h) - q[1] * Math.sin(ch.h), ch.y + q[0] * Math.sin(ch.h) + q[1] * Math.cos(ch.h)];
 
 function spin(name, physics) {
   const T = truthOf(name);
   const cad = E.parseSTEP(stepOf(name));
   const code = E.parseJava(opModeFor(T));
   const map = E.autoMap(code.devices, cad.mechs);
-  E.Sim.reset(code, cad, map, { payloadKg: 0, duty: 0.30, trust: 'code', physics, front: truthInCad(T, cad).front, startPose: { ...START } });
+  const front = truthInCad(T, cad).front;
+  E.Sim.reset(code, cad, map, { payloadKg: 0, duty: 0.30, trust: 'code', physics, front, startPose: { ...START } });
   E.Sim.pad = { 1: { right_stick_x: 1 }, 2: {} };
-  const piv = pivotedPlan(cad, T);
-  const h0 = E.Sim.chassis.h, p0 = worldOf(E.Sim.chassis, piv.q);
-  let bumped = null;
-  for (let i = 0; i < 100; i++) { run(E, 0.02); bumped = bumped || E.Sim.bump; }
-  const p1 = worldOf(E.Sim.chassis, piv.q);
-  const drift = Math.hypot(p1[0] - p0[0], p1[1] - p0[1]);
+  // THE placement contract (src/frame.js robotToWorld) — the one the physics,
+  // the collisions and the view all use — so this watches what the user sees
+  const q = trueCentreInEngine(cad, T);
+  const where = () => E.robotToWorld(E.Sim.chassis, front, q);
+  const h0 = E.Sim.chassis.h, p0 = where();
+  let bumped = null, drift = 0;
+  for (let i = 0; i < 100; i++) {
+    run(E, 0.02); bumped = bumped || E.Sim.bump;
+    // the worst moment, not the end: a robot that turns a full circle comes
+    // back to where it started and would hide any drift in between
+    const p = where(); drift = Math.max(drift, Math.hypot(p[0] - p0[0], p[1] - p0[1]));
+  }
   const pose = Math.hypot(E.Sim.chassis.x - START.x, E.Sim.chassis.y - START.y);
   const turned = Math.abs(E.Sim.chassis.h - h0);
-  const info = name + ' ' + physics + ': drivetrain centre moved ' + mm(drift) + ' (the pose itself ' + mm(pose) + '), heading changed ' +
-    (turned * 180 / Math.PI).toFixed(0) + ' deg; pivot by ' + piv.how + ', drivetrain centre ' + mm(Math.hypot(...piv.q)) + ' off the pivot' +
+  const info = name + ' ' + physics + ': drivetrain centre moved up to ' + mm(drift) + ' (the pose itself ' + mm(pose) + '), heading changed ' +
+    (turned * 180 / Math.PI).toFixed(0) + ' deg; true drivetrain centre ' + mm(Math.hypot(q[0], q[1])) + ' off the engine origin' +
     '; drivetrain ' + (E.Sim.drivetrain ? E.Sim.drivetrain.wheels.length + ' motors ok=' + E.Sim.drivetrain.ok : 'none') +
     (E.Sim.rig ? '; rig ' + E.Sim.rig.drive.kind + ' ' + E.Sim.rig.props.kg.toFixed(1) + ' kg' + (E.Sim.rig.props.assumed ? ' (assumed)' : '') + ', COM ' + v3([E.Sim.rig.props.com.x, E.Sim.rig.props.com.y, E.Sim.rig.props.com.z]) : '; no rig') +
     (bumped ? '; hit ' + bumped : '');
