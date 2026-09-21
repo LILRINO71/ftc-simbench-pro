@@ -152,6 +152,18 @@ function frontToRobot(front){
   return p=>[frDot(p,F.fwd),frDot(p,F.left),p[2]];
 }
 
+/* Where a canonical CAD point is on the field. THE contract between the
+   physics, the view and the tests: pose.x/y is the drivetrain centre in field
+   metres, pose.h is the heading (CCW from field +x), and the front setting
+   says which canonical axis is the robot's forward. Anything that draws or
+   measures the robot in the world goes through this, so the thing the
+   collisions push, the thing the view draws and the thing the tests watch
+   can never be three different points again. */
+function robotToWorld(pose,front,p){
+  const r=frontToRobot(front)(p), c=Math.cos(pose.h), s=Math.sin(pose.h);
+  return [pose.x+r[0]*c-r[1]*s, pose.y+r[0]*s+r[1]*c, r[2]];
+}
+
 /* Canonicalise a CAD that didn't come through the parser — the built-in
    sample, or a workspace saved before frames existed. Joints move with the
    parts. Idempotent: a CAD that already carries a frame is left alone, and
