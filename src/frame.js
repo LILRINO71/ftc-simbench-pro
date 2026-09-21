@@ -39,7 +39,9 @@ const FRAME_AXES=[[1,0,0],[0,1,0],[0,0,1]];
 const frDot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
 
 /* Wheel-shaped parts, measured the same way the drivetrain detector does, in
-   whatever orientation the CAD arrived. */
+   whatever orientation the CAD arrived. With no wheel names to go on, the
+   same shape-only set the detector would fall back to — found here with up
+   unknown, since finding up is what the wheels are for. */
 function frameWheels(solids){
   const out=[];
   for(const s of solids||[]){
@@ -48,7 +50,9 @@ function frameWheels(solids){
     if(!(g.r>0.012&&g.r<0.16)||g.round<0.75||g.width>2.2*g.r) continue;
     out.push(g);
   }
-  return out;
+  if(out.length>=2) return out;
+  const byShape=dtShapeWheels(solids,null);
+  return byShape?byShape.wheels.map(c=>c.g):out;
 }
 
 /* Which CAD axis is up. Every drive axle is horizontal, so up is square to all
@@ -92,15 +96,9 @@ function robotFrame(cad,opts){
   const upv=R[2];
   const rot=p=>[frDot(R[0],p),frDot(R[1],p),frDot(R[2],p)];
 
-  // the drive ring: wheels within a hand's width of the lowest, as the
-  // drivetrain detector reads it, so the two agree on where the centre is
-  let ws=frameWheels(solids);
-  if(ws.length>=2){
-    const rmax=Math.max.apply(null,ws.map(w=>w.r));
-    const lift=ws.map(w=>frDot(w.c,upv)), lo=Math.min.apply(null,lift);
-    const low=ws.filter((w,i)=>lift[i]<=lo+Math.max(0.03,0.6*rmax));
-    if(low.length>=2) ws=low;
-  }
+  // the drive wheels are the ones on the floor — exactly as the drivetrain
+  // detector picks them, so the two agree on where the centre is
+  let ws=dtOnFloor(frameWheels(solids),upv);
   let origin, originWhy, floorWhy;
   if(ws.length>=2){
     const c=[0,0,0]; for(const w of ws){ c[0]+=w.c[0]; c[1]+=w.c[1]; c[2]+=w.c[2]; }

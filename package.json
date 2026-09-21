@@ -10,5 +10,8 @@
     "test": "node tools/test.mjs",
     "sync-shot-sim": "node tools/sync-shot-sim.mjs",
     "corpus": "node tools/stepgen.mjs --check"
+  },
+  "devDependencies": {
+    "occt-import-js": "0.0.23"
   }
 }

@@ -103,7 +103,9 @@ test('coordinates land on the 0.1 mm grid — hand-checked, sign included', () =
 });
 
 test('a real STEP assembly survives within the documented 0.1 mm', () => {
-  const cad = E.parseSTEP(fixture('assembly.step'));
+  // a corpus robot with real B-rep (tests/fixtures/robots), not the hand-written
+  // skeleton: the parser now keeps only geometry that is actually on a solid
+  const cad = E.parseSTEP(fixture('robots/mecanum-zup.step'));
   const r = E.unpackSession(E.packSession(E.sessionFromBench({ cad })));
   assert.equal(r.ok, true, r.error);
   assert.equal(r.session.cad.solids.length, cad.solids.length);

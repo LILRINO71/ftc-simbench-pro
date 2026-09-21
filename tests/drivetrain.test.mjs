@@ -189,7 +189,7 @@ test('flywheels and intake rollers are not drive wheels', () => {
   assert.equal(res.kind, 'mecanum');
   assert.equal(res.wheels.length, 4, 'only the four at the bottom');
   assert.ok(res.wheels.every((w) => Math.abs(w.z) < 1e-9));
-  assert.ok(res.why.some((w) => /above the lowest wheels/.test(w)), res.why.join(' | '));
+  assert.ok(res.why.some((w) => /clear of the floor/.test(w)), res.why.join(' | '));
 });
 
 test('nothing to go on: unknown, zero confidence, and a reason', () => {

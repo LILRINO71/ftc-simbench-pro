@@ -109,15 +109,44 @@ function parseSTEP(text, onProgress, opts){
     const g=A(a)[1]; if(!g||g[0]!=="(") return null;
     return g.slice(1,-1).split(",").map(Number); };
 
-  let scale=1;
-  for(const [id,e] of ents){
-    const names=e.map(x=>x[0]);
-    if(names.indexOf("LENGTH_UNIT")>=0 && names.indexOf("SI_UNIT")>=0){
-      const a=e.filter(x=>x[0]==="SI_UNIT")[0][1];
-      scale = /MILLI/.test(a) ? 0.001 : 1;
-      break;
+  /* ===== length unit =====
+     The unit is whatever the representation context the shape lives in
+     assigns (GLOBAL_UNIT_ASSIGNED_CONTEXT). An inch is a CONVERSION_BASED_UNIT
+     whose LENGTH_MEASURE_WITH_UNIT says "25.4 of this MILLI METRE", so the
+     first SI length unit in the file is the millimetre that DEFINES the inch —
+     reading that made an inch robot 25.4x too small. */
+  const SI_PREFIX={EXA:1e18,PETA:1e15,TERA:1e12,GIGA:1e9,MEGA:1e6,KILO:1e3,HECTO:1e2,DECA:1e1,
+                   DECI:1e-1,CENTI:1e-2,MILLI:1e-3,MICRO:1e-6,NANO:1e-9,PICO:1e-12};
+  const unitMemo=new Map();
+  function lengthUnit(id,depth){                 // metres per unit, or null if not a length unit
+    if(id==null||(depth|0)>6) return null;
+    if(unitMemo.has(id)) return unitMemo.get(id);
+    const e=ents.get(id); let m=null;
+    if(e&&e.some(x=>x[0]==="LENGTH_UNIT")){
+      const si=T(id,"SI_UNIT"), cb=T(id,"CONVERSION_BASED_UNIT");
+      if(si!=null){
+        const g=A(si), pre=(g[0]||"").replace(/\./g,"").trim(), nm=(g[1]||"").replace(/\./g,"").trim();
+        if(nm==="METRE") m=SI_PREFIX[pre]||1;
+      }else if(cb!=null){
+        const mw=REF(A(cb)[1]);
+        const mv=T(mw,"LENGTH_MEASURE_WITH_UNIT")||T(mw,"MEASURE_WITH_UNIT");
+        if(mv!=null){
+          const g=A(mv), num=/-?[\d.]+(?:[eE][-+]?\d+)?/.exec(g[0]||""), base=lengthUnit(REF(g[1]),(depth|0)+1);
+          if(num&&base) m=(+num[0])*base;
+        }
+      }
     }
+    unitMemo.set(id,m); return m;
   }
+  function contextUnit(ctx){
+    const g=T(ctx,"GLOBAL_UNIT_ASSIGNED_CONTEXT"); if(g==null) return null;
+    for(const r of (A(g)[0]||"").replace(/[()]/g,"").split(",")){ const u=lengthUnit(REF(r)); if(u) return u; }
+    return null;
+  }
+  const repContext = rep => { for(const [t,a] of (ents.get(rep)||[]))
+      if(/REPRESENTATION$/.test(t)){ const g=A(a); if(g.length>=3) return REF(g[2]); }
+    return null; };
+  const repUnit = rep => contextUnit(repContext(rep));
 
   /* ===== assembly transforms =====
      Part geometry is usually stored in the part's OWN coordinates and placed
@@ -187,21 +216,82 @@ function parseSTEP(text, onProgress, opts){
   const blockCross=new Set();
   for(const [id,e] of ents) for(const [t,a] of e)
     if(t==="MAPPED_ITEM"||t==="REPRESENTATION_MAP"||t==="CONTEXT_DEPENDENT_SHAPE_REPRESENTATION") blockCross.add(id);
+  /* ===== the points ON a part =====
+     Only what lies on the solid: its vertices, and its curved edges sampled
+     along the arc they actually cover. Everything else a representation
+     reaches is construction — the placement axes of the rep itself (a point
+     at the part's origin, which put every part modelled in place a leg away
+     from the origin), a circle's centre, a plane's or cylinder's location.
+     Collecting those made parts too big, too heavy and the robot too wide. */
+  const NOT_GEOM=/^(AXIS[12]_PLACEMENT(_[23]D)?|CARTESIAN_POINT|DIRECTION|VECTOR|LINE|CIRCLE|ELLIPSE|PCURVE|DEFINITIONAL_REPRESENTATION|PLANE)$|SURFACE(?!_MODEL)|CONTEXT|UNIT|STYLE|COLOUR/;
+  const construction = id => { const e=ents.get(id); if(!e) return true;
+    for(const x of e) if(x[0]!=="FACE_SURFACE"&&NOT_GEOM.test(x[0])) return true; return false; };
+  const CURVE_SEG=32;                            // samples per full turn: under 0.3 mm sag on a 104 mm wheel
+  const hasType = (id,re) => { const e=ents.get(id); if(!e) return false; for(const x of e) if(re.test(x[0])) return true; return false; };
+  function edgeSamples(curve,v1,v2,sense,out,depth){
+    if(curve==null||depth>4) return;
+    const sc=T(curve,"SURFACE_CURVE")||T(curve,"SEAM_CURVE");
+    if(sc!=null) return edgeSamples(REF(A(sc)[1]),v1,v2,sense,out,depth+1);
+    const tc=T(curve,"TRIMMED_CURVE");            // the vertices still bound it
+    if(tc!=null) return edgeSamples(REF(A(tc)[1]),v1,v2,sense,out,depth+1);
+    const ci=T(curve,"CIRCLE"), el=T(curve,"ELLIPSE");
+    if(ci!=null||el!=null){
+      const g=A(ci!=null?ci:el), M=matOf(REF(g[1])); if(!M) return;
+      const ra=+g[2], rb=ci!=null?ra:+g[3]; if(!(ra>0&&rb>0)) return;
+      const ang=p=>{ const d=[p[0]-M.t[0],p[1]-M.t[1],p[2]-M.t[2]]; return Math.atan2(dt3(d,M.r[1])/rb, dt3(d,M.r[0])/ra); };
+      const pa=coords(T(v1,"VERTEX_POINT")!=null?REF(A(T(v1,"VERTEX_POINT"))[1]):null);
+      const pb=coords(T(v2,"VERTEX_POINT")!=null?REF(A(T(v2,"VERTEX_POINT"))[1]):null);
+      // the curve runs counter-clockwise about its axis; an edge against the
+      // curve's sense covers the arc from its end vertex to its start vertex
+      let t0=0, span=2*Math.PI;
+      if(pa&&pb&&v1!==v2){
+        const s0=ang(sense?pa:pb), s1=ang(sense?pb:pa);
+        span=((s1-s0)%(2*Math.PI)+2*Math.PI)%(2*Math.PI); t0=s0;
+        if(span<1e-9) span=2*Math.PI;
+      }else if(pa) t0=ang(pa);
+      const n=Math.max(2,Math.ceil(CURVE_SEG*span/(2*Math.PI)));
+      for(let i=1;i<n;i++){ const t=t0+span*i/n, c=Math.cos(t)*ra, s=Math.sin(t)*rb;
+        out.push([M.t[0]+c*M.r[0][0]+s*M.r[1][0], M.t[1]+c*M.r[0][1]+s*M.r[1][1], M.t[2]+c*M.r[0][2]+s*M.r[1][2]]); }
+      return;
+    }
+    // splines and polylines: their control points hug the curve (convex hull property)
+    if(hasType(curve,/^(B_SPLINE_CURVE|BEZIER_CURVE|POLYLINE|RATIONAL_B_SPLINE_CURVE|QUASI_UNIFORM_CURVE|UNIFORM_CURVE)/))
+      for(const r of refs.get(curve)||[]){ const v=T(r,"CARTESIAN_POINT")!=null?coords(r):null; if(v&&v.length===3) out.push(v); }
+  }
+  function geomPoints(seed,seen,out){
+    const stack=[seed];
+    while(stack.length){
+      const n=stack.pop();
+      const vp=T(n,"VERTEX_POINT");
+      if(vp!=null){ const v=coords(REF(A(vp)[1])); if(v&&v.length===3) out.push(v); continue; }
+      const pl=T(n,"POLY_LOOP");
+      if(pl!=null){ for(const r of refs.get(n)||[]){ const v=coords(r); if(v&&v.length===3) out.push(v); } continue; }
+      const ec=T(n,"EDGE_CURVE");
+      if(ec!=null){
+        const g=A(ec), v1=REF(g[1]), v2=REF(g[2]);
+        edgeSamples(REF(g[3]),v1,v2,!/\.F\./.test(g[4]||""),out,0);
+        for(const r of [v1,v2]) if(r!=null&&!seen.has(r)){ seen.add(r); stack.push(r); }
+        continue;
+      }
+      for(const r of refs.get(n)||[]){
+        if(seen.has(r)||blockCross.has(r)) continue;
+        seen.add(r);
+        if(!construction(r)) stack.push(r);
+      }
+    }
+  }
+  let scale=1;
   const ptCache=new Map();
   function localPoints(rep){
     if(ptCache.has(rep)) return ptCache.get(rep);
     const seeds=[rep].concat(geomLink.get(rep)||[]);
-    const out=[]; const seen=new Set(seeds); const stack=seeds.slice();
-    while(stack.length){
-      const n=stack.pop();
-      const cp=T(n,"CARTESIAN_POINT");
-      if(cp){ const g=A(cp)[1];
-        if(g&&g[0]==="("){ const v=g.slice(1,-1).split(",").map(Number);
-          if(v.length===3&&v[0]===v[0]&&v[1]===v[1]&&v[2]===v[2]) out.push(v); } }
-      for(const r of refs.get(n)||[]){
-        if(seen.has(r)||blockCross.has(r)) continue;
-        seen.add(r); stack.push(r);
-      }
+    const out=[]; const seen=new Set(seeds);
+    for(const s of seeds){
+      const from=out.length;
+      geomPoints(s,seen,out);
+      // a part modelled in its own unit comes back in the assembly's
+      const u=repUnit(s), k=u?u/scale:1;
+      if(k!==1) for(let i=from;i<out.length;i++) out[i]=[out[i][0]*k,out[i][1]*k,out[i][2]*k];
     }
     ptCache.set(rep,out); return out;
   }
@@ -229,6 +319,24 @@ function parseSTEP(text, onProgress, opts){
   }
   const treeRoots=[...kidsOcc.keys()].filter(k=>!childSet.has(k));
 
+  // the assembly's own context sets the unit everything is placed in; with no
+  // context units at all (hand-written files), a length unit nothing is
+  // defined in terms of
+  {
+    const rootRep=treeRoots.length?repOfPd.get(treeRoots[0]):null;
+    let u=rootRep!=null?repUnit(rootRep):null;
+    if(!u) for(const r of repOfPd.values()){ u=repUnit(r)||repUnit((geomLink.get(r)||[])[0]); if(u) break; }
+    if(!u){
+      const bases=new Set();
+      for(const [id,e] of ents) for(const [t,a] of e)
+        if(t==="LENGTH_MEASURE_WITH_UNIT"||t==="MEASURE_WITH_UNIT") bases.add(REF(A(a)[1]));
+      for(const [id,e] of ents) if(!bases.has(id)&&e.some(x=>x[0]==="LENGTH_UNIT")){ u=lengthUnit(id); if(u) break; }
+    }
+    scale=u||1;
+  }
+  const UNIT_NAMES=[[1,"METRE"],[0.001,"MILLIMETRE"],[0.01,"CENTIMETRE"],[0.0254,"INCH"],[0.3048,"FOOT"]];
+  const unitName=(UNIT_NAMES.find(x=>Math.abs(x[0]-scale)<=1e-9*x[0])||[0,scale+" m"])[1];
+
   const occs=[];            // every placed occurrence, with its global transform
   let totalPts=0;
   function walkOcc(pdid,M,depth,viaNauo){
@@ -240,6 +348,10 @@ function parseSTEP(text, onProgress, opts){
       walkOcc(k.pd, mulM(M, xfOfNauo.get(k.nauo)||IDM), depth+1, k.nauo);
   }
   walkOcc(treeRoots.length?treeRoots[0]:null, IDM, 0, null);
+  // a single part, or parts with no assembly around them: each stands where modelled
+  if(!occs.length) for(const [pdid,rep] of repOfPd) if(!asChild.has(pdid)){
+    totalPts+=localPoints(rep).length; occs.push({pd:pdid, M:IDM, rep, nauo:null});
+  }
 
   /* Two conventions exist in the wild. Some exporters bake each part's world
      position into its geometry; others store it locally and rely on the
@@ -269,21 +381,17 @@ function parseSTEP(text, onProgress, opts){
   // ---- emit the point cloud, strided to something a browser can draw
   const TARGET=130000;
   const raw=[];
-  if(bakedGlobal){
-    const st=Math.max(1,Math.ceil(pts.length/3/TARGET));
-    for(let i=0,n=0;i<pts.length;i+=3,n++){
-      if(n%st) continue;
-      raw.push([pts[i]*scale,pts[i+1]*scale,pts[i+2]*scale]);
-    }
-  }else{
+  {
     const stride=Math.max(1,Math.ceil(totalPts/TARGET));
-    let seq=0;
+    let seq=0; const once=new Set();
     for(const o of occs){
       if(o.rep==null) continue;
+      // baked geometry is already where it goes, so a shared rep is drawn once
+      if(bakedGlobal){ if(once.has(o.rep)) continue; once.add(o.rep); }
       const lp=localPoints(o.rep);
       for(let i=0;i<lp.length;i++){
         if((seq++ % stride)!==0) continue;
-        const v=applyM(o.M,lp[i]);
+        const v=bakedGlobal?lp[i]:applyM(o.M,lp[i]);
         raw.push([v[0]*scale,v[1]*scale,v[2]*scale]);
       }
     }
@@ -315,16 +423,20 @@ function parseSTEP(text, onProgress, opts){
     }
   }
 
-  // ---- drop unbounded-surface construction points
-  const src = raw.length? raw : (function(){ const a=[];
-    for(let i=0;i<pts.length;i+=3) a.push([pts[i]*scale,pts[i+1]*scale,pts[i+2]*scale]); return a; })();
-  const q=(arr,p)=>{ const s=Float64Array.from(arr).sort(); return s[Math.min(s.length-1,Math.max(0,Math.floor(s.length*p)))]; };
-  const lim = k => { if(!src.length) return [-1,1];
-    const col=src.map(v=>v[k]); const a=q(col,0.01), b=q(col,0.99), pad=(b-a)*0.22+1e-9; return [a-pad,b+pad]; };
-  const L0=lim(0), L1=lim(1), L2=lim(2);
+  /* ---- the cloud. Every point above is on a solid, so nothing is trimmed:
+     a quantile trim of the pooled cloud used to cut real parts off wherever
+     the part density was uneven — the wheels of a robot whose fasteners
+     crowd one plate. Only a file with no B-rep at all falls back to its bare
+     points, and there the far-flung ones are plane and axis locations. */
+  let src=raw, L=null;
+  if(!src.length){
+    src=[]; for(let i=0;i<pts.length;i+=3) src.push([pts[i]*scale,pts[i+1]*scale,pts[i+2]*scale]);
+    const q=(arr,p)=>{ const s=Float64Array.from(arr).sort(); return s[Math.min(s.length-1,Math.max(0,Math.floor(s.length*p)))]; };
+    L=[0,1,2].map(k=>{ const col=src.map(v=>v[k]); const a=q(col,0.01), b=q(col,0.99), pad=(b-a)*0.22+1e-9; return [a-pad,b+pad]; });
+  }
   const P=[]; const mn=[1e18,1e18,1e18], mx=[-1e18,-1e18,-1e18];
   for(const p of src){
-    if(p[0]<L0[0]||p[0]>L0[1]||p[1]<L1[0]||p[1]>L1[1]||p[2]<L2[0]||p[2]>L2[1]) continue;
+    if(L&&(p[0]<L[0][0]||p[0]>L[0][1]||p[1]<L[1][0]||p[1]>L[1][1]||p[2]<L[2][0]||p[2]>L[2][1])) continue;
     P.push(p);
     for(let k=0;k<3;k++){ if(p[k]<mn[k])mn[k]=p[k]; if(p[k]>mx[k])mx[k]=p[k]; }
   }
@@ -340,7 +452,6 @@ function parseSTEP(text, onProgress, opts){
     for(const v0 of lp){
       const v=bakedGlobal?v0:applyM(o.M,v0);
       const p=[v[0]*scale,v[1]*scale,v[2]*scale];
-      if(p[0]<L0[0]||p[0]>L0[1]||p[1]<L1[0]||p[1]>L1[1]||p[2]<L2[0]||p[2]>L2[1]) continue;
       w.push(p);
       for(let k=0;k<3;k++){ if(p[k]<smn[k])smn[k]=p[k]; if(p[k]>smx[k])smx[k]=p[k]; }
     }
@@ -476,7 +587,7 @@ function parseSTEP(text, onProgress, opts){
   }
   classifyMechs(mechs);
 
-  return {name:null, units:scale===1?"METRE":"MILLIMETRE", points:P, pointCount:P.length, solids,
+  return {name:null, units:unitName, points:P, pointCount:P.length, solids,
           bbox:{min:mn,max:mx}, parts, mechs, placements, frame};
 }
 
