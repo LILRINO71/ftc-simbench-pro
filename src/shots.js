@@ -78,7 +78,8 @@ const Shots={
       if(this._own) return null;
     }
     const fp=Sim.footprint||{hx:0.2};
-    return {ox:-Math.max(0,fp.hx-0.08), mount:c.mountDeg||0};
+    // the back of the BOX, which sits (fp.ox) off the drivetrain centre
+    return {ox:(fp.ox||0)-Math.max(0,fp.hx-0.08), mount:c.mountDeg||0};
   },
   /* Where the ball leaves, on the field. */
   exitPoint(pose){

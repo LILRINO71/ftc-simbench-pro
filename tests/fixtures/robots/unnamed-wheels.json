@@ -1,0 +1,114 @@
+{
+  "name": "unnamed-wheels",
+  "note": "mecanum-zup with every product renamed Part N / Assembly N",
+  "units": "mm",
+  "up": "+z",
+  "front": "+x",
+  "wheelCentroid": [
+    0,
+    0,
+    0.052
+  ],
+  "floorZ": 0,
+  "drive": {
+    "kind": "mecanum",
+    "wheels": 4,
+    "radius": 0.05319,
+    "motors": 4
+  },
+  "wheels": [
+    {
+      "corner": "FL",
+      "c": [
+        0.168,
+        0.2,
+        0.052
+      ],
+      "axle": [
+        0,
+        1,
+        0
+      ],
+      "r": 0.052
+    },
+    {
+      "corner": "FR",
+      "c": [
+        0.168,
+        -0.2,
+        0.052
+      ],
+      "axle": [
+        0,
+        -1,
+        0
+      ],
+      "r": 0.052
+    },
+    {
+      "corner": "BL",
+      "c": [
+        -0.168,
+        0.2,
+        0.052
+      ],
+      "axle": [
+        0,
+        1,
+        0
+      ],
+      "r": 0.052
+    },
+    {
+      "corner": "BR",
+      "c": [
+        -0.168,
+        -0.2,
+        0.052
+      ],
+      "axle": [
+        0,
+        -1,
+        0
+      ],
+      "r": 0.052
+    }
+  ],
+  "massKg": 5.041,
+  "massClass": "light",
+  "bbox": {
+    "min": [
+      -0.224,
+      -0.223,
+      0
+    ],
+    "max": [
+      0.224,
+      0.223,
+      0.478
+    ]
+  },
+  "leafParts": 25,
+  "occurrences": 25,
+  "products": 15,
+  "bodies": 80,
+  "partNames": [
+    "Part 1",
+    "Part 10",
+    "Part 11",
+    "Part 12",
+    "Part 13",
+    "Part 14",
+    "Part 2",
+    "Part 3",
+    "Part 4",
+    "Part 5",
+    "Part 6",
+    "Part 7",
+    "Part 8",
+    "Part 9"
+  ],
+  "occt": {
+    "meshes": 80
+  }
+}

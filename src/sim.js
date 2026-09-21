@@ -9,6 +9,9 @@ const Sim={
 
   /* Build devices and state for an OpMode. Nothing runs yet. */
   load(code,cad,map,opts){
+    // every CAD runs in the canonical robot frame; the parser does this for
+    // STEP files, and this catches the rest (the sample, older workspaces)
+    if(typeof canonicalizeCAD==="function") canonicalizeCAD(cad,{up:opts&&opts.up});
     this.dev={}; this.vars={}; this.t=0; this.pids={}; this.timers={};
     const sp=(opts&&opts.startPose)||{x:0,y:0,h:0};
     this.chassis={x:sp.x,y:sp.y,h:sp.h};
@@ -324,6 +327,12 @@ const ASSUMED_KG=12, ASSUMED_MIN_KG=2;
 function buildRig(cad,dtn,base,dev,opts){
   if(!dtn||!dtn.ok||typeof Dyn==="undefined"||typeof massProps!=="function") return null;
   const o=opts||{};
+  // Everything below is in ONE frame: the robot's own (x forward, y left, z up,
+  // origin at the drivetrain centre on the floor). The CAD arrives canonical
+  // (src/frame.js) — up-aligned and centred — so the only rotation left is
+  // which way is forward. Mixing frames here is exactly what made a robot
+  // lurch sideways when it turned in place.
+  const toR=typeof frontToRobot==="function"?frontToRobot(o.front):(p=>p);
   let props=massProps(cad,{payloadKg:o.payloadKg});
   // A STEP with no solid parts (or a CAD of one mechanism) weighs nothing, and
   // a 0.2 kg robot accelerates like nothing on Earth. Rather than pretend, run
@@ -334,29 +343,48 @@ function buildRig(cad,dtn,base,dev,opts){
     props={kg:ASSUMED_KG, com:{x:0,y:0,z:0.11}, comHeight:0.11,
            I:{xx:0,yy:0,zz:ASSUMED_KG*(L*L+W*W)/12}, Izz:ASSUMED_KG*(L*L+W*W)/12,
            parts:[], confidence:0.15, assumed:true, cadKg:props.kg};
+  }else{
+    // yaw about z doesn't change Izz, so only the centre of mass moves
+    const c=toR([props.com.x,props.com.y,props.com.z]);
+    props=Object.assign({},props,{com:{x:c[0],y:c[1],z:c[2]}, comHeight:c[2]});
   }
-  const geo=(typeof driveFromCAD==="function")?driveFromCAD(cad):null;
+  const geo=(typeof driveFromCAD==="function")?driveFromCAD(cad,{front:o.front}):null;
+  const cadWheels=(geo&&geo.wheels)||[];
   const corners={};
-  if(geo&&geo.wheels) for(const w of geo.wheels) if(w.corner) corners[w.corner]=w;
+  for(const w of cadWheels) if(w.corner) corners[w.corner]=w;
+  // Wheels the CAD has but can't hand out by corner (six-wheel, drop-centre,
+  // a diamond) still say where the drive base is: use its real span.
+  const span=cadWheels.length>=2?{
+    x0:Math.min.apply(null,cadWheels.map(w=>w.x)), x1:Math.max.apply(null,cadWheels.map(w=>w.x)),
+    y0:Math.min.apply(null,cadWheels.map(w=>w.y)), y1:Math.max.apply(null,cadWheels.map(w=>w.y)),
+    r:cadWheels.reduce((a,w)=>a+w.r,0)/cadWheels.length}:null;
   const L=(base&&base.L)||0.40, W=(base&&base.W)||0.36, R=(base&&base.wheelR)||0.048;
-  const kind=(geo&&geo.kind&&geo.kind!=="unknown")?geo.kind:(dtn.style==="mecanum"?"mecanum":"tank");
+  // Four parallel axles are a mecanum set or a tank set and the geometry
+  // genuinely can't tell which; the drivetrain detector says "tank" with low
+  // confidence for exactly that case. Code that does mecanum maths settles it.
+  let kind=(geo&&geo.kind&&geo.kind!=="unknown")?geo.kind:(dtn.style==="mecanum"?"mecanum":"tank");
+  const weakTank=geo&&geo.kind==="tank"&&(geo.confidence||0)<0.5;
+  if(weakTank&&dtn.style==="mecanum") kind="mecanum";
   const wheels=[], devs=[], motors=[];
   for(const w of dtn.wheels){
     const corner=(w.front?"F":w.back?"B":"")+(w.left?"L":w.right?"R":"");
     const g=corner.length===2?corners[corner]:null;
-    // the standard mecanum X when the CAD doesn't say: FL and BR one way,
+    const x=g?g.x:span?(w.front?span.x1:(w.back?span.x0:(span.x0+span.x1)/2)):(w.front?L/2:(w.back?-L/2:0));
+    const y=g?g.y:span?(w.left?span.y1:span.y0):(w.left?W/2:-W/2);
+    // the standard mecanum X when nothing says otherwise: FL and BR one way,
     // FR and BL the other
-    const x=g?g.x:(w.front?L/2:(w.back?-L/2:0));
-    const y=g?g.y:(w.left?W/2:-W/2);
     const roller=kind!=="mecanum"?0
       :(g&&g.roller?g.roller:(((w.front&&w.left)||(w.back&&w.right))?1:-1));
-    wheels.push({x, y, z:0, r:(g&&g.r>0.015)?g.r:R, roller, corner:corner.length===2?corner:null});
+    const r=(g&&g.r>0.015)?g.r:(span&&span.r>0.015?span.r:R);
+    wheels.push({x, y, z:0, r, roller, corner:corner.length===2?corner:null});
     devs.push(w.dev);
-    const s=dev&&dev[w.dev];
-    motors.push((s&&s.spec)||null);
+    const sd=dev&&dev[w.dev];
+    motors.push((sd&&sd.spec)||null);
   }
-  return {props, drive:{kind, wheels}, motors, devs, gear:1,
+  return {props, drive:{kind, wheels, from:g0(geo)}, motors, devs, gear:1,
           mu:(Number.isFinite(o.mu)&&o.mu>0)?o.mu:undefined};
 }
+// where the wheel geometry came from, for the physics panel and the math sheet
+const g0=geo=>geo&&geo.wheels&&geo.wheels.length?"cad":"code";
 const clamp01=v=>Math.max(0,Math.min(1,v));
 const SLEW=8;                                   // motor power change per second (power units / s)

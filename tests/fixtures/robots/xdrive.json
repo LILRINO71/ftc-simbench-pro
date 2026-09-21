@@ -1,0 +1,106 @@
+{
+  "name": "xdrive",
+  "note": "four omni wheels at the corners, axles at 45 degrees",
+  "units": "mm",
+  "up": "+z",
+  "front": "+x",
+  "wheelCentroid": [
+    0,
+    0,
+    0.048
+  ],
+  "floorZ": 0.0002,
+  "drive": {
+    "kind": "x",
+    "wheels": 4,
+    "radius": 0.04831,
+    "motors": 4
+  },
+  "wheels": [
+    {
+      "corner": null,
+      "c": [
+        0.16,
+        0.16,
+        0.048
+      ],
+      "axle": [
+        0.7071067811865475,
+        0.7071067811865475,
+        0
+      ],
+      "r": 0.048
+    },
+    {
+      "corner": null,
+      "c": [
+        0.16,
+        -0.16,
+        0.048
+      ],
+      "axle": [
+        0.7071067811865475,
+        -0.7071067811865475,
+        0
+      ],
+      "r": 0.048
+    },
+    {
+      "corner": null,
+      "c": [
+        -0.16,
+        0.16,
+        0.048
+      ],
+      "axle": [
+        -0.7071067811865475,
+        0.7071067811865475,
+        0
+      ],
+      "r": 0.048
+    },
+    {
+      "corner": null,
+      "c": [
+        -0.16,
+        -0.16,
+        0.048
+      ],
+      "axle": [
+        -0.7071067811865475,
+        -0.7071067811865475,
+        0
+      ],
+      "r": 0.048
+    }
+  ],
+  "massKg": 4.444,
+  "massClass": "light",
+  "bbox": {
+    "min": [
+      -0.201898,
+      -0.201898,
+      0.0002
+    ],
+    "max": [
+      0.201898,
+      0.201898,
+      0.127
+    ]
+  },
+  "leafParts": 12,
+  "occurrences": 12,
+  "products": 7,
+  "bodies": 84,
+  "partNames": [
+    "REV Control Hub REV-31-1595",
+    "REV Slim Battery 12V",
+    "X Base Plate",
+    "X Lower Plate",
+    "goBILDA 5203 Series Yellow Jacket Planetary Gear Motor 5203-2402-0019",
+    "goBILDA 96mm Omni Wheel 3606-0014-0096"
+  ],
+  "occt": {
+    "meshes": 84
+  }
+}

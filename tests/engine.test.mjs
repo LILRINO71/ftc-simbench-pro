@@ -193,10 +193,20 @@ test('step: assembly transforms place local geometry, and mechanisms are found',
   assert.equal(arm.id, 'Arm');
   assert.equal(arm.part, '2000-0025-0002');
   assert.equal(arm.kind, 'revolute-lift');
-  near(arm.pivot[0], 0.10, 1e-9, 'pivot x'); near(arm.pivot[2], 0.30, 1e-9, 'pivot z');
+  // The parser hands back the canonical frame (src/frame.js); what this test is
+  // about is whether the STEP transforms were applied, so check in raw CAD
+  // coordinates by undoing the frame: raw = R^T canon + origin.
+  const F = cad.frame;
+  assert.equal(F.up, '+z', 'no wheels in this fixture, so Onshape\'s Top plane is the floor');
+  assert.equal(F.originWhy, 'bbox');
+  const raw = (p) => [0, 1, 2].map((k) => F.R[0][k] * p[0] + F.R[1][k] * p[1] + F.R[2][k] * p[2] + F.origin[k]);
+  const pv = raw(arm.pivot);
+  near(pv[0], 0.10, 1e-9, 'pivot x'); near(pv[2], 0.30, 1e-9, 'pivot z');
   // the Frame's geometry is stored at z 0..0.05 and placed at z = 0.20
-  const frame = cad.points.filter((p) => p[2] > 0.19 && p[2] < 0.26 && p[0] >= -1e-9 && p[0] <= 0.051);
+  const frame = cad.points.map(raw).filter((p) => p[2] > 0.19 && p[2] < 0.26 && p[0] >= -1e-9 && p[0] <= 0.051);
   assert.ok(frame.length >= 4, `frame geometry translated, found ${frame.length}`);
+  // and in the canonical frame the robot stands on the floor
+  near(cad.bbox.min[2], 0, 1e-9, 'canonical floor');
 });
 
 // ---------------------------------------------------------------- rig

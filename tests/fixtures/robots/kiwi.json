@@ -1,0 +1,91 @@
+{
+  "name": "kiwi",
+  "note": "three omni wheels 120 degrees apart, axles radial",
+  "units": "mm",
+  "up": "+z",
+  "front": "+x",
+  "wheelCentroid": [
+    9.25185853854297e-18,
+    9.25185853854297e-18,
+    0.048
+  ],
+  "floorZ": 0.0002,
+  "drive": {
+    "kind": "omni",
+    "wheels": 3,
+    "radius": 0.04831,
+    "motors": 3
+  },
+  "wheels": [
+    {
+      "corner": null,
+      "c": [
+        0.08500000000000002,
+        0.14722431864335458,
+        0.048
+      ],
+      "axle": [
+        0.5000000000000001,
+        0.8660254037844386,
+        0
+      ],
+      "r": 0.048
+    },
+    {
+      "corner": null,
+      "c": [
+        -0.17,
+        2.0818995585505005e-17,
+        0.048
+      ],
+      "axle": [
+        -1,
+        1.2246467991473532e-16,
+        0
+      ],
+      "r": 0.048
+    },
+    {
+      "corner": null,
+      "c": [
+        0.08500000000000002,
+        -0.14722431864335458,
+        0.048
+      ],
+      "axle": [
+        0.5000000000000001,
+        -0.8660254037844386,
+        0
+      ],
+      "r": 0.048
+    }
+  ],
+  "massKg": 2.73,
+  "massClass": "light",
+  "bbox": {
+    "min": [
+      -0.189,
+      -0.225167,
+      0.0002
+    ],
+    "max": [
+      0.26,
+      0.225167,
+      0.127
+    ]
+  },
+  "leafParts": 9,
+  "occurrences": 9,
+  "products": 6,
+  "bodies": 63,
+  "partNames": [
+    "Kiwi Triangle Plate",
+    "REV Control Hub REV-31-1595",
+    "REV Slim Battery 12V",
+    "goBILDA 5203 Series Yellow Jacket Planetary Gear Motor 5203-2402-0019",
+    "goBILDA 96mm Omni Wheel 3606-0014-0096"
+  ],
+  "occt": {
+    "meshes": 63
+  }
+}

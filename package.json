@@ -8,6 +8,7 @@
     "build": "node tools/build.mjs",
     "build:ship": "node tools/build.mjs --min",
     "test": "node tools/test.mjs",
-    "sync-shot-sim": "node tools/sync-shot-sim.mjs"
+    "sync-shot-sim": "node tools/sync-shot-sim.mjs",
+    "corpus": "node tools/stepgen.mjs --check"
   }
 }

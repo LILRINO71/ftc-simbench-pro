@@ -69,8 +69,10 @@ const Field={
      clear of the LOADING ZONE and the FLOWER on that wall. */
   startPose(alliance,fp){
     const H=this.half(), s=alliance==="blue"?1:-1;
-    const hx=(fp&&fp.hx)||0.2286;
-    return {x:s*(H-hx), y:0, h:alliance==="blue"?Math.PI:0};
+    const hx=(fp&&fp.hx)||0.2286, ox=(fp&&fp.ox)||0, oy=(fp&&fp.oy)||0;
+    // the BOX touches the wall and sits on the centre line; the pose is the
+    // drivetrain centre, which is wherever the box's offset puts it
+    return {x:s*(H-hx+ox), y:s*oy, h:alliance==="blue"?Math.PI:0};
   },
 
   /* Things a robot can't drive through, flattened to 2-D capsules at the
@@ -104,6 +106,18 @@ const Field={
      extent), obstacles by pushing out along the shallowest direction.
      Returns what it hit, or null. Mutates ch. */
   collide(ch,fp,obs){
+    const ox=(fp&&fp.ox)||0, oy=(fp&&fp.oy)||0;
+    if(!ox&&!oy) return this.collideBox(ch,fp,obs);
+    // The pose is the drivetrain centre, but the box can sit off it (an intake
+    // out the front). Collide the box where it really is, then carry the pose
+    // along by the same push.
+    const c=Math.cos(ch.h), s=Math.sin(ch.h), dx=ox*c-oy*s, dy=ox*s+oy*c;
+    const box={x:ch.x+dx, y:ch.y+dy, h:ch.h};
+    const hit=this.collideBox(box,fp,obs);
+    ch.x=box.x-dx; ch.y=box.y-dy;
+    return hit;
+  },
+  collideBox(ch,fp,obs){
     let hit=null;
     for(let pass=0; pass<3; pass++){
       const H=this.half(), c=Math.abs(Math.cos(ch.h)), s=Math.abs(Math.sin(ch.h));
@@ -170,14 +184,29 @@ function capsulePush(ch,fp,o){
    which way the CAD's front faces, and the drive base under it if any. */
 function footprintOf(cad,front,base){
   const b=cad&&cad.bbox;
-  let fp={hx:0.2286, hy:0.2286, h:0.35};
+  let x0=-0.2286, x1=0.2286, y0=-0.2286, y1=0.2286, h=0.35;
   if(b){
-    const ex=Math.max(0.05,(b.max[0]-b.min[0])/2), ey=Math.max(0.05,(b.max[1]-b.min[1])/2);
-    const side=/y/.test(front||"+x");
-    fp={hx:side?ey:ex, hy:side?ex:ey, h:Math.max(0.05,b.max[2]-b.min[2])};
+    h=Math.max(0.05,b.max[2]-b.min[2]);
+    if(cad.frame&&typeof frontToRobot==="function"){
+      // A canonical CAD (src/frame.js) has its origin at the drivetrain centre,
+      // so the box is measured from there, in the robot's own axes — and it can
+      // be lopsided. That offset is the difference between a robot that spins
+      // about its wheels and one that swings its intake round like a door.
+      const f=frontToRobot(front);
+      x0=y0=Infinity; x1=y1=-Infinity;
+      for(const cx of [b.min[0],b.max[0]]) for(const cy of [b.min[1],b.max[1]]){
+        const q=f([cx,cy,0]);
+        x0=Math.min(x0,q[0]); x1=Math.max(x1,q[0]); y0=Math.min(y0,q[1]); y1=Math.max(y1,q[1]);
+      }
+    }else{
+      const ex=(b.max[0]-b.min[0])/2, ey=(b.max[1]-b.min[1])/2, side=/y/.test(front||"+x");
+      x1=side?ey:ex; y1=side?ex:ey; x0=-x1; y0=-y1;
+    }
   }
-  if(base) fp={hx:Math.max(fp.hx,base.L/2), hy:Math.max(fp.hy,base.W/2), h:fp.h+base.H};
-  return fp;
+  // a drawn base sits centred under the pose, and the footprint covers both
+  if(base){ x0=Math.min(x0,-base.L/2); x1=Math.max(x1,base.L/2); y0=Math.min(y0,-base.W/2); y1=Math.max(y1,base.W/2); h+=base.H; }
+  const hx=Math.max(0.05,(x1-x0)/2), hy=Math.max(0.05,(y1-y0)/2);
+  return {hx, hy, h, ox:(x1+x0)/2, oy:(y1+y0)/2};
 }
 
 /* A drive base drawn under the CAD when the code drives but the CAD has no

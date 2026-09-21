@@ -1,0 +1,44 @@
+{
+  "name": "arm-only",
+  "note": "no drivetrain: an arm on a plate; the bench must draw a base under it",
+  "units": "mm",
+  "up": "+z",
+  "front": "+x",
+  "wheelCentroid": null,
+  "floorZ": 0,
+  "drive": {
+    "kind": "none",
+    "wheels": 0,
+    "radius": 0,
+    "motors": 0
+  },
+  "wheels": [],
+  "massKg": 1.364,
+  "massClass": "light",
+  "bbox": {
+    "min": [
+      -0.15,
+      -0.15,
+      0
+    ],
+    "max": [
+      0.29,
+      0.15,
+      0.195
+    ]
+  },
+  "leafParts": 5,
+  "occurrences": 5,
+  "products": 6,
+  "bodies": 6,
+  "partNames": [
+    "1120 Series U-Channel 300mm Arm",
+    "2000 Series Dual Mode Servo (25-2) 2000-0025-0002",
+    "Arm Tower",
+    "Base Plate",
+    "Claw Block"
+  ],
+  "occt": {
+    "meshes": 6
+  }
+}

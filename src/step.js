@@ -36,7 +36,7 @@ function splitStepRecords(s){
   return out;
 }
 
-function parseSTEP(text, onProgress){
+function parseSTEP(text, onProgress, opts){
   const di = text.indexOf("DATA;");
   const body = (di<0? text : text.slice(di+5));
   const recs = splitStepRecords(body);
@@ -354,6 +354,19 @@ function parseSTEP(text, onProgress){
   if(solids.length>1800) solids.length=1800;
   onProgress && onProgress(solids.length+" parts");
 
+  /* ---- one frame for everything downstream (src/frame.js): +z up, origin at
+     the drivetrain centre on the floor. It has to happen here, before the
+     mechanisms, because they are built from heights and "is this axis
+     vertical" — both meaningless on a robot modelled lying on its side. */
+  let frame=null;
+  if(typeof robotFrame==="function"){
+    const F=robotFrame({solids, bbox:{min:mn.slice(),max:mx.slice()}}, opts);
+    const bb=applyFrame(F,{points:P, solids, placements, bbox:{min:mn.slice(),max:mx.slice()}});
+    for(let k=0;k<3;k++){ mn[k]=bb.min[k]; mx[k]=bb.max[k]; }
+    frame=frameRecord(F);
+    onProgress && onProgress("up is "+F.up+" ("+F.upWhy+")");
+  }
+
   // ---- parts inventory
   const counts=new Map(), partNo=new Map();
   for(const [id,pr] of nauo){
@@ -432,13 +445,13 @@ function parseSTEP(text, onProgress){
     let pivot=null, axis=[0,0,1], cluster=[];
     if(selfHw){
       // the actuator itself: use this occurrence's own placement
-      const own=placements.filter(p=>p.child===nm && p.loc.some(v=>v!==0));
+      const own=placements.filter(p=>p.child===nm && (p.placed!==undefined?p.placed:p.loc.some(v=>v!==0)));
       const mine=own.shift();
       if(mine){ pivot=mine.loc.slice(); axis=mine.axis; cluster=[mine.loc.slice()]; }
       // don't let a later occurrence of the same part reuse this placement
       if(mine) mine.child="__used";
     }else{
-      const own=placements.filter(p=>p.parent===nm && p.loc.some(v=>v!==0));
+      const own=placements.filter(p=>p.parent===nm && (p.placed!==undefined?p.placed:p.loc.some(v=>v!==0)));
       cluster=own.map(p=>p.loc.slice());
       const mounts=own.filter(p=>/servo|mount|body|midcase|topcase|botcase|motor|bracket|gearbox/i.test(p.child||""));
       const isVert=p=>Math.abs(p.axis[2])>0.85;
@@ -464,7 +477,7 @@ function parseSTEP(text, onProgress){
   classifyMechs(mechs);
 
   return {name:null, units:scale===1?"METRE":"MILLIMETRE", points:P, pointCount:P.length, solids,
-          bbox:{min:mn,max:mx}, parts, mechs, placements};
+          bbox:{min:mn,max:mx}, parts, mechs, placements, frame};
 }
 
 /* ---- the rig: an explicit, editable kinematic chain ----

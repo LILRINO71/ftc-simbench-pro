@@ -1,0 +1,114 @@
+{
+  "name": "mecanum-zup",
+  "note": "goBILDA mecanum, Z up, origin at the drivetrain centre on the floor, mm",
+  "units": "mm",
+  "up": "+z",
+  "front": "+x",
+  "wheelCentroid": [
+    0,
+    0,
+    0.052
+  ],
+  "floorZ": 0,
+  "drive": {
+    "kind": "mecanum",
+    "wheels": 4,
+    "radius": 0.05319,
+    "motors": 4
+  },
+  "wheels": [
+    {
+      "corner": "FL",
+      "c": [
+        0.168,
+        0.2,
+        0.052
+      ],
+      "axle": [
+        0,
+        1,
+        0
+      ],
+      "r": 0.052
+    },
+    {
+      "corner": "FR",
+      "c": [
+        0.168,
+        -0.2,
+        0.052
+      ],
+      "axle": [
+        0,
+        -1,
+        0
+      ],
+      "r": 0.052
+    },
+    {
+      "corner": "BL",
+      "c": [
+        -0.168,
+        0.2,
+        0.052
+      ],
+      "axle": [
+        0,
+        1,
+        0
+      ],
+      "r": 0.052
+    },
+    {
+      "corner": "BR",
+      "c": [
+        -0.168,
+        -0.2,
+        0.052
+      ],
+      "axle": [
+        0,
+        -1,
+        0
+      ],
+      "r": 0.052
+    }
+  ],
+  "massKg": 5.041,
+  "massClass": "light",
+  "bbox": {
+    "min": [
+      -0.224,
+      -0.223,
+      0
+    ],
+    "max": [
+      0.224,
+      0.223,
+      0.478
+    ]
+  },
+  "leafParts": 25,
+  "occurrences": 25,
+  "products": 15,
+  "bodies": 80,
+  "partNames": [
+    "1120 Series U-Channel 208mm Crossbar",
+    "1120 Series U-Channel 252mm Back",
+    "1120 Series U-Channel 252mm Front",
+    "1120 Series U-Channel 350mm Slide",
+    "1120 Series U-Channel 448mm Left Rail",
+    "1120 Series U-Channel 448mm Right Rail",
+    "2000 Series Dual Mode Servo (25-2) 2000-0025-0002",
+    "M4 x 10mm Socket Head Cap Screw 2802-0004-0010",
+    "Pattern Plate 300x250",
+    "REV Control Hub REV-31-1595",
+    "REV Slim Battery 12V",
+    "goBILDA 104mm Mecanum Wheel (Left) 3213-0001-0001",
+    "goBILDA 104mm Mecanum Wheel (Right) 3213-0001-0002",
+    "goBILDA 5203 Series Yellow Jacket Planetary Gear Motor 5203-2402-0019"
+  ],
+  "occt": {
+    "meshes": 80
+  }
+}

@@ -9,7 +9,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const ENGINE = ['hardware', 'samples', 'step', 'hull', 'inertia', 'expr', 'java', 'mapping', 'robotconfig', 'compare', 'analyze', 'drivetrain', 'dynamics', 'field', 'shots', 'controllers', 'session', 'mathdoc', 'gitimport', 'onboarding', 'sim'];
+const ENGINE = ['hardware', 'samples', 'step', 'hull', 'inertia', 'expr', 'java', 'mapping', 'robotconfig', 'compare', 'analyze', 'drivetrain', 'frame', 'dynamics', 'field', 'shots', 'controllers', 'session', 'mathdoc', 'gitimport', 'onboarding', 'sim'];
 const EXPORTS = [
   'Field', 'Shots', 'IN', 'TIP_GRAMS', 'FRONTS', 'footprintOf', 'capsulePush', 'nearestMotorId', 'SHOOTER_JAVA',
   'convexHull', 'boxCorners', 'solidTriangles', 'thinPoints', 'solidKind', 'sampleSolids', 'robotBase', 'makeRng',
@@ -26,6 +26,7 @@ const EXPORTS = [
   'MATERIALS', 'hullVolume', 'partMass', 'massProps', 'inertiaOf',
   'driveFromCAD', 'DRIVE_KINDS', 'ikMatrix', 'fkFromIk', 'wheelSpeeds', 'chassisFromWheels',
   'Dyn', 'tractionLimit', 'motorTorque', 'wheelLoads',
+  'robotFrame', 'frameUp', 'applyFrame', 'canonicalizeCAD', 'frontToRobot', 'frameMatrix', 'FRAME_UP_ROWS', 'buildRig', 'ASSUMED_KG',
   'FTCSIM_MAGIC', 'packSession', 'unpackSession', 'sessionFromBench',
   'mathReport', 'mathText', 'mathMarkdown',
   'parseRepoRef', 'rawUrlsFor', 'pickOpModes', 'javaLooksLikeOpMode',

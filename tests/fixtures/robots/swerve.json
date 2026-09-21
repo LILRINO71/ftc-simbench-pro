@@ -1,0 +1,107 @@
+{
+  "name": "swerve",
+  "note": "four wheels, each under a coaxial steering servo; nothing is named swerve",
+  "units": "mm",
+  "up": "+z",
+  "front": "+x",
+  "wheelCentroid": [
+    0,
+    0,
+    0.048
+  ],
+  "floorZ": 0,
+  "drive": {
+    "kind": "swerve",
+    "wheels": 4,
+    "radius": 0.048,
+    "motors": 4
+  },
+  "wheels": [
+    {
+      "corner": null,
+      "c": [
+        0.15,
+        0.15,
+        0.048
+      ],
+      "axle": [
+        0,
+        1,
+        0
+      ],
+      "r": 0.048
+    },
+    {
+      "corner": null,
+      "c": [
+        0.15,
+        -0.15,
+        0.048
+      ],
+      "axle": [
+        0,
+        1,
+        0
+      ],
+      "r": 0.048
+    },
+    {
+      "corner": null,
+      "c": [
+        -0.15,
+        0.15,
+        0.048
+      ],
+      "axle": [
+        0,
+        1,
+        0
+      ],
+      "r": 0.048
+    },
+    {
+      "corner": null,
+      "c": [
+        -0.15,
+        -0.15,
+        0.048
+      ],
+      "axle": [
+        0,
+        1,
+        0
+      ],
+      "r": 0.048
+    }
+  ],
+  "massKg": 4.651,
+  "massClass": "light",
+  "bbox": {
+    "min": [
+      -0.2,
+      -0.2,
+      0
+    ],
+    "max": [
+      0.2,
+      0.2,
+      0.246
+    ]
+  },
+  "leafParts": 19,
+  "occurrences": 19,
+  "products": 8,
+  "bodies": 83,
+  "partNames": [
+    "2000 Series Dual Mode Servo (25-2) 2000-0025-0002",
+    "Module Top Plate",
+    "REV Control Hub REV-31-1595",
+    "REV Slim Battery 12V",
+    "Swerve Chassis Plate",
+    "goBILDA 5203 Series Yellow Jacket Planetary Gear Motor 5203-2402-0019",
+    "goBILDA 96mm Grip Wheel 3614-0001-0096"
+  ],
+  "occt": {
+    "meshes": 83
+  }
+}

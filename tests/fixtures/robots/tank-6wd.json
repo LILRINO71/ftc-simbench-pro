@@ -1,0 +1,136 @@
+{
+  "name": "tank-6wd",
+  "note": "six wheels, drop centre: traction in the middle (3 mm lower), omnis at the ends, the classic 6WD pattern",
+  "units": "mm",
+  "up": "+z",
+  "front": "+x",
+  "wheelCentroid": [
+    0,
+    0,
+    0.049999999999999996
+  ],
+  "floorZ": 0,
+  "drive": {
+    "kind": "tank",
+    "wheels": 6,
+    "radius": 0.04831,
+    "motors": 2
+  },
+  "wheels": [
+    {
+      "corner": null,
+      "c": [
+        0.16,
+        0.2,
+        0.051
+      ],
+      "axle": [
+        0,
+        1,
+        0
+      ],
+      "r": 0.048
+    },
+    {
+      "corner": null,
+      "c": [
+        0.16,
+        -0.2,
+        0.051
+      ],
+      "axle": [
+        0,
+        -1,
+        0
+      ],
+      "r": 0.048
+    },
+    {
+      "corner": null,
+      "c": [
+        0,
+        0.2,
+        0.048
+      ],
+      "axle": [
+        0,
+        1,
+        0
+      ],
+      "r": 0.048
+    },
+    {
+      "corner": null,
+      "c": [
+        0,
+        -0.2,
+        0.048
+      ],
+      "axle": [
+        0,
+        -1,
+        0
+      ],
+      "r": 0.048
+    },
+    {
+      "corner": null,
+      "c": [
+        -0.16,
+        0.2,
+        0.051
+      ],
+      "axle": [
+        0,
+        1,
+        0
+      ],
+      "r": 0.048
+    },
+    {
+      "corner": null,
+      "c": [
+        -0.16,
+        -0.2,
+        0.051
+      ],
+      "axle": [
+        0,
+        -1,
+        0
+      ],
+      "r": 0.048
+    }
+  ],
+  "massKg": 3.496,
+  "massClass": "light",
+  "bbox": {
+    "min": [
+      -0.224,
+      -0.22,
+      0
+    ],
+    "max": [
+      0.224,
+      0.22,
+      0.125
+    ]
+  },
+  "leafParts": 15,
+  "occurrences": 15,
+  "products": 11,
+  "bodies": 109,
+  "partNames": [
+    "1120 Series U-Channel 252mm",
+    "1120 Series U-Channel 448mm",
+    "Pattern Plate 300x250",
+    "REV Control Hub REV-31-1595",
+    "REV Slim Battery 12V",
+    "goBILDA 5203 Series Yellow Jacket Planetary Gear Motor 5203-2402-0019",
+    "goBILDA 96mm Omni Wheel 3606-0014-0096",
+    "goBILDA 96mm Traction Wheel 3614-0001-0096"
+  ],
+  "occt": {
+    "meshes": 109
+  }
+}
