@@ -22,7 +22,7 @@ export const DOMAIN = 'app.ftc-simbench.com';
 // earlier ones define. The engine never touches the DOM; only view3d and app do.
 export const ORDER = ['hardware', 'samples', 'step', 'hull', 'inertia', 'expr', 'java', 'mapping', 'robotconfig',
   'compare', 'analyze', 'drivetrain', 'frame', 'dynamics', 'field', 'shots', 'controllers', 'session', 'mathdoc',
-  'gitimport', 'onboarding', 'sim', 'view3d', 'app'];
+  'gitimport', 'onboarding', 'sim', 'tessellate', 'view3d', 'app'];
 
 const argv = process.argv.slice(2);
 const MIN = argv.includes('--min');

@@ -1221,6 +1221,9 @@ function syncOptionControls(){
   $$("#shooterSeg button").forEach(b=>b.classList.toggle("on",b.dataset.mode===OPTS.shooterModel));
 }
 function loadCAD(cad,label,cls){
+  // one frame for everything (src/frame.js): the parser does this for STEP
+  // files; the sample and older workspaces come through here
+  canonicalizeCAD(cad,{up:OPTS.up});
   CAD=cad;
   $("#cadStatus").textContent=label; $("#cadDrop").className="drop "+(cls||"ok");
   const parts=cad.solids&&cad.solids.length?cad.solids.length+" parts":(cad.points?cad.points.length.toLocaleString():"0")+" pts";
@@ -1246,19 +1249,47 @@ function readText(file,cb,err){
   r.onload=()=>cb(r.result);
   r.readAsText(file);
 }
+let LAST_STEP=null;                 // the dropped file's text, for the Up override and the exact geometry
 function takeCAD(file){
   $("#cadStatus").textContent="reading "+file.name+" …"; $("#cadDrop").className="drop";
-  readText(file,text=>{
-    const mb=(text.length/1048576).toFixed(1);
-    $("#cadStatus").textContent="parsing "+mb+" MB …";
-    setTimeout(()=>{
-      try{
-        const cad=parseSTEP(text,msg=>{ $("#cadStatus").textContent=msg; });
-        cad.name=file.name;
-        loadCAD(cad, file.name+" · "+mb+" MB · "+cad.mechs.length+" mechanism"+(cad.mechs.length===1?"":"s"), cad.mechs.length?"ok":"bad");
-      }catch(e){ $("#cadStatus").textContent="couldn't parse this STEP file — "+e.message; $("#cadDrop").className="drop bad"; }
-    },30);
-  },m=>{ $("#cadStatus").textContent=m; });
+  readText(file,text=>{ LAST_STEP={name:file.name, text}; parseAndLoad(); },m=>{ $("#cadStatus").textContent=m; });
+}
+function parseAndLoad(){
+  if(!LAST_STEP) return;
+  const {name,text}=LAST_STEP, mb=(text.length/1048576).toFixed(1);
+  $("#cadStatus").textContent="parsing "+mb+" MB …";
+  setTimeout(()=>{
+    try{
+      const cad=parseSTEP(text,msg=>{ $("#cadStatus").textContent=msg; },{up:OPTS.up});
+      cad.name=name;
+      loadCAD(cad, name+" · "+mb+" MB · "+cad.mechs.length+" mechanism"+(cad.mechs.length===1?"":"s"), cad.mechs.length?"ok":"bad");
+      exactGeometry(cad,text);
+    }catch(e){ $("#cadStatus").textContent="couldn't parse this STEP file — "+e.message; $("#cadDrop").className="drop bad"; }
+    renderFrameNote();
+  },30);
+}
+/* The real surfaces, the way Onshape draws them. OpenCascade loads from the
+   CDN the first time and runs off the main thread; until it answers — or if
+   it can't (offline, blocked) — the robot stays drawn as simplified shapes,
+   never blank. */
+function exactGeometry(cad,text){
+  const note=$("#exactNote"); if(note){ note.textContent="loading exact geometry (OpenCascade) …"; note.className="hint"; }
+  Tess.run(text).then(res=>{
+    if(CAD!==cad) return;                     // another file was dropped meanwhile
+    const n=View.setExact(cad,res);
+    if(note) note.textContent=n?"Exact geometry: "+n+" surface meshes straight from the STEP file, in its own colours."
+                              :"This STEP file has no solid surfaces to mesh, so the parts are drawn as simplified shapes.";
+  }).catch(e=>{
+    if(CAD!==cad) return;
+    if(note){ note.textContent="Exact geometry unavailable ("+e.message+") — showing simplified shapes. Everything else works the same."; note.className="hint warn"; }
+  });
+}
+/* What the frame decided, in words: which way is up and where the centre is. */
+function renderFrameNote(){
+  const el=$("#frameNote"); if(!el||!CAD||!CAD.frame) return;
+  const f=CAD.frame;
+  el.textContent="Up is "+f.up+" — "+f.upWhy+". The robot turns about "+
+    (f.originWhy==="wheels"?"the centre of its drive wheels.":"the middle of the CAD, since no drive wheels were found.");
 }
 function takeCode(file){ readText(file,text=>addOpModeFromText(file.name,text)); }
 function setRobotConfig(text,name){
@@ -1777,7 +1808,7 @@ const Physics={
     const mm=v=>(v*1000).toFixed(0)+" mm";
     setHTML($("#massRead"),[
       `<span>mass <b>${p.kg.toFixed(2)} kg</b>${p.assumed?' <i>assumed — the CAD has no solid parts to weigh</i>':""}</span>`,
-      `<span>COM <b>${mm(p.com.x)}, ${mm(p.com.y)}</b> <i>from origin</i></span>`,
+      `<span>COM <b>${mm(p.com.x)}, ${mm(p.com.y)}</b> <i>${CAD&&CAD.frame&&CAD.frame.originWhy==="wheels"?"from the drivetrain centre":"from the robot's centre"}</i></span>`,
       `<span>height <b>${mm(p.comHeight==null?p.com.z:p.comHeight)}</b></span>`,
       `<span>I<sub>zz</sub> <b>${p.Izz.toFixed(3)}</b> <i>kg·m²</i></span>`,
       d?`<span>drive <b>${esc(d.kind)}</b> <i>${(d.wheels||[]).length} wheels · ${drawn?"placed from your code":Math.round((d.confidence||0)*100)+"% sure from the CAD"}</i></span>`:"",
@@ -1800,10 +1831,10 @@ function driveInUse(){
 }
 let DRIVE_CACHE={key:null,val:null};
 function safeDrive(){
-  const key=(CAD&&CAD.name)+"|"+(CAD&&CAD.solids?CAD.solids.length:0);
+  const key=(CAD&&CAD.name)+"|"+(CAD&&CAD.solids?CAD.solids.length:0)+"|"+OPTS.front;
   if(DRIVE_CACHE.key===key) return DRIVE_CACHE.val;
   let val=null;
-  try{ val=driveFromCAD(CAD); }catch(e){ val=null; }
+  try{ val=driveFromCAD(CAD,{front:OPTS.front}); }catch(e){ val=null; }
   DRIVE_CACHE={key,val};
   return val;
 }
@@ -1871,6 +1902,13 @@ function proBoot(){
     if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="s"){ e.preventDefault(); Session.save(); }
     if(e.key==="Escape"&&!$("#ghOverlay").hidden) GH.open(false);
   });
+  // Up: auto reads it from the wheels; set it by hand for a robot with none
+  const syncUp=()=>$$("#upSeg button").forEach(b=>b.classList.toggle("on",(b.dataset.up||undefined)===OPTS.up));
+  $("#upSeg").addEventListener("click",e=>{ const b=e.target.closest("button"); if(!b) return;
+    OPTS.up=b.dataset.up||undefined; syncUp();
+    if(LAST_STEP) parseAndLoad();
+    else $("#frameNote").textContent="Up can be changed for a STEP file you drop in; the built-in sample is already Z-up."; });
+  syncUp(); renderFrameNote();
   Physics.sync(); Status.render();
 }
 

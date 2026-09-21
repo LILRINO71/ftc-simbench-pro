@@ -19,6 +19,10 @@ THIRD-PARTY COMPONENTS
   vendor/biobuzz-shot-sim/LICENSE and applies to those files only.
   three.js (loaded at runtime from a CDN) — MIT licence, Copyright (c) 2010-2026
   three.js authors.
+  occt-import-js 0.0.23 and Open CASCADE Technology (loaded at runtime from
+  jsDelivr, unmodified, to tessellate STEP geometry) — GNU LGPL 2.1, with the
+  OCCT exception. Not bundled; licence texts ship with the package at
+  https://cdn.jsdelivr.net/npm/occt-import-js@0.0.23/dist/
 
 NO WARRANTY
 The simulation in this software is an engineering model, not a measurement of a

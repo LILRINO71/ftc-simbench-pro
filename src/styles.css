@@ -654,3 +654,5 @@ kbd{display:inline-block; min-width:15px; padding:0 3px; border:1px solid var(--
   .hdr-btn{padding:0 9px;}
   .status-chip{padding:0 10px;}
 }
+.hint.warn{color:var(--warn);}
+#frameNote:empty,#exactNote:empty{display:none;}

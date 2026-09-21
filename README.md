@@ -42,6 +42,26 @@ Deployment to `app.ftc-simbench.com` is in [DEPLOY.md](DEPLOY.md).
 | **Workspaces** | `session.js` bundles the parsed CAD, the map, the code and the pose into a `.ftcsim` file. Drag it back in and you're where you left off, with no STEP to re-parse. |
 | **Controllers** | Any standard gamepad, assigned to gamepad1 or gamepad2, with rumble. |
 
+### The robot as Onshape draws it
+
+Drop a STEP file and OpenCascade (occt-import-js, loaded from jsDelivr the first time, run in a
+Web Worker) meshes every real surface, in the file's own colours, and each mesh rides the
+mechanism of the part it came from. Until it answers — or if it can't, offline — the robot is
+drawn from simplified shapes, never blank.
+
+| before: a convex hull per part | after: the STEP file's own surfaces |
+|---|---|
+| ![Hull rendering](docs/before-hulls.png) | ![Exact rendering](docs/exact-geometry.png) |
+
+### Any robot? The corpus says which
+
+`tests/fixtures/robots/` holds 14 Onshape-style robots with real B-rep geometry, each checked
+against OpenCascade: mecanum (Z-up, Y-up, inch units, front along +y, origin 0.6 m off with an
+intake out the front, unnamed parts, nested four levels deep, 1,500 parts), tank, 6WD drop-centre,
+X-drive, kiwi, swerve and an arm with no drivetrain. `tests/anyrobot.test.mjs` runs each through
+the whole engine — parse, drivetrain, mass, frame — and spins it in place, asserting the TRUE
+drivetrain centre never moves more than 5 mm at any moment. All 14 pass.
+
 ### The walkthrough, once, on first load
 
 ![The first-run walkthrough highlighting the CAD drop target, with an X to dismiss it](docs/tour.png)

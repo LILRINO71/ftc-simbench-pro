@@ -81,7 +81,7 @@ function frameUp(solids,bbox,opts){
       const above=b.max[best.k]-best.plane, below=best.plane-b.min[best.k];
       const sign=above>=below?"+":"-";
       const ax="xyz"[best.k];
-      return {up:sign+ax, why:ws.length+" wheels: their axles are all square to "+ax+
+      return {up:sign+ax, why:ws.length+" wheel-shaped parts: their axles are all square to "+ax+
         ", their centres sit level along it, and the robot is built on the "+(sign==="+"?"positive":"negative")+" side"};
     }
   }

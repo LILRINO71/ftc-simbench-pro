@@ -143,10 +143,14 @@
           <div class="ds" id="cadStatus">sample: fulll.step (measured)</div>
         </div>
         <input type="file" id="cadFile" accept=".step,.stp,.STEP,.STP" hidden>
+        <p class="hint" id="frameNote"></p>
+        <p class="hint" id="exactNote"></p>
       </div>
       <div class="sec" data-sec="models">
         <div class="sec-head"><h3>Drawn parts</h3></div>
         <div class="form2">
+          <span>Up</span>
+          <div class="seg" id="upSeg" title="Which CAD axis points up — auto reads it from the wheels"><button data-up="">auto</button><button data-up="+z">Z</button><button data-up="+y">Y</button><button data-up="-y">−Y</button><button data-up="+x">X</button><button data-up="-x">−X</button></div>
           <span>CAD front</span>
           <div class="seg" id="frontSeg" aria-label="Which way the CAD's front faces"><button data-front="+x">+x</button><button data-front="+y">+y</button><button data-front="-x">−x</button><button data-front="-y">−y</button></div>
           <span>Drive base</span>

@@ -146,6 +146,46 @@ const View={
       m.userData.shared=true; this._rmat[k]=m; }
     return this._rmat[k];
   },
+  /* The STEP file's own geometry, tessellated by OpenCascade (src/tessellate.js),
+     in place of the convex hulls: the robot as Onshape draws it. Kept with the
+     CAD it belongs to and re-applied on every rebuild, so a rig edit regroups
+     the exact meshes too. Each mesh rides the mechanism of the part it came
+     from; a group with no exact geometry keeps its hull. */
+  setExact(cad,res){
+    this.exact=res&&res.meshes&&res.meshes.length?{cad,res}:null;
+    if(this.exact&&this.cad===cad) this.applyExact();
+    return this.exact?this.exact.res.meshes.length:0;
+  },
+  applyExact(){
+    for(const o of this.exactG||[]){ if(o.parent) o.parent.remove(o); this.dispose(o); }
+    this.exactG=[];
+    const {cad,res}=this.exact;
+    const list=tessBuckets(cad,res,tessAssign(cad,res,this.turretScale));
+    const c=this.c, got=new Set();
+    for(const b of list){
+      const parent=this.groupAt[b.group]||this.groupAt.chassis; if(!parent) continue;
+      const n=b.pos.length, pos=new Float32Array(n), nor=new Float32Array(n);
+      // canonical (Z up) -> view (Y up), exactly as v3() does for the parser's points
+      for(let i=0;i<n;i+=3){
+        pos[i]=b.pos[i]-c[0]; pos[i+1]=b.pos[i+2]-c[2]; pos[i+2]=-(b.pos[i+1]-c[1]);
+        nor[i]=b.nor[i]; nor[i+1]=b.nor[i+2]; nor[i+2]=-b.nor[i+1];
+      }
+      const geo=new THREE.BufferGeometry();
+      geo.setAttribute("position",new THREE.BufferAttribute(pos,3));
+      geo.setAttribute("normal",new THREE.BufferAttribute(nor,3));
+      geo.setIndex(new THREE.BufferAttribute(b.idx,1));
+      if(!b.hasNormals) geo.computeVertexNormals();
+      // the file's own colour when it has one — that is what makes it look like
+      // Onshape — otherwise the palette for what the part is made of
+      let mat;
+      if(b.color){ const base=ROBOT_MAT[b.kind]||ROBOT_MAT.metal;
+        mat=new THREE.MeshStandardMaterial({color:new THREE.Color(b.color), metalness:base.metalness==null?0.3:base.metalness, roughness:base.roughness==null?0.55:base.roughness}); }
+      else mat=this.robotMat(b.kind);
+      const mesh=new THREE.Mesh(geo,mat); mesh.castShadow=true; mesh.receiveShadow=true;
+      parent.add(mesh); this.exactG.push(mesh); got.add(b.group);
+    }
+    for(const g in this.hullOf) this.hullOf[g].visible=!got.has(g);
+  },
   /* The robot's own parts, grouped by the mechanism that moves them. */
   buildRobot(cad){
     const bb=cad.bbox, size=this.size, M=cad.mechs;
@@ -238,7 +278,9 @@ const View={
     };
     const mk=list=>solids?mkSolids(list):mkPoints(list);
 
-    const chas=mk(groups.chassis); if(chas) this.liftG.add(chas);
+    // where each group's parts hang, so the exact meshes can replace the hulls
+    this.groupAt={chassis:this.liftG}; this.hullOf={};
+    const chas=mk(groups.chassis); if(chas){ this.liftG.add(chas); this.hullOf.chassis=chas; }
 
     /* ---- the hierarchy from the rig, whatever shape it is ---- */
     this.jawSets=[]; this.markers=[];
@@ -248,7 +290,8 @@ const View={
       const inv=new THREE.Group(); inv.position.copy(this.v3(mech.pivot).clone().multiplyScalar(-1));
       g.add(inv); parentInv.add(g);
       mech._g=g; mech._inv=inv;
-      const p=mk(groups[mech.id]||[]); if(p) inv.add(p);
+      const p=mk(groups[mech.id]||[]); if(p){ inv.add(p); this.hullOf[mech.id]=p; }
+      this.groupAt[mech.id]=inv;
       if(mech.kind!=="fixed"){
         const s=new THREE.Mesh(new THREE.SphereGeometry(Math.max(0.006,size*0.014),12,8),markMat);
         s.position.copy(this.v3(mech.pivot)); inv.add(s); this.markers.push(s);
@@ -272,6 +315,8 @@ const View={
     for(const r of rigRoots(M)) buildLink(r,this.liftG);
 
     this.groupCounts={chassis:groups.chassis.length};
+    this.exactG=[];
+    if(this.exact&&this.exact.cad===cad) this.applyExact();
     M.forEach(m=>this.groupCounts[m.id]=(groups[m.id]||[]).length);
   },
 
