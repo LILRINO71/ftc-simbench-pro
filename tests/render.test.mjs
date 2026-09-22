@@ -21,7 +21,7 @@ const stepOf = (n) => fs.readFileSync(path.join(DIR, n + '.step'), 'utf8');
 // is pure; Tess only touches the DOM when it runs.
 const T = new Function('"use strict";\n' + engineBundle().replace(/^"use strict";\n/, '') + '\n' +
   fs.readFileSync(path.join(ROOT, 'src', 'tessellate.js'), 'utf8') +
-  '\nreturn { parseSTEP, mechOwner, solidGroups, tessMatch, tessAssign, tessBuckets, tessNames, OCCT_PARAMS };')();
+  '\nreturn { parseSTEP, mechOwner, solidGroups, tessMatch, tessAssign, tessBuckets, tessNames, tessEdges, tessTree, OCCT_PARAMS };')();
 
 // occt-import-js is a devDependency: the exact geometry is the feature, so a
 // machine without it fails here rather than skipping into a false green
@@ -106,4 +106,51 @@ test('mecanum-zup: the arm\'s meshes move with the arm, the drive stays on the c
   const inMech = asg.group.filter((g) => g !== 'chassis').length;
   assert.ok(cad.mechs.length > 0 && inMech > 0, 'no exact mesh rides a mechanism (' + cad.mechs.length + ' mechanisms)');
   asg.names.forEach((n, j) => { if (/rail|pattern plate|control hub|battery|mecanum/i.test(n)) assert.equal(asg.group[j], 'chassis', n); });
+});
+
+/* A unit cube the way occt returns one: six B-rep faces, each two triangles
+   over its own four vertices. */
+function occtCube(withFaces) {
+  const F = [[[0,0,0],[1,0,0],[1,1,0],[0,1,0]], [[0,0,1],[1,0,1],[1,1,1],[0,1,1]], [[0,0,0],[1,0,0],[1,0,1],[0,0,1]],
+    [[0,1,0],[1,1,0],[1,1,1],[0,1,1]], [[0,0,0],[0,1,0],[0,1,1],[0,0,1]], [[1,0,0],[1,1,0],[1,1,1],[1,0,1]]];
+  const pos = [], idx = [], faces = [];
+  F.forEach((q, f) => { const b = pos.length / 3; q.forEach((v) => pos.push(...v)); idx.push(b, b + 1, b + 2, b, b + 2, b + 3); faces.push({ first: 2 * f, last: 2 * f + 1, color: null }); });
+  return { root: { name: 'cube', meshes: [0], children: [] }, meshes: [{ name: 'cube', attributes: { position: { array: pos } }, index: { array: idx }, brep_faces: withFaces ? faces : [] }] };
+}
+const segs = (list) => { const out = []; for (const e of list) for (let i = 0; i < e.pos.length; i += 6) out.push([[e.pos[i], e.pos[i + 1], e.pos[i + 2]], [e.pos[i + 3], e.pos[i + 4], e.pos[i + 5]]]); return out; };
+const isCubeEdge = ([a, b]) => { let diff = 0; for (let k = 0; k < 3; k++) if (Math.abs(a[k] - b[k]) > 1e-9) diff++; return diff === 1; };
+
+test('edges: a cube gives its 12 edges and no face diagonals, from the B-rep faces', () => {
+  const s = segs(T.tessEdges({}, occtCube(true), { group: ['chassis'] }));
+  assert.equal(s.length, 24, 'each of the 12 edges bounds two faces');
+  assert.ok(s.every(isCubeEdge), 'a face diagonal is not a CAD edge');
+  const unique = new Set(s.map(([a, b]) => [a, b].map((p) => p.join(',')).sort().join('|')));
+  assert.equal(unique.size, 12);
+});
+
+test('edges: without face ranges, creases over 30 degrees stand in', () => {
+  const s = segs(T.tessEdges({}, occtCube(false), { group: ['chassis'] }));
+  assert.equal(s.length, 12, 'welded, the cube has 12 creases');
+  assert.ok(s.every(isCubeEdge));
+});
+
+test('edges, the instance tree and hiding, on a real corpus robot', async () => {
+  const res = await tess('mecanum-zup');
+  const cad = T.parseSTEP(stepOf('mecanum-zup'));
+  const asg = T.tessAssign(cad, res, 0.55);
+  const edges = T.tessEdges(cad, res, asg);
+  const n = edges.reduce((a, e) => a + e.pos.length / 6, 0);
+  assert.ok(n > 500, 'a robot has hundreds of edges, got ' + n);
+  // edges sit on the robot, in the same canonical frame as the parser's box
+  for (const e of edges) for (let i = 0; i < e.pos.length; i += 3) for (let k = 0; k < 3; k++)
+    assert.ok(e.pos[i + k] > cad.bbox.min[k] - 0.003 && e.pos[i + k] < cad.bbox.max[k] + 0.003, 'edge point outside the robot');
+  const tree = T.tessTree(res);
+  assert.equal(tree.all.length, res.meshes.filter((m) => m.index.array.length).length, 'the tree reaches every mesh');
+  // hiding a part takes exactly its triangles out
+  const hide = new Set([tree.all[0]]);
+  const all = T.tessBuckets(cad, res, asg), less = T.tessBuckets(cad, res, asg, hide);
+  const tri = (l) => l.reduce((a, b) => a + b.idx.length / 3, 0);
+  assert.equal(tri(all) - tri(less), res.meshes[tree.all[0]].index.array.length / 3);
+  // and every bucket's ranges cover its triangles exactly once
+  for (const b of all) assert.equal(b.ranges.reduce((a, r) => a + r.count, 0), b.idx.length / 3);
 });

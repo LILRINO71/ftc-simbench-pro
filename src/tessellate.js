@@ -147,15 +147,86 @@ function tessAssign(cad,res,turretScale){
   return {group, solid:mt.solid, names:mt.names};
 }
 
+/* The model's edges, as Onshape draws them: the boundaries of B-rep faces.
+   occt says which triangles make each face (brep_faces), so an edge used by
+   exactly one triangle of a face is that face's boundary — a real CAD edge,
+   not a guess from angles (a crease threshold would draw every facet of a
+   coarse cylinder and miss a tangent fillet). Meshes without face ranges
+   fall back to creases steeper than 30 degrees on welded vertices. Returns
+   line-segment pairs per mechanism group, in the canonical frame. */
+function tessEdges(cad,res,asg,hidden){
+  const M=frameM(cad), out={};
+  const put=(g,ax,ay,az,bx,by,bz)=>{ const a=out[g]||(out[g]=[]); a.push(
+    M[0]*ax+M[1]*ay+M[2]*az+M[3], M[4]*ax+M[5]*ay+M[6]*az+M[7], M[8]*ax+M[9]*ay+M[10]*az+M[11],
+    M[0]*bx+M[1]*by+M[2]*bz+M[3], M[4]*bx+M[5]*by+M[6]*bz+M[7], M[8]*bx+M[9]*by+M[10]*bz+M[11]); };
+  (res.meshes||[]).forEach((m,j)=>{
+    if(hidden&&hidden.has(j)) return;
+    const P=m.attributes&&m.attributes.position&&m.attributes.position.array, I=m.index&&m.index.array;
+    if(!P||!P.length||!I||!I.length) return;
+    const g=asg.group[j];
+    if(m.brep_faces&&m.brep_faces.length){
+      for(const f of m.brep_faces){
+        const cnt=new Map();
+        for(let t=f.first;t<=f.last;t++) for(let e=0;e<3;e++){
+          const a=I[3*t+e], b=I[3*t+(e+1)%3], k=a<b?a*4294967296+b:b*4294967296+a;
+          cnt.set(k,(cnt.get(k)||0)+1);
+        }
+        for(const [k,n] of cnt){ if(n!==1) continue;
+          const a=Math.floor(k/4294967296), b=k%4294967296;
+          put(g,P[3*a],P[3*a+1],P[3*a+2],P[3*b],P[3*b+1],P[3*b+2]); }
+      }
+      return;
+    }
+    // no face ranges: weld by position, then keep creases and open borders
+    const key=i=>Math.round(P[3*i]*1e5)+","+Math.round(P[3*i+1]*1e5)+","+Math.round(P[3*i+2]*1e5);
+    const weld=new Map(), id=new Uint32Array(P.length/3);
+    for(let i=0;i<id.length;i++){ const k=key(i); if(!weld.has(k)) weld.set(k,i); id[i]=weld.get(k); }
+    const nrm=t=>{ const a=I[3*t],b=I[3*t+1],c=I[3*t+2];
+      const ux=P[3*b]-P[3*a],uy=P[3*b+1]-P[3*a+1],uz=P[3*b+2]-P[3*a+2], vx=P[3*c]-P[3*a],vy=P[3*c+1]-P[3*a+1],vz=P[3*c+2]-P[3*a+2];
+      const n=[uy*vz-uz*vy,uz*vx-ux*vz,ux*vy-uy*vx], L=Math.hypot(n[0],n[1],n[2])||1; return [n[0]/L,n[1]/L,n[2]/L]; };
+    const edges=new Map();
+    for(let t=0;t<I.length/3;t++) for(let e=0;e<3;e++){
+      const a=id[I[3*t+e]], b=id[I[3*t+(e+1)%3]]; if(a===b) continue;
+      const k=a<b?a+"_"+b:b+"_"+a; const r=edges.get(k); if(r) r.t.push(t); else edges.set(k,{a,b,t:[t]}); }
+    const cos30=Math.cos(Math.PI/6);
+    for(const e of edges.values()){
+      let keep=e.t.length!==2;
+      if(!keep){ const n1=nrm(e.t[0]), n2=nrm(e.t[1]); keep=n1[0]*n2[0]+n1[1]*n2[1]+n1[2]*n2[2]<cos30; }
+      if(keep) put(g,P[3*e.a],P[3*e.a+1],P[3*e.a+2],P[3*e.b],P[3*e.b+1],P[3*e.b+2]);
+    }
+  });
+  return Object.keys(out).map(g=>({group:g, pos:new Float32Array(out[g])}));
+}
+
+/* The assembly as occt read it — the instance list Onshape shows — with
+   every node's meshes (its own and all below) so a click anywhere selects
+   the whole sub-assembly. */
+function tessTree(res){
+  const names=tessNames(res);
+  let n=0;
+  const walk=node=>{
+    const kids=(node.children||[]).map(walk).filter(Boolean);
+    const own=(node.meshes||[]).slice();
+    const all=own.concat(...kids.map(k=>k.all));
+    if(!all.length) return null;
+    const name=node.name||(own.length===1?names[own[0]]:"")||"(unnamed)";
+    return {id:"n"+(n++), name, own, all, kids};
+  };
+  return walk(res.root||{})||{id:"n0", name:"", own:[], all:[], kids:[]};
+}
+
 /* The draw buckets: one indexed buffer per (group, colour), in the canonical
    frame. STEP colours win, per face where the file has them; a part with
-   none gets its solid kind and the view's palette. */
-function tessBuckets(cad,res,asg){
+   none gets its solid kind and the view's palette. Each bucket remembers
+   which triangles came from which mesh (`ranges`), so a click on the merged
+   buffer still finds the part; `hidden` leaves meshes out. */
+function tessBuckets(cad,res,asg,hidden){
   const M=frameM(cad), solids=(cad&&cad.solids)||[], out={};
   const hex=c=>c?"#"+c.map(v=>Math.round(Math.max(0,Math.min(1,v))*255).toString(16).padStart(2,"0")).join(""):null;
   const bucket=(g,col,kind)=>{ const key=g+"|"+(col||"kind:"+kind);
     return out[key]=out[key]||{group:g, color:col, kind, parts:[], nv:0, ni:0}; };
   (res.meshes||[]).forEach((m,j)=>{
+    if(hidden&&hidden.has(j)) return;
     const P=m.attributes&&m.attributes.position&&m.attributes.position.array, I=m.index&&m.index.array;
     if(!P||!P.length||!I||!I.length) return;
     const g=asg.group[j], si=asg.solid[j], kind=(si>=0&&solids[si].kind)||"metal";
@@ -167,14 +238,15 @@ function tessBuckets(cad,res,asg){
     for(const c in runs){
       const b=bucket(g,c||null,kind);
       let nt=0; for(const f of runs[c]) nt+=f.last-f.first+1;
-      b.parts.push({m, faces:runs[c], nt}); b.nv+=P.length/3; b.ni+=nt*3;
+      b.parts.push({m, j, faces:runs[c], nt}); b.nv+=P.length/3; b.ni+=nt*3;
     }
   });
   const list=[];
   for(const key in out){
     const b=out[key], pos=new Float32Array(b.nv*3), nor=new Float32Array(b.nv*3), idx=new Uint32Array(b.ni);
-    let vo=0, io=0;
+    let vo=0, io=0; const ranges=[];
     for(const p of b.parts){
+      ranges.push({j:p.j, start:io/3, count:p.nt});
       const P=p.m.attributes.position.array, N=p.m.attributes.normal&&p.m.attributes.normal.array, I=p.m.index.array;
       for(let i=0;i<P.length;i+=3){
         const x=P[i], y=P[i+1], z=P[i+2], o=vo*3+i;
@@ -185,7 +257,7 @@ function tessBuckets(cad,res,asg){
       for(const f of p.faces) for(let t=f.first*3;t<=f.last*3+2;t++) idx[io++]=I[t]+vo;
       vo+=P.length/3;
     }
-    list.push({group:b.group, color:b.color, kind:b.kind, pos, nor, idx, hasNormals:b.parts.every(p=>p.m.attributes.normal)});
+    list.push({group:b.group, color:b.color, kind:b.kind, pos, nor, idx, ranges, hasNormals:b.parts.every(p=>p.m.attributes.normal)});
   }
   return list;
 }
