@@ -163,6 +163,19 @@ test('the fills are pinned to parts with published masses', () => {
   assert.ok(rel(lexan.kg, 0.108) < 0.15, `polycarbonate plate ${lexan.kg.toFixed(3)} kg vs 0.108`);
 });
 
+test('a flat aluminium plate is weighed as a plate, not as hollow structure', () => {
+  // 300 x 300 x 6 mm: 1.46 kg solid, ~0.87 kg pocketed; the channel fill said 0.26
+  const base = E.partMass({ name: 'Base Plate', kind: 'metal', pts: boxPts([0.300, 0.300, 0.006]) }, {});
+  assert.ok(base.kg > 0.7 && base.kg < 1.46, `base plate ${base.kg.toFixed(3)} kg`);
+  assert.match(base.why, /plate/);
+  // a 50 mm block and a 24 mm-deep channel stay structure
+  assert.doesNotMatch(E.partMass({ name: 'block', kind: 'metal', pts: boxPts([0.05, 0.05, 0.12]) }, {}).why, /plate/);
+  assert.doesNotMatch(E.partMass({ name: 'chan', kind: 'metal', pts: boxPts([0.24, 0.048, 0.024]) }, {}).why, /plate/);
+  // steel plate: the metal density override carries over
+  const steel = E.partMass({ name: 'Base Plate', kind: 'metal', pts: boxPts([0.300, 0.300, 0.006]) }, { materials: { metal: { density: 7850 } } });
+  assert.ok(rel(steel.kg, base.kg * 7850 / 2700) < 1e-9);
+});
+
 test('a materials override changes one field, not the whole kind', () => {
   const part = { name: 'block', kind: 'metal', pts: boxPts([0.1, 0.1, 0.1]) };
   const base = E.partMass(part, {});

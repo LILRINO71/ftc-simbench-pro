@@ -11,6 +11,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { minifyJS, minifyCSS, minifyHTML } from './minify.mjs';
+import { buildRobot } from './stepgen.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const rd = (...p) => fs.readFileSync(path.join(ROOT, ...p), 'utf8');
@@ -22,7 +23,7 @@ export const DOMAIN = 'app.ftc-simbench.com';
 // earlier ones define. The engine never touches the DOM; only view3d and app do.
 export const ORDER = ['hardware', 'samples', 'step', 'hull', 'inertia', 'expr', 'java', 'mapping', 'robotconfig',
   'compare', 'analyze', 'drivetrain', 'frame', 'dynamics', 'field', 'shots', 'controllers', 'session', 'mathdoc',
-  'gitimport', 'onboarding', 'sim', 'tessellate', 'view3d', 'app'];
+  'gitimport', 'onboarding', 'sim', 'tessellate', 'view3d', 'cadview', 'app'];
 
 const argv = process.argv.slice(2);
 const MIN = argv.includes('--min');
@@ -90,6 +91,10 @@ const page = `<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\
 fs.writeFileSync(path.join(DIST, 'index.html'), page, 'utf8');
 fs.writeFileSync(path.join(DIST, 'CNAME'), DOMAIN + '\n', 'utf8');
 fs.writeFileSync(path.join(DIST, '.nojekyll'), '', 'utf8');
+// a real STEP robot the CAD view can open with one click, served beside the app
+fs.mkdirSync(path.join(DIST, 'demo'), { recursive: true });
+// generated, not copied: *.step is gitignored, so a clean checkout has no file to copy
+fs.writeFileSync(path.join(DIST, 'demo', 'mecanum-demo.step'), buildRobot('mecanum-offset').text, 'utf8');
 
 // Cloudflare Pages / Netlify read this. The page is one file that changes every
 // deploy, so it must never be cached hard; everything else here is immutable.

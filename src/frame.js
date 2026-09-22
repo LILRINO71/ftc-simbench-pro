@@ -185,13 +185,28 @@ function robotToWorld(pose,front,p){
   return [pose.x+r[0]*c-r[1]*s, pose.y+r[0]*s+r[1]*c, r[2]];
 }
 
+/* The box around what is actually there: part solids first (what the view
+   draws), else the point cloud. Null when a CAD has neither. */
+function geomBox(cad){
+  const mn=[Infinity,Infinity,Infinity], mx=[-Infinity,-Infinity,-Infinity];
+  const grow=p=>{ for(let k=0;k<3;k++){ const v=+p[k]; if(v<mn[k]) mn[k]=v; if(v>mx[k]) mx[k]=v; } };
+  const solids=(cad&&cad.solids)||[];
+  if(solids.length) for(const s of solids) for(const p of s.pts||[]) grow(p);
+  else for(const p of (cad&&cad.points)||[]) grow(p);
+  return Number.isFinite(mn[0])?{min:mn,max:mx}:null;
+}
+
 /* Canonicalise a CAD that didn't come through the parser — the built-in
    sample, or a workspace saved before frames existed. Joints move with the
    parts. Idempotent: a CAD that already carries a frame is left alone, and
    re-measuring a canonical CAD gives the identity anyway. */
 function canonicalizeCAD(cad,opts){
   if(!cad||cad.frame) return cad;
-  const F=robotFrame(cad,{up:opts&&opts.up});
+  // Measure from the parts themselves. A stored bbox can disagree with them —
+  // the built-in sample's reached 10 cm below its lowest part, so the floor
+  // went there and the whole robot hovered above the tiles.
+  const gb=geomBox(cad);
+  const F=robotFrame({solids:cad.solids, bbox:gb||cad.bbox},{up:opts&&opts.up});
   cad.bbox=applyFrame(F,{points:cad.points, solids:cad.solids, placements:cad.placements, bbox:cad.bbox});
   for(const m of cad.mechs||[]){
     if(m.pivot) m.pivot=F.toRobot(m.pivot);

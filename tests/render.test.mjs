@@ -9,13 +9,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { engineBundle } from './load.mjs';
+import { engineBundle, fixture } from './load.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
 const DIR = path.join(HERE, 'fixtures', 'robots');
-const NAMES = fs.readdirSync(DIR).filter((f) => f.endsWith('.step')).map((f) => f.slice(0, -5)).sort();
-const stepOf = (n) => fs.readFileSync(path.join(DIR, n + '.step'), 'utf8');
+// the sidecars are committed; the STEPs are regenerated when a clone lacks them
+const NAMES = fs.readdirSync(DIR).filter((f) => f.endsWith('.json')).map((f) => f.slice(0, -5)).sort();
+const stepOf = (n) => fixture('robots/' + n + '.step');
 
 // tessellate.js is a DOM-side file, but everything it defines at the top level
 // is pure; Tess only touches the DOM when it runs.

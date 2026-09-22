@@ -240,12 +240,24 @@
       <div class="vp-top">
         <div class="vp-title" id="vpTitle">—</div>
         <div class="seg seg-dark" id="viewSeg">
-          <button data-v="iso" class="on">robot</button><button data-v="side">side</button><button data-v="top">top</button><button data-v="field">driver</button>
+          <button data-v="iso" class="on">robot</button><button data-v="side">side</button><button data-v="top">top</button><button data-v="field">driver</button><button data-v="cad" title="Inspect the CAD the way Onshape shows it">CAD</button>
         </div>
         <div class="vp-fill"></div>
       </div>
       <div class="vp-hint" id="vpHint" hidden></div>
       <div class="vp-tip" id="vpTip" hidden>Drag to move · shift-drag to turn</div>
+      <div class="cad-ui" id="cadUI" hidden>
+        <aside class="cad-tree" aria-label="Instances">
+          <div class="cad-tree-head"><b>Instances</b><span class="cad-count" id="cadCount"></span><span class="spacer"></span><button class="cad-btn" id="cadShowAll" type="button">Show all</button></div>
+          <div class="cad-tree-body" id="cadTreeBody"></div>
+        </aside>
+        <div class="cad-info" id="cadInfo" hidden></div>
+        <div class="cad-bar" id="cadBar">
+          <button type="button" class="cad-btn" data-cv="iso">Iso</button><button type="button" class="cad-btn" data-cv="front">Front</button><button type="button" class="cad-btn" data-cv="top">Top</button><button type="button" class="cad-btn" data-cv="right">Right</button><button type="button" class="cad-btn" id="cadFit" title="Zoom to fit (F)">Fit</button>
+          <label class="cad-check"><input type="checkbox" id="cadEdges" checked> Edges</label>
+        </div>
+        <div class="cad-hint">Right-drag rotate · middle-drag pan · scroll zoom · click a part</div>
+      </div>
       <div class="vp-bottom">
         <div class="pip" id="pip" hidden>
           <button class="pip-head" id="pipHead" type="button" aria-expanded="true"><span>Arm torque</span><span id="pipDeg">—</span></button>

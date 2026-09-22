@@ -7,6 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { buildRobot } from '../tools/stepgen.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ENGINE = ['hardware', 'samples', 'step', 'hull', 'inertia', 'expr', 'java', 'mapping', 'robotconfig', 'compare', 'analyze', 'drivetrain', 'frame', 'dynamics', 'field', 'shots', 'controllers', 'session', 'mathdoc', 'gitimport', 'onboarding', 'sim'];
@@ -53,7 +54,11 @@ export function loadEngine(src = engineSource()) {
   return new Function(`"use strict";\n${src}\nreturn { ${api} };`)();
 }
 
-export const fixture = (name) => fs.readFileSync(path.join(ROOT, 'tests', 'fixtures', name), 'utf8');
+// corpus STEPs are gitignored with the rest of *.step; a fresh clone regenerates them
+export const fixture = (name) => {
+  const f = path.join(ROOT, 'tests', 'fixtures', name), m = /^robots\/([\w-]+)\.step$/.exec(name);
+  return m && !fs.existsSync(f) ? buildRobot(m[1]).text : fs.readFileSync(f, 'utf8');
+};
 
 /** The vendored BIOBUZZ Shot Sim engine and its data, as the page loads them. */
 export function loadShotEngine() {

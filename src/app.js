@@ -1045,7 +1045,9 @@ function shotTick(now){
 }
 function updateArc(){
   let path=null, col=0, dashed=false;
-  if(ShotUI.arc){
+  // no flywheel in the code (and none picked): no arc. A claw robot used to
+  // draw a phantom shot line up into the sky.
+  if(ShotUI.arc&&Shots.cfg&&Shots.cfg.shooter){
     if(ShotUI.preview){ const o=ShotUI.odds==null?(ShotUI.preview.hit?1:0):ShotUI.odds;
       path=ShotUI.preview.path; col=o>=0.8?0x5DBE72:o>=0.4?0xEE7F42:0xEC5B51; }
     // the best arc only when it's worth showing: a WON'T WORK "best" can be a 6 m lob
@@ -1241,7 +1243,9 @@ function loadCAD(cad,label,cls){
   // the front defaults to the way the wheels roll; a saved rig can still say otherwise
   RIG_DEVICES={}; HW_USER={}; Shots.cfg=null; OPTS.front=frontFromWheels(cad)||"+x"; OPTS.baseModel="auto"; OPTS.shooterModel="auto";
   const restored=loadSavedRig();
+  View.hiddenParts=new Set();
   View.load(cad);
+  if(CadView.on){ CadView.hid=null; CadView.select(null); CadView.fit(); CadView.renderTree(); }
   if(Sim.phase!=="running") placeAtStart();
   if(CODE){ MAP=autoMap(CODE.devices,CAD.mechs); applyDeviceMemory(); rebuild(); }
   if(restored) $("#cadStatus").textContent=label+" · rig restored";
@@ -1286,6 +1290,7 @@ function exactGeometry(cad,text){
   Tess.run(text).then(res=>{
     if(CAD!==cad) return;                     // another file was dropped meanwhile
     const n=View.setExact(cad,res);
+    if(CadView.on) CadView.renderTree();
     if(note) note.textContent=n?"Exact geometry: "+n+" surface meshes straight from the STEP file, in its own colours."
                               :"This STEP file has no solid surfaces to mesh, so the parts are drawn as simplified shapes.";
   }).catch(e=>{
@@ -2026,7 +2031,8 @@ function proBoot(){
 
   // stage & dock
   $("#viewSeg").addEventListener("click",e=>{ const b=e.target.closest("button"); if(!b) return;
-    $$("#viewSeg button").forEach(x=>x.classList.toggle("on",x===b)); View.setView(b.dataset.v); });
+    $$("#viewSeg button").forEach(x=>x.classList.toggle("on",x===b));
+    if(b.dataset.v==="cad") CadView.enter(); else { CadView.exit(); View.setView(b.dataset.v); } });
   $("#resetPose").addEventListener("click",placeAtStart);
   wireShotTab();
   $("#padSeg").addEventListener("click",e=>{ const b=e.target.closest("button"); if(b) setActivePad(+b.dataset.pad); });
@@ -2056,7 +2062,7 @@ function proBoot(){
       OPTS.startPose=Object.assign({},Sim.chassis);
     }
     const v=q.get("view");
-    if(v&&/^(iso|front|side|top|field)$/.test(v)){ View.setView(v); $$("#viewSeg button").forEach(x=>x.classList.toggle("on",x.dataset.v===v)); }
+    if(v&&/^(iso|front|side|top|field|cad)$/.test(v)){ if(v==="cad") CadView.enter(); else View.setView(v); $$("#viewSeg button").forEach(x=>x.classList.toggle("on",x.dataset.v===v)); }
     ["left","right"].forEach(side=>{ const t=TAB_RENAMED[q.get(side)]||q.get(side), nav=$(`.tabs[data-tabs="${side}"]`);
       if(t&&nav&&nav.querySelector(`button[data-tab="${t}"]`)) selectTab(nav,t); });
     if(q.get("start")==="1") dsStart();

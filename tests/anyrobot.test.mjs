@@ -23,14 +23,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { loadEngine, loadWithField, sampleBench, run, engineBundle } from './load.mjs';
+import { loadEngine, loadWithField, sampleBench, run, engineBundle, fixture } from './load.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
 const DIR = path.join(HERE, 'fixtures', 'robots');
 const NAMES = fs.readdirSync(DIR).filter((f) => f.endsWith('.json')).map((f) => f.slice(0, -5)).sort();
 const truthOf = (n) => JSON.parse(fs.readFileSync(path.join(DIR, n + '.json'), 'utf8'));
-const stepOf = (n) => fs.readFileSync(path.join(DIR, n + '.step'), 'utf8');
+const stepOf = (n) => fixture('robots/' + n + '.step');
 
 /* The engine, with src/frame.js in it whether or not load.mjs lists it yet. */
 const FRAME_SRC = path.join(ROOT, 'src', 'frame.js');
@@ -402,5 +402,5 @@ test('performance: parseSTEP on "big" (~1500 parts) under 3 s', () => {
 test('the corpus is all there and every fixture is small enough to commit', () => {
   const want = ['mecanum-zup', 'mecanum-offset', 'mecanum-yup', 'mecanum-inch', 'mecanum-front-y', 'tank-traction', 'tank-6wd', 'xdrive', 'kiwi', 'swerve', 'unnamed-wheels', 'nested', 'big', 'arm-only'];
   for (const n of want) assert.ok(NAMES.includes(n), n + ' missing from tests/fixtures/robots');
-  for (const n of NAMES) assert.ok(fs.statSync(path.join(DIR, n + '.step')).size < 400 * 1024, n + '.step is over 400 KB');
+  for (const n of NAMES) assert.ok(stepOf(n).length < 400 * 1024, n + '.step is over 400 KB');
 });

@@ -656,3 +656,46 @@ kbd{display:inline-block; min-width:15px; padding:0 3px; border:1px solid var(--
 }
 .hint.warn{color:var(--warn);}
 #frameNote:empty,#exactNote:empty{display:none;}
+
+/* ============================================================
+   CAD VIEW — Onshape's graphics area: light, quiet, the model first
+   ============================================================ */
+.viewport.cad .vp-hint,.viewport.cad .pip,.viewport.cad .vp-readout,.viewport.cad .vp-tip{display:none!important;}
+.viewport.cad .vp-title{color:#4b5663;}
+.cad-ui{position:absolute; inset:0; pointer-events:none; font-family:var(--body); color:#1f2933;}
+.cad-ui>*{pointer-events:auto;}
+.cad-tree{position:absolute; left:10px; top:48px; width:236px; max-height:calc(100% - 110px); display:flex; flex-direction:column;
+  background:rgba(255,255,255,.94); border:1px solid #cfd6de; border-radius:6px; box-shadow:0 1px 3px rgba(20,30,40,.12);}
+.cad-tree-head{display:flex; align-items:center; gap:6px; padding:7px 9px; border-bottom:1px solid #e3e8ed; font-size:12px;}
+.cad-tree-head b{font-weight:600; letter-spacing:.01em;}
+.cad-count{font-family:var(--mono); font-size:10.5px; color:#7b8794;}
+.cad-tree-body{overflow:auto; padding:3px 0; font-size:12px;}
+.cad-tree-body .row{display:flex; align-items:center; gap:5px; padding:3px 8px; cursor:pointer; white-space:nowrap;}
+.cad-tree-body .row:hover{background:#eef3f8;}
+.cad-tree-body .row.on{background:#dbe9fb; color:#1253a8;}
+.cad-tree-body .row.off .nm{color:#9aa5b1;}
+.cad-tree-body .nm{overflow:hidden; text-overflow:ellipsis;}
+.cad-tree-body .nm.asm{font-weight:600;}
+.cad-tree-body .eye{border:0; background:none; color:#52606d; font-size:10px; width:16px; padding:0; cursor:pointer;}
+.cad-tree-body .row.off .eye{color:#b4bcc4;}
+.cad-empty{padding:10px 12px; margin:0; color:#616e7c; font-size:12px; line-height:1.45;}
+.cad-info{position:absolute; right:12px; bottom:56px; width:258px; background:rgba(255,255,255,.96); border:1px solid #cfd6de;
+  border-radius:6px; box-shadow:0 2px 8px rgba(20,30,40,.14); padding:9px 11px 10px; font-size:12px;}
+.cad-info .ci-head{display:flex; align-items:center; gap:6px; margin-bottom:6px;}
+.cad-info .ci-head b{flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; color:#1253a8;}
+.cad-info .sheet-x{position:static; width:22px; height:22px; font-size:16px; color:#7b8794;}
+.cad-info .ci-row{display:flex; justify-content:space-between; gap:10px; padding:2px 0; border-top:1px solid #eef1f4;}
+.cad-info .ci-row span{color:#616e7c;}
+.cad-info .ci-row b{font-weight:600; font-family:var(--mono); font-size:11.5px; text-align:right;}
+.cad-info .ci-acts{display:flex; gap:6px; margin-top:8px;}
+.cad-info .btn-sm{background:#f5f7fa; border-color:#cfd6de; color:#1f2933;}
+.cad-bar{position:absolute; left:50%; bottom:12px; transform:translateX(-50%); display:flex; align-items:center; gap:2px; padding:3px;
+  background:rgba(255,255,255,.95); border:1px solid #cfd6de; border-radius:6px; box-shadow:0 1px 3px rgba(20,30,40,.12);}
+.cad-btn{border:0; background:none; color:#1f2933; font:600 12px var(--body); padding:5px 10px; border-radius:4px; cursor:pointer;}
+.cad-btn:hover{background:#e6eef7; color:#1253a8;}
+.cad-check{display:flex; align-items:center; gap:5px; font-size:12px; padding:0 8px 0 6px; border-left:1px solid #e3e8ed; margin-left:3px; cursor:pointer;}
+.cad-hint{position:absolute; left:50%; transform:translateX(-50%); bottom:52px; white-space:nowrap; font-size:11px; color:#616e7c; background:rgba(255,255,255,.7); padding:3px 7px; border-radius:4px;}
+@media (max-width:900px){ .cad-tree{width:180px;} .cad-info{right:10px; top:auto; bottom:58px;} }
+.cad-empty .btn-sm{margin:2px 0 4px;}
+.cad-demo-note{display:block; font-size:11px; color:#7b8794; margin-top:4px;}
+

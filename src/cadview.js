@@ -67,8 +67,10 @@ const CadView={
     this.light(null,"sel"); this.light(null,"hover"); this.sel=null; this.hover=null;
     V.el.classList.remove("cad");
     $("#cadUI").hidden=true;
+    for(const o of this.hid||[]) o.visible=true; this.hid=null;
     for(const o of [V.fieldG,V.dynG,V.footG,V.baseG,V.shooterG]) if(o) o.visible=true;
     for(const m of V.markers||[]) m.visible=true;
+    for(const J of V.jawSets||[]){ J.a.visible=true; J.b.visible=true; }
   },
 
   /* ---------------- camera ---------------- */
@@ -97,16 +99,27 @@ const CadView={
     const u=new THREE.Vector3().crossVectors(f,r).normalize();
     return {r,u,f};
   },
-  halfH(){ return this.size()*0.62/this.zoom; },
+  halfH(){ return this.size()*0.95/this.zoom; },
+  /* The visible window, in model metres about the target. It is shifted,
+     not the model, so the robot sits in the space beside the instance list
+     yet still spins about its own centre. */
+  frustum(w,h){
+    const a=w/h, hh=this.halfH(), tree=document.querySelector(".cad-tree");
+    const pad=tree&&tree.offsetParent?tree.offsetWidth+10:0, s=pad/2*(2*hh/h);
+    return {l:-hh*a-s, r:hh*a-s, t:hh, b:-hh};
+  },
 
   render(){
     const V=View; if(!V.cad||!this.target) return;
-    // nothing but the model
+    // nothing but the model: every other thing in the world (field, HIVEs,
+    // balls — they don't all live under one group) steps out of the way
+    if(!this.hid){ this.hid=[]; for(const o of V.world.children) if(o!==V.chassisG&&o.visible){ o.visible=false; this.hid.push(o); } }
     for(const o of [V.fieldG,V.dynG,V.footG,V.baseG,V.shooterG]) if(o) o.visible=false;
     for(const m of V.markers||[]) m.visible=false;
+    for(const J of V.jawSets||[]){ J.a.visible=false; J.b.visible=false; }
     V.liftG.position.y=0;
-    const w=V.el.clientWidth||1, h=V.el.clientHeight||1, a=w/h, hh=this.halfH();
-    const c=this.cam; c.left=-hh*a; c.right=hh*a; c.top=hh; c.bottom=-hh; c.near=-this.size()*20; c.far=this.size()*20;
+    const w=V.el.clientWidth||1, h=V.el.clientHeight||1, F=this.frustum(w,h);
+    const c=this.cam; c.left=F.l; c.right=F.r; c.top=F.t; c.bottom=F.b; c.near=-this.size()*20; c.far=this.size()*20;
     c.updateProjectionMatrix();
     // everything is worked out in the model's frame, then carried to the world
     V.liftG.updateMatrixWorld(true);
@@ -230,7 +243,11 @@ const CadView={
   renderTree(){
     const body=$("#cadTreeBody"); if(!body) return;
     const V=View;
-    if(!V.exact){ body.innerHTML='<p class="cad-empty">The instance list comes from the exact geometry — drop a STEP file and it appears here.</p>'; $("#cadCount").textContent=""; return; }
+    if(!V.exact){
+      body.innerHTML='<p class="cad-empty">This robot is the built-in sample, drawn from simple shapes — it has no STEP file behind it. '+
+        'Drop your own Onshape STEP export anywhere on the page, or:</p><div class="cad-empty"><button class="btn-sm primary" id="cadDemo" type="button">Open the demo robot</button>'+
+        '<span class="cad-demo-note">a real STEP assembly, 32 parts</span></div>';
+      $("#cadCount").textContent=""; return; }
     this.tree=tessTree(V.exact.res);
     const hidden=V.hiddenParts||new Set();
     const rows=[];
@@ -328,11 +345,12 @@ const CadView={
       if(!this.on) return;
       e.preventDefault(); e.stopImmediatePropagation();
       // zoom about the point under the cursor, the way Onshape does
-      const rect=c.getBoundingClientRect(), nx=((e.clientX-rect.left)/rect.width)*2-1, ny=-((e.clientY-rect.top)/rect.height)*2+1;
-      const a=rect.width/rect.height, h0=this.halfH();
+      const rect=c.getBoundingClientRect(), fx=(e.clientX-rect.left)/rect.width, fy=1-(e.clientY-rect.top)/rect.height;
+      const at=F=>[F.l+fx*(F.r-F.l), F.b+fy*(F.t-F.b)];   // the cursor, in model metres about the target
+      const p0=at(this.frustum(rect.width,rect.height));
       this.zoom=Math.max(0.15,Math.min(40,this.zoom*(e.deltaY<0?1.12:1/1.12)));
-      const h1=this.halfH(), {r,u}=this.basis();
-      this.target.addScaledVector(r,nx*a*(h0-h1)).addScaledVector(u,ny*(h0-h1));
+      const p1=at(this.frustum(rect.width,rect.height)), {r,u}=this.basis();
+      this.target.addScaledVector(r,p0[0]-p1[0]).addScaledVector(u,p0[1]-p1[1]);
     },{capture:true,passive:false});
     c.addEventListener("dblclick",e=>{ if(this.on){ e.stopImmediatePropagation(); this.fit(); } },true);
 
@@ -342,6 +360,11 @@ const CadView={
     $("#cadEdges").addEventListener("change",e=>{ this.edgesOn=e.target.checked; View.showEdges(this.edgesOn); });
     $("#cadShowAll").addEventListener("click",()=>{ View.hiddenParts=new Set(); View.applyExact(); this.renderTree(); this.light(this.sel,"sel"); });
     $("#cadTreeBody").addEventListener("click",e=>{
+      if(e.target.id==="cadDemo"){ const b=e.target; b.disabled=true; b.textContent="Loading…";
+        fetch("demo/mecanum-demo.step").then(r=>{ if(!r.ok) throw new Error(r.status); return r.text(); })
+          .then(t=>takeCAD(new File([t],"demo mecanum robot.step")))
+          .catch(()=>{ b.disabled=false; b.textContent="Open the demo robot"; $("#cadStatus").textContent="the demo robot is only on the hosted site"; });
+        return; }
       const eye=e.target.closest("[data-eye]");
       if(eye){ const n=this.node(eye.dataset.eye); if(n){ const hid=View.hiddenParts||new Set(); this.setHidden(n.all,!n.all.every(j=>hid.has(j))); } return; }
       const row=e.target.closest(".row"); if(!row) return;

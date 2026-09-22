@@ -43,6 +43,7 @@ const MASS_MIN_T = THIN_T;
      fastener  steel 7850, minus thread valleys, drives and countersinks. */
 const MATERIALS = {
   metal:       {density:2700, fill:0.18, label:"aluminium structure"},
+  plate:       {density:2700, fill:0.60, label:"aluminium plate, pocketed"},
   servo:       {density:1800, fill:0.85, label:"servo"},
   motor:       {density:3200, fill:0.63, label:"gearmotor"},
   wheel:       {density:1400, fill:0.60, label:"wheel/tread"},
@@ -135,6 +136,29 @@ function vendorMassFor(solid, volume){
      opts.vendor:false  ignore the known-part table, weigh everything by density
    `how` is 'vendor' when a published mass was used and 'density' otherwise,
    so the UI can separate what is known from what is inferred. */
+/* Stock sold by length: mass per mm of the longest side, from the vendor's
+   published weights. Only the 48 x 48 mm 1120 series, the one we're sure of;
+   everything else goes by density and says so. */
+const LINEAR_MASS = [
+  {re:/\b1120[- ]series\b|\b1120-\d{4}-\d{3,4}\b/i, gPerMm:0.47, section:[0.042,0.054], label:"goBILDA 1120 U-channel, ~0.47 g/mm"}
+];
+function linearVendorMass(solid, pts){
+  const s = ((solid&&solid.part) || "") + " " + ((solid&&solid.name) || "");
+  const row = LINEAR_MASS.find(r=>r.re.test(s)); if(!row||!pts.length) return null;
+  const b = massBoxOf(pts), d = [b.L, b.W, b.H].sort((a,c)=>a-c);
+  // it has to be shaped like the stock: the named cross-section, and long
+  if(!(d[1]>row.section[0]&&d[1]<row.section[1]&&d[2]>1.5*d[1])) return null;
+  const kg = row.gPerMm*d[2]*1000/1000;
+  return {kg, why:"published weight per length, "+row.label+" x "+(d[2]*1000).toFixed(0)+" mm"};
+}
+
+// thin and wide in the part's own axes: at most 12 mm thick, 7x wider than thick
+function isPlateShape(pts){
+  if(!pts || pts.length < 4) return false;
+  const b = massBoxOf(pts), d = [b.L, b.W, b.H].sort((a,c)=>a-c);
+  return d[0] <= 0.012 && d[1] >= 7*d[0];
+}
+
 function partMass(solid, opts){
   opts = opts || {};
   const pts = (solid && solid.pts) || [];
@@ -144,13 +168,25 @@ function partMass(solid, opts){
     // density here is the back-computed effective density, for display only
     if(v) return {kg:v.kg, how:"vendor", density:(vol>0 ? v.kg/vol : 0), fill:1, volume:vol,
                   why:"published mass, "+v.label};
+    // goBILDA 1120-series U-channel is the most common part on an FTC robot,
+    // and the one a single metal fill gets most wrong: its hull is a 48 x 48 mm
+    // box, nearly all air, so density x fill read a 448 mm channel as 500 g.
+    // goBILDA's published weights run ~0.47 g per mm of length, holes included.
+    const lin = linearVendorMass(solid, pts);
+    if(lin) return {kg:lin.kg, how:"vendor", density:(vol>0 ? lin.kg/vol : 0), fill:1, volume:vol, why:lin.why};
   }
   let tbl = MATERIALS;
   if(opts.materials){                        // merge per kind: {metal:{density:5000}} keeps metal's fill
     tbl = Object.assign({}, MATERIALS);
     for(const k in opts.materials) tbl[k] = Object.assign({}, MATERIALS[k] || MATERIALS.metal, opts.materials[k]);
+    // a denser metal is denser in plate form too; the fill stays the plate's
+    const m = opts.materials.metal;
+    if(m && Number.isFinite(m.density) && !opts.materials.plate) tbl.plate = Object.assign({}, MATERIALS.plate, {density:m.density});
   }
-  const kind = (solid && solid.kind) || "metal";
+  let kind = (solid && solid.kind) || "metal";
+  // a flat plate's hull is nearly all metal, unlike a channel's; the 0.18
+  // structure fill read a 6 mm base plate at under a third of its weight
+  if(kind === "metal" && isPlateShape(pts)) kind = "plate";
   const mat = tbl[kind] || tbl.metal || MATERIALS.metal;
   const density = Number.isFinite(mat.density) ? mat.density : 0;
   const fill = Number.isFinite(mat.fill) ? mat.fill : 0;

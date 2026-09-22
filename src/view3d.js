@@ -32,8 +32,8 @@ const View={
     this.ren.shadowMap.enabled=true;
     this.ren.shadowMap.type=THREE.PCFSoftShadowMap;
     el.appendChild(this.ren.domElement);
-    this.scene.add(new THREE.HemisphereLight(0xfff3dc,0x1d1a15,0.72));
-    const sun=new THREE.DirectionalLight(0xfff6e8,0.8);
+    this.hemi=new THREE.HemisphereLight(0xfff3dc,0x1d1a15,0.72); this.scene.add(this.hemi);
+    const sun=new THREE.DirectionalLight(0xfff6e8,0.8); this.sun=sun;
     sun.position.set(-2.2,5.5,3.0); sun.castShadow=true;
     sun.shadow.mapSize.set(2048,2048);
     const sc=sun.shadow.camera; sc.left=-3.2; sc.right=3.2; sc.top=3.2; sc.bottom=-3.2; sc.near=1; sc.far=14;
@@ -49,7 +49,9 @@ const View={
   bind(){
     const c=this.ren.domElement; let orbit=false,lx=0,ly=0;
     c.addEventListener("contextmenu",e=>e.preventDefault());
+    const cad=()=>typeof CadView!=="undefined"&&CadView.on;
     c.addEventListener("pointerdown",e=>{
+      if(cad()) return;
       c.setPointerCapture(e.pointerId);
       if(this.onRobotDrag&&this.hitsRobot(e)){
         const f=this.floorAt(e);
@@ -64,6 +66,7 @@ const View={
       this.setCursor(this.hover?"move":"grab"); };
     c.addEventListener("pointerup",end); c.addEventListener("pointercancel",end);
     c.addEventListener("pointermove",e=>{
+      if(cad()) return;
       if(this.drag){
         const f=this.floorAt(e), d=this.drag; if(!f) return;
         if(d.turn) this.onRobotDrag({x:d.x0, y:d.y0, h:d.h0+Math.atan2(f.y-d.y0,f.x-d.x0)-d.a0});
@@ -79,7 +82,7 @@ const View={
       const over=!!(this.onRobotDrag&&this.hitsRobot(e));
       if(over!==this.hover){ this.hover=over; this.setCursor(over?"move":"grab"); if(this.onHover) this.onHover(over); }
     });
-    c.addEventListener("wheel",e=>{ e.preventDefault();
+    c.addEventListener("wheel",e=>{ if(cad()) return; e.preventDefault();
       this.rad=Math.max(0.12,Math.min(24,this.rad*(1+Math.sign(e.deltaY)*0.09))); },{passive:false});
     addEventListener("resize",()=>this.resize());
   },
@@ -159,33 +162,47 @@ const View={
   applyExact(){
     for(const o of this.exactG||[]){ if(o.parent) o.parent.remove(o); this.dispose(o); }
     this.exactG=[];
-    const {cad,res}=this.exact;
-    const list=tessBuckets(cad,res,tessAssign(cad,res,this.turretScale));
+    const {cad,res}=this.exact, hidden=this.hiddenParts;
+    const asg=this.exactAsg=tessAssign(cad,res,this.turretScale);
+    const list=tessBuckets(cad,res,asg,hidden);
     const c=this.c, got=new Set();
+    const toView=(src,n)=>{ const out=new Float32Array(n);
+      // canonical (Z up) -> view (Y up), exactly as v3() does for the parser's points
+      for(let i=0;i<n;i+=3){ out[i]=src[i]-c[0]; out[i+1]=src[i+2]-c[2]; out[i+2]=-(src[i+1]-c[1]); }
+      return out; };
     for(const b of list){
       const parent=this.groupAt[b.group]||this.groupAt.chassis; if(!parent) continue;
-      const n=b.pos.length, pos=new Float32Array(n), nor=new Float32Array(n);
-      // canonical (Z up) -> view (Y up), exactly as v3() does for the parser's points
-      for(let i=0;i<n;i+=3){
-        pos[i]=b.pos[i]-c[0]; pos[i+1]=b.pos[i+2]-c[2]; pos[i+2]=-(b.pos[i+1]-c[1]);
-        nor[i]=b.nor[i]; nor[i+1]=b.nor[i+2]; nor[i+2]=-b.nor[i+1];
-      }
+      const n=b.pos.length, pos=toView(b.pos,n), nor=new Float32Array(n);
+      for(let i=0;i<n;i+=3){ nor[i]=b.nor[i]; nor[i+1]=b.nor[i+2]; nor[i+2]=-b.nor[i+1]; }
       const geo=new THREE.BufferGeometry();
       geo.setAttribute("position",new THREE.BufferAttribute(pos,3));
       geo.setAttribute("normal",new THREE.BufferAttribute(nor,3));
       geo.setIndex(new THREE.BufferAttribute(b.idx,1));
       if(!b.hasNormals) geo.computeVertexNormals();
       // the file's own colour when it has one — that is what makes it look like
-      // Onshape — otherwise the palette for what the part is made of
-      let mat;
-      if(b.color){ const base=ROBOT_MAT[b.kind]||ROBOT_MAT.metal;
-        mat=new THREE.MeshStandardMaterial({color:new THREE.Color(b.color), metalness:base.metalness==null?0.3:base.metalness, roughness:base.roughness==null?0.55:base.roughness}); }
-      else mat=this.robotMat(b.kind);
+      // Onshape — otherwise the palette for what the part is made of. Low
+      // metalness: with no environment to reflect, metal just goes black.
+      const base=ROBOT_MAT[b.kind]||ROBOT_MAT.metal;
+      const mat=new THREE.MeshStandardMaterial({color:b.color?new THREE.Color(b.color):base.color,
+        metalness:Math.min(0.2,base.metalness==null?0.2:base.metalness), roughness:Math.max(0.45,base.roughness==null?0.55:base.roughness),
+        transparent:!!base.transparent, opacity:base.opacity==null?1:base.opacity,
+        // faces sit a hair behind their edges, so the lines never z-fight
+        polygonOffset:true, polygonOffsetFactor:1, polygonOffsetUnits:1});
       const mesh=new THREE.Mesh(geo,mat); mesh.castShadow=true; mesh.receiveShadow=true;
+      mesh.userData.ranges=b.ranges;
       parent.add(mesh); this.exactG.push(mesh); got.add(b.group);
+    }
+    // the model's real edges, the thin dark lines that make CAD look like CAD
+    for(const e of tessEdges(cad,res,asg,hidden)){
+      const parent=this.groupAt[e.group]||this.groupAt.chassis; if(!parent) continue;
+      const geo=new THREE.BufferGeometry(); geo.setAttribute("position",new THREE.BufferAttribute(toView(e.pos,e.pos.length),3));
+      const lines=new THREE.LineSegments(geo,this.edgeMat()); lines.userData.edges=true; lines.visible=this.edgesOn!==false;
+      parent.add(lines); this.exactG.push(lines);
     }
     for(const g in this.hullOf) this.hullOf[g].visible=!got.has(g);
   },
+  edgeMat(){ if(!this._edgeMat){ this._edgeMat=new THREE.LineBasicMaterial({color:0x1b1e22, transparent:true, opacity:0.85}); this._edgeMat.userData.shared=true; } return this._edgeMat; },
+  showEdges(on){ this.edgesOn=on; this.scene.traverse(o=>{ if(o.userData&&o.userData.edges) o.visible=on; }); },
   /* The robot's own parts, grouped by the mechanism that moves them. */
   buildRobot(cad){
     const bb=cad.bbox, size=this.size, M=cad.mechs;
@@ -258,6 +275,8 @@ const View={
         geo.setAttribute("normal",new THREE.BufferAttribute(nor,3));
         const mesh=new THREE.Mesh(geo,this.robotMat(k)); mesh.castShadow=true; mesh.receiveShadow=true;
         g.add(mesh);
+        const lines=new THREE.LineSegments(new THREE.EdgesGeometry(geo,30),this.edgeMat());
+        lines.userData.edges=true; lines.visible=this.edgesOn!==false; g.add(lines);
       }
       return g;
     };
@@ -755,10 +774,11 @@ const View={
     else if(v==="side"){ this.theta=0; this.phi=Math.PI/2.2; }
     else if(v==="top"){ this.theta=-Math.PI/2; this.phi=0.09; }
     else { this.theta=-0.7; this.phi=1.12; }
-    this.rad=Math.max(this.size,0.46)*1.9;
+    this.rad=Math.max(this.size,0.46)*2.4;
   },
   render(){
     if(!this.cam) return;
+    if(typeof CadView!=="undefined"&&CadView.on){ CadView.render(); return; }
     // robot views follow the chassis as it drives; the field view holds still
     const target=new THREE.Vector3(0,0,0);
     if(this.mode==="field") target.set(this.alliance==="blue"?0.25:-0.25,0.3,0);
