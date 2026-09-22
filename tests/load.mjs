@@ -26,7 +26,7 @@ const EXPORTS = [
   'MATERIALS', 'hullVolume', 'partMass', 'massProps', 'inertiaOf',
   'driveFromCAD', 'DRIVE_KINDS', 'ikMatrix', 'fkFromIk', 'wheelSpeeds', 'chassisFromWheels',
   'Dyn', 'tractionLimit', 'motorTorque', 'wheelLoads',
-  'robotFrame', 'frameUp', 'applyFrame', 'canonicalizeCAD', 'frontToRobot', 'robotToWorld', 'frameMatrix', 'FRAME_UP_ROWS', 'buildRig', 'ASSUMED_KG',
+  'robotFrame', 'frameUp', 'applyFrame', 'canonicalizeCAD', 'frontToRobot', 'robotToWorld', 'frontFromWheels', 'frontAcrossWheels', 'frameMatrix', 'FRAME_UP_ROWS', 'buildRig', 'ASSUMED_KG',
   'FTCSIM_MAGIC', 'packSession', 'unpackSession', 'sessionFromBench',
   'mathReport', 'mathText', 'mathMarkdown',
   'parseRepoRef', 'rawUrlsFor', 'pickOpModes', 'javaLooksLikeOpMode',

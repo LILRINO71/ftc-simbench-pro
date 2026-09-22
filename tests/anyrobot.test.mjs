@@ -235,13 +235,17 @@ function trueCentreInEngine(cad, T) {
   return [dot(R[0], d), dot(R[1], d), dot(R[2], d)];
 }
 
-function spin(name, physics) {
+function spin(name, physics, autoFront) {
   const T = truthOf(name);
   const cad = E.parseSTEP(stepOf(name));
   const code = E.parseJava(opModeFor(T));
   const map = E.autoMap(code.devices, cad.mechs);
-  const front = truthInCad(T, cad).front;
-  E.Sim.reset(code, cad, map, { payloadKg: 0, duty: 0.30, trust: 'code', physics, front, startPose: { ...START } });
+  // autoFront: set nothing, the way a user who just dropped the file would —
+  // the engine reads the front off the wheels
+  const opts = { payloadKg: 0, duty: 0.30, trust: 'code', physics, startPose: { ...START } };
+  if (!autoFront) opts.front = truthInCad(T, cad).front;
+  E.Sim.reset(code, cad, map, opts);
+  const front = E.Sim.opts.front;                 // the front the engine actually runs with
   E.Sim.pad = { 1: { right_stick_x: 1 }, 2: {} };
   // THE placement contract (src/frame.js robotToWorld) — the one the physics,
   // the collisions and the view all use — so this watches what the user sees
@@ -361,9 +365,24 @@ for (const name of NAMES) {
         assert.ok(Math.abs(b[k] - tb[k]) < 0.005, 'bounds.' + k + ' = ' + (b[k] * 1000).toFixed(1) + ' mm, true ' + (tb[k] * 1000).toFixed(1) + ' mm');
     });
 
+    test('the front comes from the wheels: square to the axles', () => {
+      // the default front used to be +x for every robot, and every robot modelled
+      // facing +y slid ~400 mm sideways when it turned
+      const cad = cadOf(name), f = E.frontFromWheels(cad), truth = truthInCad(T, cad).front;
+      if (!T.wheels.length || T.drive.kind === 'x' || T.drive.kind === 'omni') { assert.equal(f, null, 'any front drives this base, got ' + f); return; }
+      assert.ok(f && f.slice(1) === truth.slice(1), 'front from the wheels ' + f + ', the robot really faces ' + truth);
+      assert.equal(E.frontAcrossWheels(cad, truth), false);
+      assert.equal(E.frontAcrossWheels(cad, truth.slice(1) === 'x' ? '+y' : '+x'), true, 'a front across the wheels is caught');
+    });
+
     for (const physics of ['rigid', 'kinematic']) {
       test('spin in place (' + physics + '): drivetrain centre < 5 mm, heading > 90 deg', () => {
         const s = spin(name, physics);
+        assert.ok(s.turned > Math.PI / 2, 'did not turn: ' + s.info);
+        assert.ok(s.drift < 0.005, 'the chassis moves while turning: ' + s.info);
+      });
+      test('spin in place with NO front set (' + physics + '): what a user who just dropped the file gets', () => {
+        const s = spin(name, physics, true);
         assert.ok(s.turned > Math.PI / 2, 'did not turn: ' + s.info);
         assert.ok(s.drift < 0.005, 'the chassis moves while turning: ' + s.info);
       });

@@ -1183,6 +1183,14 @@ function refitRobot(){
   Sim.footprint=footprintOf(CAD,OPTS.front,Sim.base);
   Sim.obstacles=Field.ok?Field.obstacles(Sim.footprint.h):[];
   if(Field.ok) Field.collide(Sim.chassis,Sim.footprint,Sim.obstacles);
+  // the physics rig is built in the robot's own axes, so a new front (or a
+  // drawn base) needs a new one — a stale rig kept the wheels placed for the
+  // old front and the robot slid sideways when it turned
+  if(Sim.code){
+    Sim.rig=buildRig(CAD,Sim.drivetrain,Sim.base,Sim.dev,OPTS);
+    Sim.dstate=Sim.rig?Dyn.reset(Sim.rig):null;
+  }
+  renderFrameNote(); Physics.sync(); Status.render();
 }
 
 /* ============================================================
@@ -1230,7 +1238,8 @@ function loadCAD(cad,label,cls){
   $("#vpTitle").textContent=(cad.name||label)+" · "+parts+" · "+cad.mechs.length+" mechanism"+(cad.mechs.length===1?"":"s")+(Field.ok?" · BIOBUZZ field":"");
   const b=cad.bbox, mm=v=>(v*1000).toFixed(0);
   $("#vpDims").textContent=`${mm(b.max[0]-b.min[0])} × ${mm(b.max[1]-b.min[1])} × ${mm(b.max[2]-b.min[2])} mm`;
-  RIG_DEVICES={}; HW_USER={}; Shots.cfg=null; OPTS.front="+x"; OPTS.baseModel="auto"; OPTS.shooterModel="auto";
+  // the front defaults to the way the wheels roll; a saved rig can still say otherwise
+  RIG_DEVICES={}; HW_USER={}; Shots.cfg=null; OPTS.front=frontFromWheels(cad)||"+x"; OPTS.baseModel="auto"; OPTS.shooterModel="auto";
   const restored=loadSavedRig();
   View.load(cad);
   if(Sim.phase!=="running") placeAtStart();
@@ -1288,8 +1297,11 @@ function exactGeometry(cad,text){
 function renderFrameNote(){
   const el=$("#frameNote"); if(!el||!CAD||!CAD.frame) return;
   const f=CAD.frame;
+  const auto=frontFromWheels(CAD);
   el.textContent="Up is "+f.up+" — "+f.upWhy+". The robot turns about "+
-    (f.originWhy==="wheels"?"the centre of its drive wheels.":"the middle of the CAD, since no drive wheels were found.");
+    (f.originWhy==="wheels"?"the centre of its drive wheels.":"the middle of the CAD, since no drive wheels were found.")+
+    (auto?(frontAcrossWheels(CAD,OPTS.front)?" CAD front is set ACROSS the wheels — they roll along "+auto.slice(1)+", so this robot will slide sideways when it turns. Pick "+auto+" or its opposite."
+         :" Front "+OPTS.front+" runs the way the wheels roll."):"");
 }
 function takeCode(file){ readText(file,text=>addOpModeFromText(file.name,text)); }
 function setRobotConfig(text,name){
@@ -1583,7 +1595,8 @@ function frame(now){
 const Status={
   cur:null,
   compute(){
-    const rt={ stalled:[], missing:[], blocked:!!(Sim&&Sim.blocked), slipping:!!(Sim&&Sim.slipping) };
+    const rt={ stalled:[], missing:[], blocked:!!(Sim&&Sim.blocked), slipping:!!(Sim&&Sim.slipping),
+               frontAcross:!!(CAD&&frontAcrossWheels(CAD,OPTS.front)) };
     return statusOf(FINDINGS,rt);
   },
   render(){

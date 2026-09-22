@@ -53,6 +53,8 @@ function statusOf(findings, runtime) {
   for (const n of rt.missing || []) push("stop", n + " is not in the robot configuration", "robot", "cfg:" + n);
   if (rt.blocked) push("stop", "the OpMode loop is blocked", "checks", "blocked");
   if (rt.slipping) push("warn", "the drivetrain is slipping", "checks", "slip");
+  // a front 90 degrees off the wheels makes every turn slide: the sim is wrong until it's fixed
+  if (rt.frontAcross) push("stop", "CAD front is set across the wheels", "robot", "front");
 
   const counts = { stop: 0, warn: 0 };
   for (const i of items) counts[i.level]++;

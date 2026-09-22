@@ -142,6 +142,29 @@ function robotFrame(cad,opts){
   return F;
 }
 
+/* Which way the robot can drive, read off its wheels: square to the axles.
+   A tank or mecanum base only drives forward along its wheels' rolling
+   direction, and a front setting 90 degrees off that is what made a robot
+   slide 400 mm sideways while it turned in place — the default "+x" was
+   wrong for every robot modelled facing +y. Returns the canonical axis
+   ('+x' or '+y'), or null when any front drives (an X-drive's 45-degree
+   wheels, a kiwi). The sign can't be read off a wheel: a 180-degree error
+   only swaps which end is drawn as the front, and turning stays exact. */
+function frontFromWheels(cad){
+  const ws=dtOnFloor(frameWheels((cad&&cad.solids)||[]),[0,0,1]);
+  if(ws.length<2) return null;
+  let ax=0, ay=0;
+  for(const w of ws){ ax+=Math.abs(w.axis[0]); ay+=Math.abs(w.axis[1]); }
+  ax/=ws.length; ay/=ws.length;
+  if(Math.abs(ax-ay)<0.3) return null;
+  return ay>ax?"+x":"+y";                      // axles along y roll along x
+}
+/* Is this front setting across the wheels (90 degrees off the way they roll)? */
+function frontAcrossWheels(cad,front){
+  const f=frontFromWheels(cad);
+  return !!f&&!!front&&(f.slice(1)!==String(front).slice(1));
+}
+
 /* Canonical (x, y) -> the robot's own (forward, left) for a front setting.
    Everything canonical is already up-aligned and centred; this is the one
    rotation left, and it's the same one driveFromCAD uses. */

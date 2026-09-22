@@ -24,6 +24,10 @@ test('status: live trouble the checks cannot see still turns the light', () => {
   assert.equal(s.counts.stop, 2);
   assert.ok(s.items.some((i) => /arm is stalled/.test(i.text)));
   assert.equal(E.statusOf([], { slipping: true }).level, 'warn');
+  // a front across the wheels makes every turn slide: that is a red light
+  const across = E.statusOf([], { frontAcross: true });
+  assert.equal(across.level, 'stop');
+  assert.ok(/across the wheels/.test(across.headline));
   assert.ok(!/</.test(E.statusOf([{ key: 'x', sev: 'fail', title: '<code>arm</code> is missing' }], {}).items[0].text), 'markup stripped for the chip');
 });
 

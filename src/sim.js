@@ -12,6 +12,8 @@ const Sim={
     // every CAD runs in the canonical robot frame; the parser does this for
     // STEP files, and this catches the rest (the sample, older workspaces)
     if(typeof canonicalizeCAD==="function") canonicalizeCAD(cad,{up:opts&&opts.up});
+    // no front given: the way the wheels roll (see frontFromWheels)
+    if(opts&&!opts.front&&typeof frontFromWheels==="function") opts.front=frontFromWheels(cad)||"+x";
     this.dev={}; this.vars={}; this.t=0; this.pids={}; this.timers={};
     const sp=(opts&&opts.startPose)||{x:0,y:0,h:0};
     this.chassis={x:sp.x,y:sp.y,h:sp.h};
