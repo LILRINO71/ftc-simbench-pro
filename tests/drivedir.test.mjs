@@ -206,3 +206,71 @@ test('the IMU reads yaw from where the robot pointed at INIT, and resetYaw does 
   assert.ok(Math.abs(E.Sim.chassis.h - h) < 1e-3, 'resetYaw leaves the robot where it is');
   assert.ok(Math.abs(E.Sim.env().get('__imuYaw')) < 0.01, 'and zeroes the reading');
 });
+
+// ---- the Checks tab: does the code drive THIS robot the way a driver expects?
+const verdict = (java) => {
+  const cad = E.parseSTEP(fixture('robots/mecanum-zup.step'));
+  const code = E.parseJava(java);
+  const map = E.autoMap(code.devices, cad.mechs);
+  const F = E.analyze(code, cad, map, { payloadKg: 0, duty: 0.3, trust: 'code' });
+  return F.find((f) => f.key === 'drive:feel');
+};
+
+test('Checks: SDK-style and BAL-style code pass the drive check; gm0-style fails, saying what goes wrong', () => {
+  assert.equal(verdict(SDK_JAVA).sev, 'pass');
+  assert.equal(verdict(BAL_JAVA).sev, 'pass', 'BAL.java drives this robot correctly, so no stick-sign warning either');
+  const g = verdict(GM0_JAVA);
+  assert.equal(g.sev, 'fail');
+  assert.match(g.title, /backward/);
+  assert.match(g.title, /turns it <b>left<\/b>/);
+  assert.match(g.body, /leftFront/, 'names the motors that push backward as mounted');
+  const live = E.Sim.phase;
+  verdict(SDK_JAVA);
+  assert.equal(E.Sim.phase, live, 'the probe never touches the live sim');
+});
+
+test('sleep() in the TeleOp loop pauses the loop and motors keep their last power; every-pass sleeps warn', () => {
+  const java = `
+@TeleOp(name = "s")
+public class S extends LinearOpMode {
+    @Override
+    public void runOpMode() {
+        DcMotor leftFront = hardwareMap.get(DcMotor.class, "leftFront");
+        DcMotor leftBack = hardwareMap.get(DcMotor.class, "leftBack");
+        DcMotor rightFront = hardwareMap.get(DcMotor.class, "rightFront");
+        DcMotor rightBack = hardwareMap.get(DcMotor.class, "rightBack");
+        Servo claw = hardwareMap.get(Servo.class, "claw");
+        leftFront.setDirection(DcMotor.Direction.REVERSE);
+        leftBack.setDirection(DcMotor.Direction.REVERSE);
+        waitForStart();
+        while (opModeIsActive()) {
+            double y = -gamepad1.left_stick_y;
+            leftFront.setPower(y);
+            leftBack.setPower(y);
+            rightFront.setPower(y);
+            rightBack.setPower(y);
+            if (gamepad1.a) {
+                claw.setPosition(0.9);
+                sleep(500);
+                claw.setPosition(0.1);
+            }
+        }
+    }
+}`;
+  bench(java, 'mecanum-zup', { physics: 'kinematic' });
+  E.Sim.pad = { 1: { left_stick_y: -1 }, 2: {} };
+  run(E, 0.5);
+  E.Sim.pad = { 1: { left_stick_y: -1, a: true }, 2: {} };  // press a while still driving
+  run(E, 0.02);
+  E.Sim.pad = { 1: {}, 2: {} };                             // then let go of everything
+  run(E, 0.1);
+  assert.equal(E.Sim.dev.claw.cmd, 0.9, 'first half of the pass ran');
+  assert.equal(E.Sim.dev.leftFront.cmd, 1, 'the drive keeps its last power while the loop sleeps');
+  run(E, 0.4);
+  assert.equal(E.Sim.dev.claw.cmd, 0.1, 'after 500 ms the rest of the pass ran');
+  run(E, 0.1);
+  assert.equal(Math.abs(E.Sim.dev.leftFront.cmd), 0, 'and the next pass read the released stick');
+  const bare = E.analyze(E.parseJava(java.replace('if (gamepad1.a) {', 'if (true) {')), E.parseSTEP(fixture('robots/mecanum-zup.step')), {}, { payloadKg: 0, duty: 0.3, trust: 'code' });
+  const f = bare.find((x) => x.key === 'sleep');
+  assert.ok(f, 'a sleep outside any button is found');
+});

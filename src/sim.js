@@ -19,7 +19,7 @@ const Sim={
     this.chassis={x:sp.x,y:sp.y,h:sp.h};
     this.code=code; this.cad=cad; this.map=map; this.opts=opts;
     this.bump=null; this.vel={x:0,y:0};
-    this.pc=0; this.sleepEnd=null; this.sleptMs=0; this.autoDone=false;
+    this.pc=0; this.sleepEnd=null; this.sleptMs=0; this.autoDone=false; this.pass=null; this.resumeAt=0;
     for(const d of code.devices){
       const mech=cad.mechs.filter(m=>m.id===map[d.name])[0]||null;
       const spec=specFor(d,mech,opts.trust);
@@ -60,7 +60,7 @@ const Sim={
   start(){
     if(!this.code) return;
     if(this.phase==="loaded") this.init();
-    this.t=0; this.pc=0; this.sleepEnd=null; this.autoDone=false;
+    this.t=0; this.pc=0; this.sleepEnd=null; this.autoDone=false; this.pass=null; this.resumeAt=0;
     for(const n in this.timers) this.timers[n]=0;
     this.phase="running";
   },
@@ -161,11 +161,19 @@ const Sim={
       }
     };
   },
+  /* Run statements straight through: INIT, and each step of an autonomous. */
   exec(list,env){
+    const p=this.pausable; this.pausable=false;
+    for(const _ of this.steps(list,env));
+    this.pausable=p;
+  },
+  /* The statements as a generator, so a TeleOp loop pass can stop at a
+     sleep() and carry on from the next statement once it's over. */
+  *steps(list,env){
     for(const st of list){
       if(st.kind==="if"){
-        if(evalNode(st.condAst,env)) this.exec(st.then,env);
-        else if(st.else) this.exec(st.else,env);
+        if(evalNode(st.condAst,env)) yield* this.steps(st.then,env);
+        else if(st.else) yield* this.steps(st.else,env);
       }else if(st.kind==="assign"){
         const v=evalNode(st.ast,env);
         const cur=this.vars[st.name]!==undefined?this.vars[st.name]:(this.code.consts[st.name]||0);
@@ -186,8 +194,11 @@ const Sim={
         const a=st.args.map(x=>evalNode(x,env));
         this.pidOp(st.obj,"setPID",a);
       }else if(st.kind==="sleep"){
-        // inside a TeleOp loop a sleep blocks the robot; the analysis reports it
-        this.sleptMs=(this.sleptMs||0)+(st.ast?evalNode(st.ast,env):(st.ms||0));
+        // in a TeleOp loop the one OpMode thread stops here: nothing else runs,
+        // and every motor keeps the last power it was given until the sleep ends
+        const ms=Math.max(0,st.ast?evalNode(st.ast,env):(st.ms||0));
+        this.sleptMs=(this.sleptMs||0)+ms;
+        if(this.pausable&&ms>0) yield ms;
       }else if(st.kind==="objcall"){
         const s=this.dev[st.obj];
         if(this.timers[st.obj]!==undefined){ if(st.meth==="reset") this.timers[st.obj]=this.t; }
@@ -238,7 +249,17 @@ const Sim={
     this.dt=dt;
     if(this.phase==="running"){
       this.t+=dt;
-      if(this.code.hasLoop) this.exec(this.code.stmts,this.env());
+      if(this.code.hasLoop){
+        // one pass of the loop per tick; a pass that sleeps holds until the
+        // sleep is over, then finishes from the statement after it
+        if(this.t>=(this.resumeAt||0)){
+          if(!this.pass) this.pass=this.steps(this.code.stmts,this.env());
+          this.pausable=true;
+          const r=this.pass.next();
+          this.pausable=false;
+          if(r.done) this.pass=null; else this.resumeAt=this.t+r.value/1000;
+        }
+      }
       else if(this.code.auto&&this.code.auto.length) this.stepAuto();
     }
 
@@ -474,6 +495,60 @@ const Sim={
    can't say. 12 kg sits in the middle of what FTC robots actually weigh; the
    limit is 19 kg. */
 const ASSUMED_KG=12, ASSUMED_MIN_KG=2;
+/* ---- what the code does to THIS robot when a driver pushes the sticks ----
+   A private copy of the sim (the live one is untouched): the OpMode's own INIT
+   and loop, the robot's own motor mounting and setDirection calls, half a
+   second per push, nothing to bump into. Both gamepads get the push, so it
+   doesn't matter which one drives. Cached per code, CAD, map and front. */
+const PROBE_CACHE=new WeakMap();
+function driveProbe(code,cad,map,opts){
+  if(!code||!cad||!code.hasLoop) return null;
+  const dtn=detectDrivetrain(code); if(!dtn||!dtn.ok) return null;
+  const key=JSON.stringify([map,opts&&opts.front,opts&&opts.baseModel,opts&&opts.physics,(cad.mechs||[]).length]);
+  const hit=PROBE_CACHE.get(code); if(hit&&hit.cad===cad&&hit.key===key) return hit.res;
+  const P=Object.create(Sim);
+  const o=Object.assign({},opts,{startPose:{x:0,y:0,h:0}});
+  const push=pad=>{
+    P.load(code,cad,map,o); P.obstacles=[]; P.onRumble=null;
+    P.init(); P.start(); P.pad={1:Object.assign({},pad),2:Object.assign({},pad)};
+    for(let i=0;i<25;i++) P.tick(0.02);
+    return {fwd:P.chassis.x, left:P.chassis.y, turn:P.chassis.h};
+  };
+  let res=null;
+  try{
+    res={style:dtn.style, up:push({left_stick_y:-1}), turnR:push({right_stick_x:1}),
+         strafeR:dtn.style==="mecanum"?push({left_stick_x:1}):null};
+    res.front=P.opts.front;
+    res.mounts=P.rig?P.rig.drive.wheels.map((w,i)=>({dev:P.rig.devs[i], corner:w.corner, mount:w.mount})):[];
+    res.reversed=Object.keys(P.dev).filter(n=>P.dev[n].reversed);
+  }catch(e){ res=null; }
+  PROBE_CACHE.set(code,{cad,key,res});
+  return res;
+}
+/* The probe as findings: one pass when the robot goes where the driver
+   pushes it, one fail naming each axis that doesn't. */
+function driveVerdict(pr,add){
+  const bad=[], u=pr.up, t=pr.turnR, s=pr.strafeR;
+  if(!(u.fwd>0.08&&Math.abs(u.turn)<0.35)) bad.push(u.fwd<-0.08?"stick up drives it <b>backward</b>":Math.abs(u.turn)>=0.35?"stick up makes it <b>spin</b>":"stick up <b>barely moves</b> it");
+  if(!(t.turn<-0.25)) bad.push(t.turn>0.25?"right stick right turns it <b>left</b>":"right stick right <b>doesn't turn</b> it");
+  if(s&&!(s.left<-0.05&&Math.abs(s.turn)<0.6)) bad.push(s.left>0.05?"left stick right strafes it <b>left</b>":Math.abs(s.turn)>=0.6?"left stick right makes it <b>spin</b>":"left stick right <b>doesn't strafe</b> it");
+  const rows=pr.mounts.map(m=>(m.dev+"                ").slice(0,17)+((m.corner||"")+"  ").slice(0,3)+
+    " positive power "+(m.mount<0?"backward":"forward ")+"   code: "+(pr.reversed.indexOf(m.dev)>=0?"REVERSE":"forward")).join("\n");
+  const how="Measured on a private copy of the sim: this OpMode's own INIT and loop, this robot's motor mounting from the CAD, "+
+    "and every <code>setDirection</code> call, half a second per push, front <b>"+pr.front+"</b>.";
+  if(!bad.length){
+    add("drive:feel","pass","The sticks drive this robot the way a driver expects",
+      how+" Stick up goes forward, right stick turns right"+(pr.strafeR?", left stick right strafes right":"")+".",rows,null);
+    return;
+  }
+  const flip=pr.mounts.filter(m=>m.mount<0).map(m=>m.dev);
+  add("drive:feel","fail","On this robot, "+bad.join(", "),
+    how+" Positive power turns a motor clockwise seen from its shaft (FTC SDK), so on this build "+
+    (flip.length?"<code>"+flip.join("</code>, <code>")+"</code> push backward until reversed":"every wheel pushes forward as mounted")+
+    ". Your code reverses "+(pr.reversed.length?"<code>"+pr.reversed.join("</code>, <code>")+"</code>":"nothing")+".",rows,
+    "Reverse exactly the motors marked \"backward\", or flip the stick signs in the code. If only the direction is off, check the CAD front in the Robot panel.");
+}
+
 /* ---- distance sensors ---- */
 const DIST_RANGE_M=2.0, DIST_OUT_M=8.19;   // REV 2m: in range to 2 m, 8190 mm when nothing's there
 // getDistance(DistanceUnit.X): metres -> the unit asked for; the SDK has no unitless form

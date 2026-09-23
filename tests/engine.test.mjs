@@ -173,7 +173,8 @@ test('analysis: competition code — blocking sleep, empty binding, mirrored pai
   const b = sampleBench(E, fixture('CompetitionTeleOp.java'));
   const F = E.analyze(b.code, b.cad, b.map, b.opts);
   const sev = (k) => (F.find((f) => f.key === k) || {}).sev;
-  assert.equal(sev('sleep'), 'fail');
+  // the sleep is behind gamepad2.right_bumper: a pause the team meant, reported as one (issue #7)
+  assert.equal(sev('sleep'), 'info');
   assert.equal(sev('empty:2y'), 'warn');
   assert.equal(sev('mirror'), 'pass');
   assert.equal(sev('pid'), 'info');

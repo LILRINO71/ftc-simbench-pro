@@ -127,13 +127,20 @@ headroom  ${ratio.toFixed(2)}×${ratio<1?"  ◄ SHORT":""}`;
     } else if(st.kind==="sleep") sleeps.push({ms:st.ms, on:ctx});
   }})(code.stmts,null);
   if(sleeps.length){
-    const total=sleeps.reduce((s,x)=>s+(x.ms||0),0);
-    add("sleep","fail","<code>sleep()</code> inside the loop freezes the whole robot",
-      "A LinearOpMode runs one thread. While <code>sleep("+sleeps[0].ms+")</code> is blocking, nothing else in the loop runs &mdash; "+
-      "the drivetrain keeps its last power, no other button is read, and the PID loops stop updating. "+
-      "At <b>"+total+" ms</b> that is roughly <b>"+Math.round(total/20)+" loop cycles</b> of a robot that will not answer the driver.",
-      sleeps.map(x=>(x.on?x.on:"(loop body)")+"   sleep("+x.ms+")").join("\n"),
-      "Drive the delay off a timer instead: latch a state, note the time, and act on it in a later pass of the same loop.");
+    const bare=sleeps.filter(x=>!x.on), total=sleeps.reduce((a,x)=>a+(x.ms||0),0);
+    const what="A LinearOpMode runs one thread. While a <code>sleep()</code> runs, nothing else in the loop does: "+
+      "every motor keeps the last power it was given (the drive coasts on at whatever speed it had), no button is read, "+
+      "and PID loops stop correcting. The bench runs it the same way: the loop stops for that long, then finishes the pass.";
+    if(bare.length)
+      add("sleep","warn","<code>sleep("+(bare[0].ms||"…")+")</code> runs on every pass of the loop",
+        what+" This one isn't behind a button, so the robot answers the driver at most every <b>"+(bare.reduce((a,x)=>a+(x.ms||0),0)+20)+" ms</b>.",
+        sleeps.map(x=>(x.on?x.on:"(every pass)")+"   sleep("+x.ms+")").join("\n"),
+        "Drive the delay off a timer instead: latch a state, note the time, and act on it in a later pass of the same loop.");
+    else
+      add("sleep","info","<code>sleep()</code> on "+sleeps.map(x=>"<code>"+x.on+"</code>").join(", ")+" pauses the whole loop",
+        what+" Pressing "+(sleeps.length===1?"it":"one")+" holds the robot's controls for <b>"+(sleeps.length===1?sleeps[0].ms:total)+" ms</b>.",
+        sleeps.map(x=>x.on+"   sleep("+x.ms+")").join("\n"),
+        "If the drive mustn't coast, run the sequence off a timer so the loop keeps going.");
   }
 
   // ---- buttons wired to nothing
@@ -206,7 +213,10 @@ headroom  ${ratio.toFixed(2)}×${ratio<1?"  ◄ SHORT":""}`;
       else if(st.expr) allExpr.push(st.expr); } })(code.stmts);
     const usesY=allExpr.some(e=>/left_stick_y/.test(e));
     const negY =allExpr.some(e=>/-\s*gamepad\d\s*\.\s*left_stick_y/.test(e));
-    if(usesY && !negY)
+    // try it: a private sim pushes the sticks on this robot (src/sim.js driveProbe)
+    const pr=typeof driveProbe==="function"?driveProbe(code,cad,map,opts):null;
+    if(pr) driveVerdict(pr,add);
+    else if(usesY && !negY)
       add("drive:sticky","info","Check the sign on <code>left_stick_y</code>",
         "On a real gamepad, pushing the stick <b>forward reports a negative value</b>. Most drivetrains need <code>-gamepad1.left_stick_y</code> or the robot drives backwards.",null,null);
   }
@@ -214,10 +224,18 @@ headroom  ${ratio.toFixed(2)}×${ratio<1?"  ◄ SHORT":""}`;
   // ---- CAD mechanisms nothing drives
   const mapped={}; for(const k in map) if(map[k]) mapped[map[k]]=1;
   for(const mech of cad.mechs) if(!mapped[mech.id]){
+    // drive hardware turns wheels; a cascade stage or gear is driven through its leader
+    if(mech.drive||mech.couple) continue;
     const cadSpec=mech.part?hwFromPart(mech.part,mech.partName):null;
-    add("unmapped:"+mech.id,"warn","CAD has an actuator on <b>"+mlabel(mech)+"</b> with no code behind it",
-      "The assembly mounts "+(cadSpec?"<code>"+mech.part+"</code>":"an actuator")+" on this mechanism, but no device in this OpMode maps to it.",null,
-      "Map it in the hardware table, or add the device if it really is unused.");
+    const actuator=cadSpec&&/^(motor|servo|crservo)$/.test(cadSpec.kind);
+    if(mech.fromMate&&mech.kind!=="fixed")
+      add("unmapped:"+mech.id,"warn","The Onshape joint <b>"+mlabel(mech)+"</b> has nothing driving it",
+        "It's a "+((JOINT_KINDS[mech.kind]||{label:mech.kind}).label)+" in your mates, but no device in this OpMode maps to it, so it stays where it was drawn.",null,
+        "Pick the device that drives it in the hardware table.");
+    else if(actuator||mech.hasActuator&&mech.kind!=="fixed")
+      add("unmapped:"+mech.id,"warn","CAD has an actuator on <b>"+mlabel(mech)+"</b> with no code behind it",
+        "The assembly mounts "+(cadSpec?"<code>"+mech.part+"</code>":"an actuator")+" on this mechanism, but no device in this OpMode maps to it.",null,
+        "Map it in the hardware table, or add the device if it really is unused.");
   }
 
   if(cad.mechs.length){

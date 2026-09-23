@@ -20,7 +20,7 @@ const EXPORTS = [
   'splitStepRecords', 'parseSTEP', 'classifyMechs', 'recomputeChain', 'rigCarries', 'rigRoots', 'mlabel',
   'JOINT_KINDS', 'leverOf', 'holdTorque', 'armAngleDeg',
   'parseExpr', 'evalNode', 'parseJava', 'deriveBindings', 'travelRange', 'isCommanded',
-  'autoMap', 'wheelCorner', 'detectDrivetrain', 'analyze', 'Sim',
+  'autoMap', 'wheelCorner', 'detectDrivetrain', 'analyze', 'Sim', 'driveProbe', 'driveVerdict',
   'AUTO_JAVA', 'coverage', 'lineAt', 'collectStaticFields',
   'parseRobotConfig', 'checkRobotConfig', 'configKind', 'codeKind', 'diffOpModes',
   // Pro
