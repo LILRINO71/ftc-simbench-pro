@@ -144,8 +144,12 @@ test('sim: STOP_AND_RESET_ENCODER zeroes the encoder', () => {
   E.Sim.reset(b.code, b.cad, b.map, b.opts); freshPads();
   E.Sim.pad[2].a = true; run(E, 2); E.Sim.pad[2].a = false;
   assert.ok(Math.abs(E.Sim.dev.lift.ticks) > 100);
+  const physical = E.Sim.dev.lift.ticks;
   E.Sim.pad[2].back = true; E.Sim.tick(0.02);
-  assert.ok(Math.abs(E.Sim.dev.lift.ticks) < 40, `reset, got ${E.Sim.dev.lift.ticks}`);
+  const read = E.Sim.env().device('lift', 'getCurrentPosition');
+  assert.ok(Math.abs(read) < 40, `the reading resets, got ${read}`);
+  // the lift doesn't move when its encoder is zeroed
+  assert.ok(Math.abs(E.Sim.dev.lift.ticks - physical) < 40, `the lift stays put: ${physical} -> ${E.Sim.dev.lift.ticks}`);
 });
 
 // ---------------------------------------------------------------- analysis

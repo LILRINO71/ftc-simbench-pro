@@ -104,44 +104,23 @@ const Sim={
         if(m&&self.dev[m[1]]) return self.dev[m[1]].cmd;
         return 0;
       },
-      device(name,meth){
+      device(name,meth,args){
         const s=self.dev[name]; if(!s) return 0;
 
-        if(s.spec.role === "DistanceSensor" && meth==="getDistance"){
-          const H = Field.half();
-          const cos = Math.cos(self.chassis.h), sin = Math.sin(self.chassis.h);
-          let minDist = 20;
-          if (cos > 1e-6) minDist = Math.min(minDist, (H - self.chassis.x) / cos);
-          if (cos < -1e-6) minDist = Math.min(minDist, (-H - self.chassis.x) / cos);
-          if (sin > 1e-6) minDist = Math.min(minDist, (H - self.chassis.y) / sin);
-          if (sin < -1e-6) minDist = Math.min(minDist, (-H - self.chassis.y) / sin);
-          for(const o of self.obstacles||[]){
-            for(let d=0; d<minDist; d+=0.05) {
-               const px = self.chassis.x + d*cos, py = self.chassis.y + d*sin;
-               const L2 = (o.b[0]-o.a[0])**2 + (o.b[1]-o.a[1])**2;
-               let t = 0;
-               if (L2 > 1e-12) t = Math.max(0, Math.min(1, ((px-o.a[0])*(o.b[0]-o.a[0]) + (py-o.a[1])*(o.b[1]-o.a[1])) / L2));
-               const projx = o.a[0] + t*(o.b[0]-o.a[0]), projy = o.a[1] + t*(o.b[1]-o.a[1]);
-               if ((px-projx)**2 + (py-projy)**2 <= o.r*o.r) { minDist = d; break; }
-            }
-          }
-          return minDist * 100;
+        if(s.spec.role==="DistanceSensor"&&meth==="getDistance"){
+          // from the sensor, taken to sit mid-front facing forward, to the first
+          // wall or field obstacle; past a REV 2m's range it reads 8190 mm, as the real one does
+          const d=self.frontRay();
+          const m=d>DIST_RANGE_M?DIST_OUT_M:d;
+          return m*distScale(args&&args[0]);
         }
-
-        if(s.spec.role === "TouchSensor" && meth==="isPressed"){
-          if (self.bump) return 1;
-          const H = Field.half(), fp = self.footprint;
-          const c=Math.abs(Math.cos(self.chassis.h)), sin=Math.abs(Math.sin(self.chassis.h));
-          if (Math.abs(self.chassis.x) + c*fp.hx+sin*fp.hy >= H - 0.05) return 1;
-          if (Math.abs(self.chassis.y) + sin*fp.hx+c*fp.hy >= H - 0.05) return 1;
-          if(typeof capsulePush === "function"){
-             for(const o of self.obstacles||[]){
-               if (capsulePush(self.chassis, {hx:fp.hx+0.05, hy:fp.hy+0.05, ox:fp.ox, oy:fp.oy}, o)) return 1;
-             }
-          }
-          return 0;
+        if(s.spec.role==="TouchSensor"&&meth==="isPressed"){
+          // on a mechanism it's a limit switch, pressed at the mechanism's home;
+          // on its own it's a front bumper
+          const drv=s.mech?Object.values(self.dev).find(o=>o!==s&&o.mech===s.mech&&(o.kind==="motor"||o.kind==="servo")):null;
+          if(drv) return drv.kind==="motor"?(Math.abs(drv.ticks)<20?1:0):(Math.abs(drv.act-drv.restPos)<0.02?1:0);
+          return self.frontRay()<0.015?1:0;
         }
-
         if(s.spec.role === "ColorSensor"){
           let r=120, g=120, b=120;
           if(Field.ok) {
@@ -157,15 +136,12 @@ const Sim={
           if (meth==="alpha") return 255;
         }
 
-        if(meth==="getCurrentPosition") return Math.round((s.ticks - (s.offset||0)) * (s.reversed ? -1 : 1));
+        if(meth==="getCurrentPosition") return Math.round(s.ticks-(s.offset||0));
         if(meth==="getTargetPosition") return s.target;
         if(meth==="getPosition") return s.cmd;
         if(meth==="getPower") return s.cmd;
-        if(meth==="getVelocity") return (s.lastDt ? (s.ticks - (s.lastTicks||0))/s.lastDt : 0) * (s.reversed ? -1 : 1);
-        if(meth==="isBusy"){
-          const currentTicks = (s.ticks - (s.offset||0)) * (s.reversed ? -1 : 1);
-          return (s.mode==="rtp"&&Math.abs(s.target-currentTicks)>10)?1:0;
-        }
+        if(meth==="getVelocity") return s.vel||0;
+        if(meth==="isBusy") return (s.mode==="rtp"&&Math.abs(s.target-(s.ticks-(s.offset||0)))>10)?1:0;
         return 0;
       },
       pid(name,meth,a){ return self.pidOp(name,meth,a); },
@@ -219,7 +195,9 @@ const Sim={
         else if(s&&st.meth==="setTargetPosition") s.target=evalNode(st.args[0],env);
         else if(s&&st.meth==="setMode"){
           const raw=st.raw||"";
-          if(/STOP_AND_RESET_ENCODER/.test(raw)){ s.revs=0; s.ticks=0; s.offset=0; s.cmd=0; }
+          // the reading goes to zero; the mechanism doesn't move, so the physical
+          // count (revs, ticks — what the view draws) stays and only the offset moves
+          if(/STOP_AND_RESET_ENCODER/.test(raw)){ s.offset=s.ticks; s.cmd=0; s.mode="reset"; }
           else if(/RUN_TO_POSITION/.test(raw)) s.mode="rtp";
           else if(/RUN_USING_ENCODER|RUN_WITHOUT_ENCODER/.test(raw)) s.mode="run";
         }
@@ -267,47 +245,43 @@ const Sim={
     for(const name in this.dev){
       const s=this.dev[name];
       if(s.kind==="motor"){
-        s.lastDt = dt;
-        s.lastTicks = s.ticks;
-        let drive=s.cmd;
+        s.stalled=false;
+        const pos=s.ticks-(s.offset||0);                    // what getCurrentPosition() reads
+        let drive=s.mode==="reset"?0:s.cmd;                 // STOP_AND_RESET_ENCODER holds the motor off
         if(s.mode==="rtp"){
           /* RUN_TO_POSITION: the hub's own loop, capped by the commanded power.
              Start slowing inside the distance the motor needs to stop from that
-             power — a fixed small band overshoots badly at speed. */
-          const currentTicks = (s.ticks - (s.offset||0)) * (s.reversed ? -1 : 1);
-          const err=s.target-currentTicks;
+             power — a fixed small band overshoots badly at speed. Everything is
+             in the code's frame, where ticks count up under positive power
+             whatever setDirection says, exactly as the SDK reports them. */
+          const err=s.target-pos;
           const perSec=(s.spec.rpm||300)/60*s.tpr;           // ticks/s at full power
           const stop=Math.abs(s.cmd)*Math.abs(s.cmd)*perSec/(2*SLEW);
           const band=Math.max(8,1.8*stop);
-          const userDrive=Math.abs(s.cmd)*Math.max(-1,Math.min(1,err/band));
-          drive = userDrive * (s.reversed ? -1 : 1);
+          drive=Math.abs(s.cmd)*Math.max(-1,Math.min(1,err/band));
         }
         const slew=SLEW*dt;
-        s.act += Math.sign(drive-s.act)*Math.min(Math.abs(drive-s.act),slew);
-        const rpm=(s.spec.rpm||300)*s.act;
-        s.revs += rpm/60*dt;
-        s.ticks = s.revs*s.tpr;                 // what getCurrentPosition() reads
-
-        const isLin = s.mech && (s.mech.kind==="linear"||s.mech.kind==="linear-slide"||s.mech.kind==="prismatic");
-        if(isLin){
-          const mmPerTick = s.mech.mmPerTick || 1;
-          const minExt = s.mech.minExt || 0;
-          const maxExt = s.mech.maxExt || 1000;
-          let ext = s.ticks * mmPerTick;
-          if (ext < minExt) { ext = minExt; s.ticks = ext/mmPerTick; s.revs = s.ticks/s.tpr; s.act = 0; s.stalled = true; }
-          if (ext > maxExt) { ext = maxExt; s.ticks = ext/mmPerTick; s.revs = s.ticks/s.tpr; s.act = 0; s.stalled = true; }
-          
-          if(s.spec.stallNm){
-            const distal = (this.opts.payloadKg||0) + 0.1;
-            const forceReq = distal * 9.81 * Math.max(0, s.mech.axis ? s.mech.axis[2] : 1);
-            const r = (s.tpr * mmPerTick / 1000) / (2 * Math.PI);
-            const tauReq = forceReq * r;
-            if (tauReq > s.spec.stallNm * (this.opts.duty||1)) { s.stalled = true; s.act = 0; }
-          }
+        let act=s.act+Math.sign(drive-s.act)*Math.min(Math.abs(drive-s.act),slew);
+        const lin=s.mech&&isLinearKind(s.mech.kind);
+        // a slide asked to lift more than its motor holds doesn't climb; it can still lower
+        if(lin&&s.spec.stallNm&&act){
+          const up=slideLiftSign(s.mech);
+          if(up&&Math.sign(act)===up&&slideHoldNm(s,this.opts)>s.spec.stallNm*(this.opts.duty||1)){ act=0; s.stalled=true; }
         }
-        s.stalled=s.stalled||false;
+        s.act=act;
+        const prev=s.ticks;
+        s.revs+=(s.spec.rpm||300)*s.act/60*dt;
+        s.ticks=s.revs*s.tpr;
+        // hard stops only where the travel is known: Onshape slider limits, or set by hand
+        if(lin&&s.mech.limits){
+          const k=slideMPerTick(s), q=s.ticks*k, lo=s.mech.limits[0], hi=s.mech.limits[1];
+          const qc=Math.max(Number.isFinite(lo)?lo:-Infinity, Math.min(Number.isFinite(hi)?hi:Infinity, q));
+          if(qc!==q){ s.ticks=qc/k; s.revs=s.ticks/s.tpr; s.act=0; s.stalled=true; }
+        }
+        s.vel=(s.ticks-prev)/dt;                            // ticks/s, for getVelocity()
         continue;
       }
+      if(s.kind!=="servo") continue;                        // sensors and the IMU don't move
       const rate=60/(s.sec60*s.travelDeg);
       const err=s.cmd-s.act;
       const step=Math.sign(err)*Math.min(Math.abs(err), rate*dt);
@@ -325,29 +299,39 @@ const Sim={
     this.driveChassis(dt);
     Shots.tick(dt,this.chassis);
   },
+  /* A slide carrying its load out moves the centre of mass with it. The shift
+     is the carried mass over the mass the dynamics actually runs on — never the
+     STEP's own mass, which an assumed-mass robot has thrown away — along the
+     slide's axis turned into the robot frame. */
   updateCOM(){
-    if(!this.rig || !this.rig.props) return;
+    const r=this.rig; if(!r||!r.props) return;
+    if(!r.props.baseCom) r.props.baseCom=Object.assign({},r.props.com);
+    const toR=typeof frontToRobot==="function"?frontToRobot(this.opts.front):(p=>p);
+    const kg=r.props.kg>0?r.props.kg:ASSUMED_KG;
     let dx=0, dy=0, dz=0;
     for(const name in this.dev){
-      const s = this.dev[name];
-      const m = s.mech;
-      if(m && (m.kind==="linear"||m.kind==="linear-slide"||m.kind==="prismatic")){
-         let d = 0;
-         if (s.kind === "motor") d = s.ticks * (m.mmPerTick||1) / 1000 * (m.dir||1);
-         else d = (s.act-s.restPos)*(m.lever||0.3)*(m.dir||1);
-         const distalKg = (this.opts.payloadKg||0) + 0.1;
-         const totalKg = this.rig.props.cadKg || this.rig.props.kg || 12;
-         if (m.axis && totalKg > 0) {
-            dx += d * m.axis[0] * (distalKg / totalKg);
-            dy += d * m.axis[1] * (distalKg / totalKg);
-            dz += d * m.axis[2] * (distalKg / totalKg);
-         }
-      }
+      const s=this.dev[name], m=s.mech;
+      if(!m||!isLinearKind(m.kind)||!m.axis) continue;
+      const d=s.kind==="motor"?s.ticks*slideMPerTick(s)*(m.dir||1):(s.act-s.restPos)*(m.lever||0.3)*(m.dir||1);
+      const a=toR(m.axis), k=d*((this.opts.payloadKg||0)+SLIDE_CARRIED_KG)/kg;
+      dx+=a[0]*k; dy+=a[1]*k; dz+=a[2]*k;
     }
-    const c = this.rig.props.baseCom || this.rig.props.com;
-    if(!this.rig.props.baseCom) this.rig.props.baseCom = {x:c.x, y:c.y, z:c.z};
-    this.rig.props.com = {x: c.x + dx, y: c.y + dy, z: c.z + dz};
-    this.rig.props.comHeight = this.rig.props.com.z;
+    const c=r.props.baseCom;
+    r.props.com={x:c.x+dx, y:c.y+dy, z:c.z+dz};
+    r.props.comHeight=r.props.com.z;
+  },
+  /* Metres from the middle of the robot's front edge, straight ahead, to the
+     first wall or field obstacle (each a capsule: segment a-b, radius r). */
+  frontRay(){
+    const fp=this.footprint||{hx:0.2,ox:0,oy:0}, h=this.chassis.h, c=Math.cos(h), sn=Math.sin(h);
+    const fx=(fp.hx||0)+(fp.ox||0), fy=fp.oy||0;
+    const x=this.chassis.x+fx*c-fy*sn, y=this.chassis.y+fx*sn+fy*c;
+    const H=typeof Field!=="undefined"&&Field.half?Field.half():1.83;
+    let t=Infinity;
+    if(c>1e-9) t=Math.min(t,(H-x)/c); if(c<-1e-9) t=Math.min(t,(-H-x)/c);
+    if(sn>1e-9) t=Math.min(t,(H-y)/sn); if(sn<-1e-9) t=Math.min(t,(-H-y)/sn);
+    for(const o of this.obstacles||[]) t=Math.min(t,rayCapsule(x,y,c,sn,o));
+    return Math.max(0,t);
   },
   /* What a drive motor does to its wheel: its output in the code's frame,
      flipped by setDirection(REVERSE), flipped again when positive power turns
@@ -471,6 +455,57 @@ const Sim={
    can't say. 12 kg sits in the middle of what FTC robots actually weigh; the
    limit is 19 kg. */
 const ASSUMED_KG=12, ASSUMED_MIN_KG=2;
+/* ---- distance sensors ---- */
+const DIST_RANGE_M=2.0, DIST_OUT_M=8.19;   // REV 2m: in range to 2 m, 8190 mm when nothing's there
+// getDistance(DistanceUnit.X): metres -> the unit asked for; the SDK has no unitless form
+function distScale(arg){
+  const u=arg&&arg.o==="id"?String(arg.v).replace(/^.*[.]/,""):"";
+  return u==="INCH"?1/0.0254:u==="MM"?1000:u==="METER"?1:100;
+}
+// first t >= 0 where the ray p + t d (d unit) meets capsule o; Infinity if never
+function rayCapsule(px,py,dx,dy,o){
+  const ax=o.a[0], ay=o.a[1], bx=o.b[0], by=o.b[1], r=o.r||0;
+  const ux=bx-ax, uy=by-ay, L=Math.hypot(ux,uy);
+  let best=Infinity;
+  const circle=(cx,cy)=>{ const fx=px-cx, fy=py-cy, b=fx*dx+fy*dy, c=fx*fx+fy*fy-r*r;
+    if(c<=0) return 0; const disc=b*b-c; if(disc<0) return Infinity; const t=-b-Math.sqrt(disc); return t>=0?t:Infinity; };
+  best=Math.min(best,circle(ax,ay),circle(bx,by));
+  if(L>1e-9){
+    const tx=ux/L, ty=uy/L, nx=-ty, ny=tx;
+    const s0=(px-ax)*tx+(py-ay)*ty, n0=(px-ax)*nx+(py-ay)*ny;
+    if(Math.abs(n0)<=r&&s0>=0&&s0<=L) return 0;                       // starts inside the tube
+    const dn=dx*nx+dy*ny;
+    if(Math.abs(dn)>1e-12) for(const side of [r,-r]){
+      const t=(side-n0)/dn; if(t<0) continue;
+      const along=s0+t*(dx*tx+dy*ty); if(along>=0&&along<=L) best=Math.min(best,t);
+    }
+  }
+  return best;
+}
+
+/* ---- linear slides driven by a motor ---- */
+const SLIDE_MM_PER_REV=120;          // a 38 mm goBILDA spool: 120 mm of string per output turn
+const SLIDE_CARRIED_KG=0.10;         // what rides the carriage besides the payload
+const isLinearKind=k=>k==="linear"||k==="linear-slide"||k==="prismatic";
+// metres of travel per encoder tick: the joint's own (Onshape, or set by hand), else the spool guess
+function slideMPerTick(s){
+  const m=s.mech||{};
+  if(Number.isFinite(m.mPerTick)&&m.mPerTick>0) return m.mPerTick;
+  if(Number.isFinite(m.mmPerTick)&&m.mmPerTick>0) return m.mmPerTick/1000;
+  return SLIDE_MM_PER_REV/1000/(s.tpr||537.7);
+}
+// which sign of motor output raises the load: the joint's direction against
+// gravity; 0 for a slide that runs level (it carries nothing up)
+function slideLiftSign(m){
+  const z=(m.axis?m.axis[2]:0)*(m.dir||1);
+  return Math.abs(z)<0.2?0:Math.sign(z);
+}
+function slideHoldNm(s,opts){
+  const m=s.mech||{}, kg=((opts&&opts.payloadKg)||0)+SLIDE_CARRIED_KG;
+  const spool=slideMPerTick(s)*(s.tpr||537.7)/(2*Math.PI);   // metres per radian of output
+  return kg*9.81*Math.abs(m.axis?m.axis[2]:1)*spool;
+}
+
 function buildRig(cad,dtn,base,dev,opts){
   if(!dtn||!dtn.ok||typeof Dyn==="undefined"||typeof massProps!=="function") return null;
   const o=opts||{};

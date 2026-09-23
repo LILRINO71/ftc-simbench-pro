@@ -94,12 +94,14 @@ function specDetect(dev, mech, trust){
   const wantsTouch = /TouchSensor/i.test(dev.type||"");
   const wantsColor = /ColorSensor/i.test(dev.type||"");
 
-  if(trust === "cad" && cadSpec) return Object.assign({src:"CAD"}, cadSpec);
-
-  // --- code wins ---
+  // a declared sensor is a sensor whatever the CAD part it landed on says
   if(wantsDist) return Object.assign({src:"code"}, GENERIC.DistanceSensor);
   if(wantsTouch) return Object.assign({src:"code"}, GENERIC.TouchSensor);
   if(wantsColor) return Object.assign({src:"code"}, GENERIC.ColorSensor);
+
+  if(trust === "cad" && cadSpec) return Object.assign({src:"CAD"}, cadSpec);
+
+  // --- code wins ---
 
   if(wantsMotor){
     const said=motorFromComment(dev.intent);
