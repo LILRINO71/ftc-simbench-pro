@@ -21,7 +21,7 @@ npm run build          # dev build  -> dist/index.html
 npm test               # the whole suite
 ```
 
-Open `dist/index.html`, or serve `dist/` on any static host.
+Open `dist/index.html`, or serve `dist/` on any static host. `dist/` is build output and is not committed (see AGENTS.md).
 
 ```bash
 npm run build:ship     # ship build: comments and layout stripped

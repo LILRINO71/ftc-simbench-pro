@@ -9,3 +9,6 @@ Thumbs.db
 *.STEP
 *.STP
 !tests/fixtures/*.step
+
+# Build output: Cloudflare Pages builds it on every push (see AGENTS.md)
+dist/
