@@ -198,7 +198,15 @@ function motorSlope(spec) {
    cannot invent or lose weight, because the total is fixed by the fit.
 
    A wheel the transfer would pull into tension is lifted, not glued down,
-   so it clamps at zero and the wheels still on the ground take the slack. */
+   so it clamps at zero and the wheels still on the ground take the slack.
+
+   A drop-centre tank is the one uneven case: its middle rows sit lower
+   and carry about twice an end wheel's share (dropCentreWeights). The fit
+   is then weighted, N_i = W*w_i*(1 + b*dx_i + c*dy_i) with dx, dy from the
+   weighted centroid, so sum(w_i*dx_i) = 0 keeps the total exact and b, c
+   still put the resultant under the COM, whatever the layout. Equal
+   weights are exactly the plane above. opts.kind is the drivetrain kind;
+   opts.dropCentre true/false overrides it. */
 function wheelLoads(props, accel, wheels, opts) {
   props = props || {}; opts = opts || {};
   const ws = Array.isArray(wheels) ? wheels : [];
@@ -219,18 +227,10 @@ function wheelLoads(props, accel, wheels, opts) {
   const cx = dynNum(com.x, 0) - ax * h / g;
   const cy = dynNum(com.y, 0) - ay * h / g;
 
-  let weights = new Array(n).fill(1);
-  if (n >= 6) {
-    const xs = ws.map(w => dynNum(w && w.x, 0));
-    const minX = Math.min(...xs), maxX = Math.max(...xs);
-    const tol = Math.max(0.01, (maxX - minX) * 0.1);
-    for (let i = 0; i < n; i++) {
-      if (xs[i] > minX + tol && xs[i] < maxX - tol) weights[i] = 2.0; // Center wheels carry double
-    }
-  }
+  const wt = dropCentreWeights(ws, opts);
   let sumW = 0;
-  for (let i = 0; i < n; i++) sumW += weights[i];
-  const wFrac = weights.map(w => w / sumW);
+  for (let i = 0; i < n; i++) sumW += wt[i];
+  const wFrac = wt.map(w => w / sumW);
 
   let mwx = 0, mwy = 0;
   for (let i = 0; i < n; i++) {
@@ -238,12 +238,15 @@ function wheelLoads(props, accel, wheels, opts) {
     mwy += wFrac[i] * dynNum(ws[i] && ws[i].y, 0);
   }
 
+  // second moments weighted the same way, or the moment misses the COM by
+  // millimetres whenever the centre rows aren't on the midpoint
   let Sxx = 0, Syy = 0, Sxy = 0;
   const dx = new Array(n), dy = new Array(n);
   for (let i = 0; i < n; i++) {
     dx[i] = dynNum(ws[i] && ws[i].x, 0) - mwx;
     dy[i] = dynNum(ws[i] && ws[i].y, 0) - mwy;
-    Sxx += dx[i] * dx[i]; Syy += dy[i] * dy[i]; Sxy += dx[i] * dy[i];
+    const f = wFrac[i];
+    Sxx += f * dx[i] * dx[i]; Syy += f * dy[i] * dy[i]; Sxy += f * dx[i] * dy[i];
   }
 
   // solve for the plane's tilt, skipping any axis the contacts don't span
@@ -261,7 +264,7 @@ function wheelLoads(props, accel, wheels, opts) {
 
   let pos = 0;
   for (let i = 0; i < n; i++) {
-    const N = W * (wFrac[i] + b * dx[i] + c * dy[i]);
+    const N = W * wFrac[i] * (1 + b * dx[i] + c * dy[i]);
     out[i] = Number.isFinite(N) && N > 0 ? N : 0;
     pos += out[i];
   }
@@ -269,6 +272,33 @@ function wheelLoads(props, accel, wheels, opts) {
   if (pos > 1e-12) { const k = W / pos; for (let i = 0; i < n; i++) out[i] *= k; }
   else for (let i = 0; i < n; i++) out[i] = W / n;
   return out;
+}
+
+/* Relative share of each wheel before the fit: 2 for a drop-centre tank's
+   middle rows, 1 everywhere else. Only a tank has a drop centre, and only
+   with 3 or more rows of wheels down BOTH sides. A mecanum base whose lift
+   motors were counted as wheels, or a hex holonomic, is not one — weighting
+   those put 25% of the robot on a wheel that isn't there. Rows are x
+   clusters, the gap tolerance a tenth of the wheelbase (1 cm at least). */
+function dropCentreWeights(ws, opts) {
+  const n = ws.length, wt = new Array(n).fill(1);
+  const on = opts.dropCentre != null ? !!opts.dropCentre : String(opts.kind || "").toLowerCase() === "tank";
+  if (!on || n < 6) return wt;
+  const xs = ws.map(w => dynNum(w && w.x, 0)), ys = ws.map(w => dynNum(w && w.y, 0));
+  let my = 0;
+  for (const y of ys) my += y;
+  my /= n;
+  const tol = Math.max(0.01, (Math.max(...xs) - Math.min(...xs)) * 0.1);
+  const sides = [[], []];                              // left, right; a wheel on the centreline is neither
+  for (let i = 0; i < n; i++) { if (ys[i] > my + 0.01) sides[0].push(i); else if (ys[i] < my - 0.01) sides[1].push(i); }
+  const rows = sides.map(side => {
+    const s = side.slice().sort((a, b) => xs[a] - xs[b]), row = new Array(s.length).fill(0);
+    for (let k = 1; k < s.length; k++) row[k] = row[k - 1] + (xs[s[k]] - xs[s[k - 1]] > tol ? 1 : 0);
+    return { s, row, last: s.length ? row[s.length - 1] : -1 };
+  });
+  if (rows.some(r => r.last < 2)) return wt;
+  for (const r of rows) r.s.forEach((i, k) => { if (r.row[k] > 0 && r.row[k] < r.last) wt[i] = 2; });
+  return wt;
 }
 
 /* ------------------------------------------------------------------
@@ -467,7 +497,8 @@ const Dyn = {
     const mOpts = { currentLimit: dynNum(rig.currentLimit, 0), stallAmps: rig.stallAmps, freeAmps: rig.freeAmps };
 
     const vx = st.v.x, vy = st.v.y, om = st.omega;
-    const loads = wheelLoads(props, st.accel, W, { g: g });
+    // the drive kind decides drop-centre weighting; rig.dropCentre overrides it
+    const loads = wheelLoads(props, st.accel, W, { g: g, kind: rig.drive && rig.drive.kind, dropCentre: rig.dropCentre });
 
     // ---- per-wheel setup: drive torque, grip ceiling, and the two solver terms
     const u = new Array(n), v = new Array(n), b0 = new Array(n), D = new Array(n),
