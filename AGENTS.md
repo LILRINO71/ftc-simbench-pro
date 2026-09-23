@@ -34,11 +34,11 @@ Read this file before you start, and again before you push.
 
 | agent | files / area | for |
 | --- | --- | --- |
-| Claude | `src/java.js`, `src/expr.js` | parser fixes from the 25f54d3 review: for loops, enum switches, fall-through, try/finally, casts, arrays, else chains |
+| Claude | `src/tessellate.js`, `src/view3d.js` (materials, lighting, exact meshes), `src/cadview.js`, `src/step.js` (occurrence list) | issue #3: exact surfaces for big assemblies (per-shape meshing, instancing); realistic materials and lighting |
 
-Done and released: drive direction, the 25f54d3 sim fixes, `autoMap`, and
-Onshape mates (`src/mates.js`, `tools/onshape-mates.mjs`). Those files are
-free again; read the conventions below before changing them.
+Done and released: drive direction, the 25f54d3 sim and parser fixes,
+`autoMap`, and Onshape mates (`src/mates.js`, `tools/onshape-mates.mjs`).
+Those files are free again; read the conventions below before changing them.
 
 ## Conventions both agents rely on
 
