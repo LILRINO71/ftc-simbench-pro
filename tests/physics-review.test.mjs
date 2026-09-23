@@ -79,3 +79,72 @@ test('Dyn.step: the rig\'s own drive kind decides the drop-centre weighting', ()
   const tank = E.Dyn.step(E.Dyn.reset(rig('tank')), 0, rig('tank'), 0.02).loads;
   [4, 5].forEach((i) => assert.ok(Math.abs(tank[i] - W / 4) < 1e-9, `tank centre wheel ${i} carries 25%`));
 });
+
+// ---- 2. a motor-driven joint is drawn through its reduction, a slide from its spool
+
+const motor = (o) => Object.assign({ kind: 'motor', act: 0, restPos: 0, revs: 0, ticks: 0, offset: 0, tpr: 537.6, travelDeg: 300 }, o);
+const deg = (r) => r * 180 / Math.PI;
+
+test('view: a motor arm turns at gearmotor revs / the joint\'s reduction, within its travel', () => {
+  assert.equal(typeof E.mechPose, 'function', 'mechPose is the pure pose the view draws');
+  const arm = { kind: 'revolute-lift', dir: 1, axis: [0, 1, 0] };
+  // RUN_TO_POSITION 1200 on a 19.2:1 is 2.23 output revs: 804 degrees drawn before
+  const s = motor({ revs: 1200 / 537.6, ticks: 1200 });
+  const a1 = deg(E.mechPose(arm, s, 0.5).ang);
+  assert.ok(Math.abs(a1) <= 300 + 1e-9, `no reduction set: clamped to the joint's travel, drew ${a1.toFixed(0)} deg`);
+  // a 5:1 reduction divides: 2.232 / 5 turns = 160.7 degrees, lift pivots draw negative
+  const a5 = deg(E.mechPose({ ...arm, gear: 5 }, s, 0.5).ang);
+  assert.ok(Math.abs(a5 + 1200 / 537.6 / 5 * 360) < 1e-6, `gear 5: ${a5.toFixed(2)} deg`);
+  const a10 = deg(E.mechPose({ ...arm, gear: 10 }, s, 0.5).ang);
+  assert.ok(Math.abs(a10 - a5 / 2) < 1e-9, 'twice the reduction, half the angle');
+  // a turret's yaw is positive and clamps the same way
+  const yaw = deg(E.mechPose({ kind: 'revolute-yaw', dir: 1, axis: [0, 0, 1] }, motor({ revs: 10 }), 0.5).ang);
+  assert.ok(yaw > 0 && yaw <= 300 + 1e-9, `turret: ${yaw.toFixed(0)} deg`);
+});
+
+test('view: the drawn joint follows the physical count, not the reset encoder', () => {
+  // STOP_AND_RESET_ENCODER moves what the code reads (offset), not the arm
+  const arm = { kind: 'revolute-lift', dir: 1, gear: 4, axis: [0, 1, 0] };
+  const a = E.mechPose(arm, motor({ revs: 1, ticks: 537.6, offset: 537.6 }), 0.5).ang;
+  assert.ok(Math.abs(deg(a) + 90) < 1e-9, `one output rev through 4:1 is -90 deg, drew ${deg(a)}`);
+  const slide = { kind: 'linear', dir: 1, axis: [0, 0, 1], pivot: [0, 0, 0] };
+  const d = E.mechPose(slide, motor({ revs: 1, ticks: 537.6, offset: 537.6 }), 0.5).d;
+  assert.ok(Math.abs(d - 0.120) < 1e-9, `slide drawn at the physical count: ${d} m`);
+});
+
+test('view: a motor slide defaults to a 120 mm spool per output rev, not 1 mm per tick', () => {
+  const slide = { kind: 'linear', dir: 1, axis: [0, 0, 1], pivot: [0, 0, 0] };
+  // one output revolution of a 19.2:1 (537.6 counts) is 120 mm of string
+  const d1 = E.mechPose(slide, motor({ revs: 1, ticks: 537.6 }), 0.5).d;
+  assert.ok(Math.abs(d1 - 0.120) < 1e-9, `1 rev: ${d1} m (was 0.5376 m at 1 mm/tick)`);
+  const d312 = E.mechPose(slide, motor({ revs: 1, ticks: 28 * 13.7, tpr: 28 * 13.7 }), 0.5).d;
+  assert.ok(Math.abs(d312 - 0.120) < 1e-9, 'the default follows the motor\'s own counts per rev');
+  // an explicit mmPerTick wins, and dir flips it
+  const dm = E.mechPose({ ...slide, mmPerTick: 0.5, dir: -1 }, motor({ revs: 1, ticks: 537.6 }), 0.5).d;
+  assert.ok(Math.abs(dm + 0.2688) < 1e-9, `mmPerTick 0.5, dir -1: ${dm}`);
+  // a runaway motor doesn't draw a slide across the field
+  const far = E.mechPose(slide, motor({ revs: 1000, ticks: 537600 }), 0.5).d;
+  assert.ok(far <= 1.0 + 1e-9, `clamped to the slide's travel: ${far} m`);
+  // a servo slide is drawn as before, from its position
+  const sv = E.mechPose({ ...slide, lever: 0.2 }, { kind: 'servo', act: 1, restPos: 0.5 }, 0.5).d;
+  assert.ok(Math.abs(sv - 0.1) < 1e-12, 'servo slide: travel x lever');
+});
+
+// ---- 3. the joint-kind aliases resolve to "linear" and leave the dropdown
+
+test('JOINT_KINDS: "linear slide" is offered once; the aliases normalise to linear', () => {
+  const keys = Object.keys(E.JOINT_KINDS), labels = keys.map((k) => E.JOINT_KINDS[k].label);
+  assert.deepEqual(keys, ['revolute-yaw', 'revolute-lift', 'linear', 'effector', 'fixed']);
+  assert.equal(new Set(labels).size, labels.length, 'no duplicate labels in the joint dropdown: ' + labels.join(', '));
+  assert.equal(typeof E.normJointKind, 'function');
+  assert.equal(E.normJointKind('linear-slide'), 'linear');
+  assert.equal(E.normJointKind('prismatic'), 'linear');
+  for (const k of keys) assert.equal(E.normJointKind(k), k, k + ' is already canonical');
+  assert.equal(E.normJointKind('constructor'), 'constructor', 'no prototype lookups');
+  // a session saved with an alias still names its joint instead of throwing
+  assert.equal(E.JOINT_KINDS.prismatic.label, 'linear slide');
+  // and the view draws an alias exactly like linear
+  const s = motor({ revs: 1, ticks: 537.6 });
+  for (const kind of ['linear-slide', 'prismatic'])
+    assert.equal(E.mechPose({ kind, dir: 1 }, s, 0.5).d, E.mechPose({ kind: 'linear', dir: 1 }, s, 0.5).d, kind);
+});

@@ -618,11 +618,19 @@ const JOINT_KINDS = {
   "revolute-yaw" :{label:"turret yaw",  hint:"swings everything above it around a vertical axis"},
   "revolute-lift":{label:"lift pivot",  hint:"raises and lowers what it carries — torque is checked here"},
   "linear"       :{label:"linear slide",hint:"extends along its axis"},
-  "linear-slide" :{label:"linear slide",hint:"extends along its axis (alias)"},
-  "prismatic"    :{label:"linear slide",hint:"extends along its axis (alias)"},
   "effector"     :{label:"end effector",hint:"grips or intakes; carries nothing further"},
   "fixed"        :{label:"fixed mount", hint:"does not move the structure"}
 };
+/* "linear-slide" and "prismatic" are other names for "linear". Listed in the
+   table, the joint dropdown offered "linear slide" three times. They still
+   resolve (non-enumerable) so a session saved with one names its joint
+   instead of throwing; compare kinds through normJointKind. */
+for(const a of ["linear-slide","prismatic"]) Object.defineProperty(JOINT_KINDS,a,{value:JOINT_KINDS.linear,enumerable:false});
+function normJointKind(k){ return k==="linear-slide"||k==="prismatic"?"linear":k; }
+/* A motor-driven slide's travel per encoder count, mm: unset, a goBILDA-style
+   spool pays out 120 mm of string per output revolution. */
+const SPOOL_MM_PER_REV=120;
+function slideMmPerTick(mech,tpr){ return (mech&&mech.mmPerTick>0)?mech.mmPerTick:SPOOL_MM_PER_REV/(tpr>0?tpr:28*19.2); }
 const centroidOf = m => {
   if(!m.cluster||!m.cluster.length) return m.pivot;
   const s=[0,0,0]; for(const p of m.cluster){s[0]+=p[0];s[1]+=p[1];s[2]+=p[2];}

@@ -707,25 +707,9 @@ const View={
       const dn=deviceOn(m.id);
       const s=dn?Sim.dev[dn]:null;
       if(!s) continue;
-      const travel=(s.act-s.restPos);
-      const isLin = m.kind==="linear"||m.kind==="linear-slide"||m.kind==="prismatic";
-      if(m.kind==="revolute-yaw"||m.kind==="revolute-lift"){
-        let ang = 0;
-        if (s.kind === "motor") {
-          ang = s.revs * (m.gear || 1) * 2 * Math.PI * (m.dir||1) * (m.kind==="revolute-lift"?-1:1);
-        } else {
-          ang = travel*(s.travelDeg||300)*Math.PI/180*(m.dir||1)*(m.kind==="revolute-lift"?-1:1);
-        }
-        m._g.quaternion.setFromAxisAngle(this.vAxis(m.axis), ang);
-      }else if(isLin){
-        let d = 0;
-        if (s.kind === "motor") {
-          d = s.ticks * (m.mmPerTick || 1) / 1000 * (m.dir||1);
-        } else {
-          d = travel*(m.lever||this.size*0.3)*(m.dir||1);
-        }
-        m._g.position.copy(this.v3(m.pivot).add(this.vAxis(m.axis).multiplyScalar(d)));
-      }
+      const p=mechPose(m,s,this.size);
+      if(p.ang!=null) m._g.quaternion.setFromAxisAngle(this.vAxis(m.axis), p.ang);
+      else if(p.d!=null) m._g.position.copy(this.v3(m.pivot).add(this.vAxis(m.axis).multiplyScalar(p.d)));
     }
     for(const J of this.jawSets||[]){
       const dn=deviceOn(J.mech.id);
@@ -809,4 +793,29 @@ const View={
 function deviceOn(mechId){
   for(const n in MAP) if(MAP[n]===mechId && Sim.dev[n]) return n;
   return null;
+}
+/* Where a mechanism is drawn: {ang} radians about its axis for a joint, {d}
+   metres along it for a slide, {} for anything that doesn't move. Pure, so
+   it is tested without a scene.
+   A motor is drawn from its physical count, s.revs / s.ticks, never less
+   s.offset: STOP_AND_RESET_ENCODER zeroes what the code reads, not where the
+   arm is. s.revs is the gearmotor's OUTPUT shaft (spec.rpm is output rpm);
+   m.gear is the joint's own reduction after it, output revs per joint rev as
+   in Dyn, so it divides. Unclamped, a 1200-tick RUN_TO_POSITION swung an arm
+   2.2 turns through the chassis: a joint stops at the sweep a servo on it
+   would get, a slide at its maxExt. */
+function mechPose(m,s,size){
+  const k=normJointKind(m.kind), dir=m.dir||1, travel=s.act-s.restPos;
+  if(k==="revolute-yaw"||k==="revolute-lift"){
+    const sgn=dir*(k==="revolute-lift"?-1:1);
+    if(s.kind!=="motor") return {ang:travel*(s.travelDeg||300)*Math.PI/180*sgn};
+    const lim=(m.travelDeg||s.travelDeg||300)*Math.PI/180, g=+m.gear>0?+m.gear:1;
+    return {ang:Math.max(-lim,Math.min(lim,(+s.revs||0)/g*2*Math.PI))*sgn};
+  }
+  if(k==="linear"){
+    if(s.kind!=="motor") return {d:travel*(m.lever||size*0.3)*dir};
+    const lim=m.maxExt>0?m.maxExt:1000;
+    return {d:Math.max(-lim,Math.min(lim,(+s.ticks||0)*slideMmPerTick(m,s.tpr)))/1000*dir};
+  }
+  return {};
 }
