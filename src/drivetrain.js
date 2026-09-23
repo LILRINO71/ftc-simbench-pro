@@ -494,7 +494,7 @@ function driveFromCAD(cad,opts){
   return {kind, confidence:conf, why, wheels, track, base, ik:ikMatrix(kind,wheels)};
 }
 
-const dtPublic=w=>({name:w.name, part:w.part, x:w.x, y:w.y, z:w.z, r:w.r,
+const dtPublic=w=>({name:w.name, part:w.part, x:w.x, y:w.y, z:w.z, r:w.r, c:w.c.slice(), width:w.width,
                     axis:w.axis.slice(), alpha:w.alpha, roller:w.roller, steer:!!w.steer, corner:w.corner,
                     mount:w.mount, mountHow:w.mountHow, shaft:w.shaft?w.shaft.slice():null});
 

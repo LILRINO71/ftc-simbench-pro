@@ -250,29 +250,54 @@ const View={
      its 99 shapes' triangles, not 3.4 million copied ones. Each copy keeps its
      own index (userData.js) for picking and hiding. */
   applyInstanced(cad,res,asg,hidden){
+    // the drive wheels turn: every chassis copy whose centre sits inside a drive
+    // wheel's cylinder (hub, rollers, side plates, the wheel's own screws) goes
+    // in that wheel's spin group, which update() turns about the axle
+    const dw=(typeof driveFromCAD==="function"?driveFromCAD(cad,{front:(Sim.opts&&Sim.opts.front)||"+x"}).wheels:[]).filter(w=>w.c&&w.axis);
+    const wheelOf=j=>{
+      if(asg.group[j]!=="chassis"||!dw.length) return -1;
+      const b=asg.boxes&&asg.boxes[j]; if(!b||!Number.isFinite(b.min[0])) return -1;
+      const p=[(b.min[0]+b.max[0])/2,(b.min[1]+b.max[1])/2,(b.min[2]+b.max[2])/2];
+      for(let k=0;k<dw.length;k++){
+        const w=dw[k], a=w.axis, d=[p[0]-w.c[0],p[1]-w.c[1],p[2]-w.c[2]], t=d[0]*a[0]+d[1]*a[1]+d[2]*a[2];
+        if(Math.hypot(d[0]-t*a[0],d[1]-t*a[1],d[2]-t*a[2])<=w.r+0.003&&Math.abs(t)<=(w.width||0.05)/2+0.004) return k;
+      }
+      return -1;
+    };
+    this.spinWheels=[];
+    const spinG=[], M=new THREE.Matrix4(), off=new THREE.Matrix4();
+    const holder=(g,k)=>{
+      const parent=this.groupAt[g]||this.groupAt.chassis; if(k<0||!parent) return {parent, off:null};
+      if(!spinG[k]){ const w=dw[k], G=new THREE.Group(); G.position.copy(this.v3(w.c)); parent.add(G); this.exactG.push(G);
+        const av=this.vAxis(w.axis).normalize();
+        spinG[k]={G, off:new THREE.Matrix4().makeTranslation(-G.position.x,-G.position.y,-G.position.z)};
+        this.spinWheels.push({G, av, a:w.axis.slice(), c:w.c.slice()}); }
+      return {parent:spinG[k].G, off:spinG[k].off};
+    };
     const bins=new Map();
     res.meshes.forEach((m,j)=>{
       if(hidden&&hidden.has(j)) return;
       if(!m.index||!m.index.array||!m.index.array.length) return;
       const g=asg.group[j], si=asg.solid[j], kind=(si>=0&&cad.solids[si]&&cad.solids[si].kind)||"metal";
-      const k=m.attributes.position.array, key=g+"|"+kind;
+      const wk=wheelOf(j), k=m.attributes.position.array, key=g+"|"+kind+"|"+wk;
       let b=bins.get(k); if(!b){ b=new Map(); bins.set(k,b); }
-      let e=b.get(key); if(!e){ e={m, g, kind, js:[]}; b.set(key,e); }
+      let e=b.get(key); if(!e){ e={m, g, kind, wk, js:[]}; b.set(key,e); }
       e.js.push(j);
     });
-    const got=new Set(), M=new THREE.Matrix4();
+    const got=new Set();
     for(const b of bins.values()) for(const e of b.values()){
-      const parent=this.groupAt[e.g]||this.groupAt.chassis; if(!parent) continue;
+      const h=holder(e.g,e.wk), parent=h.parent; if(!parent) continue;
+      const place=j=>{ this.instMatrix(cad,res.meshes[j],M); return h.off?M.premultiply(h.off):M; };
       const S=this.instGeo(e.m), mats=S.runs.map(r=>this.finishMat(r.col||null,e.kind));
       const inst=new THREE.InstancedMesh(S.g,mats.length===1?mats[0]:mats,e.js.length);
-      e.js.forEach((j,i)=>inst.setMatrixAt(i,this.instMatrix(cad,res.meshes[j],M)));
+      e.js.forEach((j,i)=>inst.setMatrixAt(i,place(j)));
       inst.instanceMatrix.needsUpdate=true;
       // the geometry's own bounds are one copy's; the copies are all over the robot
       inst.frustumCulled=false; inst.castShadow=true; inst.receiveShadow=true;
       inst.userData.js=e.js;
       parent.add(inst); this.exactG.push(inst); got.add(e.g);
       if(S.eg) for(const j of e.js){
-        const L=new THREE.LineSegments(S.eg,this.edgeMat()); L.matrixAutoUpdate=false; this.instMatrix(cad,res.meshes[j],L.matrix);
+        const L=new THREE.LineSegments(S.eg,this.edgeMat()); L.matrixAutoUpdate=false; L.matrix.copy(place(j));
         L.userData.edges=true; L.userData.j=j; L.visible=this.edgesOn!==false; parent.add(L); this.exactG.push(L);
       }
     }
@@ -343,8 +368,9 @@ const View={
       const t=d[0]*ax[0]+d[1]*ax[1]+d[2]*ax[2];
       return Math.hypot(d[0]-ax[0]*t, d[1]-ax[1]*t, d[2]-ax[2]*t);
     };
+    const wheel=inDriveWheel(cad);
     const owner=p=>{
-      if(!segs.length) return "chassis";
+      if(!segs.length||wheel(p)) return "chassis";          // a drive wheel is the chassis's
       let best=null, bd=1e9;
       for(const s of segs){ const d=distSeg(p,s.a,s.b); if(d<bd){bd=d; best=s;} }
       let id=best.id; const m=best.m;
@@ -799,6 +825,23 @@ const View={
     this.arcLine=line; this.dynG.add(line);
   },
 
+  /* Turn each exact drive wheel at the speed its motor drives it. The sim's
+     wheel is found by where its CAD wheel sits, so a changed front can't
+     mismatch them; the sense comes from the wheel's rolling direction now. */
+  spinExact(dt){
+    const r=Sim.rig; if(!r||!this.spinWheels||!this.spinWheels.length) return;
+    const F={"+x":[1,0],"-x":[-1,0],"+y":[0,1],"-y":[0,-1]}[(Sim.opts&&Sim.opts.front)||"+x"]||[1,0];
+    for(const sw of this.spinWheels){
+      if(sw.rig!==r){ sw.rig=r; sw.i=-1; let bd=0.02;
+        r.drive.wheels.forEach((w,k)=>{ if(!w.c) return; const d=Math.hypot(w.c[0]-sw.c[0],w.c[1]-sw.c[1],w.c[2]-sw.c[2]); if(d<bd){ bd=d; sw.i=k; } }); }
+      if(sw.i<0) continue;
+      const w=r.drive.wheels[sw.i], dev=r.devs[sw.i], s=Sim.dev[dev]; if(!s) continue;
+      // rolling forward along f turns the wheel about up x f
+      const ca=Math.cos(w.alpha||0), sa=Math.sin(w.alpha||0), f=[ca*F[0]-sa*F[1], ca*F[1]+sa*F[0]];
+      const sense=(-f[1]*sw.a[0]+f[0]*sw.a[1])<0?-1:1;
+      sw.G.rotateOnAxis(sw.av, sense*Sim.wheelCmd(dev,w.mount)*(s.spec.rpm||312)/60*2*Math.PI*dt);
+    }
+  },
   update(){
     if(!this.cad) return;
     const now=performance.now(), dt=Math.min(0.1,(now-(this.lastT||now))/1000); this.lastT=now;
@@ -816,7 +859,10 @@ const View={
     const fp=Sim.footprint;
     if(fp&&(!this.footG||this.fpShown!==fp.hx+"|"+fp.hy+"|"+fp.h+"|"+(fp.ox||0)+"|"+(fp.oy||0))) this.buildFootprint(fp);
     // wheels roll with their motors, the flywheel with the shooter
-    for(const w of this.wheels){ const s=w.dev&&Sim.dev[w.dev]; if(s) w.spin.rotation.z-=s.act*(s.spec.rpm||312)/60*2*Math.PI*dt; }
+    // physical direction, setDirection and mounting included (Sim.wheelCmd)
+    const rig=Sim.rig, mountOf=d=>{ const i=rig?rig.devs.indexOf(d):-1; return i>=0?rig.drive.wheels[i].mount:1; };
+    for(const w of this.wheels){ const s=w.dev&&Sim.dev[w.dev]; if(s) w.spin.rotation.z-=Sim.wheelCmd(w.dev,mountOf(w.dev))*(s.spec.rpm||312)/60*2*Math.PI*dt; }
+    this.spinExact(dt);
     if(this.fly) this.fly.g.rotation.z-=Math.min(26,Shots.spin()*140)*dt;
 
     for(const m of this.cad.mechs){

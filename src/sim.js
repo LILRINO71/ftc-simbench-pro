@@ -672,7 +672,8 @@ function buildRig(cad,dtn,base,dev,opts){
     // which way positive power turns this wheel (src/drivetrain.js dtMounts):
     // measured from the motor in the CAD, else the standard inboard build
     const mount=(g&&(g.mount===1||g.mount===-1))?g.mount:(kind==="swerve"?1:(w.left?-1:1));
-    wheels.push({x, y, z:0, r, roller, alpha, mount, corner:corner.length===2?corner:null});
+    // c: the CAD wheel's centre in the canonical frame, for the view to turn its parts
+    wheels.push({x, y, z:0, r, roller, alpha, mount, corner:corner.length===2?corner:null, c:g&&g.c?g.c.slice():null});
     devs.push(w.dev);
     const sd=dev&&dev[w.dev];
     motors.push((sd&&sd.spec)||null);

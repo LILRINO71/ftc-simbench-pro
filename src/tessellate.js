@@ -55,14 +55,29 @@ function mechOwner(cad,turretScale){
 const solidCentroid=s=>{ const c=[0,0,0]; for(const p of s.pts){ c[0]+=p[0]; c[1]+=p[1]; c[2]+=p[2]; }
   const n=s.pts.length||1; return [c[0]/n,c[1]/n,c[2]/n]; };
 
+/* Is a point inside one of the drive wheels (hub, rollers, side plates)? A
+   drive wheel belongs to the chassis whatever mechanism sits nearest: by
+   proximity alone, the rollers of a back wheel on 7832's robot rode with the
+   intake. Canonical frame; cached per CAD. */
+const WHEEL_TEST=new WeakMap();
+function inDriveWheel(cad){
+  if(!cad) return ()=>false;
+  let f=WHEEL_TEST.get(cad); if(f) return f;
+  let ws=[];
+  try{ ws=(typeof driveFromCAD==="function"?driveFromCAD(cad,{front:"+x"}).wheels:[]).filter(w=>w.c&&w.axis); }catch(e){ ws=[]; }
+  f=p=>ws.some(w=>{ const a=w.axis, d=[p[0]-w.c[0],p[1]-w.c[1],p[2]-w.c[2]], t=d[0]*a[0]+d[1]*a[1]+d[2]*a[2];
+    return Math.hypot(d[0]-t*a[0],d[1]-t*a[1],d[2]-t*a[2])<=w.r+0.003&&Math.abs(t)<=(w.width||0.05)/2+0.004; });
+  WHEEL_TEST.set(cad,f); return f;
+}
 /* The group of every solid; a solid's group is the one its centroid falls in. */
 function solidGroups(cad,turretScale){
-  const own=mechOwner(cad,turretScale), ids=new Set(((cad&&cad.mechs)||[]).map(m=>m.id));
+  const own=mechOwner(cad,turretScale), ids=new Set(((cad&&cad.mechs)||[]).map(m=>m.id)), wheel=inDriveWheel(cad);
   // with Onshape mates each part's joint is known exactly (src/mates.js); a
   // part no joint carries is the frame's
   if(cad&&cad.mates) return ((cad&&cad.solids)||[]).map(s=>s.mech&&ids.has(s.mech)?s.mech:"chassis");
   return ((cad&&cad.solids)||[]).map(s=>{ if(!s.pts||!s.pts.length) return "chassis";
-    const g=own(solidCentroid(s)); return ids.has(g)?g:"chassis"; });
+    const c=solidCentroid(s); if(wheel(c)) return "chassis";
+    const g=own(c); return ids.has(g)?g:"chassis"; });
 }
 
 /* occt names the tree nodes, not always the meshes: the node that holds a
@@ -152,9 +167,11 @@ function tessAssign(cad,res,turretScale){
   const group=mt.solid.map((i,j)=>{
     if(i>=0) return sg[i];
     const b=mt.boxes[j]; if(!Number.isFinite(b.min[0])) return "chassis";
-    const g=own([0,1,2].map(k=>(b.min[k]+b.max[k])/2)); return ids.has(g)?g:"chassis";
+    const c=[0,1,2].map(k=>(b.min[k]+b.max[k])/2);
+    if(!cad.mates&&inDriveWheel(cad)(c)) return "chassis";
+    const g=own(c); return ids.has(g)?g:"chassis";
   });
-  return {group, solid:mt.solid, names:mt.names};
+  return {group, solid:mt.solid, names:mt.names, boxes:mt.boxes};
 }
 
 /* The model's edges, as Onshape draws them: the boundaries of B-rep faces.
