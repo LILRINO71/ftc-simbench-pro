@@ -243,6 +243,13 @@ const CadView={
   renderTree(){
     const body=$("#cadTreeBody"); if(!body) return;
     const V=View;
+    if(!V.exact&&typeof EXACT!=="undefined"&&EXACT.state!=="none"){
+      // a real STEP whose surfaces aren't in yet: say which, never "the sample"
+      const n=(CAD&&CAD.solids||[]).length;
+      body.innerHTML='<p class="cad-empty">'+(EXACT.state==="loading"
+        ? 'Loading the exact surfaces from your STEP (OpenCascade)… Until then its '+n+' parts are drawn as simplified shapes. Big assemblies can take a minute.'
+        : "The exact surfaces couldn't be loaded ("+esc(EXACT.msg||"unknown error")+"), so your STEP's "+n+" parts are drawn as simplified shapes. Joints, mass and physics are unaffected.")+'</p>';
+      $("#cadCount").textContent=n?String(n):""; return; }
     if(!V.exact){
       body.innerHTML='<p class="cad-empty">This robot is the built-in sample, drawn from simple shapes — it has no STEP file behind it. '+
         'Drop your own Onshape STEP export anywhere on the page, or:</p><div class="cad-empty"><button class="btn-sm primary" id="cadDemo" type="button">Open the demo robot</button>'+

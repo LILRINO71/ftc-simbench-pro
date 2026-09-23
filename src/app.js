@@ -1234,6 +1234,7 @@ function loadCAD(cad,label,cls){
   // one frame for everything (src/frame.js): the parser does this for STEP
   // files; the sample and older workspaces come through here
   canonicalizeCAD(cad,{up:OPTS.up});
+  EXACT={state:"none", msg:null};            // a STEP's exactGeometry() sets it loading right after
   CAD=cad;
   $("#cadStatus").textContent=label; $("#cadDrop").className="drop "+(cls||"ok");
   const parts=cad.solids&&cad.solids.length?cad.solids.length+" parts":(cad.points?cad.points.length.toLocaleString():"0")+" pts";
@@ -1286,16 +1287,20 @@ function parseAndLoad(){
    CDN the first time and runs off the main thread; until it answers — or if
    it can't (offline, blocked) — the robot stays drawn as simplified shapes,
    never blank. */
+let EXACT={state:"none", msg:null};        // the exact surfaces for the CAD panel: none (sample), loading, ok, failed
 function exactGeometry(cad,text){
   const note=$("#exactNote"); if(note){ note.textContent="loading exact geometry (OpenCascade) …"; note.className="hint"; }
+  EXACT={state:"loading", msg:null}; if(CadView.on) CadView.renderTree();
   Tess.run(text).then(res=>{
     if(CAD!==cad) return;                     // another file was dropped meanwhile
+    EXACT={state:res&&res.meshes&&res.meshes.length?"ok":"failed", msg:"the file has no solid surfaces to mesh"};
     const n=View.setExact(cad,res);
     if(CadView.on) CadView.renderTree();
     if(note) note.textContent=n?"Exact geometry: "+n+" surface meshes straight from the STEP file, in its own colours."
                               :"This STEP file has no solid surfaces to mesh, so the parts are drawn as simplified shapes.";
   }).catch(e=>{
     if(CAD!==cad) return;
+    EXACT={state:"failed", msg:e.message}; if(CadView.on) CadView.renderTree();
     if(note){ note.textContent="Exact geometry unavailable ("+e.message+") — showing simplified shapes. Everything else works the same."; note.className="hint warn"; }
   });
 }
