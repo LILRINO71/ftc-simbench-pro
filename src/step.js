@@ -641,7 +641,8 @@ function classifyMechs(mechs){
   const vert = a => Math.abs(a[2])>0.85;
   // only actuator-bearing mechanisms get a joint type inferred; the rest are
   // offered as mapping targets but stay out of the chain until typed by hand
-  const act = mechs.filter(m=>m.kind!=="fixed");
+  // an Onshape mate joint (src/mates.js) is measured, not guessed: leave it be
+  const act = mechs.filter(m=>m.kind!=="fixed"&&!m.fromMate);
   let yaw=null, lowest=1e18;
   for(const m of act){ if(m.pivot&&vert(m.axis)&&m.pivot[2]<lowest){lowest=m.pivot[2]; yaw=m;} }
   if(yaw) yaw.kind="revolute-yaw";
@@ -671,6 +672,7 @@ function classifyMechs(mechs){
     : span*0.5;
   if(nearEff && nd>reach) nearEff=null;
   for(const m of mechs){
+    if(m.fromMate) continue;
     m.inferred=true;
     m.dir=m.dir||1;
     m.leverOverride = (m.leverOverride===undefined)?null:m.leverOverride;

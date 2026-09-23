@@ -149,8 +149,16 @@ const {sessionFromBench, packSession, unpackSession} = (function(){
       name: str(at(s, "name"), C, "solid name"), part: str(at(s, "part"), C, "solid part number"),
       kind: str(at(s, "kind"), C, "solid kind") || "metal",
       size: C.s(num(at(s, "size"), 0, C, "solid size")),
-      pts: points(at(s, "pts"), C.caps.maxPointsPerSolid, C, "solid " + i + " points")
+      pts: points(at(s, "pts"), C.caps.maxPointsPerSolid, C, "solid " + i + " points"),
+      mech: str(at(s, "mech"), C, "solid joint")              // set by an Onshape mate import
     }));
+    // a joint's travel limits: metres for a slide (mm on file), radians for a turn
+    const limits = (m, lin) => {
+      const L = at(m, "limits");
+      if(!Array.isArray(L) || L.length !== 2) return null;
+      const one = v => v == null ? null : (lin ? C.s(num(v, 0, C, "mech limit")) : qd(num(v, 0, C, "mech limit")));
+      return [one(L[0]), one(L[1])];
+    };
     const mechs = list(at(v, "mechs"), C.caps.maxMechs, C, "cad.mechs").map(m => ({
       id: str(at(m, "id"), C, "mech id") || "mechanism",
       label: str(at(m, "label"), C, "mech label"),
@@ -167,8 +175,18 @@ const {sessionFromBench, packSession, unpackSession} = (function(){
       part: str(at(m, "part"), C, "mech part number"),
       partName: str(at(m, "partName"), C, "mech part name"),
       hasActuator: bool(at(m, "hasActuator")),
-      manual: bool(at(m, "manual")), inferred: bool(at(m, "inferred"))
+      manual: bool(at(m, "manual")), inferred: bool(at(m, "inferred")),
+      // from an Onshape mate import (src/mates.js)
+      alias: str(at(m, "alias"), C, "mech alias"),
+      limits: limits(m, /^(linear|linear-slide|prismatic)$/.test(str(at(m, "kind"), C, "mech kind") || "")),
+      couple: isObj(at(m, "couple")) ? {to: str(at(at(m, "couple"), "to"), C, "mech couple"),
+        ratio: qd(num(at(at(m, "couple"), "ratio"), 1, C, "mech couple ratio")), via: str(at(at(m, "couple"), "via"), C, "mech couple via")} : null,
+      fromMate: isObj(at(m, "fromMate")) ? {name: str(at(at(m, "fromMate"), "name"), C, "mate name"),
+        type: str(at(at(m, "fromMate"), "type"), C, "mate type"), id: str(at(at(m, "fromMate"), "id"), C, "mate id")} : null
     }));
+    for(const m of mechs){ if(!m.limits) delete m.limits; if(!m.couple) delete m.couple; if(!m.fromMate) delete m.fromMate; if(!m.alias) delete m.alias; }
+    for(const s of solids) if(!s.mech) delete s.mech;
+    const mt = at(v, "mates");
     return {
       name: str(at(v, "name"), C, "cad.name"),
       units: oneOf(at(v, "units"), ["METRE", "MILLIMETRE"], "METRE"),
@@ -185,6 +203,10 @@ const {sessionFromBench, packSession, unpackSession} = (function(){
       })),
       mechs: mechs,
       solids: solids,
+      mates: isObj(mt) ? {source: oneOf(at(mt, "source"), ["onshape"], "onshape"),
+        joints: Math.max(0, int(at(mt, "joints"), 0, C, "mates.joints")), matched: Math.max(0, int(at(mt, "matched"), 0, C, "mates.matched")),
+        parts: Math.max(0, int(at(mt, "parts"), 0, C, "mates.parts")), loops: Math.max(0, int(at(mt, "loops"), 0, C, "mates.loops")),
+        why: list(at(mt, "why"), 64, C, "mates.why").map(w => str(w, C, "mates note") || "")} : null,
       placements: list(at(v, "placements"), C.caps.maxPlacements, C, "cad.placements").map(p => ({
         nauo: str(at(p, "nauo"), C, "placement id"),
         parent: str(at(p, "parent"), C, "placement parent"),
@@ -302,9 +324,15 @@ const {sessionFromBench, packSession, unpackSession} = (function(){
       pivot: vecI(m.pivot), distalTo: m.distalTo ? vecI(m.distalTo) : null, cluster: flat(m.cluster),
       lever: mmI(m.lever), restAngleDeg: m.restAngleDeg,
       leverOverride: m.leverOverride == null ? null : mmI(m.leverOverride),
-      part: m.part, partName: m.partName, hasActuator: m.hasActuator, manual: m.manual, inferred: m.inferred
+      part: m.part, partName: m.partName, hasActuator: m.hasActuator, manual: m.manual, inferred: m.inferred,
+      alias: m.alias || null,
+      limits: m.limits ? m.limits.map(v => !Number.isFinite(v) ? null : (/^(linear|linear-slide|prismatic)$/.test(m.kind) ? mmI(v) : v)) : null,
+      couple: m.couple ? {to: m.couple.to, ratio: m.couple.ratio, via: m.couple.via || null} : null,
+      fromMate: m.fromMate ? {name: m.fromMate.name, type: m.fromMate.type, id: m.fromMate.id} : null
     })),
-    solids: cad.solids.map(s => ({name:s.name, part:s.part, kind:s.kind, size:mmI(s.size), pts:flat(s.pts)})),
+    solids: cad.solids.map(s => ({name:s.name, part:s.part, kind:s.kind, size:mmI(s.size), pts:flat(s.pts), mech:s.mech || null})),
+    mates: cad.mates ? {source: cad.mates.source, joints: cad.mates.joints, matched: cad.mates.matched,
+      parts: cad.mates.parts, loops: cad.mates.loops, why: cad.mates.why} : null,
     placements: cad.placements.map(p => ({nauo:p.nauo, parent:p.parent, child:p.child, loc:vecI(p.loc), axis:p.axis})),
     points: cad.points ? flat(cad.points) : null
   };

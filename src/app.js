@@ -564,7 +564,7 @@ function applyRig(r){
       CAD.mechs.push(m); byId[j.id]=m;
     }
     m.label=j.label||m.label||m.id;
-    if(j.kind) m.kind=j.kind;
+    if(j.kind) m.kind=normJointKind(j.kind);      // a saved alias (prismatic, linear-slide) is a linear slide
     if(j.parent) m.parent=j.parent;
     m.dir=j.dir||1;
     if(j.pivotMm) m.pivot=j.pivotMm.map(v=>v/1000);
@@ -639,7 +639,7 @@ function renderRig(){
   $("#rigChain").innerHTML=M.map(m=>{
     const carries=rigCarries(M,m.id), dev=deviceOn(m.id);
     const par=m.parent==="chassis"?"the frame":mlabel(M.filter(x=>x.id===m.parent)[0]||{id:m.parent});
-    return `<div class="chainrow"><span class="cn">${esc(mlabel(m))}</span> <span class="cj">${JOINT_KINDS[m.kind].label}</span>
+    return `<div class="chainrow"><span class="cn">${esc(mlabel(m))}</span> <span class="cj">${esc((JOINT_KINDS[m.kind]||{label:String(m.kind)}).label)}</span>
       ${dev?` <code>${esc(dev)}</code>`:` <span class="cj">no device</span>`}
       <div class="cc">mounted on ${esc(par)} — ${carries.length?"swings <b>"+carries.map(c=>esc(mlabel(M.filter(x=>x.id===c)[0]||{id:c}))).join("</b>, <b>")+"</b> with it":"carries nothing further"}</div></div>`;
   }).join("");

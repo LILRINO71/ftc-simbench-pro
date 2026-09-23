@@ -166,3 +166,51 @@ test('the URL box only ever builds links to onshape.com', () => {
     'javascript:alert(1)//onshape.com/documents/'])
     assert.equal(E.onshapeApiLinks(bad), null, bad);
 });
+
+test('the view draws a mate joint the way the sim stops it, and a cascade stage follows its leader', async () => {
+  const fs = await import('node:fs'), path = await import('node:path');
+  const { engineBundle } = await import('./load.mjs');
+  const root = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/(\w:)/, '$1')), '..');
+  const V = new Function('"use strict";\n' + engineBundle().replace(/^"use strict";\n/, '') + '\n' +
+    fs.readFileSync(path.join(root, 'src', 'view3d.js'), 'utf8') + '\nreturn { mechPose, mateClamp };')();
+  const cad = fresh();
+  E.applyOnshapeMates(cad, R.onshape.assembly, { features: R.onshape.features });
+  const arm = cad.mechs.find((m) => m.id === 'Arm Pivot'), lift = cad.mechs.find((m) => m.id === 'Lift Stage');
+  // a motor 0.5 output turns up: 3.14 rad, past the 2.1 rad limit
+  const pa = V.mechPose(arm, { kind: 'motor', revs: 0.5, act: 0, restPos: 0, tpr: 537.7 }, 0.5);
+  assert.ok(Math.abs(pa.ang - 2.1) < 1e-12, 'drawn at the limit, right-handed about the mate axis: ' + pa.ang);
+  // no lift-joint sign flip for a mate: a small positive turn draws positive
+  assert.ok(V.mechPose(arm, { kind: 'motor', revs: 0.1, act: 0, restPos: 0 }, 0.5).ang > 0);
+  const pl = V.mechPose(lift, { kind: 'motor', ticks: 10000, act: 0, restPos: 0, tpr: 537.7 }, 0.5);
+  assert.ok(Math.abs(pl.d - 0.28) < 1e-12, 'slide drawn at its 0.28 m limit');
+  const car = cad.mechs.find((m) => m.id === 'Lift Carriage');
+  assert.equal(car.couple.to, 'Lift Stage');
+  assert.equal(V.mateClamp(car, 0.5), 0.27, 'the follower stops at its own limit too');
+});
+
+test('a saved session keeps the mate joints: limits, the cascade, and which joint carries each part', () => {
+  const cad = fresh();
+  E.applyOnshapeMates(cad, R.onshape.assembly, { features: R.onshape.features });
+  const r = E.unpackSession(E.packSession(E.sessionFromBench({ cad })));
+  assert.equal(r.ok, true, r.error);
+  const back = r.session.cad;
+  assert.ok(back.mates && back.mates.joints === 4, 'the import summary survives');
+  assert.deepEqual(back.solids.map((s) => s.mech || null), cad.solids.map((s) => s.mech || null));
+  const by = (c, id) => c.mechs.find((m) => m.id === id);
+  assert.deepEqual(by(back, 'Lift Stage').limits.map((v) => +v.toFixed(4)), [0, 0.28]);
+  assert.ok(Math.abs(by(back, 'Arm Pivot').limits[1] - 2.1) < 1e-6);
+  assert.deepEqual(by(back, 'Lift Carriage').couple, { to: 'Lift Stage', ratio: 1, via: 'linear' });
+  assert.equal(by(back, 'Claw').fromMate.type, 'REVOLUTE');
+  // and a session with no mates is unchanged in shape
+  const plain = E.unpackSession(E.packSession(E.sessionFromBench({ cad: E.parseSTEP(buildRobot('arm-only').text) })));
+  assert.equal(plain.session.cad.mates, null);
+  assert.ok(plain.session.cad.mechs.every((m) => !('limits' in m) && !('couple' in m)));
+});
+
+test('re-typing the mechanisms (as opening a session does) leaves mate joints alone', () => {
+  const cad = fresh();
+  E.applyOnshapeMates(cad, R.onshape.assembly, { features: R.onshape.features });
+  const before = cad.mechs.map((m) => [m.id, m.kind, m.parent]);
+  E.classifyMechs(cad.mechs);
+  assert.deepEqual(cad.mechs.map((m) => [m.id, m.kind, m.parent]), before);
+});

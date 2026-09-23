@@ -706,8 +706,14 @@ const View={
       if(!m._g) continue;
       const dn=deviceOn(m.id);
       const s=dn?Sim.dev[dn]:null;
-      if(!s) continue;
-      const p=mechPose(m,s,this.size);
+      let p=s?mechPose(m,s,this.size):null;
+      // a joint tied to a driven one (a cascade stage, a gear, a rack) follows it
+      if(!p&&m.couple){
+        const L=this.cad.mechs.find(x=>x.id===m.couple.to), ln=L&&deviceOn(L.id), ls=ln&&Sim.dev[ln];
+        if(ls){ const lp=mechPose(L,ls,this.size), q=mateClamp(m,(lp.ang!=null?lp.ang:(lp.d||0))*m.couple.ratio);
+          p=normJointKind(m.kind)==="linear"?{d:q}:{ang:q}; }
+      }
+      if(!p) continue;
       if(p.ang!=null) m._g.quaternion.setFromAxisAngle(this.vAxis(m.axis), p.ang);
       else if(p.d!=null) m._g.position.copy(this.v3(m.pivot).add(this.vAxis(m.axis).multiplyScalar(p.d)));
     }
@@ -806,6 +812,15 @@ function deviceOn(mechId){
    would get, a slide at its maxExt. */
 function mechPose(m,s,size){
   const k=normJointKind(m.kind), dir=m.dir||1, travel=s.act-s.restPos;
+  // an Onshape mate: right-handed about the mate's own axis, inside its limits,
+  // exactly as the sim stops it (src/sim.js)
+  if(m.fromMate&&(k==="revolute-yaw"||k==="revolute-lift"||k==="linear")){
+    const lin=k==="linear";
+    let q=lin?(s.kind==="motor"?(+s.ticks||0)*slideMmPerTick(m,s.tpr)/1000:travel*(m.lever||size*0.3))
+             :(s.kind==="motor"?(+s.revs||0)/(+m.gear>0?+m.gear:1)*2*Math.PI:travel*(s.travelDeg||300)*Math.PI/180);
+    q=mateClamp(m,q*dir);
+    return lin?{d:q}:{ang:q};
+  }
   if(k==="revolute-yaw"||k==="revolute-lift"){
     const sgn=dir*(k==="revolute-lift"?-1:1);
     if(s.kind!=="motor") return {ang:travel*(s.travelDeg||300)*Math.PI/180*sgn};
@@ -818,4 +833,8 @@ function mechPose(m,s,size){
     return {d:Math.max(-lim,Math.min(lim,(+s.ticks||0)*slideMmPerTick(m,s.tpr)))/1000*dir};
   }
   return {};
+}
+function mateClamp(m,q){
+  const L=m.limits; if(!L) return q;
+  return Math.max(Number.isFinite(L[0])?L[0]:-Infinity, Math.min(Number.isFinite(L[1])?L[1]:Infinity, q));
 }

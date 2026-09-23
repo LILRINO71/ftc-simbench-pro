@@ -503,16 +503,10 @@ function rayCapsule(px,py,dx,dy,o){
 }
 
 /* ---- linear slides driven by a motor ---- */
-const SLIDE_MM_PER_REV=120;          // a 38 mm goBILDA spool: 120 mm of string per output turn
 const SLIDE_CARRIED_KG=0.10;         // what rides the carriage besides the payload
-const isLinearKind=k=>k==="linear"||k==="linear-slide"||k==="prismatic";
+const isLinearKind=k=>normJointKind(k)==="linear";
 // metres of travel per encoder tick: the joint's own (Onshape, or set by hand), else the spool guess
-function slideMPerTick(s){
-  const m=s.mech||{};
-  if(Number.isFinite(m.mPerTick)&&m.mPerTick>0) return m.mPerTick;
-  if(Number.isFinite(m.mmPerTick)&&m.mmPerTick>0) return m.mmPerTick/1000;
-  return SLIDE_MM_PER_REV/1000/(s.tpr||537.7);
-}
+function slideMPerTick(s){ return slideMmPerTick(s.mech,s.tpr)/1000; }   // the view draws with the same (src/step.js)
 // which sign of motor output raises the load: the joint's direction against
 // gravity; 0 for a slide that runs level (it carries nothing up)
 function slideLiftSign(m){

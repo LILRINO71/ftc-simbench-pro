@@ -225,7 +225,7 @@ headroom  ${ratio.toFixed(2)}×${ratio<1?"  ◄ SHORT":""}`;
       const carries=rigCarries(cad.mechs,m.id);
       const dev=Object.keys(map).filter(k=>map[k]===m.id)[0];
       return (mlabel(m)+"            ").slice(0,13)+
-             (JOINT_KINDS[m.kind].label+"              ").slice(0,15)+
+             ((JOINT_KINDS[m.kind]||{label:String(m.kind)}).label+"              ").slice(0,15)+
              (dev?dev:"—").padEnd(10)+
              (carries.length? "swings "+carries.map(c=>mlabel(cad.mechs.filter(x=>x.id===c)[0])).join(", ") : "carries nothing");
     }).join("\n");
