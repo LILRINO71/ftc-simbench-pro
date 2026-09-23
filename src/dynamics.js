@@ -205,7 +205,7 @@ function wheelLoads(props, accel, wheels, opts) {
   const n = ws.length;
   if (!n) return [];
 
-  const g = dynNum(opts.g, G);
+  const g = dynNum(opts.g, 9.80665);
   const m = dynNum(props.kg, 0);
   const W = m * g;
   const out = new Array(n).fill(0);
@@ -219,21 +219,36 @@ function wheelLoads(props, accel, wheels, opts) {
   const cx = dynNum(com.x, 0) - ax * h / g;
   const cy = dynNum(com.y, 0) - ay * h / g;
 
-  let mx = 0, my = 0;
-  for (const w of ws) { mx += dynNum(w && w.x, 0); my += dynNum(w && w.y, 0); }
-  mx /= n; my /= n;
+  let weights = new Array(n).fill(1);
+  if (n >= 6) {
+    const xs = ws.map(w => dynNum(w && w.x, 0));
+    const minX = Math.min(...xs), maxX = Math.max(...xs);
+    const tol = Math.max(0.01, (maxX - minX) * 0.1);
+    for (let i = 0; i < n; i++) {
+      if (xs[i] > minX + tol && xs[i] < maxX - tol) weights[i] = 2.0; // Center wheels carry double
+    }
+  }
+  let sumW = 0;
+  for (let i = 0; i < n; i++) sumW += weights[i];
+  const wFrac = weights.map(w => w / sumW);
+
+  let mwx = 0, mwy = 0;
+  for (let i = 0; i < n; i++) {
+    mwx += wFrac[i] * dynNum(ws[i] && ws[i].x, 0);
+    mwy += wFrac[i] * dynNum(ws[i] && ws[i].y, 0);
+  }
 
   let Sxx = 0, Syy = 0, Sxy = 0;
   const dx = new Array(n), dy = new Array(n);
   for (let i = 0; i < n; i++) {
-    dx[i] = dynNum(ws[i] && ws[i].x, 0) - mx;
-    dy[i] = dynNum(ws[i] && ws[i].y, 0) - my;
+    dx[i] = dynNum(ws[i] && ws[i].x, 0) - mwx;
+    dy[i] = dynNum(ws[i] && ws[i].y, 0) - mwy;
     Sxx += dx[i] * dx[i]; Syy += dy[i] * dy[i]; Sxy += dx[i] * dy[i];
   }
 
   // solve for the plane's tilt, skipping any axis the contacts don't span
   const tol = 1e-8;
-  const rx = cx - mx, ry = cy - my;
+  const rx = cx - mwx, ry = cy - mwy;
   let b = 0, c = 0;
   const det = Sxx * Syy - Sxy * Sxy;
   if (Sxx > tol && Syy > tol && Math.abs(det) > tol * Math.max(Sxx, Syy)) {
@@ -246,7 +261,7 @@ function wheelLoads(props, accel, wheels, opts) {
 
   let pos = 0;
   for (let i = 0; i < n; i++) {
-    const N = W * (1 / n + b * dx[i] + c * dy[i]);
+    const N = W * (wFrac[i] + b * dx[i] + c * dy[i]);
     out[i] = Number.isFinite(N) && N > 0 ? N : 0;
     pos += out[i];
   }

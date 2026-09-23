@@ -614,6 +614,8 @@ const JOINT_KINDS = {
   "revolute-yaw" :{label:"turret yaw",  hint:"swings everything above it around a vertical axis"},
   "revolute-lift":{label:"lift pivot",  hint:"raises and lowers what it carries — torque is checked here"},
   "linear"       :{label:"linear slide",hint:"extends along its axis"},
+  "linear-slide" :{label:"linear slide",hint:"extends along its axis (alias)"},
+  "prismatic"    :{label:"linear slide",hint:"extends along its axis (alias)"},
   "effector"     :{label:"end effector",hint:"grips or intakes; carries nothing further"},
   "fixed"        :{label:"fixed mount", hint:"does not move the structure"}
 };

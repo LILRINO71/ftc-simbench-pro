@@ -36,7 +36,10 @@ const GENERIC = {
   Speed: {fam:"generic speed servo", kind:"servo",role:"Speed", stallNm:1.40,sec60:0.16,travelDeg:300,guess:true},
   Servo: {fam:"unspecified servo",   kind:"servo",role:"Servo", stallNm:1.50,sec60:0.18,travelDeg:300,guess:true},
   Motor: {fam:"unspecified motor",   kind:"motor",role:"Motor", stallNm:2.38,rpm:312,ratio:19.2,guess:true},
-  CRServo:{fam:"continuous servo",   kind:"crservo",role:"CR",  stallNm:1.40,rpm:100,guess:true}
+  CRServo:{fam:"continuous servo",   kind:"crservo",role:"CR",  stallNm:1.40,rpm:100,guess:true},
+  DistanceSensor:{fam:"distance sensor",kind:"sensor",role:"DistanceSensor",guess:true},
+  TouchSensor:{fam:"touch sensor",kind:"sensor",role:"TouchSensor",guess:true},
+  ColorSensor:{fam:"color sensor",kind:"sensor",role:"ColorSensor",guess:true}
 };
 
 /* "// 6000 rpm goBILDA" above a motor: the person who built it said which one. */
@@ -87,10 +90,17 @@ function specDetect(dev, mech, trust){
   const cadSpec = mech && mech.part ? hwFromPart(mech.part, mech.partName) : null;
   const wantsMotor = /DcMotor|DcMotorEx/i.test(dev.type||"");
   const wantsCR = /CRServo/i.test(dev.type||"");
+  const wantsDist = /DistanceSensor/i.test(dev.type||"");
+  const wantsTouch = /TouchSensor/i.test(dev.type||"");
+  const wantsColor = /ColorSensor/i.test(dev.type||"");
 
   if(trust === "cad" && cadSpec) return Object.assign({src:"CAD"}, cadSpec);
 
   // --- code wins ---
+  if(wantsDist) return Object.assign({src:"code"}, GENERIC.DistanceSensor);
+  if(wantsTouch) return Object.assign({src:"code"}, GENERIC.TouchSensor);
+  if(wantsColor) return Object.assign({src:"code"}, GENERIC.ColorSensor);
+
   if(wantsMotor){
     const said=motorFromComment(dev.intent);
     if(said) return said;

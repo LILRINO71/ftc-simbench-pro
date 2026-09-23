@@ -28,9 +28,25 @@ function parseStatements(src, base, opts){
     while(i<src.length && /\s/.test(src[i])) i++;
     if(i>=src.length) break;
     if(src[i]==="{"){ const r=matchBlock(src,i); out.push.apply(out,parseStatements(src.slice(r[0],r[1]),base+r[0],opts)); i=r[1]+1; continue; }
-    const kw=/^(if|while|for|switch|do)\b/.exec(src.slice(i));
+    const kw=/^(if|while|for|switch|do|try)\b/.exec(src.slice(i));
     if(kw){
       const at=base+i;
+      if (kw[1]==="try") {
+         let startBrace = src.indexOf("{", i);
+         if (startBrace < 0) break;
+         let r = matchBlock(src, startBrace);
+         out.push.apply(out, parseStatements(src.slice(r[0], r[1]), base+r[0], opts));
+         i = r[1]+1;
+         while (i<src.length && /\s/.test(src[i])) i++;
+         while (src.startsWith("catch", i) || src.startsWith("finally", i)) {
+             let bStart = src.indexOf("{", i);
+             if (bStart < 0) break;
+             let bMatch = matchBlock(src, bStart);
+             i = bMatch[1]+1;
+             while (i<src.length && /\s/.test(src[i])) i++;
+         }
+         continue;
+      }
       const lp=src.indexOf("(",i);
       if(lp<0||kw[1]==="do"){ out.push({kind:"unknown",at,text:src.slice(i,i+40).trim(),why:"do/while loops inside the OpMode aren't simulated"}); break; }
       let d=0,j=lp;
@@ -40,6 +56,47 @@ function parseStatements(src, base, opts){
       let bodySrc,bodyAt,end;
       if(src[k]==="{"){ const r=matchBlock(src,k); bodySrc=src.slice(r[0],r[1]); bodyAt=base+r[0]; end=r[1]+1; }
       else { const sc=src.indexOf(";",k); if(sc<0) break; bodySrc=src.slice(k,sc+1); bodyAt=base+k; end=sc+1; }
+      
+      if(kw[1]==="for"){
+        const parts = cond.split(";");
+        const condStr = parts.length >= 2 ? parts[1].trim() : cond;
+        if(opts.auto){
+          out.push({kind:"while", at, cond:condStr, condAst:parseExpr(condStr), body:parseStatements(bodySrc,bodyAt)});
+        }else{
+          out.push({kind:"unknown",at,text:"for ("+cond.trim().slice(0,40)+")", why:"loops inside the OpMode loop aren't simulated"});
+        }
+        i=end; continue;
+      }
+      if(kw[1]==="switch"){
+        let switchSrc = bodySrc;
+        const caseRegex = /case\s+([^:]+):|default\s*:/g;
+        let mCase, lastIndex = -1, lastCond = null;
+        let caseBlocks = [];
+        while ((mCase = caseRegex.exec(switchSrc))) {
+           if (lastIndex !== -1) caseBlocks.push({cond: lastCond, src: switchSrc.slice(lastIndex, mCase.index)});
+           lastCond = mCase[1] ? mCase[1].trim() : null;
+           lastIndex = mCase.index + mCase[0].length;
+        }
+        if (lastIndex !== -1) caseBlocks.push({cond: lastCond, src: switchSrc.slice(lastIndex)});
+        let elseStmts = [];
+        let rootIf = null, currIf = null;
+        for (let c=0; c<caseBlocks.length; c++) {
+            let cb = caseBlocks[c];
+            let bSrc = cb.src.replace(/break\s*;/g, "").trim();
+            if (cb.cond === null) {
+                elseStmts = parseStatements(bSrc, bodyAt + switchSrc.indexOf(cb.src));
+            } else {
+                let exprStr = cond + " == " + cb.cond;
+                let ifNode = {kind:"if", at: base+i, cond: exprStr, condAst: parseExpr(exprStr), then: parseStatements(bSrc, bodyAt + switchSrc.indexOf(cb.src)), else: null};
+                if (!rootIf) rootIf = ifNode; else currIf.else = [ifNode];
+                currIf = ifNode;
+            }
+        }
+        if (currIf) { currIf.else = elseStmts.length ? elseStmts : null; out.push(rootIf); }
+        else out.push.apply(out, elseStmts);
+        i=end; continue;
+      }
+      
       if(kw[1]!=="if"){
         // in an autonomous sequence a while loop is a wait: run the body each
         // tick until the condition goes false
@@ -48,7 +105,7 @@ function parseStatements(src, base, opts){
           i=end; continue;
         }
         out.push({kind:"unknown",at,text:kw[1]+" ("+cond.trim().slice(0,48)+")",
-          why:kw[1]==="switch"?"switch statements aren't simulated":"loops inside the OpMode loop aren't simulated"});
+          why:"loops inside the OpMode loop aren't simulated"});
         i=end; continue;
       }
       // the sample autos wrap their whole sequence in `if (opModeIsActive())`
@@ -109,7 +166,7 @@ function splitArgsTop(s){
 function classifyStatement(s){
   if(!s) return null;
   let m;
-  if((m=/^([A-Za-z_$][\w$]*)\s*\.\s*(setPosition|setPower|setVelocity)\s*\(([\s\S]*)\)$/.exec(s)))
+  if((m=/^((?:[A-Za-z_$][\w$]*)(?:\s*\.\s*[A-Za-z_$][\w$]*\s*\([^)]*\))*)\s*\.\s*(setPosition|setPower|setVelocity)\s*\(([\s\S]*)\)$/.exec(s)))
     return {kind:"call", dev:m[1], op:m[2], expr:m[3].trim(), ast:parseExpr(m[3])};
   if(/^telemetry\s*\./.test(s)) return null;
   if(/^(idle|waitForStart|telemetry\.update)\s*\(\s*\)$/.test(s)) return null;
@@ -137,7 +194,7 @@ function classifyStatement(s){
     return {kind:"unknown", text:s, why:"objects of type "+m[1]+" aren't simulated"};
   }
   // any other method on an object: setDirection, setMode, setPID, resetYaw …
-  if((m=/^([A-Za-z_$][\w$]*)\s*\.\s*([A-Za-z_$][\w$]*)\s*\(([\s\S]*)\)$/.exec(s))){
+  if((m=/^((?:[A-Za-z_$][\w$]*)(?:\s*\.\s*[A-Za-z_$][\w$]*\s*\([^)]*\))*)\s*\.\s*([A-Za-z_$][\w$]*)\s*\(([\s\S]*)\)$/.exec(s))){
     const raw=m[3];
     return {kind:"objcall", obj:m[1], meth:m[2], raw,
             args:splitArgsTop(raw).map(x=>parseExpr(x))};

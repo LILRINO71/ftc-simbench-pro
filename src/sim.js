@@ -23,8 +23,10 @@ const Sim={
     for(const d of code.devices){
       const mech=cad.mechs.filter(m=>m.id===map[d.name])[0]||null;
       const spec=specFor(d,mech,opts.trust);
-      const isMotor=spec.kind==="motor"||spec.kind==="crservo";
-      this.dev[d.name]={kind:isMotor?"motor":"servo", mech, spec,
+      let kind = spec.kind;
+      if (kind === "crservo") kind = "motor";
+      const isMotor=kind==="motor";
+      this.dev[d.name]={kind, mech, spec,
         cmd:isMotor?0:0.5, act:isMotor?0:0.5, revs:0, ticks:0, stalled:false,
         reversed:false, mode:"run", target:0,
         tpr: 28*(spec.ratio||19.2),        // goBILDA: 28 counts per motor rev
@@ -101,12 +103,66 @@ const Sim={
       },
       device(name,meth){
         const s=self.dev[name]; if(!s) return 0;
-        if(meth==="getCurrentPosition") return Math.round(s.ticks);
+
+        if(s.spec.role === "DistanceSensor" && meth==="getDistance"){
+          const H = Field.half();
+          const cos = Math.cos(self.chassis.h), sin = Math.sin(self.chassis.h);
+          let minDist = 20;
+          if (cos > 1e-6) minDist = Math.min(minDist, (H - self.chassis.x) / cos);
+          if (cos < -1e-6) minDist = Math.min(minDist, (-H - self.chassis.x) / cos);
+          if (sin > 1e-6) minDist = Math.min(minDist, (H - self.chassis.y) / sin);
+          if (sin < -1e-6) minDist = Math.min(minDist, (-H - self.chassis.y) / sin);
+          for(const o of self.obstacles||[]){
+            for(let d=0; d<minDist; d+=0.05) {
+               const px = self.chassis.x + d*cos, py = self.chassis.y + d*sin;
+               const L2 = (o.b[0]-o.a[0])**2 + (o.b[1]-o.a[1])**2;
+               let t = 0;
+               if (L2 > 1e-12) t = Math.max(0, Math.min(1, ((px-o.a[0])*(o.b[0]-o.a[0]) + (py-o.a[1])*(o.b[1]-o.a[1])) / L2));
+               const projx = o.a[0] + t*(o.b[0]-o.a[0]), projy = o.a[1] + t*(o.b[1]-o.a[1]);
+               if ((px-projx)**2 + (py-projy)**2 <= o.r*o.r) { minDist = d; break; }
+            }
+          }
+          return minDist * 100;
+        }
+
+        if(s.spec.role === "TouchSensor" && meth==="isPressed"){
+          if (self.bump) return 1;
+          const H = Field.half(), fp = self.footprint;
+          const c=Math.abs(Math.cos(self.chassis.h)), sin=Math.abs(Math.sin(self.chassis.h));
+          if (Math.abs(self.chassis.x) + c*fp.hx+sin*fp.hy >= H - 0.05) return 1;
+          if (Math.abs(self.chassis.y) + sin*fp.hx+c*fp.hy >= H - 0.05) return 1;
+          if(typeof capsulePush === "function"){
+             for(const o of self.obstacles||[]){
+               if (capsulePush(self.chassis, {hx:fp.hx+0.05, hy:fp.hy+0.05, ox:fp.ox, oy:fp.oy}, o)) return 1;
+             }
+          }
+          return 0;
+        }
+
+        if(s.spec.role === "ColorSensor"){
+          let r=120, g=120, b=120;
+          if(Field.ok) {
+            const zone = Field.zoneAt(self.chassis.x/0.0254, self.chassis.y/0.0254);
+            if (zone === "red LOADING ZONE") { r=200; g=50; b=50; }
+            else if (zone === "blue LOADING ZONE") { r=50; g=50; b=200; }
+            else if (zone === "red side") { r=140; }
+            else if (zone === "blue side") { b=140; }
+          }
+          if (meth==="red") return r;
+          if (meth==="green") return g;
+          if (meth==="blue") return b;
+          if (meth==="alpha") return 255;
+        }
+
+        if(meth==="getCurrentPosition") return Math.round((s.ticks - (s.offset||0)) * (s.reversed ? -1 : 1));
         if(meth==="getTargetPosition") return s.target;
         if(meth==="getPosition") return s.cmd;
         if(meth==="getPower") return s.cmd;
-        if(meth==="getVelocity") return (s.spec.rpm||300)*s.act*s.tpr/60;
-        if(meth==="isBusy") return (s.mode==="rtp"&&Math.abs(s.target-s.ticks)>10)?1:0;
+        if(meth==="getVelocity") return (s.lastDt ? (s.ticks - (s.lastTicks||0))/s.lastDt : 0) * (s.reversed ? -1 : 1);
+        if(meth==="isBusy"){
+          const currentTicks = (s.ticks - (s.offset||0)) * (s.reversed ? -1 : 1);
+          return (s.mode==="rtp"&&Math.abs(s.target-currentTicks)>10)?1:0;
+        }
         return 0;
       },
       pid(name,meth,a){ return self.pidOp(name,meth,a); },
@@ -159,7 +215,7 @@ const Sim={
         else if(s&&st.meth==="setTargetPosition") s.target=evalNode(st.args[0],env);
         else if(s&&st.meth==="setMode"){
           const raw=st.raw||"";
-          if(/STOP_AND_RESET_ENCODER/.test(raw)){ s.ticks=0; s.revs=0; s.cmd=0; }
+          if(/STOP_AND_RESET_ENCODER/.test(raw)){ s.revs=0; s.ticks=0; s.offset=0; s.cmd=0; }
           else if(/RUN_TO_POSITION/.test(raw)) s.mode="rtp";
           else if(/RUN_USING_ENCODER|RUN_WITHOUT_ENCODER/.test(raw)) s.mode="run";
         }
@@ -207,23 +263,45 @@ const Sim={
     for(const name in this.dev){
       const s=this.dev[name];
       if(s.kind==="motor"){
+        s.lastDt = dt;
+        s.lastTicks = s.ticks;
         let drive=s.cmd;
         if(s.mode==="rtp"){
           /* RUN_TO_POSITION: the hub's own loop, capped by the commanded power.
              Start slowing inside the distance the motor needs to stop from that
              power — a fixed small band overshoots badly at speed. */
-          const err=s.target-s.ticks;
+          const currentTicks = (s.ticks - (s.offset||0)) * (s.reversed ? -1 : 1);
+          const err=s.target-currentTicks;
           const perSec=(s.spec.rpm||300)/60*s.tpr;           // ticks/s at full power
           const stop=Math.abs(s.cmd)*Math.abs(s.cmd)*perSec/(2*SLEW);
           const band=Math.max(8,1.8*stop);
-          drive=Math.abs(s.cmd)*Math.max(-1,Math.min(1,err/band));
+          const userDrive=Math.abs(s.cmd)*Math.max(-1,Math.min(1,err/band));
+          drive = userDrive * (s.reversed ? -1 : 1);
         }
         const slew=SLEW*dt;
         s.act += Math.sign(drive-s.act)*Math.min(Math.abs(drive-s.act),slew);
         const rpm=(s.spec.rpm||300)*s.act;
         s.revs += rpm/60*dt;
         s.ticks = s.revs*s.tpr;                 // what getCurrentPosition() reads
-        s.stalled=false;
+
+        const isLin = s.mech && (s.mech.kind==="linear"||s.mech.kind==="linear-slide"||s.mech.kind==="prismatic");
+        if(isLin){
+          const mmPerTick = s.mech.mmPerTick || 1;
+          const minExt = s.mech.minExt || 0;
+          const maxExt = s.mech.maxExt || 1000;
+          let ext = s.ticks * mmPerTick;
+          if (ext < minExt) { ext = minExt; s.ticks = ext/mmPerTick; s.revs = s.ticks/s.tpr; s.act = 0; s.stalled = true; }
+          if (ext > maxExt) { ext = maxExt; s.ticks = ext/mmPerTick; s.revs = s.ticks/s.tpr; s.act = 0; s.stalled = true; }
+          
+          if(s.spec.stallNm){
+            const distal = (this.opts.payloadKg||0) + 0.1;
+            const forceReq = distal * 9.81 * Math.max(0, s.mech.axis ? s.mech.axis[2] : 1);
+            const r = (s.tpr * mmPerTick / 1000) / (2 * Math.PI);
+            const tauReq = forceReq * r;
+            if (tauReq > s.spec.stallNm * (this.opts.duty||1)) { s.stalled = true; s.act = 0; }
+          }
+        }
+        s.stalled=s.stalled||false;
         continue;
       }
       const rate=60/(s.sec60*s.travelDeg);
@@ -239,8 +317,33 @@ const Sim={
       }
       s.act=want;
     }
+    this.updateCOM();
     this.driveChassis(dt);
     Shots.tick(dt,this.chassis);
+  },
+  updateCOM(){
+    if(!this.rig || !this.rig.props) return;
+    let dx=0, dy=0, dz=0;
+    for(const name in this.dev){
+      const s = this.dev[name];
+      const m = s.mech;
+      if(m && (m.kind==="linear"||m.kind==="linear-slide"||m.kind==="prismatic")){
+         let d = 0;
+         if (s.kind === "motor") d = s.ticks * (m.mmPerTick||1) / 1000 * (m.dir||1);
+         else d = (s.act-s.restPos)*(m.lever||0.3)*(m.dir||1);
+         const distalKg = (this.opts.payloadKg||0) + 0.1;
+         const totalKg = this.rig.props.cadKg || this.rig.props.kg || 12;
+         if (m.axis && totalKg > 0) {
+            dx += d * m.axis[0] * (distalKg / totalKg);
+            dy += d * m.axis[1] * (distalKg / totalKg);
+            dz += d * m.axis[2] * (distalKg / totalKg);
+         }
+      }
+    }
+    const c = this.rig.props.baseCom || this.rig.props.com;
+    if(!this.rig.props.baseCom) this.rig.props.baseCom = {x:c.x, y:c.y, z:c.z};
+    this.rig.props.com = {x: c.x + dx, y: c.y + dy, z: c.z + dz};
+    this.rig.props.comHeight = this.rig.props.com.z;
   },
   driveChassis(dt){
     const dtn=this.drivetrain;
@@ -445,7 +548,7 @@ function buildRig(cad,dtn,base,dev,opts){
     if(!steer.some(Boolean)) steer=null;
   }
   const sw=o.swerve||{};
-  return {props, drive:{kind, wheels, from:g0(geo)}, motors, devs, gear:1, steer,
+  return {props, drive:{kind, wheels, from:g0(geo)}, motors, devs, gear:(Number.isFinite(o.gear)&&o.gear>0)?o.gear:1, steer,
           steerCfg:{zero:Number.isFinite(sw.zero)?sw.zero:0.5, travel:(Number.isFinite(sw.travelDeg)?sw.travelDeg:180)*Math.PI/180, sense:sw.sense===-1?-1:1},
           mu:(Number.isFinite(o.mu)&&o.mu>0)?o.mu:undefined};
 }

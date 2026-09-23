@@ -706,11 +706,22 @@ const View={
       const s=dn?Sim.dev[dn]:null;
       if(!s) continue;
       const travel=(s.act-s.restPos);
+      const isLin = m.kind==="linear"||m.kind==="linear-slide"||m.kind==="prismatic";
       if(m.kind==="revolute-yaw"||m.kind==="revolute-lift"){
-        const ang=travel*(s.travelDeg||300)*Math.PI/180*(m.dir||1)*(m.kind==="revolute-lift"?-1:1);
+        let ang = 0;
+        if (s.kind === "motor") {
+          ang = s.revs * (m.gear || 1) * 2 * Math.PI * (m.dir||1) * (m.kind==="revolute-lift"?-1:1);
+        } else {
+          ang = travel*(s.travelDeg||300)*Math.PI/180*(m.dir||1)*(m.kind==="revolute-lift"?-1:1);
+        }
         m._g.quaternion.setFromAxisAngle(this.vAxis(m.axis), ang);
-      }else if(m.kind==="linear"){
-        const d=travel*(m.lever||this.size*0.3)*(m.dir||1);
+      }else if(isLin){
+        let d = 0;
+        if (s.kind === "motor") {
+          d = s.ticks * (m.mmPerTick || 1) / 1000 * (m.dir||1);
+        } else {
+          d = travel*(m.lever||this.size*0.3)*(m.dir||1);
+        }
         m._g.position.copy(this.v3(m.pivot).add(this.vAxis(m.axis).multiplyScalar(d)));
       }
     }
