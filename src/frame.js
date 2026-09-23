@@ -48,9 +48,9 @@ function frameWheels(solids){
     if(!s||!s.pts||s.pts.length<4||!dtIsWheel(s)) continue;
     const g=dtWheelGeom(s.pts);
     if(!(g.r>0.012&&g.r<0.16)||g.round<0.75||g.width>2.2*g.r) continue;
-    out.push(g);
+    out.push(dtGrowWheel(g,solids));                  // a hub and its rollers are one wheel
   }
-  if(out.length>=2) return out;
+  if(out.length>=2) return dtUniqueWheels(out,g=>g);
   const byShape=dtShapeWheels(solids,null);
   return byShape?byShape.wheels.map(c=>c.g):out;
 }

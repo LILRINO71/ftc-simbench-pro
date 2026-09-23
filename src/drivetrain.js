@@ -115,6 +115,45 @@ function dtWheelGeom(pts){
   return {c, axis:pr.vec[2], r:big/2, width:E[2][0], round:big>0?Math.min(a,b)/big:0};
 }
 
+/* A wheel is often several parts. goBILDA's 96 mm mecanum is a 53 mm hub
+   ("Wheel Core") with ten rollers, each its own part; a traction wheel can be
+   a hub inside a separate tread. The rollers are too slim to pass as wheels,
+   so the hub alone was taken for the wheel: the floor sat at its bottom (the
+   robot sank 22 mm) and the radius came out 26.5 mm instead of 48. Grow the
+   wheel to everything wheel-like packed round its own axle: rollers, tread,
+   slant plates. Returns a new geometry, or the one given. */
+const DT_WHEELBIT=/roller|tread|tire|tyre|slant plate|side plate|wheel/i;
+function dtGrowWheel(g,solids){
+  const a=g.axis, rad=p=>{ const d=[p[0]-g.c[0],p[1]-g.c[1],p[2]-g.c[2]], t=dtDot(d,a);
+    return [Math.hypot(d[0]-t*a[0],d[1]-t*a[1],d[2]-t*a[2]), t]; };
+  let R=g.r, lo=-g.width/2, hi=g.width/2, n=0;
+  for(const s of solids||[]){
+    if(!s||!s.pts||s.pts.length<4) continue;
+    if(!((s.kind==="wheel")||DT_WHEELBIT.test((s.name||"")+" "+(s.part||"")))||DT_NOTWHEEL.test(s.name||"")) continue;
+    // the part's own centre: round the axle, within a wheel's width of the hub
+    const c=dtCentroid(s.pts), [cr,ct]=rad(c);
+    if(cr>Math.max(0.06,1.8*g.r)||Math.abs(ct)>Math.max(0.04,g.width)) continue;
+    let pr=0, plo=Infinity, phi=-Infinity;
+    for(const p of s.pts){ const [r,t]=rad(p); if(r>pr) pr=r; if(t<plo) plo=t; if(t>phi) phi=t; }
+    if(pr>0.16) continue;                              // not part of any FTC wheel
+    if(pr>R){ R=pr; } if(plo<lo) lo=plo; if(phi>hi) hi=phi; n++;
+  }
+  if(n<2||R<g.r*1.12) return g;
+  const mid=(lo+hi)/2;
+  return Object.assign({},g,{c:[g.c[0]+a[0]*mid,g.c[1]+a[1]*mid,g.c[2]+a[2]*mid], r:R, width:hi-lo, grown:n});
+}
+/* The same wheel found twice (a hub and its tread both named as wheels):
+   keep the bigger. */
+function dtUniqueWheels(list,get){
+  const out=[];
+  for(const x of list){
+    const g=get(x), same=out.findIndex(y=>{ const h=get(y);
+      return Math.hypot(h.c[0]-g.c[0],h.c[1]-g.c[1],h.c[2]-g.c[2])<Math.max(0.01,0.3*Math.min(g.r,h.r))&&Math.abs(dtDot(h.axis,g.axis))>0.95; });
+    if(same<0) out.push(x); else if(g.r>get(out[same]).r) out[same]=x;
+  }
+  return out;
+}
+
 /* The wheels actually on the ground: bottom (centre along up, less radius)
    within a few millimetres of the lowest bottom. The tolerance covers a
    drop-centre 6WD (~3 mm) and tread that isn't modelled perfectly round. */
@@ -343,7 +382,7 @@ function driveFromCAD(cad,opts){
     return nothing("The CAD has no part solids, so there is nothing to read a drivetrain from.");
   }
   const cand=solids.filter(dtIsWheel);
-  const wheelOf=(s,g)=>({name:s.name||"", part:s.part||null, c:g.c, axis:g.axis, r:g.r, width:g.width,
+  const wheelOf=(s,g)=>({name:s.name||"", part:s.part||null, c:g.c, axis:g.axis, r:g.r, width:g.width, grown:g.grown||0,
              x:0, y:0, z:0, ax:[0,0,0], skew:0, roller:0, steer:false, corner:null, alpha:0});
 
   // ---- each candidate as a cylinder, with the obvious non-wheels dropped
@@ -352,8 +391,12 @@ function driveFromCAD(cad,opts){
     const g=dtWheelGeom(s.pts);
     // 24 mm to 320 mm diameter, round across the axle, and wider across than along it
     if(!(g.r>0.012&&g.r<0.16) || g.round<0.75 || g.width>2.2*g.r){ odd++; continue; }
-    ws.push(wheelOf(s,g));
+    ws.push(wheelOf(s,dtGrowWheel(g,solids)));
   }
+  ws=dtUniqueWheels(ws,w=>w);
+  const grown=ws.filter(w=>w.grown);
+  if(grown.length) why.push(grown.length+" wheel"+(grown.length===1?" is":"s are")+" built from several parts (a hub with rollers or a tread round it); each was measured to its outer edge, "+
+    (Math.max.apply(null,grown.map(w=>w.r))*2000).toFixed(0)+" mm across, not the hub's size.");
   if(odd) why.push(odd+" wheel-named part(s) are the wrong shape for a wheel (too small, too big, not round, or longer than they are wide) and were dropped.");
   // no name vouches for two wheels: read them off the shapes instead
   const byShape=ws.length<2 ? dtShapeWheels(solids,F.up) : null;
