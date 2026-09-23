@@ -58,6 +58,9 @@ const solidCentroid=s=>{ const c=[0,0,0]; for(const p of s.pts){ c[0]+=p[0]; c[1
 /* The group of every solid; a solid's group is the one its centroid falls in. */
 function solidGroups(cad,turretScale){
   const own=mechOwner(cad,turretScale), ids=new Set(((cad&&cad.mechs)||[]).map(m=>m.id));
+  // with Onshape mates each part's joint is known exactly (src/mates.js); a
+  // part no joint carries is the frame's
+  if(cad&&cad.mates) return ((cad&&cad.solids)||[]).map(s=>s.mech&&ids.has(s.mech)?s.mech:"chassis");
   return ((cad&&cad.solids)||[]).map(s=>{ if(!s.pts||!s.pts.length) return "chassis";
     const g=own(solidCentroid(s)); return ids.has(g)?g:"chassis"; });
 }

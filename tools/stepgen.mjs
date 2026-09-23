@@ -522,8 +522,127 @@ export const ROBOTS = {
       inst(part('Claw Block', [box([0, 0, 0], [0.06, 0.08, 0.05])], COL.orange, 0.12), frame([0.26, 0, 0.170]))
     ];
     return { root: asm('Arm Test Stand', kids), units: 'mm', V: V_ZUP, b: { wheels: [], kind: 'none', r: 0 }, front: '+x', up: '+z', note: 'no drivetrain: an arm on a plate; the bench must draw a base under it' };
+  },
+  /* A robot with its Onshape mates: mecanum base, a two-stage slide whose
+     carriage follows stage 1 through a LINEAR relation, an arm on a
+     revolute at the carriage, and a claw finger on a revolute at the arm's
+     end. Mates live both in the root and inside the subassemblies, as they do
+     in a real Onshape document. buildRobot writes the matching assembly
+     definition (what GET /assemblies/.../e/... returns) alongside the STEP. */
+  mated: () => {
+    const b = mecanumBase();
+    const kids = flatten(b);
+    const tag = (i, t) => Object.assign(i, { tag: t });
+    const rail = part('Slide Rail', [box([0, 0, 0.15], [0.030, 0.030, 0.300])], COL.alu, 0.12);
+    const st1 = part('Slide Stage 1', [box([0, 0, 0.15], [0.024, 0.024, 0.300])], COL.alu, 0.10);
+    const car = part('Slide Carriage', [box([0, 0, 0.03], [0.050, 0.050, 0.060])], COL.alu, 0.08);
+    const lift = asm('Lift', [
+      tag(inst(rail, IDF), 'rail'),
+      tag(inst(st1, frame([0.030, 0, 0.020])), 'stage1'),
+      tag(inst(car, frame([0.060, 0, 0.030])), 'carriage'),
+      tag(inst(motor5203('goBILDA 5203 Lift Motor 5203-2402-0019'), frame([-0.035, 0, 0.060], [0, 0, -1])), 'liftMotor')
+    ]);
+    const link = uChannel(0.250, '1120 Series U-Channel Arm 250mm');
+    const armAsm = asm('Arm', [
+      tag(inst(link, frame([0, -0.024, 0], [1, 0, 0], [0, 0, 1])), 'link'),
+      tag(inst(servo(), frame([0.020, 0.040, 0])), 'armServo'),
+      tag(inst(part('Claw Body', [box([0, 0, 0], [0.040, 0.060, 0.040])], COL.orange, 0.09), frame([0.270, 0, 0])), 'clawBody'),
+      tag(inst(part('Claw Finger', [box([0.020, 0, 0], [0.040, 0.010, 0.030])], COL.orange, 0.02), frame([0.290, 0.020, 0])), 'finger')
+    ]);
+    kids.push(tag(inst(lift, frame([-0.100, 0, 0.080])), 'Lift'), tag(inst(armAsm, frame([0.010, 0, 0.170])), 'Arm'));
+    // mate frames in robot coordinates: origin, z axis (the joint axis), x axis
+    const mates = [
+      { name: 'Fastened 1', type: 'FASTENED', a: ['Lift', 'rail'], b: ['1120 Series U-Channel 448mm Left Rail'], o: [-0.100, 0, 0.080], z: [0, 0, 1] },
+      { name: 'Lift Stage', type: 'SLIDER', in: 'Lift', a: ['rail'], b: ['stage1'], o: [-0.085, 0, 0.100], z: [0, 0, 1], limits: [0, 0.28] },
+      { name: 'Lift Carriage', type: 'SLIDER', in: 'Lift', a: ['stage1'], b: ['carriage'], o: [-0.040, 0, 0.110], z: [0, 0, 1], limits: [0, 0.27] },
+      { name: 'Arm Pivot', type: 'REVOLUTE', a: ['Lift', 'carriage'], b: ['Arm', 'link'], o: [0.010, 0, 0.170], z: [0, 1, 0], x: [1, 0, 0], limits: [-Math.PI / 2, 2.1] },
+      { name: 'Fastened 2', type: 'FASTENED', in: 'Arm', a: ['link'], b: ['armServo'], o: [0.030, 0.040, 0.170], z: [0, 0, 1] },
+      { name: 'Fastened 3', type: 'FASTENED', in: 'Arm', a: ['link'], b: ['clawBody'], o: [0.280, 0, 0.170], z: [0, 0, 1] },
+      { name: 'Claw', type: 'REVOLUTE', in: 'Arm', a: ['clawBody'], b: ['finger'], o: [0.300, 0.020, 0.170], z: [0, 0, 1], limits: [0, 1.2] }
+    ];
+    const relations = [{ name: 'Cascade', type: 'LINEAR', mates: ['Lift Stage', 'Lift Carriage'], ratio: 1 }];
+    const joints = [
+      { name: 'Lift Stage', kind: 'linear', axis: [0, 0, 1], parent: 'chassis', carries: ['Slide Stage 1'] },
+      { name: 'Lift Carriage', kind: 'linear', axis: [0, 0, 1], parent: 'Lift Stage', carries: ['Slide Carriage'], couple: 'Lift Stage' },
+      { name: 'Arm Pivot', kind: 'revolute-lift', axis: [0, 1, 0], parent: 'Lift Carriage', carries: ['1120 Series U-Channel Arm 250mm', '2000 Series Dual Mode Servo (25-2) 2000-0025-0002', 'Claw Body'] },
+      { name: 'Claw', kind: 'revolute-yaw', axis: [0, 0, 1], parent: 'Arm Pivot', carries: ['Claw Finger'] }
+    ];
+    return { root: asm('Mated Robot', kids), units: 'mm', V: V_ZUP, b, front: '+x', up: '+z', mates, relations, joints,
+      note: 'mecanum base + two-stage slide + arm + claw, with the Onshape mates (sliders, revolutes, fastened, a linear relation) as the API returns them' };
   }
 };
+
+/* ---------------- the Onshape assembly definition ----------------
+   What GET /api/v10/assemblies/d/{did}/w/{wid}/e/{eid}?includeMateFeatures=true
+   returns for this tree: instances per assembly definition (ids belong to the
+   definition, so every instance of a subassembly shares them), every
+   occurrence with its world transform (4x4 row-major, metres), and the mate
+   features, each in the assembly that owns it, with each end's mate
+   connector given in that occurrence's own coordinates. */
+function onshapeAssembly(top, R) {
+  const defs = new Map(), idsOf = new Map();
+  const labels = (list) => { const seen = {}; return list.map((c) => { const n = c.p.name; seen[n] = (seen[n] || 0) + 1; return n + ' <' + seen[n] + '>'; }); };
+  const instList = (a) => {
+    if (!idsOf.has(a.uid)) idsOf.set(a.uid, a.children.map((c, i) => 'I' + a.uid.toString(36) + 'x' + i));
+    const ids = idsOf.get(a.uid), names = labels(a.children);
+    return a.children.map((c, i) => Object.assign({ id: ids[i], name: names[i], type: c.p.kind === 'asm' ? 'Assembly' : 'Part', suppressed: false,
+      documentId: 'DOC', elementId: 'E' + c.p.uid, configuration: 'default', fullConfiguration: 'default', documentMicroversion: 'MV', isStandardContent: false },
+      c.p.kind === 'asm' ? {} : { partId: 'P' + c.p.uid }));
+  };
+  const occurrences = [], tagPath = new Map(), world = new Map();
+  const T16 = (F) => [F.x[0], F.y[0], F.z[0], F.o[0], F.x[1], F.y[1], F.z[1], F.o[1], F.x[2], F.y[2], F.z[2], F.o[2], 0, 0, 0, 1];
+  const visit = (a, F, path, tags) => {
+    instList(a);
+    const ids = idsOf.get(a.uid);
+    a.children.forEach((c, i) => {
+      const Fw = compose(F, c.F), p = path.concat([ids[i]]), t = tags.concat([c.tag || c.p.name]);
+      occurrences.push({ path: p, transform: T16(Fw), fixed: false, hidden: false });
+      world.set(p.join('/'), Fw); tagPath.set(t.join('/'), p);
+      if (c.p.kind === 'asm') { if (!defs.has(c.p.uid)) defs.set(c.p.uid, c.p); visit(c.p, Fw, p, t); }
+    });
+  };
+  visit(top, IDF, [], []);
+  const features = new Map([[top.uid, []]]);
+  for (const uid of defs.keys()) features.set(uid, []);
+  const local = (Fw, M) => {                     // a world frame in an occurrence's own coordinates
+    const inv = (v) => [dot(v, Fw.x), dot(v, Fw.y), dot(v, Fw.z)];
+    return { origin: inv(sub(M.o, Fw.o)), xAxis: inv(M.x), yAxis: inv(M.y), zAxis: inv(M.z) };
+  };
+  const idOf = new Map();
+  R.mates.forEach((m, k) => {
+    const prefix = m.in ? m.in + '/' : '', owner = m.in ? tagPath.get(m.in) : [];
+    const ownerUid = m.in ? top.children.find((c) => c.tag === m.in).p.uid : top.uid;
+    const M = frame(m.o, m.z, m.x || null);
+    const ends = [m.a, m.b].map((e) => {
+      const full = tagPath.get(prefix + e.join('/'));
+      if (!full) throw new Error('mate ' + m.name + ': no occurrence ' + prefix + e.join('/'));
+      return { matedOccurrence: full.slice(owner.length), matedCS: local(world.get(full.join('/')), M) };
+    });
+    const id = 'F' + k;
+    idOf.set(m.name, { id, ownerUid });
+    features.get(ownerUid).push({ id, suppressed: false, featureType: 'mate', featureData: { name: m.name, mateType: m.type, matedEntities: ends } });
+  });
+  for (const r of R.relations || []) {
+    const [a, b] = r.mates.map((n) => idOf.get(n));
+    features.get(a.ownerUid).push({ id: 'R' + a.id + b.id, suppressed: false, featureType: 'mateRelation',
+      featureData: { name: r.name, relationType: r.type, mates: [{ featureId: a.id }, { featureId: b.id }], relationRatio: r.ratio, reverseDirection: false } });
+  }
+  const assembly = {
+    rootAssembly: { documentId: 'DOC', elementId: 'E' + top.uid, configuration: 'default', fullConfiguration: 'default', documentMicroversion: 'MV',
+      instances: instList(top), occurrences, features: features.get(top.uid), patterns: [] },
+    subAssemblies: [...defs.values()].map((a) => ({ documentId: 'DOC', elementId: 'E' + a.uid, configuration: 'default', fullConfiguration: 'default',
+      documentMicroversion: 'MV', instances: instList(a), features: features.get(a.uid), patterns: [] })),
+    parts: []
+  };
+  // mate limits, the way the features endpoint gives them
+  const q = (m, v) => m.type === 'SLIDER' ? (v * 1000) + ' mm' : (v * 180 / Math.PI) + ' deg';
+  const features2 = { features: R.mates.filter((m) => m.limits).map((m) => ({ message: { featureId: idOf.get(m.name).id, name: m.name, parameters: [
+    { message: { parameterId: 'limitsEnabled', value: true } },
+    { message: { parameterId: m.type === 'SLIDER' ? 'limitAxialZMin' : 'limitRotationMin', expression: q(m, m.limits[0]) } },
+    { message: { parameterId: m.type === 'SLIDER' ? 'limitAxialZMax' : 'limitRotationMax', expression: q(m, m.limits[1]) } }
+  ] } })) };
+  return { assembly, features: features2 };
+}
 
 /* Build one robot: place in CAD by V, bake structure if asked, compute truth. */
 export function buildRobot(name) {
@@ -538,7 +657,7 @@ export function buildRobot(name) {
       const p = Object.assign({}, c.p, { uid: ++PID + 100000, bake: F });
       return inst(p, IDF);
     }
-    return inst(c.p, F);
+    return Object.assign(inst(c.p, F), c.tag ? { tag: c.tag } : {});
   });
 
   // truth: extent of every solid, mass, leaf count, all in CAD coordinates
@@ -575,7 +694,8 @@ export function buildRobot(name) {
     bodies, partNames: [...partNames].sort()
   };
   const text = writeStep(top, { units: R.units, name });
-  return { text, truth };
+  if (R.joints) truth.joints = R.joints;
+  return { text, truth, onshape: R.mates ? onshapeAssembly(top, R) : null };
 }
 
 /* ---------------- OpenCascade check ---------------- */

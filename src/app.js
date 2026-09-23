@@ -1276,6 +1276,7 @@ function parseAndLoad(){
       const cad=parseSTEP(text,msg=>{ $("#cadStatus").textContent=msg; },{up:OPTS.up});
       cad.name=name;
       loadCAD(cad, name+" · "+mb+" MB · "+cad.mechs.length+" mechanism"+(cad.mechs.length===1?"":"s"), cad.mechs.length?"ok":"bad");
+      if(MATES.asm) applyMates();
       exactGeometry(cad,text);
     }catch(e){ $("#cadStatus").textContent="couldn't parse this STEP file — "+e.message; $("#cadDrop").className="drop bad"; }
     renderFrameNote();
@@ -1322,11 +1323,73 @@ function setRobotConfig(text,name){
   analyzeAll();
 }
 function takeRobotConfig(file){ readText(file,text=>setRobotConfig(text,file.name)); }
+/* ============================================================
+   ONSHAPE MATES — src/mates.js does the work; this is the panel.
+   The two JSON files come from Onshape's own API, opened in a tab that's
+   signed in to Onshape: no keys, nothing sent anywhere but Onshape.
+   ============================================================ */
+const MATES={asm:null, features:null, name:null, report:null};
+function takeMates(file){
+  readText(file,text=>{
+    let j; try{ j=JSON.parse(text); }catch(e){ $("#mateStatus").textContent=file.name+" isn't JSON — save the page Onshape shows as a .json file."; $("#mateDrop").className="drop bad"; return; }
+    if(j&&j.rootAssembly){ MATES.asm=j; MATES.name=file.name; }
+    else if(j&&(Array.isArray(j.features)||Array.isArray(j))) MATES.features=j;
+    else { $("#mateStatus").textContent=file.name+" isn't an Onshape assembly definition or features list."; $("#mateDrop").className="drop bad"; return; }
+    applyMates();
+  });
+}
+function applyMates(){
+  const st=$("#mateStatus"), drop=$("#mateDrop"), note=$("#mateNote"), pill=$("#matePill");
+  if(!MATES.asm){ st.textContent=MATES.features?"Got the mate limits. Now drop the assembly definition.":"Drop the assembly definition, and the features file too if you want limits."; return; }
+  if(!CAD||!(CAD.solids||[]).some(s=>s.occT)){
+    st.textContent="Got "+MATES.name+". Load the STEP of the same assembly and the mates apply to it."; drop.className="drop"; return;
+  }
+  try{
+    const rep=applyOnshapeMates(CAD,MATES.asm,{features:MATES.features});
+    MATES.report=rep;
+    recomputeChain(CAD.mechs);
+    View.hiddenParts=View.hiddenParts||new Set();
+    View.load(CAD); if(View.exact) View.applyExact();
+    if(CadView.on) CadView.renderTree();
+    if(CODE){ MAP=autoMap(CODE.devices,CAD.mechs); applyDeviceMemory(); rebuild(); }
+    pill.textContent=rep.joints+" joint"+(rep.joints===1?"":"s"); pill.className="pill ok";
+    st.textContent=MATES.name+" · "+rep.matched+" of "+rep.parts+" parts matched"+(MATES.features?" · limits":"");
+    drop.className="drop ok"; $("#mateClear").hidden=false;
+    note.innerHTML=rep.why.map(w=>"<li>"+esc(w)+"</li>").join("");
+  }catch(e){
+    st.textContent="Couldn't apply the mates — "+e.message; drop.className="drop bad"; pill.textContent="error"; pill.className="pill bad";
+  }
+  Status.render&&Status.render();
+}
+function clearMates(){
+  MATES.asm=MATES.features=MATES.name=MATES.report=null;
+  $("#matePill").textContent="none"; $("#matePill").className="pill"; $("#mateClear").hidden=true;
+  $("#mateNote").innerHTML=""; $("#mateDrop").className="drop";
+  $("#mateStatus").textContent="Drop the assembly definition, and the features file too if you want limits.";
+  if(LAST_STEP) parseAndLoad();                 // back to the joints the STEP alone suggests
+}
+function wireMates(){
+  const drop=$("#mateDrop"), input=$("#mateFile");
+  const many=list=>[].forEach.call(list||[],takeMates);
+  drop.addEventListener("click",()=>input.click());
+  drop.addEventListener("keydown",e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); input.click(); } });
+  ["dragenter","dragover"].forEach(ev=>drop.addEventListener(ev,e=>{ e.preventDefault(); e.stopPropagation(); drop.classList.add("armed"); document.body.classList.remove("dragging"); }));
+  ["dragleave","drop"].forEach(ev=>drop.addEventListener(ev,e=>{ e.preventDefault(); drop.classList.remove("armed"); }));
+  drop.addEventListener("drop",e=>{ e.stopPropagation(); document.body.classList.remove("dragging"); many(e.dataTransfer.files); });
+  input.addEventListener("change",e=>{ many(e.target.files); input.value=""; });
+  $("#mateUrl").addEventListener("input",e=>{
+    const L=onshapeApiLinks(e.target.value), box=$("#mateLinks");
+    box.hidden=!L; if(!L) return;
+    $("#mateDefLink").href=L.def; $("#mateFeatLink").href=L.features;
+  });
+  $("#mateClear").addEventListener("click",clearMates);
+}
 function routeFile(file){
   const n=file.name.toLowerCase();
   if(/\.(step|stp)$/.test(n)) takeCAD(file);
   else if(/\.ftcsim$/.test(n)) Session.take(file);
   else if(/\.xml$/.test(n)) takeRobotConfig(file);
+  else if(/\.json$/.test(n)) takeMates(file);
   else takeCode(file);
 }
 function wireDrop(dropEl,inputEl,handler){
@@ -1989,6 +2052,7 @@ function proBoot(){
   // hardware
   wireDrop($("#cadDrop"),$("#cadFile"),takeCAD);
   wireDrop($("#cfgDrop"),$("#cfgFile"),takeRobotConfig);
+  wireMates();
   wirePageDrop();
   $("#cfgClear").addEventListener("click",()=>{
     OPTS.robotConfig=null; ROBOT_CFG_NAME=null; store.del("ftcbench.robotconfig");
@@ -2018,6 +2082,7 @@ function proBoot(){
   });
   $("#rigReset").addEventListener("click",()=>{
     store.del(rigKey()); HW_USER={}; RIG_DEVICES={};
+    if(MATES.report){ applyMates(); return; }   // the mates are the rig
     for(const m of CAD.mechs){ m.kind=m.hasActuator===false?"fixed":null; m.leverOverride=null; m.label=null; }
     CAD.mechs=CAD.mechs.filter(m=>!m.manual);
     classifyMechs(CAD.mechs);

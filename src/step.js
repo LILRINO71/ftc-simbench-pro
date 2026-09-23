@@ -459,7 +459,11 @@ function parseSTEP(text, onProgress, opts){
     const size=Math.hypot(smx[0]-smn[0],smx[1]-smn[1],smx[2]-smn[2]);
     if(size<0.006) continue;                   // washers and grub screws
     const raw=pname(o.pd)||"", pm=/(\d{4}-\d{4}-\d{1,4}|REV-\d{2}-\d{4})/.exec(raw);
-    solids.push({name:clean(raw), part:pm?pm[1]:null, kind:solidKind(raw,pm?pm[1]:null), size, pts:thinPoints(w,120)});
+    const sd={name:clean(raw), part:pm?pm[1]:null, kind:solidKind(raw,pm?pm[1]:null), size, pts:thinPoints(w,120)};
+    // where this occurrence sits in the file's own frame, in metres: how an
+    // Onshape mate import (src/mates.js) finds it; meaningless if baked
+    if(!bakedGlobal) sd.occT={r:o.M.r.map(a=>a.slice()), t:[o.M.t[0]*scale,o.M.t[1]*scale,o.M.t[2]*scale]};
+    solids.push(sd);
   }
   solids.sort((a,b)=>b.size-a.size);
   if(solids.length>1800) solids.length=1800;

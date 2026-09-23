@@ -248,7 +248,9 @@ const View={
     if(solids){
       for(const s of solids){
         const c=[0,0,0]; for(const p of s.pts){ c[0]+=p[0]; c[1]+=p[1]; c[2]+=p[2]; }
-        (groups[owner(c.map(v=>v/s.pts.length))]||groups.chassis).push(s);
+        // Onshape mates say exactly which joint carries a part (src/mates.js)
+        const g=cad.mates?(s.mech&&groups[s.mech]?s.mech:"chassis"):owner(c.map(v=>v/s.pts.length));
+        (groups[g]||groups.chassis).push(s);
       }
     }else{
       const pts=cad.points||[], stride=Math.max(1,Math.ceil(pts.length/110000));

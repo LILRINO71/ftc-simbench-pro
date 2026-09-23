@@ -40,12 +40,18 @@ function autoMap(devices,mechs){
     if(mech.kind==="revolute-yaw"&&SYNONYM.yaw.some(w=>d.indexOf(w)>=0)) return 45;
     return 0;
   };
-  const score=(dev,mech)=>Math.max(one(dev.name.toLowerCase(),mech), one(String(dev.cfg||"").toLowerCase(),mech));
+  // an Onshape mate's own name counts too, when the joint was named after its part
+  const score=(dev,mech)=>{
+    const alt=mech.alias&&mech.alias!==mech.id?Object.assign({},mech,{id:mech.alias}):null;
+    return Math.max(one(dev.name.toLowerCase(),mech), one(String(dev.cfg||"").toLowerCase(),mech),
+                    alt?one(dev.name.toLowerCase(),alt):0, alt?one(String(dev.cfg||"").toLowerCase(),alt):0);
+  };
   const pairs=[];
   for(const dev of devices){
     map[dev.name]=null;
     if(MAP_NOT_ACTUATOR.test(dev.type||"")||isDriveDevice(dev)) continue;
-    for(const mech of mechs){ const v=score(dev,mech); if(v>=45) pairs.push({dev:dev.name, mech:mech.id, v}); }
+    // a joint tied to another by a gear, rack or cascade is driven through that one
+    for(const mech of mechs){ if(mech.couple) continue; const v=score(dev,mech); if(v>=45) pairs.push({dev:dev.name, mech:mech.id, v}); }
   }
   pairs.sort((a,b)=>b.v-a.v);
   for(const p of pairs) if(map[p.dev]===null&&!used[p.mech]){ map[p.dev]=p.mech; used[p.mech]=1; }

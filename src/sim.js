@@ -272,6 +272,13 @@ const Sim={
         const prev=s.ticks;
         s.revs+=(s.spec.rpm||300)*s.act/60*dt;
         s.ticks=s.revs*s.tpr;
+        // a revolute joint with known limits (Onshape) stops there too: angle from
+        // the output turns through the joint's reduction
+        if(!lin&&s.mech&&s.mech.limits&&/^revolute/.test(s.mech.kind)){
+          const k=2*Math.PI/(s.mech.gear||1)*(s.mech.dir||1), q=s.revs*k, lo=s.mech.limits[0], hi=s.mech.limits[1];
+          const qc=Math.max(Number.isFinite(lo)?lo:-Infinity, Math.min(Number.isFinite(hi)?hi:Infinity, q));
+          if(qc!==q){ s.revs=qc/k; s.ticks=s.revs*s.tpr; s.act=0; s.stalled=true; }
+        }
         // hard stops only where the travel is known: Onshape slider limits, or set by hand
         if(lin&&s.mech.limits){
           const k=slideMPerTick(s), q=s.ticks*k, lo=s.mech.limits[0], hi=s.mech.limits[1];
@@ -294,6 +301,12 @@ const Sim={
         if(req>usable){ s.stalled=true; if(step>0) continue; }
       }
       s.act=want;
+      // a servo on a joint with known limits (Onshape) can't swing past them
+      if(s.mech&&s.mech.limits&&/^revolute/.test(s.mech.kind)){
+        const k=travelDegOf(s.spec)*Math.PI/180*(s.mech.dir||1), q=(s.act-s.restPos)*k, lo=s.mech.limits[0], hi=s.mech.limits[1];
+        const qc=Math.max(Number.isFinite(lo)?lo:-Infinity, Math.min(Number.isFinite(hi)?hi:Infinity, q));
+        if(qc!==q){ s.act=s.restPos+qc/k; s.stalled=true; }
+      }
     }
     this.updateCOM();
     this.driveChassis(dt);
@@ -309,11 +322,17 @@ const Sim={
     const toR=typeof frontToRobot==="function"?frontToRobot(this.opts.front):(p=>p);
     const kg=r.props.kg>0?r.props.kg:ASSUMED_KG;
     let dx=0, dy=0, dz=0;
+    const travel=new Map();                           // each linear joint's own extension, metres
     for(const name in this.dev){
       const s=this.dev[name], m=s.mech;
       if(!m||!isLinearKind(m.kind)||!m.axis) continue;
-      const d=s.kind==="motor"?s.ticks*slideMPerTick(s)*(m.dir||1):(s.act-s.restPos)*(m.lever||0.3)*(m.dir||1);
-      const a=toR(m.axis), k=d*((this.opts.payloadKg||0)+SLIDE_CARRIED_KG)/kg;
+      travel.set(m.id, s.kind==="motor"?s.ticks*slideMPerTick(s)*(m.dir||1):(s.act-s.restPos)*(m.lever||0.3)*(m.dir||1));
+    }
+    // a stage tied to a driven one (a cascade, a rack) moves with it
+    for(const m of (this.cad&&this.cad.mechs)||[]) if(m.couple&&isLinearKind(m.kind)&&travel.has(m.couple.to)) travel.set(m.id,travel.get(m.couple.to)*m.couple.ratio);
+    for(const m of (this.cad&&this.cad.mechs)||[]){
+      if(!travel.has(m.id)||!m.axis) continue;
+      const a=toR(m.axis), k=travel.get(m.id)*((this.opts.payloadKg||0)+SLIDE_CARRIED_KG)/kg;
       dx+=a[0]*k; dy+=a[1]*k; dz+=a[2]*k;
     }
     const c=r.props.baseCom;
