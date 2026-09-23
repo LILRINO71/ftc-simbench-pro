@@ -3,15 +3,34 @@
    ============================================================ */
 const SYNONYM={ lift:["arm","lift","shoulder","elbow","slide","extend","pivot"],
                 grip:["claw","grip","gripper","hand","intake","clamp","wrist"],
-                yaw: ["rotate","base","turret","yaw","swivel","spin"],
-                drive:["drive","left","right","front","back","rear","wheel","motor"] };
+                yaw: ["rotate","base","turret","yaw","swivel","spin"] };
+/* Devices that never drive a CAD mechanism: sensors and the IMU move nothing,
+   and a drive motor turns a wheel (the drivetrain pairs those with wheels by
+   corner). */
+const MAP_NOT_ACTUATOR=/Sensor|IMU|BNO055|Gyro|Camera|Webcam|Limelight|Odometry|Pinpoint|OTOS|LED|Voltage/i;
+function isDriveDevice(dev){
+  if(!/DcMotor/i.test(dev.type||"")) return false;
+  for(const n of [dev.name,dev.cfg]){
+    if(!n) continue;
+    const c=wheelCorner(n);
+    if((c.front||c.back)&&(c.left||c.right)) return true;              // frontLeft, fL, rb
+    if((c.left||c.right)&&/drive|wheel/i.test(n)) return true;         // leftDrive
+  }
+  return false;
+}
+/* Which CAD mechanism each device drives, by name. Both the variable and the
+   hardware-config name count — `motor` says nothing, "Arm" does. Assignment
+   is best match first across every device, so an early device can't take a
+   later one's obvious match. The old drive-word synonyms (left, front, motor)
+   matched any mechanism with Left in its name, which is how a mecanum motor
+   ended up driving a linear slide. */
 function autoMap(devices,mechs){
   const map={}; const used={};
-  const score=(dev,mech)=>{
-    const d=dev.name.toLowerCase(), s=(mech.id||"").toLowerCase();
-    if(!s) return 0;
+  const one=(d,mech)=>{
+    const s=(mech.id||"").toLowerCase();
+    if(!s||!d) return 0;
     if(d===s) return 100;
-    if(s.indexOf(d)>=0||d.indexOf(s)>=0) return 70;
+    if(d.length>=3&&(s.indexOf(d)>=0||d.indexOf(s)>=0)) return 70;
     for(const key in SYNONYM){
       const g=SYNONYM[key];
       if(g.some(w=>d.indexOf(w)>=0)&&g.some(w=>s.indexOf(w)>=0)) return 55;
@@ -21,12 +40,15 @@ function autoMap(devices,mechs){
     if(mech.kind==="revolute-yaw"&&SYNONYM.yaw.some(w=>d.indexOf(w)>=0)) return 45;
     return 0;
   };
+  const score=(dev,mech)=>Math.max(one(dev.name.toLowerCase(),mech), one(String(dev.cfg||"").toLowerCase(),mech));
+  const pairs=[];
   for(const dev of devices){
-    let best=null,bv=0;
-    for(const mech of mechs){ if(used[mech.id]) continue;
-      const v=score(dev,mech); if(v>bv){bv=v;best=mech;} }
-    if(best&&bv>=45){ map[dev.name]=best.id; used[best.id]=1; } else map[dev.name]=null;
+    map[dev.name]=null;
+    if(MAP_NOT_ACTUATOR.test(dev.type||"")||isDriveDevice(dev)) continue;
+    for(const mech of mechs){ const v=score(dev,mech); if(v>=45) pairs.push({dev:dev.name, mech:mech.id, v}); }
   }
+  pairs.sort((a,b)=>b.v-a.v);
+  for(const p of pairs) if(map[p.dev]===null&&!used[p.mech]){ map[p.dev]=p.mech; used[p.mech]=1; }
   return map;
 }
 /* Which corner a drive motor sits on, from its name. Teams write this every
