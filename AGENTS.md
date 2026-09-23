@@ -34,8 +34,11 @@ Read this file before you start, and again before you push.
 
 | agent | files / area | for |
 | --- | --- | --- |
-| Claude | `src/sim.js` (device commands, encoders, drive direction), `src/drivetrain.js`, `src/mapping.js`, `src/samples.js` drive directions | motor direction from CAD mounting; encoder/`setDirection` semantics; issues #1 #2 |
-| Claude | `src/mates.js` (new), `tools/onshape-mates.mjs` (new), mate import UI in `src/app.js` + `src/markup.html` | Onshape mates → joints |
+| Claude | `src/java.js`, `src/expr.js` | parser fixes from the 25f54d3 review: for loops, enum switches, fall-through, try/finally, casts, arrays, else chains |
+
+Done and released: drive direction, the 25f54d3 sim fixes, `autoMap`, and
+Onshape mates (`src/mates.js`, `tools/onshape-mates.mjs`). Those files are
+free again; read the conventions below before changing them.
 
 ## Conventions both agents rely on
 
@@ -46,5 +49,14 @@ Read this file before you start, and again before you push.
   frame and turns it into physical motion only at the joint or wheel.
 - **Robot frame** (`src/frame.js`): +z up, origin at the drivetrain centre on
   the floor, placement only through `robotToWorld`.
+- **Onshape mates** (`src/mates.js`): a mate joint has `fromMate`, true
+  `axis`/`pivot` (canonical frame), `limits` (m for a slide, rad for a turn,
+  right-handed about the mate axis), and maybe `couple:{to, ratio}` (a
+  cascade stage, gear or rack driven through another joint). Each part it
+  carries has `solid.mech` set to its id; with `cad.mates` set, grouping
+  uses that, never nearest-pivot. `classifyMechs` leaves mate joints alone.
+- **Joint kinds**: compare through `normJointKind(k)`; `prismatic` and
+  `linear-slide` are aliases of `linear`. Slide travel per tick is
+  `slideMmPerTick(mech, tpr)`, shared by the sim and the view.
 - `npm test` runs every `tests/*.test.mjs`; `tests/anyrobot.test.mjs` is the
   any-robot corpus, and it must stay 14/14.
