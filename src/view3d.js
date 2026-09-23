@@ -285,8 +285,10 @@ const View={
       e.js.push(j);
     });
     const got=new Set();
+    this.instHolder=new Map();                       // copy -> where it lives, for highlights
     for(const b of bins.values()) for(const e of b.values()){
       const h=holder(e.g,e.wk), parent=h.parent; if(!parent) continue;
+      for(const j of e.js) this.instHolder.set(j,h);
       const place=j=>{ this.instMatrix(cad,res.meshes[j],M); return h.off?M.premultiply(h.off):M; };
       const S=this.instGeo(e.m), mats=S.runs.map(r=>this.finishMat(r.col||null,e.kind));
       const inst=new THREE.InstancedMesh(S.g,mats.length===1?mats[0]:mats,e.js.length);

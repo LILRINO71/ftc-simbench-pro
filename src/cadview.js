@@ -216,9 +216,12 @@ const CadView={
         depthWrite:false, polygonOffset:true, polygonOffsetFactor:-2, polygonOffsetUnits:-2});
       parts.forEach(j=>{
         const m=res.meshes[j]; if(!m||!m.index) return;
-        const parent=V.groupAt[asg.group[j]]||V.groupAt.chassis; if(!parent) return;
+        // where the copy lives: its mechanism group, or its wheel's spin group, so
+        // the highlight turns with a wheel too
+        const h=V.instHolder&&V.instHolder.get(j), parent=h?h.parent:(V.groupAt[asg.group[j]]||V.groupAt.chassis); if(!parent) return;
         // the shape's geometry is shared (never freed here); the tint is this highlight's own
         const mesh=new THREE.Mesh(V.instGeo(m).g,mat); mesh.matrixAutoUpdate=false; V.instMatrix(cad,m,mesh.matrix);
+        if(h&&h.off) mesh.matrix.premultiply(h.off);
         mesh.renderOrder=5; parent.add(mesh); this[which+"G"].push(mesh);
       });
       return;
