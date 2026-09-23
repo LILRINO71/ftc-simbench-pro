@@ -21,6 +21,25 @@ const ROBOT_MAT={
   hub:{color:0x1f2023, metalness:0.2, roughness:0.55},
   orange:{color:0xe8702a, metalness:0.1, roughness:0.5}
 };
+/* How each kind of part takes light, for the exact surfaces. The STEP's own
+   colour is the colour; this is the finish: machined aluminium, steel screws,
+   satin motor cans, moulded plastic, rubber rollers. Metal only looks like
+   metal with something to reflect, so these materials see a studio
+   environment (View.envMap): soft overhead and side light, not the field. */
+const REAL_MAT={
+  metal:      {m:0.8,  r:0.36, e:1.0},
+  fastener:   {m:0.9,  r:0.3,  e:1.0},
+  motor:      {m:0.55, r:0.4,  e:0.9},
+  hub:        {m:0.3,  r:0.45, e:0.8},
+  yellow:     {m:0.3,  r:0.45, e:0.8},
+  servo:      {m:0.0,  r:0.5,  e:0.55},
+  electronics:{m:0.05, r:0.48, e:0.55},
+  printed:    {m:0.0,  r:0.62, e:0.45},
+  orange:     {m:0.05, r:0.5,  e:0.6},
+  wheel:      {m:0.0,  r:0.86, e:0.3},
+  belt:       {m:0.0,  r:0.92, e:0.25},
+  clear:      {m:0.0,  r:0.08, e:1.0}
+};
 const View={
   init(el){
     this.el=el;
@@ -159,11 +178,115 @@ const View={
     if(this.exact&&this.cad===cad) this.applyExact();
     return this.exact?this.exact.res.meshes.length:0;
   },
+  /* A studio to reflect: a dim room with a big overhead softbox and side
+     panels, pre-filtered once (PMREM) so every metal part picks up soft,
+     believable highlights. Robot materials only; the field keeps its look. */
+  envMap(){
+    if(this._env!==undefined) return this._env;
+    try{
+      const pm=new THREE.PMREMGenerator(this.ren), room=new THREE.Scene(), box=new THREE.BoxGeometry(1,1,1);
+      const shell=new THREE.Mesh(box,new THREE.MeshBasicMaterial({color:0x5c6068, side:THREE.BackSide}));
+      shell.scale.set(20,10,20); shell.position.y=4; room.add(shell);
+      const lamp=(x,y,z,sx,sy,sz,i)=>{ const m=new THREE.Mesh(box,new THREE.MeshBasicMaterial({color:new THREE.Color(i,i,i)}));
+        m.position.set(x,y,z); m.scale.set(sx,sy,sz); room.add(m); };
+      lamp(0,8.9,0, 10,0.1,6, 3.2);                 // overhead softbox
+      lamp(-9.8,4,0, 0.1,4,8, 1.7);                 // key side
+      lamp(9.8,4,-3, 0.1,3,5, 1.1);                 // fill side
+      lamp(0,3,9.8, 8,3,0.1, 0.8);                  // back wall
+      this._env=pm.fromScene(room,0.04).texture; pm.dispose();
+      room.traverse(o=>{ if(o.material) o.material.dispose(); }); box.dispose();
+    }catch(e){ this._env=null; }                    // no float render targets: plain lighting still works
+    return this._env;
+  },
+  /* One material per colour and finish, shared by every part that has them. */
+  finishMat(col,kind){
+    const key=(col||"")+"|"+kind; this._mats=this._mats||{};
+    if(this._mats[key]) return this._mats[key];
+    const base=ROBOT_MAT[kind]||ROBOT_MAT.metal, P=REAL_MAT[kind]||REAL_MAT.metal, env=this.envMap();
+    // with nothing to reflect, metal just goes black: keep it low then
+    const mat=new THREE.MeshStandardMaterial({color:col?new THREE.Color(col):base.color,
+      metalness:env?P.m:Math.min(0.2,P.m), roughness:env?P.r:Math.max(0.45,P.r),
+      envMap:env||null, envMapIntensity:P.e,
+      transparent:!!base.transparent, opacity:base.opacity==null?1:base.opacity, depthWrite:base.depthWrite!==false,
+      // faces sit a hair behind their edges, so the lines never z-fight
+      polygonOffset:true, polygonOffsetFactor:1, polygonOffsetUnits:1});
+    mat.userData.shared=true;
+    return this._mats[key]=mat;
+  },
+  /* A shape meshed once (src/tessellate.js tessExpand) as GPU geometry: one
+     draw group per run of faces in one colour, plus its edges. Shared by every
+     copy; freed when the next robot's surfaces arrive. */
+  instGeo(m){
+    const k=m.attributes.position.array; this.shapeCache=this.shapeCache||new Map();
+    let e=this.shapeCache.get(k); if(e) return e;
+    const g=new THREE.BufferGeometry();
+    g.setAttribute("position",new THREE.BufferAttribute(k,3));
+    if(m.attributes.normal&&m.attributes.normal.array) g.setAttribute("normal",new THREE.BufferAttribute(m.attributes.normal.array,3));
+    g.setIndex(new THREE.BufferAttribute(m.index.array,1));
+    if(!g.attributes.normal) g.computeVertexNormals();
+    const runs=[], faces=m.brep_faces&&m.brep_faces.length?m.brep_faces:[{first:0,last:m.index.array.length/3-1,color:null}];
+    for(const f of faces){ const col=tessColorHex(f.color)||tessColorHex(m.color)||"", last=runs[runs.length-1];
+      if(last&&last.col===col&&last.end===f.first) last.end=f.last+1; else runs.push({col, start:f.first, end:f.last+1}); }
+    runs.forEach((r,i)=>g.addGroup(r.start*3,(r.end-r.start)*3,i));
+    g.computeBoundingSphere(); g.userData.shared=true;
+    const segs=meshEdgeSegs(m); let eg=null;
+    if(segs.length){ eg=new THREE.BufferGeometry(); eg.setAttribute("position",new THREE.BufferAttribute(segs,3)); eg.userData.shared=true; }
+    e={g, runs, eg}; this.shapeCache.set(k,e); return e;
+  },
+  dropShapes(){
+    for(const e of (this.shapeCache||new Map()).values()){ e.g.dispose(); if(e.eg) e.eg.dispose(); }
+    this.shapeCache=new Map();
+  },
+  /* Where a placed copy sits in the view: its occurrence placement, then the
+     robot frame, then canonical (Z up) -> view (Y up) as v3() does. */
+  instMatrix(cad,m,out){
+    const c=this.c, A=placeM(frameM(cad),m.T);
+    const V=new THREE.Matrix4().set(1,0,0,-c[0], 0,0,1,-c[2], 0,-1,0,c[1], 0,0,0,1);
+    return (out||new THREE.Matrix4()).multiplyMatrices(V,
+      new THREE.Matrix4().set(A[0],A[1],A[2],A[3], A[4],A[5],A[6],A[7], A[8],A[9],A[10],A[11], 0,0,0,1));
+  },
+  /* Per-shape surfaces as instances: one InstancedMesh per shape per
+     mechanism group and finish, so a 773-part robot is ~150 draw calls over
+     its 99 shapes' triangles, not 3.4 million copied ones. Each copy keeps its
+     own index (userData.js) for picking and hiding. */
+  applyInstanced(cad,res,asg,hidden){
+    const bins=new Map();
+    res.meshes.forEach((m,j)=>{
+      if(hidden&&hidden.has(j)) return;
+      if(!m.index||!m.index.array||!m.index.array.length) return;
+      const g=asg.group[j], si=asg.solid[j], kind=(si>=0&&cad.solids[si]&&cad.solids[si].kind)||"metal";
+      const k=m.attributes.position.array, key=g+"|"+kind;
+      let b=bins.get(k); if(!b){ b=new Map(); bins.set(k,b); }
+      let e=b.get(key); if(!e){ e={m, g, kind, js:[]}; b.set(key,e); }
+      e.js.push(j);
+    });
+    const got=new Set(), M=new THREE.Matrix4();
+    for(const b of bins.values()) for(const e of b.values()){
+      const parent=this.groupAt[e.g]||this.groupAt.chassis; if(!parent) continue;
+      const S=this.instGeo(e.m), mats=S.runs.map(r=>this.finishMat(r.col||null,e.kind));
+      const inst=new THREE.InstancedMesh(S.g,mats.length===1?mats[0]:mats,e.js.length);
+      e.js.forEach((j,i)=>inst.setMatrixAt(i,this.instMatrix(cad,res.meshes[j],M)));
+      inst.instanceMatrix.needsUpdate=true;
+      // the geometry's own bounds are one copy's; the copies are all over the robot
+      inst.frustumCulled=false; inst.castShadow=true; inst.receiveShadow=true;
+      inst.userData.js=e.js;
+      parent.add(inst); this.exactG.push(inst); got.add(e.g);
+      if(S.eg) for(const j of e.js){
+        const L=new THREE.LineSegments(S.eg,this.edgeMat()); L.matrixAutoUpdate=false; this.instMatrix(cad,res.meshes[j],L.matrix);
+        L.userData.edges=true; L.userData.j=j; L.visible=this.edgesOn!==false; parent.add(L); this.exactG.push(L);
+      }
+    }
+    for(const g in this.hullOf) this.hullOf[g].visible=!got.has(g);
+  },
   applyExact(){
     for(const o of this.exactG||[]){ if(o.parent) o.parent.remove(o); this.dispose(o); }
     this.exactG=[];
     const {cad,res}=this.exact, hidden=this.hiddenParts;
     const asg=this.exactAsg=tessAssign(cad,res,this.turretScale);
+    if(res.perShape){
+      if(this.shapeRes!==res){ this.dropShapes(); this.shapeRes=res; }
+      this.applyInstanced(cad,res,asg,hidden); return;
+    }
     const list=tessBuckets(cad,res,asg,hidden);
     const c=this.c, got=new Set();
     const toView=(src,n)=>{ const out=new Float32Array(n);
@@ -179,15 +302,9 @@ const View={
       geo.setAttribute("normal",new THREE.BufferAttribute(nor,3));
       geo.setIndex(new THREE.BufferAttribute(b.idx,1));
       if(!b.hasNormals) geo.computeVertexNormals();
-      // the file's own colour when it has one — that is what makes it look like
-      // Onshape — otherwise the palette for what the part is made of. Low
-      // metalness: with no environment to reflect, metal just goes black.
-      const base=ROBOT_MAT[b.kind]||ROBOT_MAT.metal;
-      const mat=new THREE.MeshStandardMaterial({color:b.color?new THREE.Color(b.color):base.color,
-        metalness:Math.min(0.2,base.metalness==null?0.2:base.metalness), roughness:Math.max(0.45,base.roughness==null?0.55:base.roughness),
-        transparent:!!base.transparent, opacity:base.opacity==null?1:base.opacity,
-        // faces sit a hair behind their edges, so the lines never z-fight
-        polygonOffset:true, polygonOffsetFactor:1, polygonOffsetUnits:1});
+      // the file's own colour when it has one (what makes it look like Onshape),
+      // else the palette for what the part is made of; the finish by kind
+      const mat=this.finishMat(b.color,b.kind);
       const mesh=new THREE.Mesh(geo,mat); mesh.castShadow=true; mesh.receiveShadow=true;
       mesh.userData.ranges=b.ranges;
       parent.add(mesh); this.exactG.push(mesh); got.add(b.group);

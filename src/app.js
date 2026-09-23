@@ -1291,13 +1291,19 @@ let EXACT={state:"none", msg:null};        // the exact surfaces for the CAD pan
 function exactGeometry(cad,text){
   const note=$("#exactNote"); if(note){ note.textContent="loading exact geometry (OpenCascade) …"; note.className="hint"; }
   EXACT={state:"loading", msg:null}; if(CadView.on) CadView.renderTree();
-  Tess.run(text).then(res=>{
+  const t0=performance.now();
+  // one shape at a time across a few workers (src/tessellate.js Tess.exact)
+  const progress=(done,total)=>{ if(CAD===cad&&note) note.textContent="exact geometry: "+done+" of "+total+" part shapes meshed …"; };
+  Tess.exact(cad,text,progress).then(res=>{
     if(CAD!==cad) return;                     // another file was dropped meanwhile
     EXACT={state:res&&res.meshes&&res.meshes.length?"ok":"failed", msg:"the file has no solid surfaces to mesh"};
     const n=View.setExact(cad,res);
     if(CadView.on) CadView.renderTree();
-    if(note) note.textContent=n?"Exact geometry: "+n+" surface meshes straight from the STEP file, in its own colours."
-                              :"This STEP file has no solid surfaces to mesh, so the parts are drawn as simplified shapes.";
+    const secs=((performance.now()-t0)/1000).toFixed(0);
+    if(note) note.textContent=!n?"This STEP file has no solid surfaces to mesh, so the parts are drawn as simplified shapes."
+      :res.perShape?"Exact geometry: "+n+" parts from "+res.shapes+" shapes, each in its own colour ("+secs+" s)"+
+        (res.failedShapes?"; "+res.failedShapes+" shape"+(res.failedShapes===1?"":"s")+" wouldn't mesh and "+(res.failedShapes===1?"is":"are")+" drawn simplified.":".")
+      :"Exact geometry: "+n+" surface meshes straight from the STEP file, in its own colours.";
   }).catch(e=>{
     if(CAD!==cad) return;
     EXACT={state:"failed", msg:e.message}; if(CadView.on) CadView.renderTree();

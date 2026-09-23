@@ -339,18 +339,19 @@ function parseSTEP(text, onProgress, opts){
 
   const occs=[];            // every placed occurrence, with its global transform
   let totalPts=0;
-  function walkOcc(pdid,M,depth,viaNauo){
+  function walkOcc(pdid,M,depth,viaNauo,path){
     if(pdid==null||depth>12) return;
     const rep=repOfPd.get(pdid);
     if(rep!=null) totalPts+=localPoints(rep).length;
-    occs.push({pd:pdid, M, rep, nauo:viaNauo});
+    occs.push({pd:pdid, M, rep, nauo:viaNauo, path});
+    const here=depth?path.concat([clean(pname(pdid)||"")]):path;
     for(const k of (kidsOcc.get(pdid)||[]))
-      walkOcc(k.pd, mulM(M, xfOfNauo.get(k.nauo)||IDM), depth+1, k.nauo);
+      walkOcc(k.pd, mulM(M, xfOfNauo.get(k.nauo)||IDM), depth+1, k.nauo, here);
   }
-  walkOcc(treeRoots.length?treeRoots[0]:null, IDM, 0, null);
+  walkOcc(treeRoots.length?treeRoots[0]:null, IDM, 0, null, []);
   // a single part, or parts with no assembly around them: each stands where modelled
   if(!occs.length) for(const [pdid,rep] of repOfPd) if(!asChild.has(pdid)){
-    totalPts+=localPoints(rep).length; occs.push({pd:pdid, M:IDM, rep, nauo:null});
+    totalPts+=localPoints(rep).length; occs.push({pd:pdid, M:IDM, rep, nauo:null, path:[]});
   }
 
   /* Two conventions exist in the wild. Some exporters bake each part's world
@@ -445,8 +446,22 @@ function parseSTEP(text, onProgress, opts){
   /* ---- solids: each leaf part's own points, placed, so the view can draw
      the robot as parts instead of a cloud. Assemblies only hold placements. */
   const solids=[];
+  /* Every leaf occurrence with geometry, tiny ones included: the exact-surface
+     mesher (src/tessellate.js) meshes each shape once and places a copy at
+     each of these. `rep` is the file's own representation id, `T` where the
+     occurrence sits (metres; null when the file bakes placements in). */
+  const leafOccs=[], bakedOnce=new Set();
   for(const o of occs){
     if(o.rep==null||kidsOcc.has(o.pd)) continue;
+    if(bakedGlobal){ if(bakedOnce.has(o.rep)) continue; bakedOnce.add(o.rep); }
+    leafOccs.push({rep:o.rep, name:clean(pname(o.pd)||""), path:o.path||[], sd:null,
+      T:bakedGlobal?null:{r:o.M.r.map(a=>a.slice()), t:[o.M.t[0]*scale,o.M.t[1]*scale,o.M.t[2]*scale]}});
+  }
+  let leafAt=0;
+  for(const o of occs){
+    if(o.rep==null||kidsOcc.has(o.pd)) continue;
+    const leaf=bakedGlobal?leafOccs.find(x=>x.rep===o.rep&&!x.seen):leafOccs[leafAt++];
+    if(leaf) leaf.seen=true;
     const lp=localPoints(o.rep); if(lp.length<4) continue;
     const w=[]; const smn=[1e18,1e18,1e18], smx=[-1e18,-1e18,-1e18];
     for(const v0 of lp){
@@ -463,10 +478,13 @@ function parseSTEP(text, onProgress, opts){
     // where this occurrence sits in the file's own frame, in metres: how an
     // Onshape mate import (src/mates.js) finds it; meaningless if baked
     if(!bakedGlobal) sd.occT={r:o.M.r.map(a=>a.slice()), t:[o.M.t[0]*scale,o.M.t[1]*scale,o.M.t[2]*scale]};
+    if(leaf) leaf.sd=sd;
     solids.push(sd);
   }
   solids.sort((a,b)=>b.size-a.size);
   if(solids.length>1800) solids.length=1800;
+  { const at=new Map(solids.map((s,i)=>[s,i]));
+    for(const l of leafOccs){ l.solid=l.sd&&at.has(l.sd)?at.get(l.sd):-1; delete l.sd; delete l.seen; } }
   onProgress && onProgress(solids.length+" parts");
 
   /* ---- one frame for everything downstream (src/frame.js): +z up, origin at
@@ -607,7 +625,7 @@ function parseSTEP(text, onProgress, opts){
   classifyMechs(mechs);
 
   return {name:null, units:unitName, points:P, pointCount:P.length, solids,
-          bbox:{min:mn,max:mx}, parts, mechs, placements, frame};
+          bbox:{min:mn,max:mx}, parts, mechs, placements, frame, occs:leafOccs};
 }
 
 /* ---- the rig: an explicit, editable kinematic chain ----

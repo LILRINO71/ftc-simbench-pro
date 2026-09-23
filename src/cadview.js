@@ -191,9 +191,11 @@ const CadView={
     const rect=V.ren.domElement.getBoundingClientRect();
     const n=new THREE.Vector2(((e.clientX-rect.left)/rect.width)*2-1, -((e.clientY-rect.top)/rect.height)*2+1);
     const ray=new THREE.Raycaster(); ray.setFromCamera(n,this.cam);
-    const meshes=V.exactG.filter(o=>o.isMesh&&o.visible&&o.userData.ranges);
+    const meshes=V.exactG.filter(o=>o.isMesh&&o.visible&&(o.userData.ranges||o.userData.js));
     const hit=ray.intersectObjects(meshes,false)[0];
     if(!hit) return null;
+    // a shape drawn as instances: the copy that was hit is the part
+    if(hit.object.userData.js) return hit.instanceId!=null?hit.object.userData.js[hit.instanceId]:null;
     const rs=hit.object.userData.ranges, t=hit.faceIndex;
     let lo=0, hi=rs.length-1;
     while(lo<hi){ const mid=(lo+hi+1)>>1; if(rs[mid].start<=t) lo=mid; else hi=mid-1; }
@@ -208,6 +210,19 @@ const CadView={
     if(!parts||!parts.length||!V.exact) return;
     const {cad,res}=V.exact, M=frameM(cad), asg=V.exactAsg; if(!asg) return;
     const col=which==="sel"?CAD_SELECT:CAD_HOVER;
+    if(res.perShape){
+      // per-shape surfaces: the part's shared shape again, at the same place, tinted
+      const mat=new THREE.MeshBasicMaterial({color:col, transparent:true, opacity:which==="sel"?0.42:0.28,
+        depthWrite:false, polygonOffset:true, polygonOffsetFactor:-2, polygonOffsetUnits:-2});
+      parts.forEach(j=>{
+        const m=res.meshes[j]; if(!m||!m.index) return;
+        const parent=V.groupAt[asg.group[j]]||V.groupAt.chassis; if(!parent) return;
+        // the shape's geometry is shared (never freed here); the tint is this highlight's own
+        const mesh=new THREE.Mesh(V.instGeo(m).g,mat); mesh.matrixAutoUpdate=false; V.instMatrix(cad,m,mesh.matrix);
+        mesh.renderOrder=5; parent.add(mesh); this[which+"G"].push(mesh);
+      });
+      return;
+    }
     const byGroup={};
     for(const j of parts){ const m=res.meshes[j]; if(!m||!m.index) continue; (byGroup[asg.group[j]]=byGroup[asg.group[j]]||[]).push(j); }
     for(const g in byGroup){
