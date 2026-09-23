@@ -13,7 +13,9 @@ function normalizeExpr(src){
     .replace(/(\d)[fFdDlL]\b/g,"$1");
 }
 function tokenize(src){
-  const T=[]; const re=/\s*(?:(gamepad\d\s*\.\s*[A-Za-z_]\w*)|([A-Za-z_$][\w$]*(?:\s*\.\s*[A-Za-z_$][\w$]*)*)|(\d*\.\d+|\d+)|(&&|\|\||[<>=!]=|[-+*/%<>!(),?:\[\]]))/g;
+  // no [ ]: arrays aren't modelled, so a subscript fails the parse and the
+  // statement is reported, instead of reading as a silent 0
+  const T=[]; const re=/\s*(?:(gamepad\d\s*\.\s*[A-Za-z_]\w*)|([A-Za-z_$][\w$]*(?:\s*\.\s*[A-Za-z_$][\w$]*)*)|(\d*\.\d+|\d+)|(&&|\|\||[<>=!]=|[-+*/%<>!(),?:]))/g;
   let m, last=0;
   while((m=re.exec(src))){
     if(m.index!==last && src.slice(last,m.index).trim()) return null;   // unparseable
@@ -49,16 +51,10 @@ function parseExpr(src){
   function un(){
     if(peek()&&peek().t==="op"&&(peek().v==="-"||peek().v==="!"||peek().v==="+")){
       const o=peek().v; i++; return {o:"u"+o,a:un()}; }
-    if(peek()&&peek().t==="op"&&peek().v==="("){
-      const t2 = T[i+1];
-      if (t2 && t2.t==="id" && /^(int|double|float|long|short|byte)$/.test(t2.v)) {
-         const t3 = T[i+2];
-         if (t3 && t3.t==="op" && t3.v===")") {
-           i+=3;
-           return un();
-         }
-      }
-    }
+    // (int) x: integer casts truncate toward zero, (double)/(float) change nothing
+    const t2=T[i+1], t3=T[i+2];
+    if(peek()&&peek().t==="op"&&peek().v==="("&&t2&&t2.t==="id"&&/^(int|long|short|byte|double|float)$/.test(t2.v)&&t3&&t3.t==="op"&&t3.v===")"){
+      i+=3; return /^(double|float)$/.test(t2.v)? un() : {o:"trunc",a:un()}; }
     return prim();
   }
   function prim(){
@@ -76,12 +72,6 @@ function parseExpr(src){
         }
         eat(")");
         return {o:"call",name:t.v,args};
-      }
-      if(peek()&&peek().t==="op"&&peek().v==="["){            // array access
-         i++;
-         const idx = ternary();
-         eat("]");
-         return {o:"array", name:t.v, idx};
       }
       if(/^(true|false)$/.test(t.v)) return {o:"num",v:t.v==="true"?1:0};
       return {o:"id",v:t.v};
@@ -115,12 +105,14 @@ function evalNode(n, env){
     case "*":  return evalNode(n.a,env)*evalNode(n.b,env);
     case "/":  { const d=evalNode(n.b,env); return d?evalNode(n.a,env)/d:0; }
     case "%":  { const d=evalNode(n.b,env); return d?evalNode(n.a,env)%d:0; }
-    case "array": return 0;
+    case "trunc": return Math.trunc(evalNode(n.a,env));
     case "call":{
       const a=n.args.map(x=>evalNode(x,env));
       // device readback: motor.getCurrentPosition(), servo.getPosition(), …
+      // The raw argument nodes go along: getDistance(DistanceUnit.INCH) needs
+      // the unit's name, and that id evaluates to 0.
       const dm=/^([A-Za-z_$][\w$]*)\.(getCurrentPosition|getPosition|getPower|getVelocity|getTargetPosition|isBusy|getDistance|isPressed|red|green|blue|alpha)$/.exec(n.name);
-      if(dm) return env.device(dm[1],dm[2]);
+      if(dm) return env.device(dm[1],dm[2],n.args);
       // ElapsedTime: runtime.seconds(), timer.milliseconds()
       const tm=/^([A-Za-z_$][\w$]*)\.(seconds|milliseconds|nanoseconds|time)$/.exec(n.name);
       if(tm&&env.timer) return env.timer(tm[1],tm[2]);
