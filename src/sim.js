@@ -52,6 +52,7 @@ const Sim={
   /* INIT: everything before waitForStart() — directions, PID objects, start positions. */
   init(){
     if(!this.code) return;
+    this.imuZero=this.chassis.h;
     this.exec(this.code.inits||[],this.env());
     for(const n in this.dev){ const s=this.dev[n]; if(s.kind==="servo") s.act=s.cmd; }
     this.phase="init";
@@ -93,7 +94,9 @@ const Sim={
     const self=this;
     return {
       get(n){
-        if(n==="__imuYaw") return self.chassis.h;
+        // a hub's IMU reads yaw from where the robot pointed when it came up
+        // (INIT here) or was last reset, never the field heading; -pi..pi like the SDK
+        if(n==="__imuYaw"){ const y=self.chassis.h-(self.imuZero||0); return Math.atan2(Math.sin(y),Math.cos(y)); }
         if(n==="__imuPitch"||n==="__imuRoll") return 0;
         if(self.vars[n]!==undefined) return self.vars[n];
         if(self.code.consts[n]!==undefined) return self.code.consts[n];
@@ -195,10 +198,11 @@ const Sim={
       }else if(st.kind==="call"){
         const s=this.dev[st.dev]; if(!s) continue;
         const v=evalNode(st.ast,env);
-        /* setDirection(REVERSE) cancels a mirrored mounting. Since the bench
-           doesn't model the mirrored mounting either, applying the reversal
-           here would double-count it — a robot told to drive forward would
-           spin. It's tracked for reporting instead. */
+        /* Commands stay in the frame the code sees: after setDirection, the
+           way the SDK reports it (encoders count up under positive power).
+           Physical direction — REVERSE and which way the motor is mounted —
+           is applied only where a motor turns something: wheelCmd() for the
+           drive wheels. */
         if(st.op==="setPosition") s.cmd=clamp01(v);
         else if(st.op==="setVelocity") s.cmd=Math.max(-1,Math.min(1,v/((s.spec.rpm||300)/60*s.tpr)));   // ticks/s → share of free speed
         else s.cmd=Math.max(-1,Math.min(1,v));
@@ -221,7 +225,7 @@ const Sim={
         }
         else if(/^set(PID|PIDF|P|I|D)$|^reset$/.test(st.meth) && !s)
           this.pidOp(st.obj,st.meth,st.args.map(x=>evalNode(x,env)));
-        else if(st.meth==="resetYaw") this.chassis.h=0;
+        else if(st.meth==="resetYaw") this.imuZero=this.chassis.h;    // zeroes the reading, never turns the robot
         else if(/^gamepad[12]$/.test(st.obj)&&this.onRumble&&/^(rumble|rumbleBlips|stopRumble)$/.test(st.meth))
           this.onRumble(+st.obj.slice(-1),st.meth,st.args.map(x=>evalNode(x,env)));   // a real controller buzzes
       }
@@ -345,6 +349,14 @@ const Sim={
     this.rig.props.com = {x: c.x + dx, y: c.y + dy, z: c.z + dz};
     this.rig.props.comHeight = this.rig.props.com.z;
   },
+  /* What a drive motor does to its wheel: its output in the code's frame,
+     flipped by setDirection(REVERSE), flipped again when positive power turns
+     the wheel backward the way it's mounted (mount -1). +1 pushes the robot
+     along the wheel's own positive direction. */
+  wheelCmd(name,mount){
+    const s=this.dev[name]; if(!s) return 0;
+    return s.act*(s.reversed?-1:1)*(mount===-1?-1:1);
+  },
   driveChassis(dt){
     const dtn=this.drivetrain;
     if(!dtn||!dtn.ok){ this.vel={x:0,y:0}; return; }
@@ -370,24 +382,29 @@ const Sim={
       this.steerModules();
       const SPD=1.15;                          // m/s of rim at full power, as below
       const W=this.rig.drive.wheels, fk=fkFromIk(ikMatrix(rk,W));
-      const t=chassisFromWheels(fk,this.rig.devs.map(n=>{ const sd=this.dev[n]; return (sd?sd.act:0)*SPD; }));
+      const t=chassisFromWheels(fk,this.rig.devs.map((n,i)=>this.wheelCmd(n,W[i]&&W[i].mount)*SPD));
       const h=this.chassis.h, c=Math.cos(h), s=Math.sin(h);
       this.chassis.x+=(t.vx*c-t.vy*s)*dt; this.chassis.y+=(t.vx*s+t.vy*c)*dt; this.chassis.h+=t.omega*dt;
       if(Field.ok) this.bump=Field.collide(this.chassis,this.footprint,this.obstacles);
       this.vel={x:(this.chassis.x-x0)/dt, y:(this.chassis.y-y0)/dt};
       return;
     }
+    // the rig's measured mounting when there is one, else the standard build
+    const mountOf=w=>{ const r=this.rig; const i=r?r.devs.indexOf(w.dev):-1;
+      return i>=0&&r.drive.wheels[i]?r.drive.wheels[i].mount:(w.left?-1:1); };
     let L=0,R=0,nl=0,nr=0,strafe=0;
     for(const w of dtn.wheels){
-      const s=this.dev[w.dev]; if(!s) continue;
-      if(w.left){ L+=s.act; nl++; } else if(w.right){ R+=s.act; nr++; }
+      if(!this.dev[w.dev]) continue;
+      const a=this.wheelCmd(w.dev,mountOf(w));
+      if(w.left){ L+=a; nl++; } else if(w.right){ R+=a; nr++; }
     }
     if(nl) L/=nl; if(nr) R/=nr;
     if(dtn.style==="mecanum"){
-      // strafe shows up as front/back disagreement on the same side
-      const lf=this.dev[(dtn.wheels.filter(w=>w.left&&w.front)[0]||{}).dev];
-      const lb=this.dev[(dtn.wheels.filter(w=>w.left&&w.back)[0]||{}).dev];
-      if(lf&&lb) strafe=(lf.act-lb.act)/2;
+      // strafe shows up as front/back disagreement on the same side: on the
+      // standard X, front-left forward with back-left backward goes RIGHT
+      // (the rigid model's mecanum rows say the same)
+      const lf=dtn.wheels.filter(w=>w.left&&w.front)[0], lb=dtn.wheels.filter(w=>w.left&&w.back)[0];
+      if(lf&&lb&&this.dev[lf.dev]&&this.dev[lb.dev]) strafe=(this.wheelCmd(lb.dev,mountOf(lb))-this.wheelCmd(lf.dev,mountOf(lf)))/2;
     }
     const SPEED=1.15, TURN=3.4;               // m/s and rad/s at full power
     const v=(L+R)/2*SPEED, w=(R-L)/2*TURN;
@@ -417,7 +434,8 @@ const Sim={
 
   stepRigid(dt){
     this.steerModules();
-    const cmd=this.rig.devs.map(n=>{ const s=this.dev[n]; return s?s.act:0; });
+    const W=this.rig.drive.wheels;
+    const cmd=this.rig.devs.map((n,i)=>this.wheelCmd(n,W[i]&&W[i].mount));
     const st=Dyn.step(this.dstate,cmd,this.rig,dt);
     this.dstate=st;
     const c=Math.cos(this.chassis.h), s=Math.sin(this.chassis.h);
@@ -528,7 +546,10 @@ function buildRig(cad,dtn,base,dev,opts){
     // non-mecanum wheels roll along the CAD's own drive direction (a kiwi's
     // wheels point round the circle, an X-drive's at 45 degrees)
     const alpha=(kind!=="mecanum"&&g&&Number.isFinite(g.alpha))?g.alpha:0;
-    wheels.push({x, y, z:0, r, roller, alpha, corner:corner.length===2?corner:null});
+    // which way positive power turns this wheel (src/drivetrain.js dtMounts):
+    // measured from the motor in the CAD, else the standard inboard build
+    const mount=(g&&(g.mount===1||g.mount===-1))?g.mount:(kind==="swerve"?1:(w.left?-1:1));
+    wheels.push({x, y, z:0, r, roller, alpha, mount, corner:corner.length===2?corner:null});
     devs.push(w.dev);
     const sd=dev&&dev[w.dev];
     motors.push((sd&&sd.spec)||null);

@@ -134,6 +134,7 @@ public class TankTeleOp extends LinearOpMode {
     public void runOpMode() {
         leftDrive = hardwareMap.get(DcMotor.class, "leftDrive");
         rightDrive = hardwareMap.get(DcMotor.class, "rightDrive");
+        leftDrive.setDirection(DcMotor.Direction.REVERSE);
         waitForStart();
         while (opModeIsActive()) {
             double y = -gamepad1.left_stick_y;

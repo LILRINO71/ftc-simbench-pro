@@ -445,12 +445,98 @@ function driveFromCAD(cad,opts){
   }
   if(kind==="swerve") why.push("Swerve kinematics here are the linearisation at the module angles in the CAD, not a full steering model: each row is that module's drive direction as drawn.");
 
+  dtMounts(ws,solids,F,kind,why);
+
   const wheels=ws.map(dtPublic);
   return {kind, confidence:conf, why, wheels, track, base, ik:ikMatrix(kind,wheels)};
 }
 
 const dtPublic=w=>({name:w.name, part:w.part, x:w.x, y:w.y, z:w.z, r:w.r,
-                    axis:w.axis.slice(), alpha:w.alpha, roller:w.roller, steer:!!w.steer, corner:w.corner});
+                    axis:w.axis.slice(), alpha:w.alpha, roller:w.roller, steer:!!w.steer, corner:w.corner,
+                    mount:w.mount, mountHow:w.mountHow, shaft:w.shaft?w.shaft.slice():null});
+
+/* ---- which way each drive wheel turns for positive motor power
+
+   The FTC SDK turns a motor's output shaft clockwise, seen from the shaft end,
+   for positive power under Direction.FORWARD: an angular velocity along minus
+   the shaft. A wheel spinning at w rolls its centre along w x up, so the push
+   on the robot is -(shaft x up). The CAD says where the shaft points: a drive
+   motor sits on its wheel's axle line with its output facing the wheel, so the
+   side of the wheel the motor body is on gives the shaft direction.
+
+   mount is +1 when positive power pushes the robot along the wheel's own
+   positive direction (alpha, forward for tank and mecanum) and -1 when it
+   pushes the other way. The -1 wheels are the ones a program reverses. */
+const DT_MOTOR=/(gear ?motor|gearbox|yellow ?jacket|\b520[1-4]\b|hd ?hex|ultra ?planetary|core ?hex|neverest|\bmotor\b)/i;
+const DT_NOT_MOTOR=/(port|mount|bracket|plate|controller|servo|encoder|\bhub\b)/i;
+function dtIsMotorPart(s){
+  const t=(s.name||"")+" "+(s.part||"");
+  return (s.kind==="motor"||DT_MOTOR.test(t)) && !DT_NOT_MOTOR.test(s.name||"");
+}
+function dtMountSign(shaft,alpha){
+  const v=-shaft[1]*Math.cos(alpha)+shaft[0]*Math.sin(alpha);   // -(shaft x up) . (cos a, sin a)
+  return v<0?-1:1;
+}
+function dtMounts(ws,solids,F,kind,why){
+  const toR=v=>[dtDot(v,F.fwd), dtDot(v,F.left), dtDot(v,F.up)];
+  if(kind==="swerve"){
+    // a module turns, and which way its drive motor spins at "straight ahead"
+    // is part of the module's calibration, like the steering zero
+    for(const w of ws){ w.mount=1; w.mountHow="swerve"; w.shaft=null; }
+    return;
+  }
+  const motors=solids.filter(dtIsMotorPart).map(s=>({c:dtCentroid(s.pts), n:s.pts.length}));
+  // direct drive: motor parts on the wheel's own axle line, off to one side
+  for(const w of ws){
+    let sum=0, n=0;
+    for(const m of motors){
+      const d=[m.c[0]-w.c[0], m.c[1]-w.c[1], m.c[2]-w.c[2]];
+      const a=dtDot(d,w.axis);
+      const rad=Math.hypot(d[0]-a*w.axis[0], d[1]-a*w.axis[1], d[2]-a*w.axis[2]);
+      if(Math.abs(a)<0.008||Math.abs(a)>0.30||rad>Math.max(0.02,0.6*w.r)) continue;
+      sum+=a*m.n; n+=m.n;
+    }
+    if(n&&Math.abs(sum/n)>0.005){
+      const s=-Math.sign(sum);                  // from the motor body toward the wheel
+      w.shaft=toR([s*w.axis[0], s*w.axis[1], s*w.axis[2]]);
+      w.mountHow="direct";
+    }
+  }
+  // a wheel with no motor of its own is chained or belted to one on the same
+  // side with a parallel axle; a chain or belt keeps the direction
+  for(const w of ws){
+    if(w.mountHow) continue;
+    let best=null, bd=Infinity;
+    for(const o of ws){
+      if(o===w||o.mountHow!=="direct") continue;
+      if(Math.abs(dtDot(o.axis,w.axis))<0.97||Math.sign(o.y)!==Math.sign(w.y)) continue;
+      const d=Math.hypot(o.x-w.x,o.y-w.y); if(d<bd){ bd=d; best=o; }
+    }
+    if(best){ w.shaft=best.shaft.slice(); w.mountHow="chain"; }
+  }
+  // nothing in the CAD: assume the standard build, motor inboard, shaft out
+  let assumed=0;
+  for(const w of ws){
+    if(w.mountHow) continue;
+    const out=Math.sign(w.ax[0]*w.x+w.ax[1]*w.y)||1;
+    w.shaft=[out*w.ax[0], out*w.ax[1], out*w.ax[2]]; w.mountHow="assumed"; assumed++;
+  }
+  for(const w of ws) w.mount=dtMountSign(w.shaft,w.alpha);
+
+  const direct=ws.filter(w=>w.mountHow==="direct").length, chain=ws.filter(w=>w.mountHow==="chain").length;
+  const rev=ws.filter(w=>w.mount<0);
+  const where=list=>list.map(w=>w.corner||((w.x>=0?"front ":"back ")+(w.y>=0?"left":"right"))).join(", ");
+  const side=list=>list.length&&list.every(w=>w.y>0)?"the left side":list.length&&list.every(w=>w.y<0)?"the right side":where(list);
+  let s="Motor direction: ";
+  if(assumed===ws.length) s+="no drive motor is in the CAD, so each wheel is assumed driven the standard way, by a motor inboard of it with the shaft pointing out.";
+  else s+=direct+" wheel"+(direct===1?"":"s")+" have a motor on the axle"+(chain?", "+chain+" more are chained or belted to one on the same side":"")+
+          (assumed?", and "+assumed+" have no motor found and are assumed standard":"")+".";
+  s+=" The FTC SDK turns a shaft clockwise, seen from its end, for positive power, so ";
+  if(!rev.length) s+="positive power pushes every wheel forward; no side needs reversing.";
+  else if(rev.length===ws.length) s+="positive power pushes every wheel backward; reverse all of them, or negate the drive.";
+  else s+="positive power pushes "+where(rev)+" backward: "+side(rev)+" is what a program reverses with setDirection(REVERSE).";
+  why.push(s);
+}
 
 /* Inverse kinematics: one row per wheel, surface speed from chassis twist.
 

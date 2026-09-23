@@ -137,6 +137,10 @@ public class MecanumTeleOp extends LinearOpMode {
         rightBack = hardwareMap.get(DcMotor.class, "rightBack");
         lift = hardwareMap.get(Servo.class, "lift");
 
+        // the left motors face the other way
+        leftFront.setDirection(DcMotor.Direction.REVERSE);
+        leftBack.setDirection(DcMotor.Direction.REVERSE);
+
         lift.setPosition(LIFT_DOWN);
 
         waitForStart();
@@ -191,8 +195,8 @@ public class TimedDriveAuto extends LinearOpMode {
         DcMotor rightBack = hardwareMap.get(DcMotor.class, "rightBack");
         Servo lift = hardwareMap.get(Servo.class, "lift");
 
-        rightFront.setDirection(DcMotor.Direction.REVERSE);
-        rightBack.setDirection(DcMotor.Direction.REVERSE);
+        leftFront.setDirection(DcMotor.Direction.REVERSE);
+        leftBack.setDirection(DcMotor.Direction.REVERSE);
         lift.setPosition(0.15);
 
         telemetry.addData("Status", "Ready");
@@ -270,6 +274,8 @@ public class ShooterTeleOp extends LinearOpMode {
         leftBack = hardwareMap.get(DcMotor.class, "leftBack");
         rightBack = hardwareMap.get(DcMotor.class, "rightBack");
         flywheel = hardwareMap.get(DcMotorEx.class, "flywheel");
+        leftFront.setDirection(DcMotor.Direction.REVERSE);
+        leftBack.setDirection(DcMotor.Direction.REVERSE);
         kicker = hardwareMap.get(Servo.class, "kicker");
 
         kicker.setPosition(KICK_REST);
