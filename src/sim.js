@@ -27,10 +27,13 @@ const Sim={
       if (kind === "crservo") kind = "motor";
       const isMotor=kind==="motor";
       this.dev[d.name]={kind, mech, spec,
-        cmd:isMotor?0:0.5, act:isMotor?0:0.5, revs:0, ticks:0, stalled:false,
+        // a servo nothing has commanded yet is unpowered: it sits where the CAD drew it
+        cmd:isMotor?0:(mech&&Number.isFinite(mech.restPos)?mech.restPos:0.5),
+        act:isMotor?0:(mech&&Number.isFinite(mech.restPos)?mech.restPos:0.5), revs:0, ticks:0, stalled:false,
         reversed:false, mode:"run", target:0,
         tpr: 28*(spec.ratio||19.2),        // goBILDA: 28 counts per motor rev
-        restPos:restPosOf(code,d.name),
+        // the servo position the CAD was drawn at: a joint spec says; else the code's own
+        restPos:(mech&&Number.isFinite(mech.restPos))?mech.restPos:restPosOf(code,d.name),
         sec60:spec.sec60||0.18, travelDeg:travelDegOf(spec)};
     }
     for(const v in code.vars) this.vars[v]=code.vars[v];
@@ -352,8 +355,15 @@ const Sim={
       if(!m||!isLinearKind(m.kind)||!m.axis) continue;
       travel.set(m.id, s.kind==="motor"?s.ticks*slideMPerTick(s)*(m.dir||1):(s.act-s.restPos)*(m.lever||0.3)*(m.dir||1));
     }
-    // a stage tied to a driven one (a cascade, a rack) moves with it
-    for(const m of (this.cad&&this.cad.mechs)||[]) if(m.couple&&isLinearKind(m.kind)&&travel.has(m.couple.to)) travel.set(m.id,travel.get(m.couple.to)*m.couple.ratio);
+    // a stage tied to a driven one (a cascade, a rack, a linkage's slide) moves with it
+    const mechs=(this.cad&&this.cad.mechs)||[], own=new Map();
+    for(const name in this.dev){ const s=this.dev[name]; if(s.mech&&(s.kind==="motor"||s.kind==="servo")&&!own.has(s.mech.id)) own.set(s.mech.id,s); }
+    const vals=jointValues(mechs,m=>{
+      if(travel.has(m.id)) return travel.get(m.id);
+      const s=own.get(m.id);
+      return s&&m.fromMate?mateJointQ(m,s):(s||m.couple?null:(m.q0||null));
+    });
+    for(const m of mechs) if(m.couple&&isLinearKind(m.kind)&&!own.has(m.id)&&vals.get(m.id)!=null) travel.set(m.id,vals.get(m.id));
     for(const m of (this.cad&&this.cad.mechs)||[]){
       if(!travel.has(m.id)||!m.axis) continue;
       const a=toR(m.axis), k=travel.get(m.id)*((this.opts.payloadKg||0)+SLIDE_CARRIED_KG)/kg;

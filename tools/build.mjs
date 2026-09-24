@@ -22,7 +22,7 @@ export const DOMAIN = 'app.ftc-simbench.com';
 // Concatenation order matters: later files use functions and constants the
 // earlier ones define. The engine never touches the DOM; only view3d and app do.
 export const ORDER = ['hardware', 'samples', 'step', 'hull', 'inertia', 'expr', 'java', 'mapping', 'robotconfig',
-  'compare', 'analyze', 'drivetrain', 'frame', 'mates', 'dynamics', 'field', 'shots', 'controllers', 'session', 'mathdoc',
+  'compare', 'analyze', 'drivetrain', 'frame', 'mates', 'jointspec', 'dynamics', 'field', 'shots', 'controllers', 'session', 'mathdoc',
   'gitimport', 'onboarding', 'sim', 'tessellate', 'view3d', 'cadview', 'app'];
 
 const argv = process.argv.slice(2);

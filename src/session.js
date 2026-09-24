@@ -142,6 +142,15 @@ const {sessionFromBench, packSession, unpackSession} = (function(){
     return out;
   };
 
+  // a linkage a joint spec ties a slide or rod to (src/jointspec.js)
+  function readLink(v, C){
+    if(!isObj(v)) return null;
+    const L = {crankPivot: vec3(at(v, "crankPivot"), C, "link crankPivot", null), crankAxis: dir3(at(v, "crankAxis"), C, "link crankAxis"),
+      crankPin: vec3(at(v, "crankPin"), C, "link crankPin", null), pin: vec3(at(v, "pin"), C, "link pin", null),
+      slideAxis: dir3(at(v, "slideAxis"), C, "link slideAxis"), rod: C.s(num(at(v, "rod"), 0, C, "link rod"))};
+    const sl = str(at(v, "slider"), C, "link slider"); if(sl) L.slider = sl;
+    return L.crankPivot && L.crankPin && L.pin && L.rod > 0 ? L : null;
+  }
   function readCad(v, C){
     if(!isObj(v)) return null;
     const bb = at(v, "bbox");
@@ -180,11 +189,18 @@ const {sessionFromBench, packSession, unpackSession} = (function(){
       alias: str(at(m, "alias"), C, "mech alias"),
       limits: limits(m, /^(linear|linear-slide|prismatic)$/.test(str(at(m, "kind"), C, "mech kind") || "")),
       couple: isObj(at(m, "couple")) ? {to: str(at(at(m, "couple"), "to"), C, "mech couple"),
-        ratio: qd(num(at(at(m, "couple"), "ratio"), 1, C, "mech couple ratio")), via: str(at(at(m, "couple"), "via"), C, "mech couple via")} : null,
+        ratio: qd(num(at(at(m, "couple"), "ratio"), 1, C, "mech couple ratio")), via: str(at(at(m, "couple"), "via"), C, "mech couple via"),
+        link: readLink(at(at(m, "couple"), "link"), C)} : null,
+      restPos: at(m, "restPos") == null ? null : Math.max(0, Math.min(1, num(at(m, "restPos"), 0.5, C, "mech restPos"))),
+      q0: at(m, "q0") == null ? null : num(at(m, "q0"), 0, C, "mech q0"),
+      mmPerTick: at(m, "mmPerTick") == null ? null : num(at(m, "mmPerTick"), 0, C, "mech mmPerTick"),
+      gear: at(m, "gear") == null ? null : num(at(m, "gear"), 1, C, "mech gear"),
       fromMate: isObj(at(m, "fromMate")) ? {name: str(at(at(m, "fromMate"), "name"), C, "mate name"),
         type: str(at(at(m, "fromMate"), "type"), C, "mate type"), id: str(at(at(m, "fromMate"), "id"), C, "mate id")} : null
     }));
-    for(const m of mechs){ if(!m.limits) delete m.limits; if(!m.couple) delete m.couple; if(!m.fromMate) delete m.fromMate; if(!m.alias) delete m.alias; }
+    for(const m of mechs){ if(!m.limits) delete m.limits; if(!m.couple) delete m.couple; if(!m.fromMate) delete m.fromMate; if(!m.alias) delete m.alias;
+      if(m.couple&&!m.couple.link) delete m.couple.link;
+      for(const k of ["restPos", "q0", "mmPerTick", "gear"]) if(m[k] == null || (k !== "restPos" && k !== "q0" && !(m[k] > 0))) delete m[k]; }
     for(const s of solids) if(!s.mech) delete s.mech;
     const mt = at(v, "mates");
     return {
@@ -315,6 +331,8 @@ const {sessionFromBench, packSession, unpackSession} = (function(){
   const vecI = p => [mmI(p[0]), mmI(p[1]), mmI(p[2])];
   const flat = pts => { const a = []; for(const p of pts) a.push(mmI(p[0]), mmI(p[1]), mmI(p[2])); return a; };
 
+  const encLink = L => !L ? null : {crankPivot: vecI(L.crankPivot), crankAxis: L.crankAxis, crankPin: vecI(L.crankPin),
+    pin: vecI(L.pin), slideAxis: L.slideAxis, rod: mmI(L.rod), slider: L.slider || null};
   const encCad = cad => !cad ? null : {
     name: cad.name, units: cad.units, pointCount: cad.pointCount,
     bbox: {min: vecI(cad.bbox.min), max: vecI(cad.bbox.max)},
@@ -327,8 +345,11 @@ const {sessionFromBench, packSession, unpackSession} = (function(){
       part: m.part, partName: m.partName, hasActuator: m.hasActuator, manual: m.manual, inferred: m.inferred,
       alias: m.alias || null,
       limits: m.limits ? m.limits.map(v => !Number.isFinite(v) ? null : (/^(linear|linear-slide|prismatic)$/.test(m.kind) ? mmI(v) : v)) : null,
-      couple: m.couple ? {to: m.couple.to, ratio: m.couple.ratio, via: m.couple.via || null} : null,
-      fromMate: m.fromMate ? {name: m.fromMate.name, type: m.fromMate.type, id: m.fromMate.id} : null
+      couple: m.couple ? {to: m.couple.to, ratio: m.couple.ratio, via: m.couple.via || null, link: encLink(m.couple.link)} : null,
+      fromMate: m.fromMate ? {name: m.fromMate.name, type: m.fromMate.type, id: m.fromMate.id} : null,
+      // a joint spec's numbers (src/jointspec.js)
+      restPos: Number.isFinite(m.restPos) ? m.restPos : null, q0: Number.isFinite(m.q0) ? m.q0 : null,
+      mmPerTick: Number.isFinite(m.mmPerTick) ? m.mmPerTick : null, gear: Number.isFinite(m.gear) ? m.gear : null
     })),
     solids: cad.solids.map(s => ({name:s.name, part:s.part, kind:s.kind, size:mmI(s.size), pts:flat(s.pts), mech:s.mech || null})),
     mates: cad.mates ? {source: cad.mates.source, joints: cad.mates.joints, matched: cad.mates.matched,

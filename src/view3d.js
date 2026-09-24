@@ -871,20 +871,21 @@ const View={
     this.spinExact(dt);
     if(this.fly) this.fly.g.rotation.z-=Math.min(26,Shots.spin()*140)*dt;
 
+    // a joint tied to a driven one (a cascade stage, a gear, a rack, a linkage's
+    // slide and rod) follows it (src/jointspec.js); a joint nothing drives
+    // still takes its drawn-pose fix
+    const drawn=jointValues(this.cad.mechs,m=>{
+      const dn=deviceOn(m.id), s=dn?Sim.dev[dn]:null;
+      if(!s) return m.couple?null:(m.q0||null);
+      const p=mechPose(m,s,this.size);
+      return p.ang!=null?p.ang:(p.d!=null?p.d:null);
+    });
     for(const m of this.cad.mechs){
       if(!m._g) continue;
-      const dn=deviceOn(m.id);
-      const s=dn?Sim.dev[dn]:null;
-      let p=s?mechPose(m,s,this.size):null;
-      // a joint tied to a driven one (a cascade stage, a gear, a rack) follows it
-      if(!p&&m.couple){
-        const L=this.cad.mechs.find(x=>x.id===m.couple.to), ln=L&&deviceOn(L.id), ls=ln&&Sim.dev[ln];
-        if(ls){ const lp=mechPose(L,ls,this.size), q=mateClamp(m,(lp.ang!=null?lp.ang:(lp.d||0))*m.couple.ratio);
-          p=normJointKind(m.kind)==="linear"?{d:q}:{ang:q}; }
-      }
-      if(!p) continue;
-      if(p.ang!=null) m._g.quaternion.setFromAxisAngle(this.vAxis(m.axis), p.ang);
-      else if(p.d!=null) m._g.position.copy(this.v3(m.pivot).add(this.vAxis(m.axis).multiplyScalar(p.d)));
+      let q=drawn.get(m.id); if(q==null) continue;
+      if(m.couple&&!deviceOn(m.id)) q=mateClamp(m,q);
+      if(normJointKind(m.kind)==="linear") m._g.position.copy(this.v3(m.pivot).add(this.vAxis(m.axis).multiplyScalar(q)));
+      else m._g.quaternion.setFromAxisAngle(this.vAxis(m.axis), q);
     }
     for(const J of this.jawSets||[]){
       const dn=deviceOn(J.mech.id);
@@ -984,11 +985,8 @@ function mechPose(m,s,size){
   // an Onshape mate: right-handed about the mate's own axis, inside its limits,
   // exactly as the sim stops it (src/sim.js)
   if(m.fromMate&&(k==="revolute-yaw"||k==="revolute-lift"||k==="linear")){
-    const lin=k==="linear";
-    let q=lin?(s.kind==="motor"?(+s.ticks||0)*slideMmPerTick(m,s.tpr)/1000:travel*(m.lever||size*0.3))
-             :(s.kind==="motor"?(+s.revs||0)/(+m.gear>0?+m.gear:1)*2*Math.PI:travel*(s.travelDeg||300)*Math.PI/180);
-    q=mateClamp(m,q*dir);
-    return lin?{d:q}:{ang:q};
+    const q=mateJointQ(m,s,size);                 // src/jointspec.js, shared with the sim
+    return k==="linear"?{d:q}:{ang:q};
   }
   if(k==="revolute-yaw"||k==="revolute-lift"){
     const sgn=dir*(k==="revolute-lift"?-1:1);
