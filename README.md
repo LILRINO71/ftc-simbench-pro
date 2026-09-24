@@ -14,6 +14,11 @@ browser, so a team can open it on the laptop that's already in the pit.
 
 ![The bench: the robot on the BIOBUZZ field with the physics panel and the math sheet open](docs/math.png)
 
+It opens with a real robot: GearGurus 7832's Into The Deep (2024-25) robot, from the team's own
+Onshape export, running their own TeleOp (`assets/robots/into-the-deep/`). Its lift, outtake arm
+and claw, linkage-driven intake extension, and intake arm, wrist and claw all move the way the
+team's code moves them. `?robot=sample` opens the small built-in sample instead.
+
 ## Run it
 
 ```bash
@@ -36,6 +41,7 @@ Deployment to `app.ftc-simbench.com` is in [DEPLOY.md](DEPLOY.md).
 |---|---|
 | **Zero-config CAD** | `step.js` resolves the assembly tree and places every part; `hull.js` gives each one a solid shape; `inertia.js` turns those into mass, centre of mass and inertia; `drivetrain.js` finds the wheels and works out whether it's mecanum, tank, X-drive, omni or swerve — without you tagging anything. |
 | **Rigid-body physics** | `dynamics.js` drives the chassis with motor torque curves, per-wheel normal loads with load transfer, and a slip-limited friction model. The robot accelerates like the build, leans under braking, and breaks traction when you ask for more than the tiles can give. |
+| **Exact joints** | `mates.js` reads Onshape's assembly definition, so every joint has its true axis, pivot, travel and carried parts. No mates? A joint spec (`jointspec.js`, a small JSON: see the default robot's `joints.json`) says the same by hand, down to cascade stages and servo-driven slider-crank linkages. |
 | **Real code** | `java.js` interprets your OpMode — servos with stall torque, encoders and PID, `RUN_TO_POSITION`, autonomous sleeps and wait loops. Not a rewrite, not a stub. |
 | **BIOBUZZ field** | The measured field from the [BIOBUZZ Shot Sim](https://github.com/LILRINO71/biobuzz-shot-sim), vendored in `vendor/`: leaning A-frame HIVEs, bistable pentagonal CELLs, wall FLOWERs, staged POLLEN and NECTAR, and the ~190 g tipping point. |
 | **Show Math** | `mathdoc.js` prints the equations for *your* robot with your numbers substituted — gear ratios, holding torque, odometry, traction limits, feedforward — and exports as Markdown for an Engineering Portfolio. |

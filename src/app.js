@@ -122,7 +122,7 @@ const opKind=e=> e.code&&e.code.kind==="Autonomous" ? "Auto" : "TeleOp";
 function renderOpList(){
   const row=e=>`
     <div class="oprow${e.id===CURRENT_ID?" on":""}" data-op="${esc(e.id)}" tabindex="0" role="button" aria-pressed="${e.id===CURRENT_ID}">
-      <div><div class="on-name">${esc(opName(e))}</div><div class="on-file">${esc(e.file)}${e.builtin?" · sample":""}</div></div>
+      <div><div class="on-name">${esc(opName(e))}</div><div class="on-file">${esc(e.file)}${e.builtin?" · "+esc(e.team||"sample"):""}</div></div>
       ${e.builtin?"<span></span>":`<button class="rm" data-oprm="${esc(e.id)}" title="Remove ${esc(e.file)}" aria-label="Remove ${esc(e.file)}">×</button>`}
     </div>`;
   const tele=LIBRARY.filter(e=>opKind(e)==="TeleOp"), auto=LIBRARY.filter(e=>opKind(e)==="Auto");
@@ -163,8 +163,7 @@ function selectOpMode(id){
     renderOpList(); renderOpSelect(); return;
   }
   CODE=e.code;
-  MAP=autoMap(CODE.devices,CAD.mechs);
-  applyDeviceMemory();
+  mapDevices();
   analyzeAll();
   Sim.load(CODE,CAD,MAP,withPose());
   applyConfigOverrides(); Sim.init(); applyConfigOverrides();    // like a DS: selected and INIT'd, waiting for START
@@ -1248,7 +1247,7 @@ function loadCAD(cad,label,cls){
   View.load(cad);
   if(CadView.on){ CadView.hid=null; CadView.select(null); CadView.fit(); CadView.renderTree(); }
   if(Sim.phase!=="running") placeAtStart();
-  if(CODE){ MAP=autoMap(CODE.devices,CAD.mechs); applyDeviceMemory(); rebuild(); }
+  if(CODE){ mapDevices(); rebuild(); }
   if(restored) $("#cadStatus").textContent=label+" · rig restored";
   syncOptionControls();
   DRIVE_CACHE={key:null,val:null}; Physics.sync(); MathTab.invalidate();
@@ -1268,7 +1267,7 @@ function takeCAD(file){
   $("#cadStatus").textContent="reading "+file.name+" …"; $("#cadDrop").className="drop";
   readText(file,text=>{ LAST_STEP={name:file.name, text}; parseAndLoad(); },m=>{ $("#cadStatus").textContent=m; });
 }
-function parseAndLoad(){
+function parseAndLoad(done){
   if(!LAST_STEP) return;
   const {name,text}=LAST_STEP, mb=(text.length/1048576).toFixed(1);
   $("#cadStatus").textContent="parsing "+mb+" MB …";
@@ -1276,12 +1275,58 @@ function parseAndLoad(){
     try{
       const cad=parseSTEP(text,msg=>{ $("#cadStatus").textContent=msg; },{up:OPTS.up});
       cad.name=name;
-      loadCAD(cad, name+" · "+mb+" MB · "+cad.mechs.length+" mechanism"+(cad.mechs.length===1?"":"s"), cad.mechs.length?"ok":"bad");
+      // a joint spec belongs to the file it was written for; another robot drops it
+      if(JOINTS.spec&&JOINTS.step!==name){ JOINTS.spec=JOINTS.report=JOINTS.devices=null; JOINTS.name=JOINTS.step=null; }
+      loadCAD(cad, (LAST_STEP.label||name+" · "+mb+" MB")+" · "+cad.mechs.length+" mechanism"+(cad.mechs.length===1?"":"s"), cad.mechs.length?"ok":"bad");
       if(MATES.asm) applyMates();
+      else if(JOINTS.spec) applyJoints();
       exactGeometry(cad,text);
+      if(done) done(cad);
     }catch(e){ $("#cadStatus").textContent="couldn't parse this STEP file — "+e.message; $("#cadDrop").className="drop bad"; }
     renderFrameNote();
   },30);
+}
+
+/* ============================================================
+   THE DEFAULT ROBOT
+   GearGurus 7832's Into The Deep robot (2024-25): their Onshape STEP,
+   their joint spec, and their OpModes, served beside the app from
+   robots/ (tools/build.mjs copies assets/robots there). The STEP is
+   gzipped (52 MB -> 8 MB) and inflated here. Until it lands, and if it
+   can't, the built-in sample robot stands in. ?robot=sample skips it.
+   ============================================================ */
+const DEFAULT_ROBOT={dir:"robots/into-the-deep/", step:"Into The Deep.step", file:"robot.step.gz", joints:"joints.json",
+  team:"7832", label:"GearGurus 7832 · Into The Deep",
+  opmodes:[{id:"itd-sample-tele", file:"sample_teleop.java"}, {id:"itd-bal", file:"BAL.java"}]};
+async function fetchStepText(url){
+  const r=await fetch(url); if(!r.ok) throw new Error(r.status+" for "+url);
+  const buf=new Uint8Array(await r.arrayBuffer());
+  // a host may have unzipped it on the way already (Content-Encoding): only inflate real gzip
+  if(buf[0]===0x1f&&buf[1]===0x8b){
+    if(typeof DecompressionStream==="undefined") throw new Error("this browser can't unzip the robot");
+    return await new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream("gzip"))).text();
+  }
+  return new TextDecoder().decode(buf);
+}
+async function loadDefaultRobot(){
+  const R=DEFAULT_ROBOT, st=$("#cadStatus");
+  st.textContent="loading "+R.label+" …";
+  try{
+    const [text,spec,...srcs]=await Promise.all([fetchStepText(R.dir+R.file),
+      fetch(R.dir+R.joints).then(r=>{ if(!r.ok) throw new Error(r.status+" for "+R.joints); return r.json(); }),
+      ...R.opmodes.map(o=>fetch(R.dir+o.file).then(r=>r.ok?r.text():null).catch(()=>null))]);
+    if(LAST_STEP) return;                       // a robot was dropped in meanwhile: that one wins
+    R.opmodes.forEach((o,i)=>{ if(srcs[i]&&!entry(o.id)){ const e={id:o.id, file:o.file, source:srcs[i], builtin:true, team:R.team}; parseEntry(e); LIBRARY.push(e); } });
+    JOINTS.spec=spec; JOINTS.name=R.joints; JOINTS.step=R.step;
+    LAST_STEP={name:R.step, text, label:R.label};
+    parseAndLoad(()=>{
+      // the team's own TeleOp, unless one of the user's OpModes was open
+      const saved=store.get("ftcbench.current",null), mine=entry(saved);
+      selectOpMode(mine&&(!mine.builtin||mine.team)?saved:R.opmodes[0].id);
+    });
+  }catch(e){
+    if(!LAST_STEP) st.textContent="couldn't load the default robot ("+e.message+") — this is the built-in sample";
+  }
 }
 /* The real surfaces, the way Onshape draws them. OpenCascade loads from the
    CDN the first time and runs off the main thread; until it answers — or if
@@ -1340,10 +1385,18 @@ function takeRobotConfig(file){ readText(file,text=>setRobotConfig(text,file.nam
    signed in to Onshape: no keys, nothing sent anywhere but Onshape.
    ============================================================ */
 const MATES={asm:null, features:null, name:null, report:null};
+/* A joint spec (src/jointspec.js): the joints written down by hand. It
+   belongs to one STEP file and comes back each time that file is parsed. */
+const JOINTS={spec:null, name:null, step:null, report:null, devices:null};
 function takeMates(file){
   readText(file,text=>{
     let j; try{ j=JSON.parse(text); }catch(e){ $("#mateStatus").textContent=file.name+" isn't JSON — save the page Onshape shows as a .json file."; $("#mateDrop").className="drop bad"; return; }
-    if(j&&j.rootAssembly){ MATES.asm=j; MATES.name=file.name; }
+    if(j&&j.format===JOINT_SPEC_FORMAT){
+      MATES.asm=MATES.features=MATES.name=MATES.report=null;
+      JOINTS.spec=j; JOINTS.name=file.name; JOINTS.step=LAST_STEP?LAST_STEP.name:null;
+      applyJoints(); return;
+    }
+    if(j&&j.rootAssembly){ MATES.asm=j; MATES.name=file.name; JOINTS.spec=null; JOINTS.report=null; }
     else if(j&&(Array.isArray(j.features)||Array.isArray(j))) MATES.features=j;
     else { $("#mateStatus").textContent=file.name+" isn't an Onshape assembly definition or features list."; $("#mateDrop").className="drop bad"; return; }
     applyMates();
@@ -1362,7 +1415,7 @@ function applyMates(){
     View.hiddenParts=View.hiddenParts||new Set();
     View.load(CAD); if(View.exact) View.applyExact();
     if(CadView.on) CadView.renderTree();
-    if(CODE){ MAP=autoMap(CODE.devices,CAD.mechs); applyDeviceMemory(); rebuild(); }
+    if(CODE){ mapDevices(); rebuild(); }
     pill.textContent=rep.joints+" joint"+(rep.joints===1?"":"s"); pill.className="pill ok";
     st.textContent=MATES.name+" · "+rep.matched+" of "+rep.parts+" parts matched"+(MATES.features?" · limits":"");
     drop.className="drop ok"; $("#mateClear").hidden=false;
@@ -1372,7 +1425,52 @@ function applyMates(){
   }
   Status.render&&Status.render();
 }
+/* The joint spec onto the loaded CAD: the same panel, the same rebuild as mates. */
+function applyJoints(){
+  const st=$("#mateStatus"), drop=$("#mateDrop"), note=$("#mateNote"), pill=$("#matePill");
+  if(!JOINTS.spec||!CAD) return;
+  try{
+    const R=applyJointSpec(CAD,JOINTS.spec);
+    JOINTS.report=R.report; JOINTS.devices=R.devices;
+    if(R.front&&FRONTS[R.front]!==undefined) OPTS.front=R.front;
+    recomputeChain(CAD.mechs);
+    View.hiddenParts=View.hiddenParts||new Set();
+    View.load(CAD); if(View.exact) View.applyExact();
+    if(CadView.on) CadView.renderTree();
+    if(Sim.phase!=="running") placeAtStart();
+    if(CODE){ mapDevices(); rebuild(); }
+    syncOptionControls();
+    pill.textContent=R.report.joints+" joint"+(R.report.joints===1?"":"s"); pill.className="pill ok";
+    st.textContent=(JOINTS.spec.robot||JOINTS.name)+" · "+R.report.matched+" of "+R.report.parts+" parts on joints";
+    // the headline counted the joints the parser guessed; these replace them
+    const J=R.report.joints+" joint"+(R.report.joints===1?"":"s");
+    for(const el of [$("#vpTitle"),$("#cadStatus")]) el.textContent=el.textContent.replace(/\d+ mechanisms?/,J);
+    drop.className="drop ok"; $("#mateClear").hidden=false;
+    note.innerHTML=R.report.why.map(w=>"<li>"+esc(w)+"</li>").join("")+
+      JOINTS.spec.joints.filter(j=>j.note).map(j=>"<li><b>"+esc(j.label||j.id)+"</b>: "+esc(j.note)+"</li>").join("");
+  }catch(e){
+    JOINTS.report=null;
+    st.textContent="Couldn't apply the joint spec — "+e.message; drop.className="drop bad"; pill.textContent="error"; pill.className="pill bad";
+  }
+  Status.render&&Status.render();
+}
+/* Which device drives which joint: a joint spec says so outright (by the
+   variable or the configuration name); otherwise the names and the CAD
+   decide. Either way, what the user picked by hand in the table stays. */
+function mapDevices(){
+  if(!CODE||!CAD) return;
+  MAP=autoMap(CODE.devices,CAD.mechs);
+  applyDeviceMemory();
+  const J=JOINTS.report&&CAD.mates&&CAD.mates.source==="spec"?JOINTS.devices:null;
+  if(J) for(const d of CODE.devices){
+    const own=k=>k&&Object.prototype.hasOwnProperty.call(J,k)?J[k]:null;
+    const j=own(d.name)||own(d.cfg), picked=RIG_DEVICES[d.name];
+    // a device the user mapped to one of these joints by hand keeps it
+    if(j&&CAD.mechs.some(m=>m.id===j)&&!(picked&&CAD.mechs.some(m=>m.id===picked))) MAP[d.name]=j;
+  }
+}
 function clearMates(){
+  if(JOINTS.spec){ JOINTS.spec=JOINTS.report=JOINTS.devices=null; JOINTS.name=JOINTS.step=null; }
   MATES.asm=MATES.features=MATES.name=MATES.report=null;
   $("#matePill").textContent="none"; $("#matePill").className="pill"; $("#mateClear").hidden=true;
   $("#mateNote").innerHTML=""; $("#mateDrop").className="drop";
@@ -2094,6 +2192,7 @@ function proBoot(){
   $("#rigReset").addEventListener("click",()=>{
     store.del(rigKey()); HW_USER={}; RIG_DEVICES={};
     if(MATES.report){ applyMates(); return; }   // the mates are the rig
+    if(JOINTS.report){ applyJoints(); return; } // and so is a joint spec
     for(const m of CAD.mechs){ m.kind=m.hasActuator===false?"fixed":null; m.leverOverride=null; m.label=null; }
     CAD.mechs=CAD.mechs.filter(m=>!m.manual);
     classifyMechs(CAD.mechs);
@@ -2148,4 +2247,5 @@ function proBoot(){
   saveRig();
   RAILS_READY=true;
   requestAnimationFrame(frame);
+  try{ if(new URLSearchParams(location.search).get("robot")!=="sample") loadDefaultRobot(); }catch(e){}
 })();

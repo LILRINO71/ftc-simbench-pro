@@ -25,6 +25,7 @@ Read this file before you start, and again before you push.
    every pair of parallel changes conflict. Build locally, never commit it.
 6. **Never commit robot CAD or test staging.** `dist/_t/`, `*.step`, and big
    CAD files stay local. The corpus STEPs regenerate from `tools/stepgen.mjs`.
+   The one exception is the default robot, `assets/robots/into-the-deep/`.
 7. **Claim before you edit a shared file.** Add a row below, push that change
    first, and remove the row when you're done. If a file you need is claimed,
    work around it or leave a note in the claimant's GitHub issue. Don't edit
@@ -55,6 +56,17 @@ Those files are free again; read the conventions below before changing them.
   cascade stage, gear or rack driven through another joint). Each part it
   carries has `solid.mech` set to its id; with `cad.mates` set, grouping
   uses that, never nearest-pivot. `classifyMechs` leaves mate joints alone.
+- **Joint specs** (`src/jointspec.js`, format `ftc-sim-bench.joints`): the
+  same joints written by hand for a robot with no mates. They land as mate
+  joints (`fromMate`, `cad.mates.source === "spec"`) plus `restPos` (the servo
+  position the CAD was drawn at), `q0` (a drawn-pose fix, rad), `mmPerTick`,
+  `gear`, and `couple.via` of `"ratio"`, `"slider-crank"` or `"rod"` with a
+  `couple.link`. A joint's value comes from `mateJointQ`, followers from
+  `jointValues`/`followQ`; the sim and the view both use these.
+- **The default robot** is `assets/robots/into-the-deep/` (GearGurus 7832):
+  `robot.step.gz`, `joints.json` and the team's OpModes, copied to
+  `dist/robots/` by the build. It is the one CAD file the repo tracks, at the
+  owner's request; `tests/jointspec.test.mjs` runs the team's TeleOp on it.
 - **Joint kinds**: compare through `normJointKind(k)`; `prismatic` and
   `linear-slide` are aliases of `linear`. Slide travel per tick is
   `slideMmPerTick(mech, tpr)`, shared by the sim and the view.

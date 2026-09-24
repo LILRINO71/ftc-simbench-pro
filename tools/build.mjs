@@ -95,6 +95,15 @@ fs.writeFileSync(path.join(DIST, '.nojekyll'), '', 'utf8');
 fs.mkdirSync(path.join(DIST, 'demo'), { recursive: true });
 // generated, not copied: *.step is gitignored, so a clean checkout has no file to copy
 fs.writeFileSync(path.join(DIST, 'demo', 'mecanum-demo.step'), buildRobot('mecanum-offset').text, 'utf8');
+// the robot the app opens with (src/app.js DEFAULT_ROBOT): its gzipped STEP, joint spec and OpModes
+const copyDir = (from, to) => {
+  fs.mkdirSync(to, { recursive: true });
+  for (const f of fs.readdirSync(from, { withFileTypes: true })) {
+    if (f.isDirectory()) copyDir(path.join(from, f.name), path.join(to, f.name));
+    else fs.copyFileSync(path.join(from, f.name), path.join(to, f.name));
+  }
+};
+if (fs.existsSync(path.join(ROOT, 'assets', 'robots'))) copyDir(path.join(ROOT, 'assets', 'robots'), path.join(DIST, 'robots'));
 
 // Cloudflare Pages / Netlify read this. The page is one file that changes every
 // deploy, so it must never be cached hard; everything else here is immutable.

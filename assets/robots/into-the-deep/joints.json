@@ -1,0 +1,248 @@
+{
+ "format": "ftc-sim-bench.joints",
+ "version": 1,
+ "robot": "GearGurus 7832 · Into The Deep (2024-25)",
+ "about": "Millimetres and degrees in the bench's robot frame (+z up, origin at the drivetrain centre on the floor). Each joint turns right-handed about its axis, or slides along it, as the value the team's code sends goes up. Part picks: a later joint's pick wins over an earlier one's.",
+ "front": "-x",
+ "joints": [
+  {
+   "id": "lift",
+   "label": "Lift (vertical slides)",
+   "kind": "slider",
+   "axis": [0, 0, 1],
+   "pivot": [0, 0, 97],
+   "device": ["uppies", "uppies1"],
+   "part": "5203-2402-0019",
+   "mmPerTick": 0.26,
+   "limits": [0, 700],
+   "note": "Four-stage slides on each side. 2650 ticks (the high basket in the team's code) is 0.69 m of travel.",
+   "parts": [
+    { "in": "(^|/)(Left|Right) SAR 230/SAR2XX/", "x": [-40, -11] },
+    { "in": "(^|/)(Left|Right) SAR 230/", "not": "/SAR2XX/", "x": [-40, -2], "z": [0, 250] },
+    { "x": [-80, -18], "y": [-170, 170], "z": [170, 400] }
+   ]
+  },
+  {
+   "id": "lift stage 2",
+   "label": "Lift stage 2",
+   "kind": "slider",
+   "axis": [0, 0, 1],
+   "pivot": [0, 0, 97],
+   "follows": { "joint": "lift", "ratio": 0.3333 },
+   "parts": [
+    { "in": "(^|/)(Left|Right) SAR 230/SAR2XX/", "x": [3, 17] },
+    { "in": "(^|/)(Left|Right) SAR 230/", "not": "/SAR2XX/", "x": [12, 40], "z": [0, 250] },
+    { "in": "(^|/)(Left|Right) SAR 230/", "not": "/SAR2XX/", "x": [-2, 12], "z": [250, 500] }
+   ]
+  },
+  {
+   "id": "lift stage 3",
+   "label": "Lift stage 3",
+   "kind": "slider",
+   "axis": [0, 0, 1],
+   "pivot": [0, 0, 97],
+   "follows": { "joint": "lift", "ratio": 0.6667 },
+   "parts": [
+    { "in": "(^|/)(Left|Right) SAR 230/SAR2XX/", "x": [-11, 3] },
+    { "in": "(^|/)(Left|Right) SAR 230/", "not": "/SAR2XX/", "x": [-2, 12], "z": [0, 250] },
+    { "in": "(^|/)(Left|Right) SAR 230/", "not": "/SAR2XX/", "x": [-40, -2], "z": [250, 500] }
+   ]
+  },
+  {
+   "id": "arm",
+   "label": "Outtake arm",
+   "kind": "revolute",
+   "axis": [0, 1, 0],
+   "pivot": [-49.5, 0, 352],
+   "parent": "lift",
+   "device": "Arm",
+   "part": "5203-2402-0051",
+   "limits": [-305, 8],
+   "note": "The team's code counts 1425.1 ticks per turn of the arm (a 50.9:1 Yellow Jacket); the CAD still shows a 19.2:1.",
+   "parts": [
+    { "in": "/Current Outtake Claw \\+ Arm/" },
+    { "in": "/2106-4008-0800 assembly/" }
+   ]
+  },
+  {
+   "id": "outRot",
+   "label": "Outtake wrist",
+   "kind": "revolute",
+   "axis": [0.883, 0, -0.469],
+   "pivot": [119.3, 33, 261],
+   "parent": "arm",
+   "device": "outRot",
+   "restPos": 0.32,
+   "parts": [
+    { "in": "/Current Outtake Claw \\+ Arm/", "x": [140, 260] },
+    { "in": "(^|/)Part [23]$", "not": "Current Outtake", "x": [150, 260], "y": [-30, 95], "z": [200, 300] }
+   ]
+  },
+  {
+   "id": "outClaw",
+   "label": "Outtake claw",
+   "kind": "revolute",
+   "axis": [-0.4405, -0.3495, -0.827],
+   "pivot": [176.9, 62.2, 249.5],
+   "parent": "outRot",
+   "device": "outClaw",
+   "restPos": 0.43,
+   "limits": [-5, 30],
+   "note": "Drawn open (0.43 in the team's code); 0.68 closes it on a sample.",
+   "parts": [
+    { "in": "/Current Outtake Claw \\+ Arm/.*(Hub Mount Gear|1908-0025-0032)", "x": [150, 260], "y": [38, 100] },
+    { "in": "(^|/)Part 3$", "not": "Current Outtake", "x": [150, 260], "y": [30, 95], "z": [200, 300] }
+   ]
+  },
+  {
+   "id": "outClaw finger",
+   "label": "Outtake claw, geared finger",
+   "kind": "revolute",
+   "axis": [-0.4405, -0.3495, -0.827],
+   "pivot": [183.5, 17.9, 265.6],
+   "parent": "outRot",
+   "follows": { "joint": "outClaw", "ratio": -1 },
+   "parts": [
+    { "in": "/Current Outtake Claw \\+ Arm/.*(Hub Mount Gear|1309 Series)", "x": [150, 260], "y": [-20, 38] },
+    { "in": "(^|/)Part 2$", "not": "Current Outtake", "x": [150, 260], "y": [-30, 38], "z": [200, 300] }
+   ]
+  },
+  {
+   "id": "crank R",
+   "label": "Extension crank (right)",
+   "kind": "revolute",
+   "axis": [0, 1, 0],
+   "pivot": [144.1, -167.9, 114],
+   "device": "linkR",
+   "part": "2000-0025-0002",
+   "restPos": 0.56,
+   "limits": [-100, 10],
+   "parts": [
+    { "in": "Flat Beam \\(29 Hole", "y": [-200, -166] },
+    { "x": [125, 165], "y": [-190, -163], "z": [95, 135] }
+   ]
+  },
+  {
+   "id": "crank L",
+   "label": "Extension crank (left)",
+   "kind": "revolute",
+   "axis": [0, 1, 0],
+   "pivot": [143.6, 167.4, 111.5],
+   "device": "linkL",
+   "part": "2000-0025-0002",
+   "restPos": 0.56,
+   "limits": [-100, 10],
+   "offsetDeg": -149.2,
+   "note": "The CAD draws this linkage folded the other way, through the floor (issue #5); it's drawn matching the right side.",
+   "parts": [
+    { "in": "Flat Beam \\(29 Hole", "y": [166, 200] },
+    { "x": [125, 165], "y": [163, 190], "z": [95, 135] }
+   ]
+  },
+  {
+   "id": "extend",
+   "label": "Intake extension",
+   "kind": "slider",
+   "axis": [-1, 0, 0],
+   "pivot": [-45.9, 0, 102.7],
+   "limits": [0, 235],
+   "follows": { "joint": "crank R", "linkage": "slider-crank", "crankPin": [176.5, -168.1, 259], "pin": [-45.9, -168.1, 102.7] },
+   "note": "A servo crank on each side pushes the two-stage slides out through a 272 mm rod: 0.56 is in, 0.25 is 226 mm out.",
+   "parts": [
+    { "x": [-215, -15], "y": [100, 170], "z": [94, 125] },
+    { "x": [-215, -15], "y": [-170, -100], "z": [94, 125] },
+    { "x": [-215, -140], "y": [-100, 100], "z": [94, 125] },
+    { "in": "(^|/)2 stage (Left|Right) SAR 230/", "x": [0, 200] },
+    { "in": "/Current Intake/" }
+   ]
+  },
+  {
+   "id": "rod R",
+   "label": "Extension rod (right)",
+   "kind": "revolute",
+   "axis": [0, 1, 0],
+   "pivot": [-45.9, -168.1, 102.7],
+   "parent": "extend",
+   "follows": { "joint": "crank R", "linkage": "rod", "slider": "extend", "crankPin": [176.5, -168.1, 259], "pin": [-45.9, -168.1, 102.7] },
+   "parts": [ { "in": "Flat Beam \\(35 Hole", "y": [-200, -150] } ]
+  },
+  {
+   "id": "rod L",
+   "label": "Extension rod (left)",
+   "kind": "revolute",
+   "axis": [0, 1, 0],
+   "pivot": [-47.8, 166.2, 102.5],
+   "parent": "extend",
+   "follows": { "joint": "crank L", "linkage": "rod", "slider": "extend", "crankPin": [189.8, 166.2, -29.8], "pin": [-47.8, 166.2, 102.5] },
+   "parts": [ { "in": "Flat Beam \\(35 Hole", "y": [150, 200] } ]
+  },
+  {
+   "id": "inY",
+   "label": "Intake arm",
+   "kind": "revolute",
+   "axis": [0, 1, 0],
+   "pivot": [-180.6, -29.6, 131.4],
+   "parent": "extend",
+   "device": "inY",
+   "part": "2000-0025-0002",
+   "restPos": 0.69,
+   "note": "Drawn in the hand-off pose: 0.69 in the team's code; 0.16 puts the claw on the floor.",
+   "parts": [ { "in": "/Current Intake/", "x": [-200, -75], "y": [-80, -25], "z": [110, 200] } ]
+  },
+  {
+   "id": "inPiv",
+   "label": "Intake wrist",
+   "kind": "revolute",
+   "axis": [0, 1, 0],
+   "pivot": [-102.7, -30.1, 167.9],
+   "parent": "inY",
+   "device": "inPiv",
+   "restPos": 0.1,
+   "parts": [ { "in": "/Current Intake/", "x": [-140, -70], "y": [-35, 20], "z": [140, 240] } ]
+  },
+  {
+   "id": "inX",
+   "label": "Intake twist",
+   "kind": "revolute",
+   "axis": [-0.46, 0, 0.888],
+   "pivot": [-105, -2.5, 220.2],
+   "parent": "inPiv",
+   "device": "inX",
+   "part": "2000-0025-0002",
+   "restPos": 0.5,
+   "parts": [
+    { "in": "/Current Intake/", "z": [212, 300] },
+    { "in": "(^|/)Part [12]$", "not": "Current Intake", "x": [-165, -115], "y": [-90, 45], "z": [215, 300] }
+   ]
+  },
+  {
+   "id": "inClaw",
+   "label": "Intake claw",
+   "kind": "revolute",
+   "axis": [0.885, -0.035, 0.465],
+   "pivot": [-125.7, 20.7, 244.1],
+   "parent": "inX",
+   "device": "inClaw",
+   "restPos": 0.51,
+   "limits": [-70, 10],
+   "note": "Drawn closed (0.51); 0.3 opens it.",
+   "parts": [
+    { "in": "/Current Intake/.*(Hub Mount Gear|1908-0025-0032)", "y": [0, 50], "z": [230, 300] },
+    { "in": "(^|/)Part 1$", "not": "Current Intake", "x": [-165, -115], "y": [0, 45], "z": [215, 300] }
+   ]
+  },
+  {
+   "id": "inClaw finger",
+   "label": "Intake claw, geared finger",
+   "kind": "revolute",
+   "axis": [0.885, -0.035, 0.465],
+   "pivot": [-127.4, -26, 242.4],
+   "parent": "inX",
+   "follows": { "joint": "inClaw", "ratio": -1 },
+   "parts": [
+    { "in": "/Current Intake/.*(Hub Mount Gear|1309 Series)", "y": [-50, 0], "z": [230, 300] },
+    { "in": "(^|/)Part 2$", "not": "Current Intake", "x": [-165, -115], "y": [-90, 0], "z": [215, 300] }
+   ]
+  }
+ ]
+}
