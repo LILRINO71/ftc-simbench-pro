@@ -65,10 +65,22 @@ function inDriveWheel(cad){
   let f=WHEEL_TEST.get(cad); if(f) return f;
   let ws=[];
   try{ ws=(typeof driveFromCAD==="function"?driveFromCAD(cad,{front:"+x"}).wheels:[]).filter(w=>w.c&&w.axis); }catch(e){ ws=[]; }
-  f=p=>ws.some(w=>{ const a=w.axis, d=[p[0]-w.c[0],p[1]-w.c[1],p[2]-w.c[2]], t=d[0]*a[0]+d[1]*a[1]+d[2]*a[2];
+  // centre inside the wheel's cylinder AND no bigger than the wheel: on 7832's
+  // robot a 232 mm beam's centre sits inside the front-left wheel's cylinder,
+  // and a centre test alone made it a wheel part that spun with the wheel
+  f=(p,ext)=>ws.some(w=>{ if((ext||0)>2.2*w.r) return false;
+    const a=w.axis, d=[p[0]-w.c[0],p[1]-w.c[1],p[2]-w.c[2]], t=d[0]*a[0]+d[1]*a[1]+d[2]*a[2];
     return Math.hypot(d[0]-t*a[0],d[1]-t*a[1],d[2]-t*a[2])<=w.r+0.003&&Math.abs(t)<=(w.width||0.05)/2+0.004; });
   WHEEL_TEST.set(cad,f); return f;
 }
+/* A part's largest box side, from its points or a {min,max} box: how big it is. */
+const partExtent=x=>{
+  let mn, mx;
+  if(x&&x.min){ mn=x.min; mx=x.max; }
+  else { mn=[Infinity,Infinity,Infinity]; mx=[-Infinity,-Infinity,-Infinity];
+    for(const p of x||[]) for(let k=0;k<3;k++){ if(p[k]<mn[k]) mn[k]=p[k]; if(p[k]>mx[k]) mx[k]=p[k]; } }
+  const e=Math.max(mx[0]-mn[0],mx[1]-mn[1],mx[2]-mn[2]); return Number.isFinite(e)?e:0;
+};
 /* The group of every solid; a solid's group is the one its centroid falls in. */
 function solidGroups(cad,turretScale){
   const own=mechOwner(cad,turretScale), ids=new Set(((cad&&cad.mechs)||[]).map(m=>m.id)), wheel=inDriveWheel(cad);
@@ -76,7 +88,7 @@ function solidGroups(cad,turretScale){
   // part no joint carries is the frame's
   if(cad&&cad.mates) return ((cad&&cad.solids)||[]).map(s=>s.mech&&ids.has(s.mech)?s.mech:"chassis");
   return ((cad&&cad.solids)||[]).map(s=>{ if(!s.pts||!s.pts.length) return "chassis";
-    const c=solidCentroid(s); if(wheel(c)) return "chassis";
+    const c=solidCentroid(s); if(wheel(c,partExtent(s.pts))) return "chassis";
     const g=own(c); return ids.has(g)?g:"chassis"; });
 }
 
@@ -168,7 +180,7 @@ function tessAssign(cad,res,turretScale){
     if(i>=0) return sg[i];
     const b=mt.boxes[j]; if(!Number.isFinite(b.min[0])) return "chassis";
     const c=[0,1,2].map(k=>(b.min[k]+b.max[k])/2);
-    if(!cad.mates&&inDriveWheel(cad)(c)) return "chassis";
+    if(!cad.mates&&inDriveWheel(cad)(c,partExtent(b))) return "chassis";
     const g=own(c); return ids.has(g)?g:"chassis";
   });
   return {group, solid:mt.solid, names:mt.names, boxes:mt.boxes};
@@ -383,7 +395,8 @@ function stepShapeUnits(text,occs){
 function tessExpand(occs,meshesOf){
   const meshes=[], solidOf=[], root={name:"", children:[], meshes:[]};
   const nodeAt=path=>{ let n=root;
-    for(const name of path){ let c=n.children.find(k=>k.sub&&k.name===name); if(!c){ c={name, sub:true, children:[], meshes:[]}; n.children.push(c); } n=c; }
+    for(const p of path){ const key=p&&p.k!=null?p.k:p, name=p&&p.n!=null?p.n:String(p);
+      let c=n.children.find(x=>x.sub===key); if(!c){ c={name, sub:key, children:[], meshes:[]}; n.children.push(c); } n=c; }
     return n; };
   for(const o of occs||[]){
     const list=meshesOf.get(o.rep); if(!list||!list.length) continue;

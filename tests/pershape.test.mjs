@@ -15,7 +15,7 @@ import { buildRobot } from '../tools/stepgen.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const T = new Function('"use strict";\n' + engineBundle().replace(/^"use strict";\n/, '') + '\n' +
   fs.readFileSync(path.join(ROOT, 'src', 'tessellate.js'), 'utf8') +
-  '\nreturn { parseSTEP, stepShapeUnits, tessExpand, tessAssign, tessBuckets, tessEdges, tessMatch, tessTree, tessNames, tessBox, placeM, frameM, OCCT_PARAMS, applyOnshapeMates };')();
+  '\nreturn { parseSTEP, stepShapeUnits, tessExpand, tessAssign, tessBuckets, tessEdges, tessMatch, tessTree, tessNames, tessBox, placeM, frameM, OCCT_PARAMS, applyOnshapeMates, inDriveWheel, driveFromCAD };')();
 const require = createRequire(import.meta.url);
 let occtP = null;
 const occt = () => (occtP = occtP || require(process.env.OCCT_IMPORT_JS || require.resolve('occt-import-js'))());
@@ -71,4 +71,26 @@ test('shapes are shared, not copied: the robot costs its unique shapes', async (
   // edges are worked out once per shape and placed with it
   const asg = T.tessAssign(cad, per, 0.55), e = T.tessEdges(cad, per, asg, null);
   assert.ok(e.reduce((n, g) => n + g.pos.length, 0) > 0);
+});
+
+test('a drive wheel part is inside the wheel AND no bigger than it; a long beam through it is not', () => {
+  const cad = T.parseSTEP(fixture('robots/mecanum-zup.step'));
+  const w = T.driveFromCAD(cad, { front: '+x' }).wheels[0], f = T.inDriveWheel(cad);
+  assert.equal(f(w.c, 0.03), true, 'a roller-sized part at the hub');
+  assert.equal(f(w.c, 2 * w.r), true, 'a side plate as big as the wheel');
+  // 7832's 232 mm flat beam: its centre inside the front-left wheel's cylinder
+  assert.equal(f(w.c, 0.232), false, 'a 232 mm beam passing through is not a wheel part');
+  assert.equal(f([w.c[0] + 0.3, w.c[1], w.c[2]], 0.03), false, 'and nothing outside the cylinder is');
+});
+
+test('twin subassemblies under one parent stay two nodes in the parts tree', async () => {
+  const { cad, per } = await both(fixture('robots/big.step'));
+  // every distinct subassembly occurrence on the parts' paths is its own node
+  const keys = new Set();
+  for (const o of cad.occs) for (const p of o.path) keys.add(p.k);
+  let nodes = 0;
+  const walk = (n) => { for (const c of n.children || []) { if ((c.children || []).length) nodes++; walk(c); } };
+  walk(per.root);
+  assert.equal(nodes, keys.size, `${keys.size} subassembly occurrences, ${nodes} tree nodes`);
+  assert.ok(keys.size > 100, 'big has its 165 identical gusset kits');
 });

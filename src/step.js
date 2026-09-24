@@ -344,7 +344,9 @@ function parseSTEP(text, onProgress, opts){
     const rep=repOfPd.get(pdid);
     if(rep!=null) totalPts+=localPoints(rep).length;
     occs.push({pd:pdid, M, rep, nauo:viaNauo, path});
-    const here=depth?path.concat([clean(pname(pdid)||"")]):path;
+    // each subassembly on the way, by its own occurrence (two identical wheel
+    // assemblies side by side are two nodes, not one) and its name
+    const here=depth?path.concat([{k:viaNauo, n:clean(pname(pdid)||"")}]):path;
     for(const k of (kidsOcc.get(pdid)||[]))
       walkOcc(k.pd, mulM(M, xfOfNauo.get(k.nauo)||IDM), depth+1, k.nauo, here);
   }

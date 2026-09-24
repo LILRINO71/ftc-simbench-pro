@@ -131,6 +131,9 @@ const View={
   fv(p){ return new THREE.Vector3(p[0]*IN, p[2]*IN, -p[1]*IN); },
 
   load(cad){
+    // another robot: the last one's exact surfaces go, GPU buffers and all, or a
+    // hide click would redraw the old robot over this one
+    if(this.exact&&this.exact.cad!==cad){ this.exact=null; this.exactG=[]; this.dropShapes(); this.shapeRes=null; this.spinWheels=[]; this.instHolder=null; }
     while(this.world.children.length){ const o=this.world.children[0]; this.world.remove(o); this.dispose(o); }
     const bb=cad.bbox;
     // A canonical CAD (src/frame.js) already has its origin at the drivetrain
@@ -257,9 +260,10 @@ const View={
     const wheelOf=j=>{
       if(asg.group[j]!=="chassis"||!dw.length) return -1;
       const b=asg.boxes&&asg.boxes[j]; if(!b||!Number.isFinite(b.min[0])) return -1;
-      const p=[(b.min[0]+b.max[0])/2,(b.min[1]+b.max[1])/2,(b.min[2]+b.max[2])/2];
+      const p=[(b.min[0]+b.max[0])/2,(b.min[1]+b.max[1])/2,(b.min[2]+b.max[2])/2], ext=partExtent(b);
       for(let k=0;k<dw.length;k++){
-        const w=dw[k], a=w.axis, d=[p[0]-w.c[0],p[1]-w.c[1],p[2]-w.c[2]], t=d[0]*a[0]+d[1]*a[1]+d[2]*a[2];
+        const w=dw[k]; if(ext>2.2*w.r) continue;            // bigger than the wheel: not part of it
+        const a=w.axis, d=[p[0]-w.c[0],p[1]-w.c[1],p[2]-w.c[2]], t=d[0]*a[0]+d[1]*a[1]+d[2]*a[2];
         if(Math.hypot(d[0]-t*a[0],d[1]-t*a[1],d[2]-t*a[2])<=w.r+0.003&&Math.abs(t)<=(w.width||0.05)/2+0.004) return k;
       }
       return -1;
@@ -371,8 +375,8 @@ const View={
       return Math.hypot(d[0]-ax[0]*t, d[1]-ax[1]*t, d[2]-ax[2]*t);
     };
     const wheel=inDriveWheel(cad);
-    const owner=p=>{
-      if(!segs.length||wheel(p)) return "chassis";          // a drive wheel is the chassis's
+    const owner=(p,ext)=>{
+      if(!segs.length||wheel(p,ext)) return "chassis";      // a drive wheel is the chassis's
       let best=null, bd=1e9;
       for(const s of segs){ const d=distSeg(p,s.a,s.b); if(d<bd){bd=d; best=s;} }
       let id=best.id; const m=best.m;
@@ -394,7 +398,7 @@ const View={
       for(const s of solids){
         const c=[0,0,0]; for(const p of s.pts){ c[0]+=p[0]; c[1]+=p[1]; c[2]+=p[2]; }
         // Onshape mates say exactly which joint carries a part (src/mates.js)
-        const g=cad.mates?(s.mech&&groups[s.mech]?s.mech:"chassis"):owner(c.map(v=>v/s.pts.length));
+        const g=cad.mates?(s.mech&&groups[s.mech]?s.mech:"chassis"):owner(c.map(v=>v/s.pts.length),partExtent(s.pts));
         (groups[g]||groups.chassis).push(s);
       }
     }else{
