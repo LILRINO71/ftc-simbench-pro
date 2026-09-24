@@ -36,6 +36,8 @@ function splitStepRecords(s){
   return out;
 }
 
+/* A quoted STEP string, '' escapes included: blanked before looking for #refs. */
+const STEP_STR=/'(?:[^']|'')*'/g;
 function parseSTEP(text, onProgress, opts){
   const di = text.indexOf("DATA;");
   const body = (di<0? text : text.slice(di+5));
@@ -210,7 +212,9 @@ function parseSTEP(text, onProgress, opts){
   const rePat=/#(\d+)/g;
   for(const [id,e] of ents){
     const s=[]; let mm;
-    for(const pr of e){ rePat.lastIndex=0; while((mm=rePat.exec(pr[1]))) s.push(+mm[1]); }
+    // not inside quoted names: a part called "#25 Roller Chain Loop" names no record
+    for(const pr of e){ const a=pr[1].indexOf("'")<0?pr[1]:pr[1].replace(STEP_STR,"''");
+      rePat.lastIndex=0; while((mm=rePat.exec(a))) s.push(+mm[1]); }
     refs.set(id,s);
   }
   const blockCross=new Set();

@@ -94,3 +94,19 @@ test('twin subassemblies under one parent stay two nodes in the parts tree', asy
   assert.equal(nodes, keys.size, `${keys.size} subassembly occurrences, ${nodes} tree nodes`);
   assert.ok(keys.size > 100, 'big has its 165 identical gusset kits');
 });
+
+test('a part named "#25 Roller Chain Loop" pulls in no record: names are not references', () => {
+  // FTC names are full of "#25" and "#35" (chain sizes). Rename the chain after
+  // the battery's own geometry record: nothing of the battery may follow it.
+  const t0 = fixture('robots/tank-traction.step');
+  const id = /^#(\d+)=ADVANCED_BREP_SHAPE_REPRESENTATION\('REV Slim Battery/m.exec(t0)[1];
+  const t = t0.split("'#25 Roller Chain Loop'").join("'#" + id + " Roller Chain Loop'");
+  assert.notEqual(t, t0, 'the corpus has a part named #25');
+  const cad = T.parseSTEP(t), cad0 = T.parseSTEP(t0);
+  const occ = cad.occs.find((o) => /Roller Chain/.test(o.name));
+  const unit = T.stepShapeUnits(t, cad.occs).find((u) => u.rep === occ.rep);
+  assert.ok(!new RegExp('^#' + id + '=', 'm').test(unit.text), "the chain's own STEP holds no battery record");
+  // and the parser's chain solid is the same with either name
+  const box = (c) => { const s = c.solids.find((x) => /Roller Chain/.test(x.name)); const mn = [0, 1, 2].map((k) => Math.min(...s.pts.map((p) => p[k]))), mx = [0, 1, 2].map((k) => Math.max(...s.pts.map((p) => p[k]))); return mn.concat(mx).map((v) => +v.toFixed(6)); };
+  assert.deepEqual(box(cad), box(cad0));
+});

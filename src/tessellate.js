@@ -347,7 +347,8 @@ function stepShapeUnits(text,occs){
   const recs=splitStepRecords(text.slice(di+5,de>di?de:text.length));
   const byId=new Map(), headRe=/^\s*#(\d+)\s*=\s*/;
   for(const r of recs){ const m=headRe.exec(r); if(m) byId.set(+m[1],r.trim()); }
-  const refsOf=r=>{ const out=[], re=/#(\d+)/g; re.lastIndex=r.indexOf("=")+1; let m; while((m=re.exec(r))) out.push(+m[1]); return out; };
+  // references after the "=", never inside a quoted name ("#25 Roller Chain Loop")
+  const refsOf=r=>{ const out=[], re=/#(\d+)/g, a=r.slice(r.indexOf("=")+1).replace(STEP_STR,"''"); let m; while((m=re.exec(a))) out.push(+m[1]); return out; };
   // the few backward links a unit needs, found by type
   const sdrOf=new Map(), srrOf=new Map(), styledOf=new Map();
   let maxId=0;
