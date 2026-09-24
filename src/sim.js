@@ -82,7 +82,10 @@ const Sim={
     if(meth==="calculate"){
       const cur=a[0]||0, tgt=(a.length>1?a[1]:0)||0;
       const err=tgt-cur, dt=this.dt||0.02;
-      st.sum=Math.max(-1e7,Math.min(1e7,st.sum+err*dt));
+      // FTCLib keeps the summed error inside its integration bounds, -1..1 by
+      // default (setIntegrationBounds): a big move can't wind the I term up
+      const lim=this.code&&this.code.ftclib?1:1e7;
+      st.sum=Math.max(-lim,Math.min(lim,st.sum+err*dt));
       const der=(st.prev===null)?0:(err-st.prev)/dt;
       st.prev=err;
       st.err=err;

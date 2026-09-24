@@ -441,6 +441,8 @@ function parseJava(raw){
   else if(/@TeleOp\b/.test(src)){ out.kind="TeleOp"; out.opmode="(unnamed)"; }
   if((m=/class\s+(\w+)\s+extends\s+(\w+)/.exec(src))){ out.cls=m[1]; out.base=m[2]; }
   out.hasWait=/waitForStart\s*\(\s*\)/.test(src);
+  // FTCLib's PID controllers clamp the summed error to +-1 unless told otherwise
+  out.ftclib=/\bcom\.arcrobotics\.ftclib\./.test(src);
   out.hasLoop=false;                     // set once the main loop is actually found below
 
   // ---- device declarations, carrying the comment written just above them
