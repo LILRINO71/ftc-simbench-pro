@@ -35,7 +35,7 @@ Read this file before you start, and again before you push.
 
 | agent | files / area | for |
 | --- | --- | --- |
-| Claude | `src/jointspec.js` (new), `src/view3d.js` (joint posing), `src/sim.js` (servo rest, linkages), `src/app.js` (default robot), `tools/build.mjs`, `tests/load.mjs`, `assets/robots/` | issues #4, #5, #9: the Into The Deep robot's joints (slides, arm, linkage, claws) and making it the default robot |
+| Claude | `src/jointspec.js`, `src/autorig.js` (new), `src/cadview.js` (joint editor), `src/app.js` (joints panel), `src/view3d.js` (joint preview), `src/roadrunner.js` | an automatic joint finder for any STEP, and a click-to-fix joint editor in the CAD view |
 
 Done and released: drive direction, the 25f54d3 sim and parser fixes,
 `autoMap`, and Onshape mates (`src/mates.js`, `tools/onshape-mates.mjs`).
@@ -66,7 +66,8 @@ Those files are free again; read the conventions below before changing them.
 - **The default robot** is `assets/robots/into-the-deep/` (GearGurus 7832):
   `robot.step.gz`, `joints.json` and the team's OpModes, copied to
   `dist/robots/` by the build. It is the one CAD file the repo tracks, at the
-  owner's request; `tests/jointspec.test.mjs` runs the team's TeleOp on it.
+  owner's request; `tests/into-the-deep.test.mjs` runs the team's TeleOp and
+  Road Runner auto on it (`src/roadrunner.js`).
 - **Joint kinds**: compare through `normJointKind(k)`; `prismatic` and
   `linear-slide` are aliases of `linear`. Slide travel per tick is
   `slideMmPerTick(mech, tpr)`, shared by the sim and the view.
