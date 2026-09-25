@@ -24,7 +24,7 @@
    ============================================================ */
 const JOINT_SPEC_FORMAT="ftc-sim-bench.joints";
 
-const {applyJointSpec, jointSpecSelect, followQ, linkPin, sliderCrank, rodAngle, jointValues, mateJointQ}=(function(){
+const {applyJointSpec, jointSpecSelect, followQ, linkPin, sliderCrank, rodAngle, jointValues, mateJointQ, specFromCad, suggestJoint}=(function(){
   const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
   const sub=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]];
   const add=(a,b)=>[a[0]+b[0],a[1]+b[1],a[2]+b[2]];
@@ -146,6 +146,14 @@ const {applyJointSpec, jointSpecSelect, followQ, linkPin, sliderCrank, rodAngle,
       if(!got.length) why.push("\""+j.id+"\": a part pick matched nothing ("+JSON.stringify(sel)+").");
       for(const i of got) owner[i]=j.id;
     }
+    // hand fixes last (the joint editor writes these): these parts ride this joint, or the frame
+    if(Number.isFinite(spec.solids)&&spec.solids!==solids.length)
+      why.push("This spec was written for a STEP with "+spec.solids+" parts; this one has "+solids.length+", so parts picked by number may be off.");
+    for(const a of Array.isArray(spec.assign)?spec.assign:[]){
+      const to=a&&a.joint==="chassis"?null:(a&&ids.has(a.joint)?a.joint:undefined);
+      if(to===undefined){ why.push("A hand fix names \""+(a&&a.joint)+"\", which isn't a joint here."); continue; }
+      for(const sel of a.parts||[]) for(const i of jointSpecSelect(cad,sel,info)) owner[i]=to;
+    }
     const mechs=[], byId=new Map();
     for(const j of joints){
       const lin=/^(slider|linear|prismatic)$/i.test(j.kind||"");
@@ -206,5 +214,71 @@ const {applyJointSpec, jointSpecSelect, followQ, linkPin, sliderCrank, rodAngle,
     cad.mates={source:"spec", name:spec.robot||null, joints:mechs.length, matched:used, parts:solids.length, loops:0, why};
     return {report:cad.mates, devices, front:typeof spec.front==="string"?spec.front:null};
   }
-  return {applyJointSpec, jointSpecSelect, followQ, linkPin, sliderCrank, rodAngle, jointValues, mateJointQ};
+  /* ---- the joint editor's helpers ----
+     Whatever joints a robot has now (guessed, from mates, from a spec) as a
+     spec the editor can change: each joint with its exact parts by number.
+     group[i] is the joint part i rides, or "chassis"; devices maps code
+     device names to joints. Numbers in mm and degrees, as on file. */
+  function specFromCad(cad,group,devices){
+    const r3=v=>v.map(x=>+(x*1000).toFixed(2)), mechs=((cad&&cad.mechs)||[]).filter(m=>!m.drive&&m.kind!=="fixed");   // a "fixed" group is frame, not a joint
+    const joints=mechs.map(m=>{
+      const k=normJointKind(m.kind), lin=k==="linear", own=[];
+      (group||[]).forEach((g,i)=>{ if(g===m.id) own.push(i); });
+      // a guessed joint moves by dir, and a lift the other way about its axis
+      // (mechPose); written down, the axis carries that so nothing changes
+      const sg=m.fromMate?1:(m.dir||1)*(k==="revolute-lift"?-1:1);
+      const j={id:m.id, label:m.label||m.id, kind:lin?"slider":"revolute", axis:(m.axis||[0,0,1]).map(v=>+(v*sg).toFixed(5)),
+        pivot:r3(m.pivot||[0,0,0]), parts:own.length?[{solid:own}]:[]};
+      if(m.parent&&m.parent!=="chassis") j.parent=m.parent;
+      if(m.part) j.part=m.part;
+      if(m.limits) j.limits=m.limits.map(v=>v==null?null:+(lin?v*1000:v/DEG).toFixed(3));
+      for(const k of ["mmPerTick","gear","restPos"]) if(Number.isFinite(m[k])) j[k]=m[k];
+      if(Number.isFinite(m.q0)&&m.q0) j.offsetDeg=+(m.q0/DEG).toFixed(3);
+      const dv=Object.keys(devices||{}).filter(d=>devices[d]===m.id); if(dv.length) j.device=dv.length===1?dv[0]:dv;
+      if(m.couple&&!m.couple.link) j.follows={joint:m.couple.to, ratio:m.couple.ratio};
+      else if(m.couple&&m.couple.link){ const L=m.couple.link; j.follows={joint:m.couple.to, linkage:m.couple.via, crankPin:r3(L.crankPin), pin:r3(L.pin)};
+        if(L.slider) j.follows.slider=L.slider; }
+      return j;
+    });
+    return {format:JOINT_SPEC_FORMAT, version:1, robot:(cad&&cad.name)||null, solids:((cad&&cad.solids)||[]).length, joints};
+  }
+  /* Where a joint made from these parts turns, or slides. A spline, a shaft
+     or a pin turns about its length; a horn, a gear, a hub or a wheel about
+     its thin direction; a rail slides along its length. The part that says
+     most wins; with none, the selection's own shape decides. */
+  function suggestJoint(cad,idx){
+    const S=(cad&&cad.solids)||[], parts=(idx||[]).map(i=>S[i]).filter(s=>s&&s.pts&&s.pts.length>=4);
+    if(!parts.length) return null;
+    const pca=pts=>{
+      const c=[0,1,2].map(k=>pts.reduce((a,p)=>a+p[k],0)/pts.length), C=[[0,0,0],[0,0,0],[0,0,0]];
+      for(const p of pts) for(let a=0;a<3;a++) for(let b=0;b<3;b++) C[a][b]+=(p[a]-c[a])*(p[b]-c[b])/pts.length;
+      const A=C.map(r=>r.slice()), V=[[1,0,0],[0,1,0],[0,0,1]];
+      for(let sw=0;sw<40;sw++) for(let p=0;p<3;p++) for(let q=p+1;q<3;q++){
+        if(Math.abs(A[p][q])<1e-18) continue;
+        const th=0.5*Math.atan2(2*A[p][q],A[q][q]-A[p][p]), co=Math.cos(th), si=Math.sin(th);
+        for(let k=0;k<3;k++){ const x=A[k][p], y=A[k][q]; A[k][p]=co*x-si*y; A[k][q]=si*x+co*y; }
+        for(let k=0;k<3;k++){ const x=A[p][k], y=A[q][k]; A[p][k]=co*x-si*y; A[q][k]=si*x+co*y; }
+        for(let k=0;k<3;k++){ const x=V[k][p], y=V[k][q]; V[k][p]=co*x-si*y; V[k][q]=si*x+co*y; }
+      }
+      const e=[0,1,2].map(i=>({val:Math.max(0,A[i][i]), vec:[V[0][i],V[1][i],V[2][i]]})).sort((a,b)=>b.val-a.val);
+      return {c, e};
+    };
+    // snap an axis that is nearly a frame axis onto it, and point it the positive way
+    const tidy=v=>{ v=unit(v); const k=[0,1,2].reduce((a,b)=>Math.abs(v[b])>Math.abs(v[a])?b:a,0);
+      if(Math.abs(v[k])>0.995){ const s=[0,0,0]; s[k]=1; return s; } return v[k]<0?mul(v,-1):v; };
+    const say=[
+      {re:/spline|shaft|axle|pin\b|rex|hex shaft/i, how:"long"},
+      {re:/horn|gear|hub|sprocket|pulley|disc|wheel|bearing|race/i, how:"thin"},
+      {re:/slide|rail|viper|extrusion|linear/i, how:"slide"}];
+    for(const t of say){
+      const s=parts.find(p=>t.re.test(p.name||""));
+      if(!s) continue;
+      const P=pca(s.pts), ax=t.how==="thin"?P.e[2].vec:P.e[0].vec;
+      return {kind:t.how==="slide"?"slider":"revolute", axis:tidy(ax), pivot:P.c, from:s.name, how:t.how};
+    }
+    const P=pca(parts.flatMap(s=>s.pts));
+    const long=P.e[0].val>6*P.e[1].val;                // one long thing: a slide along it
+    return {kind:long?"slider":"revolute", axis:tidy(long?P.e[0].vec:P.e[2].vec), pivot:P.c, from:null, how:"shape"};
+  }
+  return {applyJointSpec, jointSpecSelect, followQ, linkPin, sliderCrank, rodAngle, jointValues, mateJointQ, specFromCad, suggestJoint};
 })();

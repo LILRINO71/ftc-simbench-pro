@@ -1314,6 +1314,9 @@ function parseAndLoad(done){
       cad.name=name;
       // a joint spec belongs to the file it was written for; another robot drops it
       if(JOINTS.spec&&JOINTS.step!==name){ JOINTS.spec=JOINTS.report=JOINTS.devices=null; JOINTS.name=JOINTS.step=null; }
+      // joints fixed by hand for this file before, in this browser
+      const mine=savedJoints(name);
+      if(mine&&(!JOINTS.spec||!JOINTS.spec.edited)){ JOINTS.spec=mine; JOINTS.step=name; JOINTS.name="your joints"; }
       loadCAD(cad, (LAST_STEP.label||name+" · "+mb+" MB")+" · "+cad.mechs.length+" mechanism"+(cad.mechs.length===1?"":"s"), cad.mechs.length?"ok":"bad");
       if(MATES.asm) applyMates();
       else if(JOINTS.spec) applyJoints();
@@ -1359,7 +1362,7 @@ async function loadDefaultRobot(){
     BUILTIN_HELPERS=R.helpers.map((f,i)=>({file:f, src:srcs[R.opmodes.length+i], team:R.team})).filter(h=>h.src);
     R.opmodes.forEach((o,i)=>{ if(srcs[i]&&!entry(o.id)){ const e={id:o.id, file:o.file, source:srcs[i], builtin:true, team:R.team, field:o.field||null}; parseEntry(e); LIBRARY.push(e); } });
     renderOpList();
-    JOINTS.spec=spec; JOINTS.name=R.joints; JOINTS.step=R.step;
+    R.spec=spec; JOINTS.spec=spec; JOINTS.name=R.joints; JOINTS.step=R.step;
     LAST_STEP={name:R.step, text, label:R.label};
     parseAndLoad(()=>{
       // the team's own TeleOp, unless one of the user's OpModes was open
@@ -1483,7 +1486,8 @@ function applyJoints(){
     if(CODE){ mapDevices(); rebuild(); }
     syncOptionControls();
     pill.textContent=R.report.joints+" joint"+(R.report.joints===1?"":"s"); pill.className="pill ok";
-    st.textContent=(JOINTS.spec.robot||JOINTS.name)+" · "+R.report.matched+" of "+R.report.parts+" parts on joints";
+    st.textContent=(JOINTS.spec.robot||JOINTS.name)+" · "+R.report.matched+" of "+R.report.parts+" parts on joints"+(JOINTS.spec.edited?" · edited by you":"");
+    $("#jointActs").hidden=false; $("#jointsReset").hidden=!JOINTS.spec.edited;
     // the headline counted the joints the parser guessed; these replace them
     const J=R.report.joints+" joint"+(R.report.joints===1?"":"s");
     for(const el of [$("#vpTitle"),$("#cadStatus")]) el.textContent=el.textContent.replace(/\d+ mechanisms?/,J);
@@ -1495,6 +1499,75 @@ function applyJoints(){
     st.textContent="Couldn't apply the joint spec — "+e.message; drop.className="drop bad"; pill.textContent="error"; pill.className="pill bad";
   }
   Status.render&&Status.render();
+}
+/* ============================================================
+   THE JOINT EDITOR — the CAD view's click-to-fix (src/cadview.js)
+   Every change lands in the robot's joint spec: a spec the robot came
+   with, or one written from the joints it has now the first time anything
+   is changed. It's kept per STEP file name in this browser, and it can be
+   downloaded to share; dropping it back in applies it again.
+   ============================================================ */
+const jointsKey=name=>"ftcbench.joints."+(name||"");
+function savedJoints(name){ try{ const j=JSON.parse(store.get(jointsKey(name),"null")); return j&&j.format===JOINT_SPEC_FORMAT?j:null; }catch(e){ return null; } }
+function editableSpec(){
+  if(!CAD) return null;
+  if(!JOINTS.spec){
+    // the joints as they are: guessed, or from mates, each with its exact parts
+    const groups=typeof solidGroups==="function"?solidGroups(CAD,View.turretScale):[];
+    JOINTS.spec=specFromCad(CAD,groups,MAP); JOINTS.name="your joints"; JOINTS.step=LAST_STEP?LAST_STEP.name:(CAD.name||null);
+    MATES.asm=MATES.features=MATES.name=MATES.report=null;
+  }
+  return JOINTS.spec;
+}
+function editJoints(change){
+  const spec=editableSpec(); if(!spec) return false;
+  change(spec);
+  spec.solids=(CAD.solids||[]).length; spec.edited=true;
+  store.set(jointsKey(JOINTS.step||CAD.name),JSON.stringify(spec));
+  applyJoints();
+  return true;
+}
+/* these parts (solid indices) ride this joint ("chassis": the frame) */
+function assignParts(solids,joint){
+  const set=new Set(solids);
+  return editJoints(spec=>{
+    spec.assign=(spec.assign||[]).map(a=>({joint:a.joint, parts:(a.parts||[]).map(p=>p.solid?{solid:p.solid.filter(i=>!set.has(i))}:p)
+      .filter(p=>!p.solid||p.solid.length)})).filter(a=>a.parts.length);
+    spec.assign.push({joint, parts:[{solid:[...set].sort((a,b)=>a-b)}]});
+  });
+}
+function addJoint(def,solids){
+  return editJoints(spec=>{
+    let id=(def.label||"joint").trim().slice(0,40)||"joint", n=2; const base=id;
+    while(spec.joints.some(j=>j.id===id)) id=base+" "+(n++);
+    const j={id, label:def.label||id, kind:def.kind==="slider"?"slider":"revolute", axis:def.axis,
+      pivot:def.pivot.map(v=>+(v*1000).toFixed(2)), parts:[]};
+    if(def.parent&&def.parent!=="chassis") j.parent=def.parent;
+    if(def.device) j.device=def.device;
+    spec.joints.push(j);
+    spec.assign=(spec.assign||[]).concat([{joint:id, parts:[{solid:solids.slice().sort((a,b)=>a-b)}]}]);
+    def.id=id;
+  });
+}
+function removeJoint(id){
+  return editJoints(spec=>{
+    const j=spec.joints.find(x=>x.id===id); if(!j) return;
+    spec.joints=spec.joints.filter(x=>x!==j);
+    for(const k of spec.joints){ if(k.parent===id){ if(j.parent) k.parent=j.parent; else delete k.parent; }
+      if(k.follows&&(k.follows.joint===id||k.follows.slider===id)) delete k.follows; }
+    // what it carried rides whatever carried it
+    spec.assign=(spec.assign||[]).map(a=>a.joint===id?Object.assign({},a,{joint:j.parent||"chassis"}):a);
+    if(j.parts&&j.parts.length) spec.assign.push({joint:j.parent||"chassis", parts:j.parts});
+  });
+}
+function changeJoint(id,patch){
+  return editJoints(spec=>{ const j=spec.joints.find(x=>x.id===id); if(j) Object.assign(j,patch); });
+}
+function downloadJoints(){
+  const spec=editableSpec(); if(!spec) return;
+  const blob=new Blob([JSON.stringify(spec,null,1)],{type:"application/json"}), a=document.createElement("a");
+  a.href=URL.createObjectURL(blob); a.download=((JOINTS.step||CAD.name||"robot").replace(/\.(step|stp)$/i,""))+".joints.json";
+  document.body.appendChild(a); a.click(); setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); },500);
 }
 /* Which device drives which joint: a joint spec says so outright (by the
    variable or the configuration name); otherwise the names and the CAD
@@ -1534,6 +1607,12 @@ function wireMates(){
     $("#mateDefLink").href=L.def; $("#mateFeatLink").href=L.features;
   });
   $("#mateClear").addEventListener("click",clearMates);
+  $("#jointsDownload").addEventListener("click",downloadJoints);
+  $("#jointsReset").addEventListener("click",()=>{
+    const name=JOINTS.step||(CAD&&CAD.name); store.del(jointsKey(name));
+    JOINTS.spec=name===DEFAULT_ROBOT.step&&DEFAULT_ROBOT.spec?DEFAULT_ROBOT.spec:null;
+    if(JOINTS.spec) applyJoints(); else if(LAST_STEP) parseAndLoad();
+  });
 }
 function routeFile(file){
   const n=file.name.toLowerCase();

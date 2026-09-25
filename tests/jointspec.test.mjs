@@ -79,3 +79,46 @@ test('part picks: path, name, box; a later joint takes parts from an earlier one
   assert.throws(() => E.applyJointSpec(cad, { format: 'x' }), /not a joint spec/);
   assert.throws(() => E.applyJointSpec(cad, { format: 'ftc-sim-bench.joints', joints: [{ id: 'a' }, { id: 'a' }] }), /two joints/);
 });
+
+test('the joint editor: any robot\'s joints become an editable spec, and hand fixes win', () => {
+  const cad = E.parseSTEP(fixture('robots/nested.step'));
+  // a robot with guessed joints: written down with its exact parts
+  const n = cad.solids.length, mechs = cad.mechs.filter((m) => !m.drive && m.kind !== 'fixed');
+  assert.ok(mechs.length >= 2, 'nested has guessed joints to write down');
+  const group = cad.solids.map((s, i) => (mechs.length && i % 3 === 0 ? mechs[0].id : 'chassis'));
+  const spec = E.specFromCad(cad, group, mechs.length ? { lift: mechs[0].id } : {});
+  assert.equal(spec.format, 'ftc-sim-bench.joints');
+  assert.equal(spec.solids, n);
+  assert.equal(spec.joints.length, mechs.length);
+  const fresh = E.parseSTEP(fixture('robots/nested.step'));
+  E.applyJointSpec(fresh, spec);
+  if (mechs.length) assert.deepEqual(fresh.solids.map((s) => s.mech || 'chassis'), group, 'round trip: every part where it was');
+  // hand fixes: these parts ride that joint, or the frame, whatever the picks said
+  const s2 = { format: 'ftc-sim-bench.joints', solids: n, joints: [{ id: 'arm', kind: 'revolute', axis: [0, 1, 0], pivot: [0, 0, 100], parts: [{ z: [-1e6, 1e6] }] }],
+    assign: [{ joint: 'chassis', parts: [{ solid: [0, 1] }] }, { joint: 'nope', parts: [{ solid: [2] }] }] };
+  const c2 = E.parseSTEP(fixture('robots/nested.step')), R = E.applyJointSpec(c2, s2);
+  assert.equal(c2.solids[0].mech, undefined); assert.equal(c2.solids[1].mech, undefined);
+  assert.equal(c2.solids[3].mech, 'arm');
+  assert.ok(R.report.why.some((w) => /nope/.test(w)), 'a fix naming no joint is reported');
+  const R3 = E.applyJointSpec(E.parseSTEP(fixture('robots/nested.step')), Object.assign({}, s2, { solids: n + 5 }));
+  assert.ok(R3.report.why.some((w) => /written for a STEP with/.test(w)), 'a spec from another version of the file says so');
+});
+
+test('the joint editor suggests an axis from what is selected: a spline turns about its length, a gear about its thin side, a rail slides', () => {
+  const cyl = (c, axis, len, r, n = 60) => { const pts = []; const [u, v] = axis[0] ? [[0, 1, 0], [0, 0, 1]] : axis[1] ? [[1, 0, 0], [0, 0, 1]] : [[1, 0, 0], [0, 1, 0]];
+    for (let i = 0; i < n; i++) { const t = (i / n) * 2 * Math.PI, h = ((i % 5) / 4 - 0.5) * len;
+      pts.push([0, 1, 2].map((k) => c[k] + axis[k] * h + r * (Math.cos(t) * u[k] + Math.sin(t) * v[k]))); } return pts; };
+  const cad = { solids: [
+    { name: 'Servo Spline', pts: cyl([0.1, 0.2, 0.3], [0, 1, 0], 0.012, 0.003) },
+    { name: '2302 Series Hub Mount Gear', pts: cyl([0, 0, 0.1], [0, 0, 1], 0.004, 0.024) },
+    { name: 'Viper-Slide rail', pts: cyl([0, 0, 0.2], [1, 0, 0], 0.4, 0.01) },
+    { name: 'Part 7', pts: cyl([0, 0, 0], [0, 0, 1], 0.002, 0.03) },
+  ] };
+  const a = E.suggestJoint(cad, [0]), b = E.suggestJoint(cad, [1]), c = E.suggestJoint(cad, [2]), d = E.suggestJoint(cad, [3]);
+  assert.deepEqual([a.kind, a.axis], ['revolute', [0, 1, 0]]);
+  assert.ok(Math.hypot(a.pivot[0] - 0.1, a.pivot[1] - 0.2, a.pivot[2] - 0.3) < 1e-3, 'through the spline');
+  assert.deepEqual([b.kind, b.axis], ['revolute', [0, 0, 1]]);
+  assert.deepEqual([c.kind, c.axis], ['slider', [1, 0, 0]]);
+  assert.deepEqual([d.kind, d.axis], ['revolute', [0, 0, 1]], 'an unnamed disc: its thin side, from its shape');
+  assert.equal(E.suggestJoint(cad, []), null);
+});

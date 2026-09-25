@@ -65,6 +65,7 @@ const CadView={
     if(V.sun&&s.sun!=null){ V.sun.intensity=s.sun; V.sun.castShadow=s.shadow; }
     this.head.intensity=0;
     this.light(null,"sel"); this.light(null,"hover"); this.sel=null; this.hover=null;
+    this.newJoint=null; View.preview=null; this.showAxis();
     V.el.classList.remove("cad");
     $("#cadUI").hidden=true;
     for(const o of this.hid||[]) o.visible=true; this.hid=null;
@@ -250,6 +251,8 @@ const CadView={
     }
   },
   select(parts,from){
+    const key=p=>p?p.slice().sort((a,b)=>a-b).join(","):"";
+    if(key(parts)!==key(this.sel)){ this.newJoint=null; this.tryVal=0; View.preview=null; }
     this.sel=parts&&parts.length?parts:null;
     this.light(this.sel,"sel");
     this.showInfo(from);
@@ -296,7 +299,7 @@ const CadView={
   showInfo(from){
     const box=$("#cadInfo"); if(!box) return;
     const V=View;
-    if(!this.sel||!V.exact){ box.hidden=true; return; }
+    if(!this.sel||!V.exact){ box.hidden=true; this.showAxis(); return; }
     const {cad,res}=V.exact, asg=V.exactAsg, names=tessNames(res);
     const j0=this.sel[0], si=asg?asg.solid[j0]:-1, s=si>=0?cad.solids[si]:null;
     // mass of the selection: each matched part once
@@ -316,8 +319,91 @@ const CadView={
     ].filter(Boolean);
     box.innerHTML=`<div class="ci-head"><b title="${esc(name)}">${esc(name)}</b><button class="sheet-x" id="cadInfoX" aria-label="Clear selection">×</button></div>`+
       rows.map(r=>`<div class="ci-row"><span>${esc(r[0])}</span><b>${esc(r[1])}</b></div>`).join("")+
-      `<div class="ci-acts"><button class="btn-sm" id="cadHide">Hide</button><button class="btn-sm" id="cadIsolate">Isolate</button></div>`;
+      `<div class="ci-acts"><button class="btn-sm" id="cadHide">Hide</button><button class="btn-sm" id="cadIsolate">Isolate</button></div>`+
+      this.jointHtml([...solids]);
     box.hidden=false;
+    this.showAxis();
+  },
+
+  /* ---------------- the joint editor (src/app.js editJoints) ----------------
+     What the selected parts ride on, the joint itself (its axis drawn in the
+     view, flip, delete, a slider to try it), and a new joint made from them. */
+  jointHtml(solids){
+    if(!solids.length||typeof editJoints!=="function"||!CAD) return "";
+    const asg=View.exactAsg, groups=new Set(this.sel.map(j=>asg&&asg.group[j]).map(g=>g&&CAD.mechs.some(m=>m.id===g)?g:"chassis"));
+    const cur=groups.size===1?[...groups][0]:null, M=CAD.mechs.filter(m=>!m.drive), m=cur&&cur!=="chassis"?M.find(x=>x.id===cur):null;
+    const opt=(v,l,on)=>`<option value="${esc(v)}"${on?" selected":""}>${esc(l)}</option>`;
+    let h=`<div class="ci-joint"><label class="ci-ride"><span>Rides on</span><select id="cadRide">`+
+      (cur?"":`<option value="" selected disabled>several joints</option>`)+opt("chassis","the frame (doesn't move)",cur==="chassis")+
+      M.map(x=>opt(x.id,mlabel(x),x.id===cur)).join("")+`</select></label>`;
+    if(m){
+      const lin=normJointKind(m.kind)==="linear", a=m.axis.map(v=>+v.toFixed(2)).join(", "), p=m.pivot.map(v=>Math.round(v*1000)).join(", ");
+      const dev=typeof deviceOn==="function"?deviceOn(m.id):null;
+      h+=`<div class="ci-jrow"><b>${esc(mlabel(m))}</b>: ${lin?"slides along":"turns about"} (${a})${lin?"":" at ("+p+") mm"}`+
+        `${dev?" · <code>"+esc(dev)+"</code>":m.couple?" · follows "+esc(m.couple.to):" · nothing drives it"}</div>`+
+        `<label class="ci-try"><span>Try it</span><input type="range" id="cadTry" min="-100" max="100" value="${this.tryVal||0}"></label>`+
+        `<div class="ci-acts"><button class="btn-sm" id="cadFlip" title="Turn or slide the other way">Flip direction</button>`+
+        `<button class="btn-sm" id="cadDelJoint" title="Its parts ride what it rode on">Delete joint</button></div>`;
+    }
+    if(this.newJoint){
+      const N=this.newJoint, devs=(typeof CODE!=="undefined"&&CODE?CODE.devices:[]).filter(d=>/DcMotor|Servo|CRServo/.test(d.type||""));
+      h+=`<div class="ci-new"><label><span>Name</span><input id="cadNjName" value="${esc(N.label)}"></label>`+
+        `<label><span>Type</span><select id="cadNjKind">${opt("revolute","turns",N.kind!=="slider")}${opt("slider","slides",N.kind==="slider")}</select></label>`+
+        `<div class="ci-jrow">Axis (${N.axis.map(v=>+v.toFixed(2)).join(", ")})${N.from?" from "+esc(N.from):" from the parts' shape"} `+
+        `<button class="btn-sm" id="cadNjFlip">flip</button> <button class="btn-sm" id="cadNjAxis" title="Try another direction">next axis</button></div>`+
+        `<label><span>Driven by</span><select id="cadNjDev">${opt("","nothing yet",!N.device)}${devs.map(d=>opt(d.name,d.name+(MAP[d.name]?" (now on "+MAP[d.name]+")":""),N.device===d.name)).join("")}</select></label>`+
+        `<label><span>Hangs from</span><select id="cadNjParent">${opt("chassis","the frame",N.parent==="chassis")}${M.map(x=>opt(x.id,mlabel(x),N.parent===x.id)).join("")}</select></label>`+
+        `<div class="ci-acts"><button class="btn-sm primary" id="cadNjMake">Make the joint</button><button class="btn-sm" id="cadNjCancel">Cancel</button></div></div>`;
+    } else h+=`<div class="ci-acts"><button class="btn-sm" id="cadNewJoint">New joint from ${this.sel.length===1?"this part":"these "+this.sel.length}</button></div>`;
+    return h+`</div>`;
+  },
+  selSolids(){ const asg=View.exactAsg; return [...new Set((this.sel||[]).map(j=>asg?asg.solid[j]:-1).filter(i=>i>=0))]; },
+  /* the joint's axis, drawn through its pivot: the one being made, or the one selected */
+  showAxis(){
+    const V=View; if(this.axisG){ if(this.axisG.parent) this.axisG.parent.remove(this.axisG); V.dispose(this.axisG); this.axisG=null; }
+    if(!this.sel||!CAD) return;
+    let ax=null, pv=null, lin=false;
+    if(this.newJoint){ ax=this.newJoint.axis; pv=this.newJoint.pivot; lin=this.newJoint.kind==="slider"; }
+    else{ const asg=V.exactAsg, g=asg&&asg.group[this.sel[0]], m=CAD.mechs.find(x=>x.id===g&&!x.drive); if(m){ ax=m.axis; pv=m.pivot; lin=normJointKind(m.kind)==="linear"; } }
+    if(!ax) return;
+    const size=this.size(), dir=V.vAxis(ax).normalize(), o=V.v3(pv).addScaledVector(dir,-size*0.18);
+    const g=new THREE.ArrowHelper(dir,o,size*0.36,lin?0x2fb56a:0xe0483a,size*0.05,size*0.025);
+    g.renderOrder=6; g.traverse(x=>{ if(x.material){ x.material.depthTest=false; x.material.transparent=true; } });
+    V.liftG.add(g); this.axisG=g;
+  },
+  jointEvent(e){
+    const t=e.target, S=this.selSolids(); if(!S.length) return false;
+    const redo=()=>{ const s=this.sel; this.select(s); };
+    if(t.id==="cadNewJoint"){
+      const g=suggestJoint(CAD,S), asg=View.exactAsg, cur=asg&&asg.group[this.sel[0]];
+      this.newJoint={label:"Joint "+(CAD.mechs.filter(m=>!m.drive).length+1), kind:g?g.kind:"revolute",
+        axis:g?g.axis:[0,0,1], pivot:g?g.pivot:[0,0,0], from:g&&g.from, parent:CAD.mechs.some(m=>m.id===cur&&!m.drive)?cur:"chassis", device:"", k:0};
+      redo(); return true; }
+    if(t.id==="cadNjCancel"){ this.newJoint=null; redo(); return true; }
+    if(t.id==="cadNjFlip"&&this.newJoint){ this.newJoint.axis=this.newJoint.axis.map(v=>-v); redo(); return true; }
+    if(t.id==="cadNjAxis"&&this.newJoint){ const A=[[1,0,0],[0,1,0],[0,0,1]]; this.newJoint.k=(this.newJoint.k+1)%3; this.newJoint.axis=A[this.newJoint.k]; this.newJoint.from="the robot's "+"xyz"[this.newJoint.k]+" axis"; redo(); return true; }
+    if(t.id==="cadNjMake"&&this.newJoint){
+      const N=this.newJoint; N.label=$("#cadNjName").value.trim()||N.label;
+      if(addJoint(N,S)) this.newJoint=null;
+      redo(); return true; }
+    const g=View.exactAsg&&View.exactAsg.group[this.sel[0]];
+    if(t.id==="cadFlip"&&g){ const m=CAD.mechs.find(x=>x.id===g); if(m) changeJoint(g,{axis:m.axis.map(v=>-v)}); redo(); return true; }
+    if(t.id==="cadDelJoint"&&g){ View.preview=null; removeJoint(g); redo(); return true; }
+    return false;
+  },
+  jointChange(e){
+    const t=e.target, S=this.selSolids(); if(!S.length) return;
+    if(t.id==="cadRide"&&t.value){ View.preview=null; assignParts(S,t.value); this.select(this.sel); }
+    else if(this.newJoint&&t.id==="cadNjKind"){ this.newJoint.kind=t.value; this.select(this.sel); }
+    else if(this.newJoint&&t.id==="cadNjDev") this.newJoint.device=t.value;
+    else if(this.newJoint&&t.id==="cadNjParent") this.newJoint.parent=t.value;
+    else if(this.newJoint&&t.id==="cadNjName") this.newJoint.label=t.value;
+  },
+  jointTry(e){
+    if(e.target.id!=="cadTry") return;
+    const g=View.exactAsg&&View.exactAsg.group[this.sel&&this.sel[0]], m=CAD.mechs.find(x=>x.id===g); if(!m) return;
+    const v=+e.target.value/100; this.tryVal=+e.target.value;
+    View.preview={id:m.id, q:normJointKind(m.kind)==="linear"?v*0.3:v*Math.PI*0.75+(m.q0||0)};
   },
 
   /* ---------------- input: Onshape's mouse ---------------- */
@@ -330,7 +416,7 @@ const CadView={
       if(face&&face!=="miss"){ this.view(face); e.stopImmediatePropagation(); return; }
       c.setPointerCapture(e.pointerId);
       const pan=e.button===1||(e.button===2&&e.shiftKey)||(e.button===0&&e.shiftKey);
-      drag={x:e.clientX, y:e.clientY, x0:e.clientX, y0:e.clientY, button:e.button, pan, moved:false};
+      drag={x:e.clientX, y:e.clientY, x0:e.clientX, y0:e.clientY, button:e.button, pan, moved:false, add:e.ctrlKey||e.metaKey};
       e.stopImmediatePropagation(); e.preventDefault();
     },true);
     c.addEventListener("pointermove",e=>{
@@ -362,7 +448,9 @@ const CadView={
       const was=drag; drag=null; e.stopImmediatePropagation();
       if(!was.moved&&was.button===0){
         const j=this.pick(e);
-        this.select(j==null?null:[j]);
+        // Ctrl (Cmd) adds a part to the selection or takes it out
+        if(was.add&&j!=null&&this.sel){ const s=this.sel.includes(j)?this.sel.filter(x=>x!==j):this.sel.concat([j]); this.select(s.length?s:null); }
+        else this.select(j==null?null:[j]);
       }
     };
     c.addEventListener("pointerup",up,true); c.addEventListener("pointercancel",()=>{ drag=null; },true);
@@ -395,7 +483,10 @@ const CadView={
       const row=e.target.closest(".row"); if(!row) return;
       const n=this.node(row.dataset.id); if(n) this.select(n.all.slice(),n);
     });
+    $("#cadInfo").addEventListener("change",e=>this.jointChange(e));
+    $("#cadInfo").addEventListener("input",e=>this.jointTry(e));
     $("#cadInfo").addEventListener("click",e=>{
+      if(this.jointEvent(e)) return;
       if(e.target.id==="cadInfoX") this.select(null);
       else if(e.target.id==="cadHide"&&this.sel){ const s=this.sel; this.select(null); this.setHidden(s,true); }
       else if(e.target.id==="cadIsolate"&&this.sel&&View.exact){

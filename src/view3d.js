@@ -875,6 +875,7 @@ const View={
     // slide and rod) follows it (src/jointspec.js); a joint nothing drives
     // still takes its drawn-pose fix
     const drawn=jointValues(this.cad.mechs,m=>{
+      if(this.preview&&this.preview.id===m.id) return this.preview.q;     // the joint editor's "try it"
       const dn=deviceOn(m.id), s=dn?Sim.dev[dn]:null;
       if(!s) return m.couple?null:(m.q0||null);
       const p=mechPose(m,s,this.size);

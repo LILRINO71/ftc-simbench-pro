@@ -173,6 +173,11 @@
           <div class="ds" id="mateStatus">Drop the assembly definition, and the features file too if you want limits.</div>
         </div>
         <input type="file" id="mateFile" accept=".json,application/json" multiple hidden>
+        <div class="joint-acts" id="jointActs" hidden>
+          <button class="btn-sm" id="jointsDownload" type="button">Download joint spec</button>
+          <button class="btn-sm" id="jointsReset" type="button" hidden>Undo my joint edits</button>
+        </div>
+        <p class="hint">Fix a joint in the <b>CAD</b> view: click a part (Ctrl-click for more), then pick what it rides on, or make a new joint from it.</p>
         <ul class="hint mate-why" id="mateNote"></ul>
       </div>
       <div class="sec" data-sec="models">
