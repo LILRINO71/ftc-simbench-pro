@@ -429,7 +429,7 @@ function collectStaticFields(src){
   return out;
 }
 
-function parseJava(raw){
+function parseJava(raw,opts){
   const src = stripComments(raw);
   const out = {opmode:null, kind:null, cls:null, devices:[], consts:{}, vars:{},
                stmts:[], inits:[], telemetry:[], hasLoop:false, hasWait:false, parseNotes:[]};
@@ -591,6 +591,9 @@ function parseJava(raw){
 
   out.bindings = deriveBindings(out.stmts);
   JCTX=null;
+  // a Road Runner 1.0 auto: its trajectories and actions (src/roadrunner.js),
+  // with the team's helper classes from the other files it was given
+  if(typeof rrDetect==="function"&&rrDetect(src)) rrAttach(out,raw,(opts&&opts.libs)||[]);
   return out;
 }
 
@@ -664,6 +667,8 @@ function isCommanded(code,name){
     else if(st.kind==="while") scan(st.body);
     else if(st.kind==="call"&&st.dev===name) found=true; } };
   scan(code.stmts); scan(code.auto); scan(code.inits);
+  // a Road Runner auto commands through its actions, and its drive through the follower
+  if(!found&&code.rr&&code.rr.commanded) found=code.rr.commanded.indexOf(name)>=0;
   return found;
 }
 

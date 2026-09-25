@@ -39,17 +39,21 @@ const Sim={
     for(const v in code.vars) this.vars[v]=code.vars[v];
     for(const n of (code.timers||[])) this.timers[n]=0;
     this.dt=0.02;
-    this.drivetrain=detectDrivetrain(code);
+    // a Road Runner auto drives through MecanumDrive's four motors, named by corner
+    const rrd=code.rr&&code.rr.drive.devs.length?code.rr.drive.devs:null;
+    this.drivetrain=rrd?{wheels:rrd.map(n=>Object.assign({dev:n},wheelCorner(n))), style:"mecanum", ok:true}:detectDrivetrain(code);
     // a CAD of just a mechanism still drives on a drawn drive base
     this.base=robotBase(cad,this.drivetrain,opts&&opts.baseModel,opts&&opts.front);
     this.footprint=footprintOf(cad,opts&&opts.front,this.base);
-    this.obstacles=Field.ok?Field.obstacles(this.footprint.h):[];
+    // "walls": an auto written for another season's field only meets the walls
+    this.obstacles=Field.ok&&!(opts&&opts.obstacles==="walls")?Field.obstacles(this.footprint.h):[];
     // the physical rig underneath: mass, wheels, motors. Null means we fall
     // back to the old kinematic glide, which is also what "kinematic" asks for.
     this.physics=(opts&&opts.physics)||"rigid";
     this.rig=buildRig(cad,this.drivetrain,this.base,this.dev,opts);
     this.dstate=this.rig?Dyn.reset(this.rig):null;
     this.slipping=false;
+    this.rr=code.rr&&typeof RRRuntime==="function"?RRRuntime(this,code.rr):null;
     this.phase="loaded";
   },
   /* INIT: everything before waitForStart() — directions, PID objects, start positions. */
@@ -58,6 +62,9 @@ const Sim={
     this.imuZero=this.chassis.h;
     this.exec(this.code.inits||[],this.env());
     for(const n in this.dev){ const s=this.dev[n]; if(s.kind==="servo") s.act=s.cmd; }
+    // Road Runner: which way the drive's motors move this robot is known once
+    // their directions are set; then the robot stands at the auto's start pose
+    if(this.rr){ this.rr.setup(); this.rr.place(); this.dstate=this.rig?Dyn.reset(this.rig):null; }
     this.phase="init";
   },
   start(){
@@ -65,6 +72,7 @@ const Sim={
     if(this.phase==="loaded") this.init();
     this.t=0; this.pc=0; this.sleepEnd=null; this.autoDone=false; this.pass=null; this.resumeAt=0;
     for(const n in this.timers) this.timers[n]=0;
+    if(this.rr) this.rr.start();
     this.phase="running";
   },
   stop(){
@@ -266,6 +274,7 @@ const Sim={
           if(r.done) this.pass=null; else this.resumeAt=this.t+r.value/1000;
         }
       }
+      else if(this.rr) this.rr.tick();
       else if(this.code.auto&&this.code.auto.length) this.stepAuto();
     }
 

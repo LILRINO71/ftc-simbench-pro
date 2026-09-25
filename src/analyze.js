@@ -12,7 +12,15 @@ function analyze(code,cad,map,opts){
     "Nothing marked <code>@TeleOp</code> or <code>@Autonomous</code>, so this class won't appear on the Driver Station list.",null,
     "Add <code>@TeleOp(name = \"…\")</code> above the class.");
   const hasAuto = code.auto && code.auto.length>0;
-  if(!code.hasLoop && !hasAuto) add("struct:loop","fail","Nothing to run after START",
+  if(code.rr){
+    const S=code.rr.summary||{}, esc2=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"})[c]);
+    add("rr:plan","info","Road Runner: "+(S.trajectories||0)+" trajector"+(S.trajectories===1?"y":"ies")+", "+(S.actions||0)+" action"+(S.actions===1?"":"s"),
+      "About "+(S.seconds||0).toFixed(1)+" s of driving and waiting from ("+code.rr.start.slice(0,2).map(v=>+v.toFixed(1)).join(", ")+") at "+
+      Math.round(code.rr.start[2]*180/Math.PI)+"°. The path, its timing and every action are the team's; the follower uses their gains"+
+      " with a feedforward from the CAD's motors and wheels, and knows exactly where the robot is."+
+      (code.rr.notes.length?"<br>"+code.rr.notes.map(esc2).join("<br>"):""),null,null);
+  }
+  else if(!code.hasLoop && !hasAuto) add("struct:loop","fail","Nothing to run after START",
     "The bench couldn't find a <code>while (opModeIsActive())</code> loop, a <code>loop()</code> method, or any statements after <code>waitForStart()</code>.",null,
     "Check the class structure — everything below is based on whatever it could read.");
   else if(!code.hasWait&&code.kind==="TeleOp"&&!/void\s+loop\s*\(/.test(code.src||"")) add("struct:wait","fail","Missing waitForStart()",

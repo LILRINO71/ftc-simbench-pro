@@ -119,6 +119,8 @@ function evalNode(n, env){
       // ftclib / roadrunner PID objects
       const pm=/^([A-Za-z_$][\w$]*)\.(calculate|setPID|setP|setI|setD|reset)$/.exec(n.name);
       if(pm) return env.pid(pm[1],pm[2],a);
+      // a method of the team's own helper class that returns a number (src/roadrunner.js)
+      if(env.fn){ const r=env.fn(n.name,a); if(r!==undefined) return r; }
       switch(n.name){
         case "opModeIsActive": return env.active?env.active():1;
         case "isStopRequested": return env.active?(env.active()?0:1):0;
