@@ -108,6 +108,11 @@
         <div class="sec-head"><h3>Autonomous</h3><span class="count" id="autoCount"></span></div>
         <div class="oplist" id="opListAuto"></div>
       </div>
+      <div class="sec" data-sec="helpers">
+        <div class="sec-head"><h3>Helper classes</h3><span class="count" id="helperCount"></span></div>
+        <p class="hint">A .java with no <code>@TeleOp</code> or <code>@Autonomous</code> lands here: your <code>MecanumDrive</code>, an <code>Arm</code> with its Road Runner actions, a PID class. Every OpMode can use them.</p>
+        <div class="oplist" id="helperList"></div>
+      </div>
       <div class="sec" data-sec="howto">
         <div class="sec-head"><h3>Driving</h3></div>
         <ul class="howto">
@@ -181,6 +186,8 @@
           <div class="seg" id="baseSeg"><button data-mode="auto">auto</button><button data-mode="show">show</button><button data-mode="hide">hide</button></div>
           <span>Shooter</span>
           <div class="seg" id="shooterSeg"><button data-mode="auto">auto</button><button data-mode="show">show</button><button data-mode="hide">hide</button></div>
+          <span>Field</span>
+          <div class="seg" id="obstacleSeg" title="What the robot bumps into: the BIOBUZZ HIVEs and FLOWERs, or only the walls (for an auto written for another season's field)"><button data-obst="all">HIVE &amp; walls</button><button data-obst="walls">walls only</button></div>
         </div>
         <p class="hint">When the code drives but the CAD has no wheels, the bench draws a mecanum base under it; when the code shoots and the CAD has no flywheel, it draws one. The honey outline on the floor is what bumps into the field.</p>
       </div>

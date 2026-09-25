@@ -112,3 +112,39 @@ test('Into The Deep: a saved workspace keeps the linkage, the rest poses and the
   assert.ok(Math.abs(m('crank L').q0 + 149.2 * DEG) < 1e-6);
   assert.equal(m('lift').mmPerTick, 0.26);
 });
+
+test("Into The Deep: the team's Road Runner auto drives its path with its own helper classes", () => {
+  const { cad, R } = itd();
+  const libs = ['MecanumDrive.java', 'Arm.java', 'Arm_PID_Class.java', 'Slides_PID_Class.java'].map((f) => ({ file: f, src: fs.readFileSync(path.join(ITD, f), 'utf8') }));
+  const code = E.parseJava(fs.readFileSync(path.join(ITD, 'TheHolyGrail.java'), 'utf8'), { libs });
+  assert.equal(code.opmode, 'The Holy Grail');
+  assert.ok(code.rr.notes.some((n) => /" bR"/.test(n)), 'the space in MecanumDrive\'s " bR" is pointed out');
+  const map = E.autoMap(code.devices, cad.mechs);
+  for (const d of code.devices) { const j = R.devices[d.name] || R.devices[d.cfg]; if (j) map[d.name] = j; }
+  E.Sim.reset(code, cad, map, { payloadKg: 0, duty: 0.3, trust: 'code', front: R.front });
+  const IN = 0.0254, at = () => E.Sim.rr.pose();
+  assert.ok(Math.abs(E.Sim.chassis.x / IN + 10) < 1e-6 && Math.abs(E.Sim.chassis.y / IN - 61.5) < 1e-6, 'placed at (-10, 61.5)');
+  // Road Runner's forward is the way all four drive motors push: the outtake side
+  assert.equal(E.Sim.rr.flip, Math.PI);
+  assert.equal(E.Sim.rr.mirrored, false);
+  // the waypoints it has to pass, in order: the chamber, the wall, the chamber again …
+  const want = [[-10, 31.5], [35, 61.25], [-23, 31], [17, 61.25], [-21, 35], [17, 61.25], [-19, 35], [17, 61.5], [-18.95, 35]];
+  const best = want.map(() => Infinity), when = want.map(() => null);
+  let armAt = null;
+  for (let i = 0; i < 28 / 0.02; i++) {
+    run(E, 0.02);
+    const p = at();
+    want.forEach((w, k) => { const d = Math.hypot(p.x - w[0], p.y - w[1]); if (d < best[k]) { best[k] = d; when[k] = E.Sim.t; } });
+    if (armAt == null && E.Sim.t > 2.2) armAt = E.Sim.dev.Arm.ticks - (E.Sim.dev.Arm.offset || 0);
+  }
+  want.forEach((w, k) => assert.ok(best[k] < 2, `reaches (${w}) within 2 in (${best[k].toFixed(2)} in at ${when[k] && when[k].toFixed(1)} s)`));
+  assert.ok(when[0] < 3 && when[2] > when[1], 'in order');
+  assert.ok(Math.abs(Math.cos(at().h - 270 * DEG) - 1) < 0.01, 'still square to the field, facing 270°');
+  assert.ok(armAt < -300, 'the arm is up at the chamber (' + Math.round(armAt) + ' ticks)');
+  assert.equal(E.Sim.dev.outClaw.cmd, 0.35, 'and the claw has let the last specimen go');
+  // the slides' PID action is never started in this auto: the Checks say so
+  const F = E.analyze(code, cad, map, { payloadKg: 0.1, duty: 0.3, trust: 'code', front: R.front });
+  assert.ok(F.some((f) => f.key === 'rr:plan'));
+  assert.ok(F.some((f) => /uppies is never commanded/.test(f.title.replace(/<[^>]+>/g, ''))));
+  assert.ok(!F.some((f) => f.sev === 'fail'), F.filter((f) => f.sev === 'fail').map((f) => f.title).join('; '));
+});

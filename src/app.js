@@ -95,11 +95,30 @@ function initRails(){
    ============================================================ */
 function entry(id){ return LIBRARY.filter(e=>e.id===id)[0]||null; }
 function parseEntry(e){
-  try{ e.code=parseJava(e.source); e.error=null; }
+  try{ e.code=parseJava(e.source,{libs:helperFiles()}); e.error=null; }
   catch(err){ e.code=null; e.error=err.message; }
   return e;
 }
+/* Helper classes: the team's other files an OpMode leans on (MecanumDrive,
+   an Arm with Road Runner actions, a PID class). The default robot brings
+   its own; a dropped .java that isn't an OpMode is kept here too. */
+let USER_HELPERS=[], BUILTIN_HELPERS=[];
+function helperFiles(){
+  const mine=new Set(USER_HELPERS.map(h=>h.file));
+  return USER_HELPERS.concat(BUILTIN_HELPERS.filter(h=>!mine.has(h.file)));
+}
+function saveHelpers(){ store.set("ftcbench.helpers",JSON.stringify(USER_HELPERS.map(h=>({file:h.file, src:h.src})))); }
+function loadHelpers(){
+  try{ USER_HELPERS=(JSON.parse(store.get("ftcbench.helpers","[]"))||[]).filter(h=>h&&h.file&&typeof h.src==="string"); }catch(e){ USER_HELPERS=[]; }
+}
+/* every OpMode again, when the helpers they may use have changed */
+function reparseAll(){
+  LIBRARY.forEach(parseEntry);
+  if(entry(CURRENT_ID)) selectOpMode(CURRENT_ID); else { renderOpList(); renderOpSelect(); }
+}
+const isOpModeSource=t=>/@(TeleOp|Autonomous)\b/.test(stripComments(t))||/\bextends\s+(LinearOpMode|OpMode)\b/.test(t);
 function initLibrary(){
+  loadHelpers();
   LIBRARY=[
     {id:"sample-claw", file:"WORKSHOPCODE.java", source:SAMPLE_JAVA, builtin:true},
     {id:"sample-mecanum", file:"MecanumTeleOp.java", source:DRIVE_JAVA, builtin:true},
@@ -129,6 +148,15 @@ function renderOpList(){
   $("#opListTele").innerHTML=tele.map(row).join("")||`<div class="op-empty">No TeleOp yet — drop a <code>@TeleOp</code> .java here.</div>`;
   $("#opListAuto").innerHTML=auto.map(row).join("")||`<div class="op-empty">No autonomous yet — an <code>@Autonomous</code> .java lands here.</div>`;
   $("#teleCount").textContent=tele.length||""; $("#autoCount").textContent=auto.length||"";
+  const H=helperFiles();
+  $("#helperList").innerHTML=H.map(h=>`<div class="oprow helper"><div><div class="on-name">${esc(h.file.replace(/\.java$/,""))}</div>
+      <div class="on-file">${esc(h.file)}${h.team?" · "+esc(h.team):""}</div></div>
+      ${h.team?"<span></span>":`<button class="rm" data-helperrm="${esc(h.file)}" title="Remove ${esc(h.file)}" aria-label="Remove ${esc(h.file)}">×</button>`}</div>`).join("")
+    ||`<div class="op-empty">None yet.</div>`;
+  $("#helperCount").textContent=H.length||"";
+  $$("#helperList [data-helperrm]").forEach(b=>b.addEventListener("click",()=>{
+    USER_HELPERS=USER_HELPERS.filter(h=>h.file!==b.dataset.helperrm); saveHelpers(); reparseAll();
+  }));
   $$(".oplist [data-op]").forEach(r=>{
     const go=()=>{ if(r.dataset.op!==CURRENT_ID) selectOpMode(r.dataset.op); };
     r.addEventListener("click",e=>{ if(!e.target.closest("[data-oprm]")) go(); });
@@ -163,6 +191,8 @@ function selectOpMode(id){
     renderOpList(); renderOpSelect(); return;
   }
   CODE=e.code;
+  // an auto written for another season's field would run into this one's HIVEs
+  if(e.field||OPTS.obstaclesBy){ OPTS.obstacles=e.field==="other"?"walls":"all"; OPTS.obstaclesBy=e.field==="other"?e.id:null; }
   mapDevices();
   analyzeAll();
   Sim.load(CODE,CAD,MAP,withPose());
@@ -173,6 +203,11 @@ function selectOpMode(id){
   renderOpList(); renderOpSelect(); renderCompareSelects(); updateDS();
 }
 function addOpModeFromText(file,text){
+  if(!isOpModeSource(text)&&/\bclass\s+\w+/.test(text)){
+    USER_HELPERS=USER_HELPERS.filter(h=>h.file!==file).concat([{file, src:text}]);
+    saveHelpers(); reparseAll();
+    return;
+  }
   const existing=LIBRARY.filter(x=>!x.builtin&&x.file===file)[0];
   const e=existing||{id:"u"+Date.now().toString(36)+Math.random().toString(36).slice(2,6), file, builtin:false};
   e.source=text; parseEntry(e);
@@ -1175,6 +1210,7 @@ function wireShotTab(){
   robotSeg("#frontSeg",b=>OPTS.front=b.dataset.front);
   robotSeg("#baseSeg",b=>OPTS.baseModel=b.dataset.mode);
   robotSeg("#shooterSeg",b=>OPTS.shooterModel=b.dataset.mode);
+  robotSeg("#obstacleSeg",b=>OPTS.obstacles=b.dataset.obst==="walls"?"walls":"all");
 }
 /* The drive base, footprint and obstacles follow the drawn-parts settings
    without restarting the OpMode. */
@@ -1182,7 +1218,7 @@ function refitRobot(){
   if(!CAD) return;
   Sim.base=robotBase(CAD,Sim.drivetrain,OPTS.baseModel,OPTS.front);
   Sim.footprint=footprintOf(CAD,OPTS.front,Sim.base);
-  Sim.obstacles=Field.ok?Field.obstacles(Sim.footprint.h):[];
+  Sim.obstacles=Field.ok&&OPTS.obstacles!=="walls"?Field.obstacles(Sim.footprint.h):[];
   if(Field.ok) Field.collide(Sim.chassis,Sim.footprint,Sim.obstacles);
   // the physics rig is built in the robot's own axes, so a new front (or a
   // drawn base) needs a new one — a stale rig kept the wheels placed for the
@@ -1228,6 +1264,7 @@ function syncOptionControls(){
   $$("#frontSeg button").forEach(b=>b.classList.toggle("on",b.dataset.front===OPTS.front));
   $$("#baseSeg button").forEach(b=>b.classList.toggle("on",b.dataset.mode===OPTS.baseModel));
   $$("#shooterSeg button").forEach(b=>b.classList.toggle("on",b.dataset.mode===OPTS.shooterModel));
+  $$("#obstacleSeg button").forEach(b=>b.classList.toggle("on",b.dataset.obst===(OPTS.obstacles==="walls"?"walls":"all")));
 }
 function loadCAD(cad,label,cls){
   // one frame for everything (src/frame.js): the parser does this for STEP
@@ -1297,7 +1334,8 @@ function parseAndLoad(done){
    ============================================================ */
 const DEFAULT_ROBOT={dir:"robots/into-the-deep/", step:"Into The Deep.step", file:"robot.step.gz", joints:"joints.json",
   team:"7832", label:"GearGurus 7832 · Into The Deep",
-  opmodes:[{id:"itd-sample-tele", file:"sample_teleop.java"}, {id:"itd-bal", file:"BAL.java"}]};
+  opmodes:[{id:"itd-sample-tele", file:"sample_teleop.java"}, {id:"itd-bal", file:"BAL.java"}, {id:"itd-holy-grail", file:"TheHolyGrail.java", field:"other"}],
+  helpers:["MecanumDrive.java", "Arm.java", "Arm_PID_Class.java", "Slides_PID_Class.java"]};
 async function fetchStepText(url){
   const r=await fetch(url); if(!r.ok) throw new Error(r.status+" for "+url);
   const buf=new Uint8Array(await r.arrayBuffer());
@@ -1312,11 +1350,15 @@ async function loadDefaultRobot(){
   const R=DEFAULT_ROBOT, st=$("#cadStatus");
   st.textContent="loading "+R.label+" …";
   try{
+    const get=f=>fetch(R.dir+f).then(r=>r.ok?r.text():null).catch(()=>null);
     const [text,spec,...srcs]=await Promise.all([fetchStepText(R.dir+R.file),
       fetch(R.dir+R.joints).then(r=>{ if(!r.ok) throw new Error(r.status+" for "+R.joints); return r.json(); }),
-      ...R.opmodes.map(o=>fetch(R.dir+o.file).then(r=>r.ok?r.text():null).catch(()=>null))]);
+      ...R.opmodes.map(o=>get(o.file)), ...R.helpers.map(get)]);
     if(LAST_STEP) return;                       // a robot was dropped in meanwhile: that one wins
-    R.opmodes.forEach((o,i)=>{ if(srcs[i]&&!entry(o.id)){ const e={id:o.id, file:o.file, source:srcs[i], builtin:true, team:R.team}; parseEntry(e); LIBRARY.push(e); } });
+    // the team's helper classes first: their Road Runner auto needs them
+    BUILTIN_HELPERS=R.helpers.map((f,i)=>({file:f, src:srcs[R.opmodes.length+i], team:R.team})).filter(h=>h.src);
+    R.opmodes.forEach((o,i)=>{ if(srcs[i]&&!entry(o.id)){ const e={id:o.id, file:o.file, source:srcs[i], builtin:true, team:R.team, field:o.field||null}; parseEntry(e); LIBRARY.push(e); } });
+    renderOpList();
     JOINTS.spec=spec; JOINTS.name=R.joints; JOINTS.step=R.step;
     LAST_STEP={name:R.step, text, label:R.label};
     parseAndLoad(()=>{
