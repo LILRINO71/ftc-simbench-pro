@@ -7,7 +7,18 @@ The robot FTC SimBench Pro opens with. Published here at the team's request.
 | `robot.step.gz` | the team's Onshape export (AP242, 773 parts, 52.6 MB unzipped). The app inflates it in the browser. |
 | `joints.json` | the robot's joint spec (`ftc-sim-bench.joints`, see `src/jointspec.js`): which parts ride on the lift, the outtake arm and claw, the linkage-driven intake extension, the intake arm, wrist, twist and claw, with each joint's axis, travel and the servo position the CAD was drawn at |
 | `sample_teleop.java`, `BAL.java` | the team's TeleOps, unchanged |
+| `TheHolyGrail.java` | the team's Road Runner 1.0 specimen auto, unchanged |
+| `MecanumDrive.java`, `Arm.java`, `Arm_PID_Class.java`, `Slides_PID_Class.java` | the helper classes the auto needs: the drive's motors and `PARAMS`, the `Arm` class with its Road Runner actions, and the PID helpers. The app loads them as helper classes. |
 | `LICENSE-TeamCode.txt` | the licence the team's code repository carries |
+
+What the bench finds when it runs this code:
+- `sample tele` drives every mechanism the way the robot does (`tests/into-the-deep.test.mjs`).
+- The Holy Grail passes all of its scoring and pickup waypoints within 2 in, in order.
+- The auto was written for the Into The Deep field, so the app runs it against the walls only.
+- `MecanumDrive` looks up its right-back motor as `" bR"`, with a space, while the TeleOps use
+  `"bR"`. On the real robot only one of the two can match the configuration.
+- The auto never starts `UpdatePID1`, so the slides are never powered in auto.
+- `uppies1` is declared but its `setPower` is commented out in the TeleOps; only `uppies` lifts.
 
 The OpModes come from
 [eli-lame/GearGurus7832_Into_the_Deep_24-25](https://github.com/eli-lame/GearGurus7832_Into_the_Deep_24-25)
