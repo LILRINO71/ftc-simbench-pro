@@ -1,0 +1,46 @@
+ITD phantom revolute joint on a random frame part (80 trials): extra parts carried median 0, p90 1, max 32, zero in 65/80; real-joint accuracy change mean 0.09 pts
+   worst: 32 from #55 Control Hub Top Frame | 3 from #140 5203 gearbox | 2 from #71 Right Slant Plate | 2 from #74 Left Slant Plate Fixed
+ITD phantom linear joint on a random frame part (80 trials): extra parts carried median 0, p90 4, max 32, zero in 64/80; real-joint accuracy change mean 0.02 pts
+   worst: 32 from #54 Control Hub Top Frame | 7 from #107 1120 Series U-Channel (1 Hole, | 5 from #19 inslide | 5 from #29 inslide
+corpus arm-only             5 parts,     4 contacts,    1 ms; no joints -> 0 parts moved; phantom joint on each structural part: extra carried mean 1.60, max 3 (of 10 phantoms)
+corpus big               1510 parts,  6583 contacts,  417 ms; no joints -> 0 parts moved; phantom joint on each structural part: extra carried mean 21.15, max 1118 (of 120 phantoms)
+corpus kiwi                 9 parts,     6 contacts,    2 ms; no joints -> 0 parts moved; phantom joint on each structural part: extra carried mean 0.33, max 2 (of 12 phantoms)
+corpus mecanum-front-y     25 parts,    25 contacts,    4 ms; no joints -> 0 parts moved; phantom joint on each structural part: extra carried mean 4.67, max 11 (of 30 phantoms)
+corpus mecanum-inch        25 parts,    26 contacts,    5 ms; no joints -> 0 parts moved; phantom joint on each structural part: extra carried mean 0.93, max 11 (of 30 phantoms)
+corpus mecanum-offset      32 parts,    32 contacts,    5 ms; no joints -> 0 parts moved; phantom joint on each structural part: extra carried mean 4.97, max 11 (of 34 phantoms)
+corpus mecanum-yup         25 parts,    25 contacts,    7 ms; no joints -> 0 parts moved; phantom joint on each structural part: extra carried mean 4.73, max 11 (of 30 phantoms)
+corpus mecanum-zup         25 parts,    25 contacts,    4 ms; no joints -> 0 parts moved; phantom joint on each structural part: extra carried mean 4.73, max 11 (of 30 phantoms)
+corpus nested              25 parts,    25 contacts,    5 ms; no joints -> 0 parts moved; phantom joint on each structural part: extra carried mean 4.73, max 11 (of 30 phantoms)
+corpus swerve              19 parts,    15 contacts,    3 ms; no joints -> 0 parts moved; phantom joint on each structural part: extra carried mean 1.13, max 13 (of 30 phantoms)
+corpus tank-6wd            15 parts,    10 contacts,    3 ms; no joints -> 0 parts moved; phantom joint on each structural part: extra carried mean 1.44, max 5 (of 18 phantoms)
+corpus tank-traction       15 parts,    13 contacts,    2 ms; no joints -> 0 parts moved; phantom joint on each structural part: extra carried mean 1.22, max 2 (of 18 phantoms)
+corpus unnamed-wheels      25 parts,    25 contacts,    3 ms; no joints -> 0 parts moved; phantom joint on each structural part: extra carried mean 5.48, max 11 (of 50 phantoms)
+corpus xdrive              12 parts,    11 contacts,    2 ms; no joints -> 0 parts moved; phantom joint on each structural part: extra carried mean 0.25, max 2 (of 16 phantoms)
+
+mated robot joints: Lift Stage(linear, parent chassis); Lift Carriage(linear, parent Lift Stage); Arm Pivot(revolute-lift, parent Lift Carriage); Claw(revolute-yaw, parent Arm Pivot)
+seeds: Lift Stage:[Slide Stage 1]  Lift Carriage:[Slide Carriage]  Arm Pivot:[2000 Series Dual Mode Servo (25-2) 2000-0025-0002]  Claw:[Claw Finger]
+
+=== mated robot, 33 parts [subasm]
+  label accuracy  all  93.9% (31/33)  structural  91.3% (21/23)  fasteners 100.0% (6/6)
+  non-seed structural  89.5% (17/19)   moving non-seed structural (recall of label)   0.0% (0/2)   frame parts put on a joint: 0 (0 structural)
+  micro (non-seed, all kinds) prec 100.0% rec   0.0%  [tp 0, predicted 0, truth 2]
+
+=== mated robot, 33 parts [nearest]
+  label accuracy  all  48.5% (16/33)  structural  52.2% (12/23)  fasteners   0.0% (0/6)
+  non-seed structural  42.1% (8/19)   moving non-seed structural (recall of label)   0.0% (0/2)   frame parts put on a joint: 15 (9 structural)
+  micro (non-seed, all kinds) prec   0.0% rec   0.0%  [tp 0, predicted 17, truth 2]
+
+=== mated robot, 33 parts [contact]
+  label accuracy  all 100.0% (33/33)  structural 100.0% (23/23)  fasteners 100.0% (6/6)
+  non-seed structural 100.0% (19/19)   moving non-seed structural (recall of label) 100.0% (2/2)   frame parts put on a joint: 0 (0 structural)
+  micro (non-seed, all kinds) prec 100.0% rec 100.0%  [tp 2, predicted 2, truth 2]
+
+=== mated robot, 33 parts [combined]
+  label accuracy  all 100.0% (33/33)  structural 100.0% (23/23)  fasteners 100.0% (6/6)
+  non-seed structural 100.0% (19/19)   moving non-seed structural (recall of label) 100.0% (2/2)   frame parts put on a joint: 0 (0 structural)
+  micro (non-seed, all kinds) prec 100.0% rec 100.0%  [tp 2, predicted 2, truth 2]
+  joint             truth pred  prec   rec  | structural non-seed tp/truth/pred | fasteners tp/truth/pred
+  Lift Stage           1    1 100.0% 100.0% | 0/0/0                                            | 0/0/0
+  Lift Carriage        1    1 100.0% 100.0% | 0/0/0                                            | 0/0/0
+  Arm Pivot            3    3 100.0% 100.0% | 2/2/2                                            | 0/0/0
+  Claw                 1    1 100.0% 100.0% | 0/0/0                                            | 0/0/0

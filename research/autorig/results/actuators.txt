@@ -1,0 +1,59 @@
+Into The Deep: 773 parts, load 5276 ms, findActuators 1138 ms, 15 actuators found
+
+Detection: real actuators 15 (8 servos, 7 motors); found 15; missed 0 []; false positives 0 []; duplicates 0
+
+Per joint (best detected actuator by perpendicular distance + 0.5 x angle):
+joint     | device ok | axis err deg | pivot->axis mm | driven parts ok/all | attached ok/all | body+mount ok/all | gear on output | pick
+arm       | yes       |          0.2 |            0.4 |                 1/1 |             2/2 |               6/6 | n/a            | motor 2
+outRot    | yes       |          0.1 |            2.8 |                 1/1 |             1/1 |               2/2 | n/a            | servo 12
+outClaw   | yes       |          0.2 |            0.8 |                 2/2 |             1/1 |               4/4 | yes 127        | servo 8 meshes 128
+crank R   | yes       |          0.2 |            0.1 |                 1/1 |             1/1 |               2/2 | n/a            | servo 14
+crank L   | yes       |          0.2 |            0.1 |                 1/1 |             1/1 |               2/2 | n/a            | servo 13
+inY       | yes       |          0.0 |            0.1 |                 1/1 |             1/1 |               2/2 | n/a            | servo 15
+inPiv     | yes       |          0.0 |            0.2 |                 2/2 |             1/1 |               2/2 | n/a            | servo 10
+inX       | yes       |          0.2 |            0.3 |                 1/1 |             1/1 |               3/3 | n/a            | servo 9
+inClaw    | yes       |          0.2 |            1.3 |                 2/2 |             1/1 |               3/3 | yes 129        | servo 11 meshes 130
+mean axis error 0.1 deg, mean pivot distance 0.7 mm, max 2.8 mm; right device 9/9
+driven parts (hub/horn/gear, structural) that ride the joint: 12/12; parts bolted to them: 10/10; body+mounts that do NOT ride it: 26/26; fasteners on the output: 3/3
+own output member (spline/shaft) riding the joint in the truth: 4/5 (the truth file puts a gearmotor's shaft with its body)
+  follower outClaw finger : meshing gear 128 (2302 Series Aluminum, MOD 0.8,) off servo 8: axis err 0.2 deg, pivot->axis 0.9 mm, ratio -1.001 (truth -1), gear rides truth 'outClaw finger'
+  follower inClaw finger  : meshing gear 130 (2302 Series Aluminum, MOD 0.8,) off servo 11: axis err 0.2 deg, pivot->axis 0.6 mm, ratio -1.001 (truth -1), gear rides truth 'inClaw finger'
+  flagged ambiguous (output end not settled): 0
+
+Motors:
+  drive motor 1  role=drive        axis=[-0.00,1.00,0.01] pivot=[-168.1,164.1,48.6] part=goBILDA 5203-style Yellow Jacket (ratio unknown) output=[323:5203 Shaft,124:Wheel Core,329:1310 Series Hyper Hub (5mm H,71:Right Slant Plate] body mech=
+  motor 2        role=joint        axis=[-0.00,-1.00,-0.00] pivot=[-49.5,46,351.6] part=5203-2402-0019 output=[320:5203 Shaft,318:1311 Series Thru-Hole Sonic ] body mech=lift
+  drive motor 3  role=drive        axis=[-0.00,-1.00,-0.00] pivot=[168,-164.1,48.3] part=5203-2402-0014 output=[321:5203 Shaft,126:Wheel Core,333:1310 Series Hyper Hub (5mm H,73:Right Slant Plate] body mech=
+  motor 4        role=unloaded     axis=[-0.00,0.01,-1.00] pivot=[119.9,96.3,136.2] part=goBILDA 5203-style Yellow Jacket (ratio unknown) output=[319:5203 Shaft] body mech=
+  drive motor 5  role=drive        axis=[-0.00,1.00,-0.00] pivot=[168.1,164,48.3] part=goBILDA 5203-style Yellow Jacket (ratio unknown) output=[325:5203 Shaft,125:Wheel Core,330:1310 Series Hyper Hub (5mm H,70:Left Slant Plate Fixed] body mech=
+  motor 6        role=unloaded     axis=[-0.00,0.01,-1.00] pivot=[72,-95.8,136.3] part=5203-2402-0019 output=[322:5203 Shaft] body mech=
+  drive motor 7  role=drive        axis=[0.00,-1.00,0.01] pivot=[-168.1,-164.1,48.7] part=goBILDA 5203-style Yellow Jacket (ratio unknown) output=[324:5203 Shaft,123:Wheel Core,328:1310 Series Hyper Hub (5mm H,69:Left Slant Plate Fixed] body mech=
+  vertical non-drive motors on the frame (the two lift/spool motors): 2, roles unloaded,unloaded -> NOT treated as revolute joints
+  drive-flagged: 4 (motor@-168,164,49; motor@168,-164,48; motor@168,164,48; motor@-168,-164,49)
+
+Servos:
+  servo 8    body=102:Servo Case spline=no  role=joint face/end: ears set the length, ears toward this face, cable exit at this end (weak), hub on it (5), centred on hub; margin 5.5; part number guessed from 4 identical servos
+  servo 9    body=110:Servo Case spline=yes role=joint face/end: spline past face, ears set the length, ears toward this face, cable exit at this end (weak), hub on it (5); margin 9.0
+  servo 10   body=112:Servo Case spline=no  role=joint face/end: ears set the length, ears toward this face, cable exit at this end (weak), hub on it (5), centred on hub; margin 5.5; part number guessed from 4 identical servos
+  servo 11   body=117:Servo Case spline=no  role=joint face/end: ears set the length, ears toward this face, cable exit at this end (weak), hub on it (5), centred on hub; margin 5.5; part number guessed from 4 identical servos
+  servo 12   body=121:Servo Case spline=no  role=joint face/end: ears set the length, ears toward this face, hub on it (5), centred on hub; margin 5.0; part number guessed from 4 identical servos
+  servo 13   body=131:Servo Case spline=yes role=joint face/end: spline past face, ears set the length, ears toward this face, cable exit at this end (weak), hub on it (5); margin 9.0
+  servo 14   body=132:Servo Case spline=yes role=joint face/end: spline past face, ears set the length, ears toward this face, cable exit at this end (weak), hub on it (5); margin 9.0
+  servo 15   body=133:Servo Case spline=yes role=joint face/end: spline past face, ears set the length, ears toward this face, cable exit at this end (weak), hub on it (5); margin 9.0
+
+Corpus robots:
+  arm-only         real  1 found  1 FP 0 missed 0 wrong drive flag 0 | roles s:unloaded
+  big              real  5 found  5 FP 0 missed 0 wrong drive flag 0 | roles m:drive m:drive m:drive m:drive s:unloaded
+  kiwi             real  3 found  3 FP 0 missed 0 wrong drive flag 0 | roles m:drive m:drive m:drive
+  mecanum-front-y  real  5 found  5 FP 0 missed 0 wrong drive flag 0 | roles m:drive m:drive m:drive m:drive s:unloaded
+  mecanum-inch     real  5 found  5 FP 0 missed 0 wrong drive flag 0 | roles m:drive m:drive m:drive m:drive s:unloaded
+  mecanum-offset   real  5 found  5 FP 0 missed 0 wrong drive flag 0 | roles m:drive m:drive m:drive m:drive s:unloaded
+  mecanum-yup      real  5 found  5 FP 0 missed 0 wrong drive flag 0 | roles m:drive m:drive m:drive m:drive s:unloaded
+  mecanum-zup      real  5 found  5 FP 0 missed 0 wrong drive flag 0 | roles m:drive m:drive m:drive m:drive s:unloaded
+  nested           real  5 found  5 FP 0 missed 0 wrong drive flag 0 | roles m:drive m:drive m:drive m:drive s:unloaded
+  swerve           real  8 found  8 FP 0 missed 0 wrong drive flag 0 | roles m:drive m:drive m:drive m:drive s:steer s:steer s:steer s:steer
+  tank-6wd         real  2 found  2 FP 0 missed 0 wrong drive flag 0 | roles m:drive m:drive
+  tank-traction    real  2 found  2 FP 0 missed 0 wrong drive flag 0 | roles m:drive m:drive
+  unnamed-wheels   real  5 (no names) found  5 FP 0 missed 0 wrong drive flag 0 | roles m:drive m:drive m:drive m:drive s:unloaded
+  xdrive           real  4 found  4 FP 0 missed 0 wrong drive flag 0 | roles m:drive m:drive m:drive m:drive
+  corpus total: 60 found, 0 false positives, 0 missed, 0 wrong drive flags, 0 claimed as 'joint' (outputs something turns)

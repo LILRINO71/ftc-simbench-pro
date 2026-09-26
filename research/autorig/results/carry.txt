@@ -1,0 +1,120 @@
+seeds: lift:[12,18,23,28]  lift stage 2:[14,17,25,27]  lift stage 3:[13,16,26]  arm:[351]  outRot:[310]  outClaw:[127]  outClaw finger:[128]  crank R:[578]  crank L:[580]  extend:[8,9,20,22]  rod R:[34]  rod L:[35]  inY:[579]  inPiv:[313]  inX:[463]  inClaw:[129]  inClaw finger:[130]
+
+=== baseline: everything frame
+  label accuracy  all  77.9% (602/773)  structural  59.0% (194/329)  fasteners  55.0% (44/80)
+  non-seed structural  64.5% (194/301)   moving non-seed structural (recall of label)   0.0% (0/107)   frame parts put on a joint: 0 (0 structural)
+  micro (non-seed, all kinds) prec 100.0% rec   0.0%  [tp 0, predicted 0, truth 143]
+
+=== baseline: seeds only
+  label accuracy  all  81.5% (630/773)  structural  67.5% (222/329)  fasteners  55.0% (44/80)
+  non-seed structural  64.5% (194/301)   moving non-seed structural (recall of label)   0.0% (0/107)   frame parts put on a joint: 0 (0 structural)
+  micro (non-seed, all kinds) prec 100.0% rec   0.0%  [tp 0, predicted 0, truth 143]
+
+=== baseline: legacy nearest-link rule (every part rides the nearest joint segment)
+  label accuracy  all  56.4% (436/773)  structural  20.1% (66/329)  fasteners   7.5% (6/80)
+  non-seed structural  12.6% (38/301)   moving non-seed structural (recall of label)  35.5% (38/107)   frame parts put on a joint: 238 (194 structural)
+  micro (non-seed, all kinds) prec  11.5% rec  30.8%  [tp 44, predicted 381, truth 143]
+
+contact graph: 2425 edges (2139 strong) in 435 ms
+
+=== subasm  (assign 13 ms + graph 435 ms)
+  label accuracy  all  86.2% (666/773)  structural  74.5% (245/329)  fasteners  71.3% (57/80)
+  non-seed structural  72.1% (217/301)   moving non-seed structural (recall of label)  45.8% (49/107)   frame parts put on a joint: 38 (26 structural)
+  micro (non-seed, all kinds) prec  48.4% rec  51.7%  [tp 74, predicted 153, truth 143]
+  joint             truth pred  prec   rec  | structural non-seed tp/truth/pred | fasteners tp/truth/pred
+  lift                32   25  60.0%  46.9% | 6/22/12                                          | 5/6/9
+  lift stage 2        32   53  49.1%  81.3% | 13/16/31                                         | 9/12/18
+  lift stage 3        30   20  55.0%  36.7% | 3/15/8                                           | 5/12/9
+  arm                 14    8 100.0%  57.1% | 7/13/7                                           | 0/0/0
+  outRot               4    7  42.9%  75.0% | 2/3/6                                            | 0/0/0
+  outClaw              3    3  66.7%  66.7% | 1/2/2                                            | 0/0/0
+  outClaw finger       3    2 100.0%  66.7% | 1/2/1                                            | 0/0/0
+  crank R              3    2  50.0%  33.3% | 0/2/1                                            | 0/0/0
+  crank L              3    2  50.0%  33.3% | 0/2/1                                            | 0/0/0
+  extend              24   36  50.0%  75.0% | 8/14/20                                          | 6/6/12
+  rod R                1    1 100.0% 100.0% | 0/0/0                                            | 0/0/0
+  rod L                1    1 100.0% 100.0% | 0/0/0                                            | 0/0/0
+  inY                  4    4  50.0%  50.0% | 1/3/3                                            | 0/0/0
+  inPiv                6    5  60.0%  50.0% | 2/5/4                                            | 0/0/0
+  inX                  5    7  57.1%  80.0% | 3/4/6                                            | 0/0/0
+  inClaw               3    3  66.7%  66.7% | 1/2/2                                            | 0/0/0
+  inClaw finger        3    2 100.0%  66.7% | 1/2/1                                            | 0/0/0
+
+=== nearest  (assign 6 ms + graph 435 ms)
+  label accuracy  all  75.3% (582/773)  structural  49.2% (162/329)  fasteners  70.0% (56/80)
+  non-seed structural  44.5% (134/301)   moving non-seed structural (recall of label)  72.0% (77/107)   frame parts put on a joint: 149 (137 structural)
+  micro (non-seed, all kinds) prec  34.7% rec  70.6%  [tp 101, predicted 291, truth 143]
+  joint             truth pred  prec   rec  | structural non-seed tp/truth/pred | fasteners tp/truth/pred
+  lift                32   38  71.1%  84.4% | 18/22/23                                         | 5/6/11
+  lift stage 2        32   51  47.1%  75.0% | 12/16/32                                         | 8/12/15
+  lift stage 3        30   27  55.6%  50.0% | 7/15/14                                          | 5/12/10
+  arm                 14   13  92.3%  85.7% | 11/13/12                                         | 0/0/0
+  outRot               4    9  33.3%  75.0% | 2/3/8                                            | 0/0/0
+  outClaw              3    4  75.0% 100.0% | 2/2/3                                            | 0/0/0
+  outClaw finger       3    3 100.0% 100.0% | 2/2/2                                            | 0/0/0
+  crank R              3    5  60.0% 100.0% | 2/2/4                                            | 0/0/0
+  crank L              3    5  40.0%  66.7% | 1/2/4                                            | 0/0/0
+  extend              24   40  55.0%  91.7% | 12/14/24                                         | 6/6/12
+  rod R                1    1 100.0% 100.0% | 0/0/0                                            | 0/0/0
+  rod L                1  100   1.0% 100.0% | 0/0/99                                           | 0/0/0
+  inY                  4    4  50.0%  50.0% | 1/3/3                                            | 0/0/0
+  inPiv                6    5  60.0%  50.0% | 2/5/4                                            | 0/0/0
+  inX                  5    5  40.0%  40.0% | 1/4/4                                            | 0/0/0
+  inClaw               3    6  50.0% 100.0% | 2/2/5                                            | 0/0/0
+  inClaw finger        3    3 100.0% 100.0% | 2/2/2                                            | 0/0/0
+
+=== contact  (assign 36 ms + graph 435 ms)
+  label accuracy  all  99.7% (771/773)  structural  99.7% (328/329)  fasteners  98.8% (79/80)
+  non-seed structural  99.7% (300/301)   moving non-seed structural (recall of label)  99.1% (106/107)   frame parts put on a joint: 0 (0 structural)
+  micro (non-seed, all kinds) prec  99.3% rec  98.6%  [tp 141, predicted 142, truth 143]
+  joint             truth pred  prec   rec  | structural non-seed tp/truth/pred | fasteners tp/truth/pred
+  lift                32   33  97.0% 100.0% | 22/22/22                                         | 6/6/7
+  lift stage 2        32   32 100.0% 100.0% | 16/16/16                                         | 12/12/12
+  lift stage 3        30   29 100.0%  96.7% | 15/15/15                                         | 11/12/11
+  arm                 14   14 100.0% 100.0% | 13/13/13                                         | 0/0/0
+  outRot               4    4 100.0% 100.0% | 3/3/3                                            | 0/0/0
+  outClaw              3    3 100.0% 100.0% | 2/2/2                                            | 0/0/0
+  outClaw finger       3    3 100.0% 100.0% | 2/2/2                                            | 0/0/0
+  crank R              3    3 100.0% 100.0% | 2/2/2                                            | 0/0/0
+  crank L              3    2 100.0%  66.7% | 1/2/1                                            | 0/0/0
+  extend              24   24 100.0% 100.0% | 14/14/14                                         | 6/6/6
+  rod R                1    1 100.0% 100.0% | 0/0/0                                            | 0/0/0
+  rod L                1    1 100.0% 100.0% | 0/0/0                                            | 0/0/0
+  inY                  4    4 100.0% 100.0% | 3/3/3                                            | 0/0/0
+  inPiv                6    6 100.0% 100.0% | 5/5/5                                            | 0/0/0
+  inX                  5    5 100.0% 100.0% | 4/4/4                                            | 0/0/0
+  inClaw               3    3 100.0% 100.0% | 2/2/2                                            | 0/0/0
+  inClaw finger        3    3 100.0% 100.0% | 2/2/2                                            | 0/0/0
+
+=== combined  (assign 14 ms + graph 435 ms)
+  label accuracy  all  99.7% (771/773)  structural  99.7% (328/329)  fasteners  98.8% (79/80)
+  non-seed structural  99.7% (300/301)   moving non-seed structural (recall of label)  99.1% (106/107)   frame parts put on a joint: 0 (0 structural)
+  micro (non-seed, all kinds) prec  99.3% rec  98.6%  [tp 141, predicted 142, truth 143]
+  joint             truth pred  prec   rec  | structural non-seed tp/truth/pred | fasteners tp/truth/pred
+  lift                32   33  97.0% 100.0% | 22/22/22                                         | 6/6/7
+  lift stage 2        32   32 100.0% 100.0% | 16/16/16                                         | 12/12/12
+  lift stage 3        30   29 100.0%  96.7% | 15/15/15                                         | 11/12/11
+  arm                 14   14 100.0% 100.0% | 13/13/13                                         | 0/0/0
+  outRot               4    4 100.0% 100.0% | 3/3/3                                            | 0/0/0
+  outClaw              3    3 100.0% 100.0% | 2/2/2                                            | 0/0/0
+  outClaw finger       3    3 100.0% 100.0% | 2/2/2                                            | 0/0/0
+  crank R              3    3 100.0% 100.0% | 2/2/2                                            | 0/0/0
+  crank L              3    2 100.0%  66.7% | 1/2/1                                            | 0/0/0
+  extend              24   24 100.0% 100.0% | 14/14/14                                         | 6/6/6
+  rod R                1    1 100.0% 100.0% | 0/0/0                                            | 0/0/0
+  rod L                1    1 100.0% 100.0% | 0/0/0                                            | 0/0/0
+  inY                  4    4 100.0% 100.0% | 3/3/3                                            | 0/0/0
+  inPiv                6    6 100.0% 100.0% | 5/5/5                                            | 0/0/0
+  inX                  5    5 100.0% 100.0% | 4/4/4                                            | 0/0/0
+  inClaw               3    3 100.0% 100.0% | 2/2/2                                            | 0/0/0
+  inClaw finger        3    3 100.0% 100.0% | 2/2/2                                            | 0/0/0
+
+=== synthetic 'mated' robot (33 parts, 4 joints, truth from its Onshape mates)
+  subasm    all  93.9% (31/33)  moving non-seed 0/2 right, 0 wrong-moving, frame parts put on a joint 0
+  nearest   all  48.5% (16/33)  moving non-seed 0/2 right, 17 wrong-moving, frame parts put on a joint 15
+  contact   all 100.0% (33/33)  moving non-seed 2/2 right, 0 wrong-moving, frame parts put on a joint 0
+  combined  all 100.0% (33/33)  moving non-seed 2/2 right, 0 wrong-moving, frame parts put on a joint 0
+
+=== corpus, 14 robots with no joints (1767 parts): 0 parts put on a joint
+
+more: posetest.mjs (13 re-posed configurations), robust.mjs (seeds, noise, parameters, ablations, metadata removed), leak.mjs (phantom joints), timing.mjs, subasm_stats.mjs

@@ -1,0 +1,24 @@
+
+--- mode rigid ---
+as drawn                                     [rigid] lift: 2 copies, 4 stages, dir ok, rails 15/15, hw 83/83, +0 other parts | extend: 2 copies, 2 stages, dir ok, rails 8/8, hw 28/28, +0 other parts | FP 0
+whole robot turned 30 deg about z            [rigid] lift: 2 copies, 4 stages, dir ok, rails 15/15, hw 83/83, +0 other parts | extend: 2 copies, 2 stages, dir ok, rails 8/8, hw 28/28, +0 other parts | FP 0
+whole robot turned 90 deg about z            [rigid] lift: 2 copies, 4 stages, dir ok, rails 15/15, hw 83/83, +0 other parts | extend: 2 copies, 2 stages, dir ok, rails 8/8, hw 28/28, +0 other parts | FP 0
+whole robot turned 137 deg about z           [rigid] lift: 2 copies, 4 stages, dir ok, rails 15/15, hw 83/83, +0 other parts | extend: 2 copies, 2 stages, dir ok, rails 8/8, hw 28/28, +0 other parts | FP 0
+drawn part-way extended                      [rigid] lift: 2 copies, 4 stages, dir ok, rails 15/15, hw 83/83, +0 other parts | extend: 2 copies, 2 stages, dir ok, rails 8/8, hw 28/28, +0 other parts | FP 0
+names stripped (every kind = metal)          [rigid] lift: 2 copies, 4 stages, dir ok, rails 15/15, hw 83/83, +0 other parts | extend: 2 copies, 2 stages, dir ok, rails 8/8, hw 28/28, +0 other parts | FP 0
+right-hand slides removed                    [rigid] lift: 1 copies, 4 stages, dir ok, rails 8/8, hw 41/41, +0 other parts | extend: 1 copies, 2 stages, dir ok, rails 4/4, hw 14/14, +0 other parts | FP 0
+
+--- mode slide ---
+as drawn                                     [slide] lift: 2 copies, 5 stages, dir ok, rails 15/15, hw 83/83, +0 other parts | extend: 2 copies, 3 stages, dir ok, rails 8/8, hw 28/28, +0 other parts | FP 0
+whole robot turned 30 deg about z            [slide] lift: 2 copies, 5 stages, dir ok, rails 15/15, hw 83/83, +0 other parts | extend: 2 copies, 3 stages, dir ok, rails 8/8, hw 28/28, +0 other parts | FP 0
+whole robot turned 90 deg about z            [slide] lift: 2 copies, 5 stages, dir ok, rails 15/15, hw 83/83, +0 other parts | extend: 2 copies, 3 stages, dir ok, rails 8/8, hw 28/28, +0 other parts | FP 0
+whole robot turned 137 deg about z           [slide] lift: 2 copies, 5 stages, dir ok, rails 15/15, hw 83/83, +0 other parts | extend: 2 copies, 3 stages, dir ok, rails 8/8, hw 28/28, +0 other parts | FP 0
+drawn part-way extended                      [slide] lift: 2 copies, 5 stages, dir ok, rails 15/15, hw 83/83, +0 other parts | extend: 2 copies, 3 stages, dir ok, rails 8/8, hw 28/28, +0 other parts | FP 0
+names stripped (every kind = metal)          [slide] lift: 2 copies, 5 stages, dir ok, rails 15/15, hw 83/83, +0 other parts | extend: 2 copies, 3 stages, dir ok, rails 8/8, hw 28/28, +0 other parts | FP 0
+right-hand slides removed                    [slide] lift: 1 copies, 5 stages, dir ok, rails 8/8, hw 41/41, +0 other parts | extend: 1 copies, 3 stages, dir ok, rails 4/4, hw 14/14, +0 other parts | FP 0
+
+--- false-positive traps (mecanum-zup + added parts) ---
+two U-channels bolted face to face (doubled frame rail)    -> 0 slide mechanisms 
+two flat beams 11 mm apart (a two-bar arm)                 -> 0 slide mechanisms 
+square tube inside a bigger tube (telescoping, 2 mm clearance) -> 1 slide mechanisms [Tube outer | Tube inner]
+three bars side by side, 2 mm gaps (Viper-style 3-stage)   -> 1 slide mechanisms [Bar 1 | Bar 2 | Bar 3]

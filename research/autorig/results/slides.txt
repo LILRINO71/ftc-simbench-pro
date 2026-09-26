@@ -1,0 +1,70 @@
+load 4658 ms; findSlides default 119 ms, rigid 82 ms; 773 parts
+
+##### DEFAULT (nested:'slide', physical) vs HAND truth -- my bodies labelled by the hand label most of their rails carry
+  lift: 2 mirror copies -> 1 mechanism, 5 stages; direction 0.000,0.000,1.000 CORRECT; fixed stage CORRECT; travel 180+180+180+180 = 720 mm (spec limit 700 mm, 3%)
+    FRAME         rails P 2/2 R 2/4   fittings P 0/0 R 0/8   fasteners P 0/0 R 0/6
+    lift          rails P 4/5 R 4/4   fittings P 8/15 R 8/8   fasteners P 6/12 R 6/6
+    lift stage 2  rails P 2/4 R 2/4   fittings P 8/16 R 8/16   fasteners P 6/12 R 6/12
+    lift stage 3  rails P 2/4 R 2/3   fittings P 8/16 R 8/15   fasteners P 6/12 R 6/12
+    => rails P 66.7% (10/15) R 66.7% (10/15) | fittings P 51.1% (24/47) R 51.1% (24/47) | fasteners P 50.0% (18/36) R 50.0% (18/36)
+    moving-end attachments: 8, of which ride this slide in the truth: 8 (truth payload rigid on the slide's joints: 14 parts, found among the attachments 8)
+  extend: 2 mirror copies -> 1 mechanism, 3 stages; direction -1.000,0.000,0.000 CORRECT; fixed stage CORRECT; travel 180+180 = 360 mm (spec limit 235 mm, 53%)
+    FRAME         rails P 4/6 R 4/4   fittings P 8/16 R 8/8   fasteners P 6/12 R 6/6
+    extend        rails P 2/2 R 2/4   fittings P 0/0 R 0/8   fasteners P 0/0 R 0/6
+    => rails P 75.0% (6/8) R 75.0% (6/8) | fittings P 50.0% (8/16) R 50.0% (8/16) | fasteners P 50.0% (6/12) R 50.0% (6/12)
+    moving-end attachments: 2, of which ride this slide in the truth: 2 (truth payload rigid on the slide's joints: 6 parts, found among the attachments 2)
+  other slide mechanisms (false positives): 0
+
+##### DEFAULT (nested:'slide') vs PHYS reading
+  lift: 2 mirror copies -> 1 mechanism, 5 stages; direction 0.000,0.000,1.000 CORRECT; fixed stage CORRECT; travel 180+180+180+180 = 720 mm (spec limit 700 mm, 3%)
+    body 0        rails P 2/2 R 2/2   fittings P 0/0 R 0/0   fasteners P 0/0 R 0/0
+    body 1        rails P 4/4 R 4/4   fittings P 16/16 R 16/16   fasteners P 12/12 R 12/12
+    body 2        rails P 4/4 R 4/4   fittings P 16/16 R 16/16   fasteners P 12/12 R 12/12
+    body 3        rails P 3/3 R 3/3   fittings P 15/15 R 15/15   fasteners P 12/12 R 12/12
+    body 4        rails P 2/2 R 2/2   fittings P 0/0 R 0/0   fasteners P 0/0 R 0/0
+    => rails P 100.0% (15/15) R 100.0% (15/15) | fittings P 100.0% (47/47) R 100.0% (47/47) | fasteners P 100.0% (36/36) R 100.0% (36/36)
+    moving-end attachments: 8, of which ride this slide in the truth: 8 (truth payload rigid on the slide's joints: 14 parts, found among the attachments 8)
+  extend: 2 mirror copies -> 1 mechanism, 3 stages; direction -1.000,0.000,0.000 CORRECT; fixed stage CORRECT; travel 180+180 = 360 mm (spec limit 235 mm, 53%)
+    body 0        rails P 2/2 R 2/2   fittings P 0/0 R 0/0   fasteners P 0/0 R 0/0
+    body 1        rails P 4/4 R 4/4   fittings P 16/16 R 16/16   fasteners P 12/12 R 12/12
+    body 2        rails P 2/2 R 2/2   fittings P 0/0 R 0/0   fasteners P 0/0 R 0/0
+    => rails P 100.0% (8/8) R 100.0% (8/8) | fittings P 100.0% (16/16) R 100.0% (16/16) | fasteners P 100.0% (12/12) R 100.0% (12/12)
+    moving-end attachments: 2, of which ride this slide in the truth: 2 (truth payload rigid on the slide's joints: 6 parts, found among the attachments 2)
+  other slide mechanisms (false positives): 0
+
+##### nested:'rigid' (the hand spec's reading) vs HAND truth
+  lift: 2 mirror copies -> 1 mechanism, 4 stages; direction 0.000,0.000,1.000 CORRECT; fixed stage CORRECT; travel 240+240+240 = 720 mm (spec limit 700 mm, 3%)
+    FRAME         rails P 4/4 R 4/4   fittings P 8/8 R 8/8   fasteners P 6/6 R 6/6
+    lift          rails P 4/4 R 4/4   fittings P 8/8 R 8/8   fasteners P 6/6 R 6/6
+    lift stage 2  rails P 4/4 R 4/4   fittings P 16/16 R 16/16   fasteners P 12/12 R 12/12
+    lift stage 3  rails P 3/3 R 3/3   fittings P 15/15 R 15/15   fasteners P 12/12 R 12/12
+    => rails P 100.0% (15/15) R 100.0% (15/15) | fittings P 100.0% (47/47) R 100.0% (47/47) | fasteners P 100.0% (36/36) R 100.0% (36/36)
+    moving-end attachments: 8, of which ride this slide in the truth: 8 (truth payload rigid on the slide's joints: 14 parts, found among the attachments 8)
+  extend: 2 mirror copies -> 1 mechanism, 2 stages; direction -1.000,0.000,0.000 CORRECT; fixed stage CORRECT; travel 240 = 240 mm (spec limit 235 mm, 2%)
+    FRAME         rails P 4/4 R 4/4   fittings P 8/8 R 8/8   fasteners P 6/6 R 6/6
+    extend        rails P 4/4 R 4/4   fittings P 8/8 R 8/8   fasteners P 6/6 R 6/6
+    => rails P 100.0% (8/8) R 100.0% (8/8) | fittings P 100.0% (16/16) R 100.0% (16/16) | fasteners P 100.0% (12/12) R 100.0% (12/12)
+    moving-end attachments: 2, of which ride this slide in the truth: 2 (truth payload rigid on the slide's joints: 6 parts, found among the attachments 2)
+  other slide mechanisms (false positives): 0
+
+end-fitting rule on the HAND truth ("a fitting between units u and u+1 rides the inner unit at the retracted end, the outer unit at the extended end"): fittings 63/63, fasteners 48/48
+
+##### corpus robots
+  arm-only             5 parts -> 0 slides (rigid mode 0)
+  big               1510 parts -> 0 slides (rigid mode 0)
+  kiwi                 9 parts -> 0 slides (rigid mode 0)
+  mecanum-front-y     25 parts -> 0 slides (rigid mode 0)
+  mecanum-inch        25 parts -> 0 slides (rigid mode 0)
+  mecanum-offset      32 parts -> 0 slides (rigid mode 0)
+  mecanum-yup         25 parts -> 0 slides (rigid mode 0)
+  mecanum-zup         25 parts -> 0 slides (rigid mode 0)
+  nested              25 parts -> 0 slides (rigid mode 0)
+  swerve              19 parts -> 0 slides (rigid mode 0)
+  tank-6wd            15 parts -> 0 slides (rigid mode 0)
+  tank-traction       15 parts -> 0 slides (rigid mode 0)
+  unnamed-wheels      25 parts -> 0 slides (rigid mode 0)
+  xdrive              12 parts -> 0 slides (rigid mode 0)
+  false positives on the 14 corpus robots without slides (both modes): 0
+  mated truth: Lift Stage carries Slide Stage 1 (axis 0,0,1, parent chassis); Lift Carriage carries Slide Carriage (axis 0,0,1, parent Lift Stage)
+  mated [slide] 1 slide(s): 3 stages, dir 0.000,0.000,1.000, fixed->out [Slide Rail | Slide Stage 1 | Slide Carriage], travel 240+240 mm, joints slide1 stage 1=Slide Stage 1, slide1=Slide Carriage
+  mated [rigid] 1 slide(s): 3 stages, dir 0.000,0.000,1.000, fixed->out [Slide Rail | Slide Stage 1 | Slide Carriage], travel 240+240 mm, joints slide1 stage 1=Slide Stage 1, slide1=Slide Carriage
