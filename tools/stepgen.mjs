@@ -769,3 +769,6 @@ async function main() {
   if (bad) { console.error(bad + ' problem(s)'); process.exitCode = 1; }
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();
+
+/* the parts library and the drive base, for other generators (tools/mechgen.mjs) */
+export { IDF, COL, ngon, motor5203, mecanumWheel, omniWheel, uChannel, plate, servo, screw, battery, controlHub, mecanumBase, flatten };
