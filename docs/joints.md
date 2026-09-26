@@ -120,7 +120,7 @@ time anything changes (`specFromCad`). It's kept per STEP file name in the brows
 **Download joint spec** saves it to share with the team or commit next to the CAD, and **Undo my
 joint edits** goes back.
 
-## 4. The automatic joint finder (in progress)
+## 4. The automatic joint finder
 
 The aim is to need none of the above for most robots. [research/autorig](../research/autorig/README.md)
 prototypes the three parts of finding joints from geometry alone and measures them against the
@@ -132,13 +132,29 @@ hand-written spec for GearGurus 7832's robot:
 | **Slides** (stacks, stage order, fixed stage, direction) | both mechanisms found, direction and fixed stage 4/4, 0 false positives |
 | **What each joint carries** (contact graph cut at each joint) | 99.7% of 773 parts on the right joint (precision 99.3%, recall 98.6%); 0 parts wrongly moved on 14 robots with no mechanisms |
 
-Next it gets built into the app. A dropped STEP with no mates and no spec gets these joints
-automatically. The ones it isn't sure of (a servo with nothing on its output, an actuator type it
-has never seen) are listed for a person to check in the editor.
+It's in the app as `src/autorig.js`. A dropped STEP with no mates, no spec and no saved edits
+gets its joints this way by itself, and **Find joints automatically** on the Mates & joints panel
+runs it on demand. How it puts the pieces together:
+1. **Slides:** each moving slide stage becomes a slider. The middle stages follow the carriage.
+2. **Revolute joints:** each actuator that turns something becomes a revolute joint. A gear it
+   meshes with becomes a follower.
+3. **Rigid bodies:** the contact graph is cut wherever motion is known, at each actuator's output
+   and between slide stages. What stays connected moves as one.
+4. **Owners and parents:** each joint owns the body its output is in. A joint hangs from whichever
+   joint owns its own case. A body several joints claim (a linkage loop) is shared out by what's
+   nearest each one's output.
+
+On GearGurus 7832's robot, the finder in the app gets:
+- all 15 actuators, the 9 driven joints on their true axes, both claw gears and both slides
+- 158 of 171 moving parts, with no frame part moved
+
+The misses are mostly the left intake linkage, which the CAD draws folded through the chassis.
+The panel lists what to check: split bodies, motors that drive a spool, servos found by shape
+alone or with an uncertain output end. The joint editor fixes the rest.
 
 ## Before any of these: the old guess
 
-Without mates or a spec, `classifyMechs` in `src/step.js` makes one mechanism per subassembly that
-holds an actuator, and every part rides the nearest mechanism. That's fine for a simple arm and
-wrong for most real robots: on Into The Deep it put 238 frame parts on joints. It stays as the
-fallback until the finder replaces it.
+Before the finder, `classifyMechs` in `src/step.js` made one mechanism per subassembly that
+holds an actuator, and every part rode the nearest mechanism. That's fine for a simple arm and
+wrong for most real robots: on Into The Deep it put 238 frame parts on joints. It's still the
+fallback when the finder finds nothing.

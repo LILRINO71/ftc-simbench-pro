@@ -1,6 +1,6 @@
 # tests/
 
-454 tests on Node's built-in runner (`node:test`). There's no browser, no mocks and no transpile
+457 tests on Node's built-in runner (`node:test`). There's no browser, no mocks and no transpile
 step: the tests run the same engine code that ships.
 
 ```bash
@@ -30,6 +30,7 @@ pure, to test how joints are drawn.
 |---|---|
 | `anyrobot.test.mjs` | **"Will any robot work?"** 14 generated robots (every drivetrain, Y-up, inch units, offset origins, unnamed parts, 4-deep nesting, 1,500 parts) go through the whole engine. Each spins in place, and the true drivetrain centre must stay within 5 mm. |
 | `into-the-deep.test.mjs` | **The real robot**, end to end: the team's STEP, joint spec, TeleOp and Road Runner auto. The right parts ride each joint. Gamepad buttons move the lift, arm, linkage and claws the right amounts. The fixed linkage stays above the floor. The auto passes all 9 waypoints within 2 in, in order. |
+| `autorig.test.mjs` | **The automatic joint finder**, from geometry alone. On the real robot it finds all 9 driven joints on their true axis lines, both claw gears as followers, and both slides; no frame part moves; over 90% of the moving parts are found. On the 14 generated robots with no mechanisms it finds nothing. |
 | `jointspec.test.mjs` | Slider-crank maths, followers, part picks, specs written from any robot's joints, hand fixes, axis suggestions. |
 | `roadrunner.test.mjs` | Builder paths and profiles (limits held, rest at both ends), stages and markers, `setTangent` in radians, helper classes and actions, a small auto driven end to end. |
 | `mates.test.mjs` | Onshape mates → joints, limits, relations, drawn the way the sim stops them. |
@@ -40,7 +41,7 @@ pure, to test how joints are drawn.
 | `pershape.test.mjs`, `render.test.mjs` | Exact geometry through OpenCascade (needs the `occt-import-js` dev dependency; its absence fails, never skips). |
 | `field.test.mjs`, `robot.test.mjs` | The BIOBUZZ field, collisions, shots, controllers. |
 | `session.test.mjs`, `mathdoc.test.mjs`, `product.test.mjs` | Workspaces (including hostile files), the Math export, the status light and GitHub import. |
-| `ship.test.mjs`, `syntax.test.mjs` | The minified build behaves like the readable one; every shipped file compiles, and no method is defined twice. |
+| `ship.test.mjs`, `syntax.test.mjs` | The minified build behaves like the readable one, and its string table hides a string before a ternary's or a case's colon but never an object key; every shipped file compiles, and no method is defined twice. |
 
 ## Adding a test
 

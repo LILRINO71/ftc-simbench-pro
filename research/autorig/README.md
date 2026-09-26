@@ -82,18 +82,27 @@ The actuator study found that goBILDA's 13.7:1 Yellow Jacket (`5203-2402-0014`) 
 so GearGurus 7832's drive motors ran as generic 312 rpm motors instead of 435. That's fixed in
 `src/hardware.js`, with `tests/hardware-parts.test.mjs`.
 
-## Next
+## In the app
 
-Build the three into the app as one finder (`src/autorig.js`):
+The three are now one finder in the app. `tools/gen-autorig.mjs` turns these modules into
+`src/autorig-lib.js`, so the app runs exactly the code measured here, and `src/autorig.js` puts
+them together:
 1. Actuators give revolute joints (axis, pivot, and the device from `mapping.js`).
 2. Unloaded motors next to slide stacks drive those slides.
 3. Meshing gears become followers.
 4. `inferCarry` assigns the parts.
 
-The output is a joint spec, the same format the editor edits. A dropped STEP with no mates and no
-spec gets it automatically, with the uncertain parts (ambiguous servo ends, unknown actuator
-types) listed for a person to confirm in the CAD view. This needs more real robots to test on,
-especially non-goBILDA ones.
+In the app, `inferCarry` is replaced by a simpler cut-and-own pass, because the actuator and slide
+finders already say exactly where motion is. The output is a joint spec, the same format the
+editor edits. A dropped STEP with no mates and no spec gets it automatically, with the uncertain
+parts listed for a person to confirm in the CAD view.
+
+On Into The Deep (`tests/autorig.test.mjs`) it finds:
+- every driven joint, both gear followers and both slides
+- 158 of 171 moving parts, with 0 frame parts moved
+
+On the 14 generated robots it finds nothing. It needs more real robots to test on, especially
+non-goBILDA ones.
 
 ## Running it
 

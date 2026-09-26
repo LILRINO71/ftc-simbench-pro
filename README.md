@@ -44,7 +44,7 @@ project. There are four layers, from exact to automatic:
 | **Onshape mates** | Read the assembly's own mates from Onshape: exact axes, travel limits and gear relations, with no guessing. | ✅ `src/mates.js` |
 | **Joint spec** | A small JSON file that says the same by hand: parts, axis, pivot, travel, which device drives it. It also covers cascade slides and servo slider-crank linkages. | ✅ `src/jointspec.js`, [docs/joints.md](docs/joints.md) |
 | **Click-to-fix editor** | In the CAD view: click parts, pick what they ride on, make a joint (the axis is suggested from the selected spline, gear or rail), flip it, try it. Every edit is a joint spec you can download. | ✅ `src/cadview.js` |
-| **Automatic joint finder** | Finds actuators, slide stacks and the parts each joint carries, straight from geometry, for any STEP. | 🔬 prototyped and measured: [research/autorig](research/autorig/README.md); being built into the app |
+| **Automatic joint finder** | Finds actuators, slide stacks and the parts each joint carries, straight from geometry, for any STEP. Runs by itself when a robot has no mates and no spec, and lists what a person should check. | ✅ `src/autorig.js`, from the measured prototypes in [research/autorig](research/autorig/README.md) |
 
 The goal: drop in any robot and get the right joints automatically, with the editor there to fix
 whatever the finder gets wrong. You shouldn't need a hand-written spec per robot.
@@ -114,7 +114,7 @@ exactly as it ships, so the whole simulator is tested without a browser. The mod
 | Path | What's there |
 |---|---|
 | [`src/`](src/README.md) | The app: engine modules, the 3D and CAD views, the UI. |
-| [`tests/`](tests/README.md) | 454 `node:test` tests: the robot corpus, physics, parser, Road Runner, the real robot end to end. |
+| [`tests/`](tests/README.md) | 457 `node:test` tests: the robot corpus, physics, parser, Road Runner, the real robot end to end. |
 | [`tools/`](tools/README.md) | The build, the minifier, the test runner, the robot corpus generator, the Onshape mates CLI. |
 | [`assets/robots/`](assets/robots/into-the-deep/README.md) | The default robot: GearGurus 7832's STEP (gzipped), its joint spec, and the team's OpModes. |
 | [`research/autorig/`](research/autorig/README.md) | The automatic joint finder study: three prototypes, measured against the real robot. |
@@ -128,7 +128,7 @@ exactly as it ships, so the whole simulator is tested without a browser. The mod
 ```bash
 npm install            # dev dependency only: occt-import-js, for the geometry tests
 npm run build          # dev build  -> dist/index.html (open it, or serve dist/)
-npm test               # the whole suite: 454 tests
+npm test               # the whole suite: 457 tests
 npm run build:ship     # what Cloudflare Pages builds: comments and layout stripped
 ```
 
@@ -140,9 +140,10 @@ check the live build by comparing its `SIMBENCH_BUILD` hash with a local ship bu
 - **The physics is a model, not a measurement.** Mass comes from CAD shapes and material density,
   or from a vendor figure when a part is recognised. Every number in the Math tab says where it
   came from. Check a real robot on a real field before you bet a match on it.
-- **Joints without Onshape mates are still partly manual.** The automatic finder is measured on
-  one real robot so far (see [research/autorig](research/autorig/README.md)). Until it ships, a
-  robot without mates gets the old nearest-mechanism guess, which the editor can fix.
+- **Automatic joints are a first draft.** The finder is measured on one real robot so far (see
+  [research/autorig](research/autorig/README.md)). On it, it finds every joint, and every part it
+  moves really moves, but 13 of 171 moving parts stay on the frame, mostly where the CAD itself
+  is drawn wrong. The panel lists what to check, and the joint editor fixes the rest.
 - **Road Runner is emulated, not run.** Paths, timing, markers and every action are the team's.
   The follower uses the team's gains, but its feedforward is the bench's own, taken from the CAD's
   motors and wheels, and the localizer is perfect. Tuned `kS`/`kV`/`kA` values belong to one real
