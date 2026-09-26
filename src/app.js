@@ -1320,6 +1320,7 @@ function parseAndLoad(done){
       loadCAD(cad, (LAST_STEP.label||name+" · "+mb+" MB")+" · "+cad.mechs.length+" mechanism"+(cad.mechs.length===1?"":"s"), cad.mechs.length?"ok":"bad");
       if(MATES.asm) applyMates();
       else if(JOINTS.spec) applyJoints();
+      else findJoints(cad,true);                  // no mates, no spec: find them from the geometry
       exactGeometry(cad,text);
       if(done) done(cad);
     }catch(e){ $("#cadStatus").textContent="couldn't parse this STEP file — "+e.message; $("#cadDrop").className="drop bad"; }
@@ -1487,12 +1488,13 @@ function applyJoints(){
     syncOptionControls();
     pill.textContent=R.report.joints+" joint"+(R.report.joints===1?"":"s"); pill.className="pill ok";
     st.textContent=(JOINTS.spec.robot||JOINTS.name)+" · "+R.report.matched+" of "+R.report.parts+" parts on joints"+(JOINTS.spec.edited?" · edited by you":"");
-    $("#jointActs").hidden=false; $("#jointsReset").hidden=!JOINTS.spec.edited;
+    $("#jointsReset").hidden=!(JOINTS.spec.edited||JOINTS.spec.auto&&JOINTS.step===DEFAULT_ROBOT.step);
     // the headline counted the joints the parser guessed; these replace them
     const J=R.report.joints+" joint"+(R.report.joints===1?"":"s");
     for(const el of [$("#vpTitle"),$("#cadStatus")]) el.textContent=el.textContent.replace(/\d+ mechanisms?/,J);
     drop.className="drop ok"; $("#mateClear").hidden=false;
-    note.innerHTML=R.report.why.map(w=>"<li>"+esc(w)+"</li>").join("")+
+    note.innerHTML=(JOINTS.spec.review||[]).map(w=>"<li><b>Check:</b> "+esc(w)+"</li>").join("")+
+      R.report.why.map(w=>"<li>"+esc(w)+"</li>").join("")+
       JOINTS.spec.joints.filter(j=>j.note).map(j=>"<li><b>"+esc(j.label||j.id)+"</b>: "+esc(j.note)+"</li>").join("");
   }catch(e){
     JOINTS.report=null;
@@ -1526,6 +1528,23 @@ function editJoints(change){
   store.set(jointsKey(JOINTS.step||CAD.name),JSON.stringify(spec));
   applyJoints();
   return true;
+}
+/* The automatic joint finder (src/autorig.js): a joint spec from the STEP's
+   geometry alone, with what a person should check. quiet: it ran by itself
+   on a new robot, so finding nothing leaves the old guess in place. */
+function findJoints(cad,quiet){
+  const st=$("#mateStatus"); if(!cad||CAD!==cad) return;
+  st.textContent="finding the joints from the geometry …";
+  setTimeout(()=>{
+    if(CAD!==cad) return;
+    let R=null;
+    try{ R=autoRig(cad,{front:OPTS.front}); }catch(e){ st.textContent="The joint finder stopped: "+e.message; return; }
+    if(!R||!R.spec){ st.textContent=quiet?"No joints found from the geometry, so they're guessed. Add Onshape mates or a joint spec, or make them in the CAD view."
+      :((R&&R.review[0])||"No joints found."); return; }
+    MATES.asm=MATES.features=MATES.name=MATES.report=null;
+    JOINTS.spec=R.spec; JOINTS.name="found automatically"; JOINTS.step=LAST_STEP?LAST_STEP.name:(cad.name||null);
+    applyJoints();
+  },40);
 }
 /* these parts (solid indices) ride this joint ("chassis": the frame) */
 function assignParts(solids,joint){
@@ -1608,6 +1627,7 @@ function wireMates(){
   });
   $("#mateClear").addEventListener("click",clearMates);
   $("#jointsDownload").addEventListener("click",downloadJoints);
+  $("#jointsFind").addEventListener("click",()=>{ if(CAD) findJoints(CAD,false); });
   $("#jointsReset").addEventListener("click",()=>{
     const name=JOINTS.step||(CAD&&CAD.name); store.del(jointsKey(name));
     JOINTS.spec=name===DEFAULT_ROBOT.step&&DEFAULT_ROBOT.spec?DEFAULT_ROBOT.spec:null;
