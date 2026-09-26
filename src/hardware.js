@@ -23,7 +23,8 @@ const HW_PARTS = {
 const YELLOW_JACKET = {
   1:{ratio:1,rpm:6000,nm:0.14},
   3:{ratio:3.7,rpm:1620,nm:0.46},   5:{ratio:5.2,rpm:1150,nm:0.65},
-  13:{ratio:13.7,rpm:435,nm:1.68},  19:{ratio:19.2,rpm:312,nm:2.38},
+  13:{ratio:13.7,rpm:435,nm:1.68},  14:{ratio:13.7,rpm:435,nm:1.68},   // 5203-2402-0014 is the 13.7:1
+  19:{ratio:19.2,rpm:312,nm:2.38},
   26:{ratio:26.9,rpm:223,nm:3.34},  27:{ratio:26.9,rpm:223,nm:3.34},
   50:{ratio:50.9,rpm:117,nm:6.08},  51:{ratio:50.9,rpm:117,nm:6.08},
   71:{ratio:71.2,rpm:84,nm:8.53},   100:{ratio:99.5,rpm:60,nm:11.57},
