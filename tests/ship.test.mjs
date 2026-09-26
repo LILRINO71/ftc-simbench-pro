@@ -91,6 +91,16 @@ test('ship build: the string-table pass is still the same engine', () => {
   assert.deepEqual(digest(loadWithField(hidden)), plain);
 });
 
+test('string table: a string before a ternary or case colon is hidden; an object key is not', () => {
+  const src = 'function f(x){ const o = {\n "alpha": 1, "beta" : 2 }; switch(x){ case "gamma": return x ? "delta" : o["alpha"]; } return "epsilon"; }\nreturn f;';
+  const h = minifyJS(src, { strings: true });
+  for (const hidden of ['gamma', 'delta', 'epsilon']) assert.ok(!h.includes('"' + hidden + '"'), hidden + ' is in the table');
+  assert.ok(h.includes('"alpha":') && h.includes('"beta":'), 'object keys stay');
+  const f = new Function(h)();
+  assert.equal(f('gamma'), 'delta');
+  assert.equal(f(''), 'epsilon');
+});
+
 test('minifier: CSS keeps what CSS needs', () => {
   const css = '/* c */\n.a {\n  width: calc(100% - 10px);\n  color: red;\n}\n.b::after { content: " "; }\n';
   const m = minifyCSS(css);

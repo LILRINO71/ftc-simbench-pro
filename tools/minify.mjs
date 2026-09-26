@@ -183,9 +183,11 @@ function hideStrings(src) {
     const t = toks[i];
     if (t.t !== 'str') { out += t.v; continue; }
     const nextTok = toks[i + 1];
-    const prevTok = toks[i - 1];
-    const isKey = nextTok && nextTok.t === 'punc' && nextTok.v === ':';
-    const isMember = prevTok && prevTok.t === 'punc' && (prevTok.v === '.' || prevTok.v === '?.');
+    let pi = i - 1; while (pi >= 0 && (toks[pi].t === 'ws' || toks[pi].t === 'lc' || toks[pi].t === 'bc')) pi--;
+    const prevTok = toks[pi];
+    // a key comes after { or , — a string before a ternary's or a case's colon is a value
+    const isKey = nextTok && nextTok.t === 'punc' && nextTok.v === ':' && (!prevTok || (prevTok.t === 'punc' && (prevTok.v === '{' || prevTok.v === ',')));
+    const isMember = toks[i - 1] && toks[i - 1].t === 'punc' && (toks[i - 1].v === '.' || toks[i - 1].v === '?.');
     const value = decodeStringLiteral(t.v);
     if (isKey || isMember || value === null || value.length < 3) { out += t.v; continue; }
     let id = index.get(value);
