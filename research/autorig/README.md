@@ -35,7 +35,8 @@ transmission), and meshing gears with their ratio.
 Weak spots:
 - **Which end of a servo is the output,** when nothing is mounted on it. These are flagged
   `ambiguous`.
-- **Actuator types with no real CAD tested yet:** REV Core Hex, UltraPlanetary, Axon.
+- **Actuator types with no real CAD tested yet:** UltraPlanetary, Axon. REV Core Hex is covered
+  by the mechanism zoo (below), but only when its name or part number is in the file.
 
 ### Slides: [`slides/slides.mjs`](slides/slides.mjs), `findSlides(cad)` → `toJointSpec()`
 
@@ -104,6 +105,52 @@ On Into The Deep (`tests/autorig.test.mjs`) it finds:
 On the 14 generated robots it finds nothing. It needs more real robots to test on, especially
 non-goBILDA ones.
 
+### The mechanism zoo: every kind of mechanism, not just one robot's
+
+One real robot can't show that the finder works on other designs. [`zoo/eval.mjs`](zoo/eval.mjs)
+runs it on `tools/mechgen.mjs`: the corpus's mecanum base plus one mechanism each, written as real
+B-rep STEP files with their true joints. Each one runs twice, once with its part names and once
+with every part renamed "Part N".
+
+| Mechanism | What it tests |
+|---|---|
+| `arm-5203` | a gearmotor straight onto an arm; the shaft runs into the arm's bore |
+| `arm-servo` | a servo with mounting ears, a horn, an arm |
+| `arm-corehex` | a REV Core Hex: the hex shaft runs through the gearbox, across the motor |
+| `turret` | a vertical motor under a turntable, with a mast on it |
+| `arm-geared` | a 20-tooth pinion driving a 60-tooth gear on the arm's axle |
+| `arm-belt` | a timing belt from a small pulley on the motor to a big one on the arm |
+| `viper-slide` | three side-by-side stages on a mount block |
+| `rail-carriage` | one linear rail with a carriage block straddling it (MGN12H) |
+| `intake-roller` | a motor, a coupler and a long roller shaft through two side plates |
+
+It started at 12 of 24 joints and 20 of 54 moving parts, with 29 frame parts moved. It's now at
+**23 of 24 joints, 52 of 54 moving parts, 0 frame parts moved**. What changed:
+- **An arm on the motor shaft.** The shaft drawn into the arm's bore made the arm look like a
+  motor mount. A part touching the motor only at its shaft now rides the output.
+- **An on-axis contact is a turning point unless both parts are the same output** (a hub bolted
+  face to face to its arm sits on the axis too). The window along the axis now covers the whole
+  output, so a long roller shaft is cut free of the far side plate.
+- **Servos by shape:** the mounting-ear test assumed a body narrower than a goBILDA case (40 mm
+  body, 54.5 mm across the ears).
+- **Motors by shape:** a motor with something coaxial on its shaft (a turret mast) made one stack
+  too long to be a motor; the pieces are now tried alone too.
+- **Gears without names:** any disc on an output can mesh. A 20-tooth pinion is only 20 mm across,
+  and the mesh test (same plane, centres one pitch-radius sum apart) is what decides.
+- **Through-bore motors** (REV Core Hex): the output is the shaft through the gearbox, on the side
+  something rides.
+- **Belts and chains:** a loop riding a pulley on the output and another pulley in the same plane
+  makes that pulley a follower (same direction, ratio of their sizes). The belt stays on the frame.
+- **A small pulley on the shaft** is no longer mistaken for an internal axle of the motor.
+- **An intake's compliant wheels** don't make its motor a drive motor unless they reach the floor.
+- **A single rail with a carriage block** is a slider (`findSlides` step 10).
+- **Slide hardware bolted to the fixed stage and the frame** (a Viper mount block the retracted
+  stage rests on) stays with the frame.
+
+Still missed: an unnamed Core Hex. With no name it's a box with a shaft through it, which is
+also what every bearing block on an axle looks like. `tests/autorig-zoo.test.mjs` runs the
+whole zoo and fails if that case starts working without the test being updated.
+
 ## Running it
 
 Everything runs in Node from the repo; the parser loads the real robot in about 4 s.
@@ -117,6 +164,7 @@ node --max-old-space-size=8192 slides/stress.mjs     # synthetic slide designs
 node --max-old-space-size=8192 carry/eval.mjs        # all approaches vs truth
 node --max-old-space-size=8192 carry/posetest.mjs    # the robot re-posed 13 ways
 node --max-old-space-size=8192 carry/leak.mjs        # fake joints: how much does a wrong joint swallow?
+node zoo/eval.mjs [names] [--verbose]                 # the app's finder on every kind of mechanism
 ```
 
 `lib.mjs` loads the robot (`loadITD()` → `{cad, truth, spec}`) and the corpus. `results/` holds

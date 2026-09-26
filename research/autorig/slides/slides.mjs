@@ -576,6 +576,38 @@ export function findSlides(cad, opts = {}) {
     m.fixedAttachments = [...new Set(m.stacks.flatMap((j) => stacks[j].fixedAtt))];
   });
 
+  /* 10. a single rail with a carriage block straddling it (an MGN linear rail,
+     a drawer-less rail-and-truck): no stack, one rail. The block is short, wraps
+     the rail across one direction (wider on both sides) and is cut into it from
+     one side in the other; the rail is not named as frame stock. */
+  let nc = 0;
+  const inMech = new Set(Object.keys(partMech).map(Number));
+  for (const f of rails) {
+    if (railOf.has(f.i) || inMech.has(f.i) || !O.carriageBlocks) continue;
+    const rn = String(S[f.i].name || '') + ' ' + String(S[f.i].part || '');
+    if (O.structureWords.test(rn) && !O.slideWords.test(rn)) continue;
+    const P = S[f.i].pts, ta = span(P, f.a), tb = span(P, f.b), tw = span(P, f.w);
+    const blocks = [];
+    for (const j of adj[f.i]) {
+      if (railOf.has(j) || inMech.has(j) || O.notCarriage.includes(S[j].kind) || !S[j].pts || S[j].pts.length < 4) continue;
+      const Q = S[j].pts, qa = span(Q, f.a), qb = span(Q, f.b), qw = span(Q, f.w);
+      if (len(qa) > O.carriageMaxFrac * f.L || len(qa) < 0.01 || mid(qa) < ta[0] || mid(qa) > ta[1]) continue;
+      if (Math.max(len(qb), len(qw)) > O.carriageMaxSection * Math.max(len(tb), len(tw))) continue;
+      const wraps = (u, q) => q[0] < u[0] - 0.001 && q[1] > u[1] + 0.001;
+      const cut = (u, q) => { const pen = ovl(u, q); return pen >= Math.max(O.carriagePen, O.carriagePenFrac * len(u)) && pen < len(u) - 0.0005 && (q[0] < u[0] - 0.001 || q[1] > u[1] + 0.001); };
+      if ((wraps(tb, qb) && cut(tw, qw)) || (wraps(tw, qw) && cut(tb, qb))) blocks.push(j);
+    }
+    if (!blocks.length) continue;
+    const id = 'carriage' + (++nc), Q = blocks.flatMap((j) => S[j].pts), qa = span(Q, f.a);
+    const travel = Math.max(0, f.L - len(qa));
+    const piv = add(mul(f.a, mid(ta)), add(mul(f.b, mid(tb)), mul(f.w, mid(tw))));
+    mechanisms.push({ id, stacks: [], dir: f.a.slice(), pivot: piv, jointIds: [id], travel: [travel],
+      stages: [{ rails: [f.i], hw: [], blocks: [] }, { rails: [], hw: [], blocks }], carriageAttachments: [], fixedAttachments: [] });
+    joints.push({ id, kind: 'linear', axis: f.a.slice(), pivot: piv, parent: 'chassis', limits: [0, travel], couple: null,
+      drawn: 0, stage: 1, stages: 2, copies: 1, parts: blocks.slice(), carriage: true });
+    for (const j of blocks) partMech[j] = id;
+  }
+
   return {
     stacks: stacks.map((st) => ({
       axis: st.a, dir: st.dir, stackDir: st.s, length: st.L, retractedT: st.retractedT, drawerSlide: st.hasNest,

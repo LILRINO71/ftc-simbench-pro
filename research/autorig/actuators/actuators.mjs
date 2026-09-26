@@ -148,10 +148,12 @@ function earBand(L, k, l, ext) {
     const hs = tips.map((q) => q[k]), band = Math.max(...hs) - Math.min(...hs);
     if (!best || band < best.band) best = { h: hs.reduce((a, b) => a + b, 0) / hs.length, band };
   }
-  const mid = L.filter((q) => Math.abs(q[l]) < ext[l] / 2 - 0.008).map((q) => q[k]);
+  // the body between the ears (a goBILDA case is 40 mm, 54.5 mm across its ears)
+  const mid = L.filter((q) => Math.abs(q[l]) < ext[l] / 2 - 0.004).map((q) => q[k]);
   if (mid.length < 3 || Math.max(...mid) - Math.min(...mid) < 0.8 * ext[k]) return null;
   return best.band < 0.2 * ext[k] ? best : null;
 }
+const BELTISH = /\b(belt|chain|gt2|gt3|htd|timing)\b/i;
 const servoSized = (ext) => { const e = ext.slice().sort((a, b) => a - b); return e[0] >= 0.008 && e[0] <= 0.032 && e[1] >= 0.018 && e[2] <= 0.080 && e[1] / e[0] >= 1.3; };
 // an assembly-tree node that IS an actuator model (the vendor's servo / gearmotor), not a subsystem
 function actNode(n) {
@@ -208,6 +210,13 @@ export function findActuators(cad, opts = {}) {
     return false;
   };
   const lineDist = (p, o, a) => { const v = sub(p, o); return norm(sub(v, mul(a, dot(v, a)))); };
+  // i touches body b only at the output shaft (a shaft through an arm's bore), not at the body
+  const shaftOnly = (i, b, F, a) => {
+    const gi = geo(i), gb = geo(b), pts = [];
+    if (gb.H) for (const p of gi.P) if (hullOut(gb.H, p) <= 0.0006) pts.push(p);
+    if (gi.H) for (const p of gb.P) if (hullOut(gi.H, p) <= 0.0006) pts.push(p);
+    return pts.length > 0 && pts.every((p) => dot(sub(p, F), a) > 0.0005 && lineDist(p, F, a) < 0.006);
+  };
 
   // names
   const nameOf = (i) => String(S[i].name || '');
@@ -317,9 +326,13 @@ export function findActuators(cad, opts = {}) {
       P2.set(f2(i), f2(j));
     }
     const stacks = new Map(); for (const i of round) { const r = f2(i); if (!stacks.has(r)) stacks.set(r, []); stacks.get(r).push(i); }
-    for (const st of stacks.values()) {
+    // a stack too long may be a motor with something coaxial on its shaft (a turret mast): try its pieces alone
+    const tryStacks = [...stacks.values()];
+    for (let si = 0; si < tryStacks.length; si++) {
+      const st = tryStacks[si];
       const c = cylOf(st[0]); let t0 = Infinity, t1 = -Infinity;
       for (const i of st) for (const p of geo(i).P) { const t = dot(p, c.axis); if (t < t0) t0 = t; if (t > t1) t1 = t; }
+      if (t1 - t0 > 0.2 && st.length > 1) { for (const i of st) tryStacks.push([i]); continue; }
       if (t1 - t0 < 0.07 || t1 - t0 > 0.2) continue;
       const A = motorUnit(st, true);
       if (A) { A.why.unshift('found by shape only'); A.shapeOnly = true; acts.push(A); st.forEach((i) => taken.add(i)); A.output.forEach((i) => taken.add(i)); }
@@ -347,6 +360,8 @@ export function findActuators(cad, opts = {}) {
     const main = cyls.slice().sort((a, b) => b.vol - a.vol)[0];
     // a round body of motor size: 20-60 mm across
     if (main.c.dia < 0.018 || main.c.dia > 0.07) return null;
+    const tb = throughBore(pieces, main);
+    if (tb) return tb;
     let a = main.c.axis;
     /* The axis line: every round piece (can, sleeve, gearbox, shaft) is centred
        on it, so the line through their box centres is sharper than any one
@@ -387,7 +402,8 @@ export function findActuators(cad, opts = {}) {
       if (!thinCoax(i)) continue;
       const [s0, s1] = range([i]);
       if (s1 < t0 - 0.006 || s0 > t1 + 0.006) continue;
-      if (s1 > t1 + 0.002 || s0 < t0 - 0.002) shaft.push(i); else body.add(i);   // inside: an internal axle
+      if (s1 > t1 + 0.002 || s0 < t0 - 0.002) shaft.push(i);
+      else if (cylOf(i).dia <= 0.010) body.add(i);   // inside: an internal axle (a small pulley or hub on the shaft stays out)
     }
     // which end is the output
     let end = 0, why = '';
@@ -409,17 +425,54 @@ export function findActuators(cad, opts = {}) {
     if (end < 0) { a = mul(a, -1); const tt = t0; t0 = -t1; t1 = -tt; }
     // the output face: where the fat part ends; for one solid, where the radius drops
     let tFace = t1, tTip = t1;
-    if (shaft.length) tTip = Math.max(...shaft.map((i) => range([i])[1]));        // tOf follows the flipped axis
-    else {
-      let fat = -Infinity; for (const i of body) for (const p of geo(i).P) if (lineDist(p, o, a) > 0.009) fat = Math.max(fat, dot(sub(p, o), a));
-      if (fat < t1 - 0.004) { tFace = fat; tTip = t1; }
-    }
+    // a shaft stub drawn into the body's own solid: the face is where the fat part ends, even
+    // when a separate shaft (a coupled roller axle) runs on from it
+    let fat = -Infinity; for (const i of body) for (const p of geo(i).P) if (lineDist(p, o, a) > 0.009) fat = Math.max(fat, dot(sub(p, o), a));
+    if (fat < t1 - 0.004) tFace = fat;
+    if (shaft.length) tTip = Math.max(t1, ...shaft.map((i) => range([i])[1]));        // tOf follows the flipped axis
     const pn = pieces.map((i) => S[i].part || pnOf(nameOf(i))).find((x) => x && MOTOR_PN.test(x)) ||
                pieces.map((i) => anc[i] && pnOf(anc[i].name)).find((x) => x && MOTOR_PN.test(x)) || null;
     const fam = pn ? null : (pieces.map(nameOf).find((n) => /520[234]/.test(n)) ? 'goBILDA 5203-style Yellow Jacket (ratio unknown)' : null);
     return { kind: 'motor', axis: a, face: add(o, mul(a, tFace)), tip: add(o, mul(a, tTip)), zone: Math.max(tTip - tFace, 0.004),
       dia: main.c.dia, body: [...body], output: shaft.slice(), part: pn, family: fam, ambiguous: why === 'guess',
       why: ['axis: coaxial round pieces', 'output end: ' + why] };
+  }
+
+  /* A through-bore gearmotor (REV Core Hex): no shaft comes out of an end of
+     the can; a loose hex shaft runs right through the gearbox, across the can.
+     The output is that shaft, on the side where something rides it. */
+  function throughBore(pieces, main) {
+    for (let i = 0; i < N; i++) {
+      if (pieces.includes(i) || role[i] || isFastener(i)) continue;
+      const c = cylOf(i); if (!c || c.dia > 0.016 || c.len < 3 * c.dia) continue;
+      if (Math.abs(dot(c.axis, main.c.axis)) > 0.5) continue;            // along the can: an ordinary output
+      const g = geo(i); if (norm(sub(g.c, geo(main.i).c)) > g.r + geo(main.i).r) continue;
+      // where the shaft line is inside the gearbox: the bore's two ends
+      let inBody = 0, outside = 0, b0 = Infinity, b1 = -Infinity;
+      for (let t = -c.len / 2; t <= c.len / 2; t += 0.001) {
+        const p = add(c.c, mul(c.axis, t));
+        if (pieces.some((b) => inside(b, p, 0.0002))) { inBody++; b0 = Math.min(b0, t); b1 = Math.max(b1, t); } else outside++;
+      }
+      if (inBody * 0.001 < 0.01 || !outside) continue;
+      let a = c.axis;
+      // the side something rides: parts the shaft passes through, past each face of the body
+      let plus = 0, minus = 0;
+      for (let k = 0; k < N; k++) {
+        if (k === i || pieces.includes(k) || role[k]) continue;
+        const gk = geo(k); if (lineDist(gk.c, c.c, a) > gk.r) continue;
+        for (let t = -c.len / 2; t <= c.len / 2; t += 0.002) {
+          if (t <= b1 && t >= b0) continue;
+          if (inside(k, add(c.c, mul(a, t)), 0.0003)) { if (t > b1) plus++; else minus++; break; }
+        }
+      }
+      let f = b1, tip = c.len / 2;
+      if (minus > plus) { a = mul(a, -1); f = -b0; }
+      const pn = pieces.map((k) => S[k].part || pnOf(nameOf(k))).find((x) => x && MOTOR_PN.test(x)) || null;
+      return { kind: 'motor', axis: a, face: add(c.c, mul(a, f)), tip: add(c.c, mul(a, tip)), zone: Math.max(tip - f, 0.004),
+        dia: main.c.dia, body: pieces.slice(), output: [i], part: pn, family: pn ? null : 'through-bore gearmotor', ambiguous: plus === minus,
+        why: ['axis: a shaft through the gearbox', 'output end: ' + (plus === minus ? 'guess' : 'what rides the shaft')] };
+    }
+    return null;
   }
 
   /* ---- servos ---- */
@@ -567,7 +620,7 @@ export function findActuators(cad, opts = {}) {
        body and what holds it: a channel bolted flat to the motor's mount (and
        merely centred on it) is frame. Hubs are allowed to sit flush. */
     for (const i of bigOut) {
-      const held = [...A.body, ...mounts].some((m) => touches(i, m, 0.0003));
+      const held = mounts.size && [...mounts].some((m) => touches(i, m, 0.0003)) || A.body.some((b) => touches(i, b, 0.0003) && !shaftOnly(i, b, F, a));
       if (held) mounts.add(i); else out.add(i);
     }
     // along a coaxial shaft that came out of the output: the hubs and gears on it
@@ -589,7 +642,9 @@ export function findActuators(cad, opts = {}) {
     // gears on the output, and the gear each one meshes with (a follower, not part of this output)
     const outL = [...out];
     const disc = (i) => { const c = cylOf(i); return c && c.round > 0.85 && c.dia > 0.012 && c.len < 0.6 * c.dia ? c : null; };
-    A.gears = outL.filter((i) => { const c = disc(i); return (GEARISH.test(nameOf(i)) || (c && c.dia > 0.025)) && c && Math.abs(dot(c.axis, a)) > 0.95; });
+    // any disc on the output can be a gear: an unnamed 20-tooth pinion is only 20 mm across, and
+    // the mesh test below (coplanar, centres one pitch radius sum apart) is what decides
+    A.gears = outL.filter((i) => { const c = disc(i); return c && Math.abs(dot(c.axis, a)) > 0.95; });
     A.meshes = [];
     for (const g1 of A.gears) {
       const c1 = disc(g1);
@@ -602,13 +657,37 @@ export function findActuators(cad, opts = {}) {
           withAxis: c2.axis.map((x) => +x.toFixed(4)), withCentre: c2.c.map((x) => +(x * 1000).toFixed(1)) });
       }
     }
-    const partners = new Set(A.meshes.map((m) => m.with));
+    /* belts and chains: a loop riding a pulley or sprocket on the output and one
+       other pulley in the same plane; that pulley turns the same way, at the
+       ratio of their sizes. A loop sits within its pulleys' width (a plate
+       bolted across both faces does not). */
+    A.belts = [];
+    const pulley = (i) => { const c = cylOf(i); return c && c.round > 0.85 && c.dia >= 0.008 && c.dia <= 0.2 && c.len <= 1.5 * c.dia ? c : null; };
+    const axial = (i) => { let t0 = Infinity, t1 = -Infinity; for (const p of geo(i).P) { const t = dot(p, a); if (t < t0) t0 = t; if (t > t1) t1 = t; } return [t0, t1]; };
+    for (const g1 of outL) {
+      const c1 = pulley(g1); if (!c1 || Math.abs(dot(c1.axis, a)) < 0.97) continue;
+      const [p0, p1] = axial(g1);
+      for (let k = 0; k < N; k++) {
+        if (bodySet.has(k) || out.has(k) || mounts.has(k) || role[k] || isFastener(k) || !touches(k, g1, 0.0006)) continue;
+        const [k0, k1] = axial(k); if (k0 < p0 - 0.0015 || k1 > p1 + 0.0015) continue;
+        for (let j = 0; j < N; j++) {
+          if (j === g1 || j === k || bodySet.has(j) || out.has(j) || role[j] || isFastener(j)) continue;
+          const c2 = pulley(j); if (!c2 || Math.abs(dot(c2.axis, a)) < 0.97 || !touches(j, k, 0.0006)) continue;
+          const [j0, j1] = axial(j); if (k0 < j0 - 0.0015 || k1 > j1 + 0.0015) continue;
+          const v = sub(c2.c, c1.c), cd = norm(sub(v, mul(a, dot(v, a))));
+          if (cd < (c1.dia + c2.dia) / 2 + 0.005) continue;
+          A.belts.push({ gear: g1, belt: k, with: j, ratio: +(c1.dia / c2.dia).toFixed(3), named: BELTISH.test(nameOf(k)),
+            withAxis: c2.axis.map((x) => +x.toFixed(4)), withCentre: c2.c.map((x) => +(x * 1000).toFixed(1)) });
+        }
+      }
+    }
+    const partners = new Set(A.meshes.map((m) => m.with).concat(A.belts.map((b) => b.with), A.belts.map((b) => b.belt)));
     // parts bolted to the output hub/horn/gear (and not to the body): the lever it swings
     for (const h of outL) {
       for (let i = 0; i < N; i++) {
         if (bodySet.has(i) || out.has(i) || mounts.has(i) || attached.has(i) || partners.has(i) || role[i] || isFastener(i)) continue;
         if (!touches(i, h, 0.0006)) continue;
-        if (A.body.some((b) => touches(i, b, 0.0006))) continue;
+        if (A.body.some((b) => touches(i, b, 0.0006) && !shaftOnly(i, b, F, a))) continue;
         attached.add(i);
       }
     }
@@ -645,7 +724,8 @@ export function findActuators(cad, opts = {}) {
       }
     }
     if (!A.drive) {
-      const wheelOut = A.output.find((i) => S[i].kind === 'wheel' || WHEELISH.test(nameOf(i)));
+      // a wheel that reaches the floor (an intake's compliant wheels ride above it)
+      const wheelOut = A.output.find((i) => (S[i].kind === 'wheel' || WHEELISH.test(nameOf(i))) && Math.min(...geo(i).P.map((p) => dot(p, up))) < floor + 0.006);
       if (wheelOut != null) { A.drive = true; A.role = 'drive'; A.why.push('a wheel on the output'); }
     }
     /* No wheel list and no wheel names: a horizontal output whose big coaxial
@@ -659,7 +739,8 @@ export function findActuators(cad, opts = {}) {
     }
     if (!A.role) {
       const turning = A.output.filter((i) => !(A.kind === 'motor' && (() => { const c = cylOf(i); return c && c.dia <= 0.016; })()) && role[i] !== 'spline');
-      if (!turning.length && !A.attached.length) { A.role = 'unloaded'; A.why.push('nothing modelled turns with the output'); }
+      if (A.belts && A.belts.length) { A.role = 'joint'; A.why.push('a belt or chain to ' + A.belts.length + ' driven pulley' + (A.belts.length > 1 ? 's' : '')); }
+      else if (!turning.length && !A.attached.length) { A.role = 'unloaded'; A.why.push('nothing modelled turns with the output'); }
       else if (A.output.some((i) => /\b(spool|winch|pulley|capstan|sprocket)\b/i.test(nameOf(i)))) { A.role = 'transmission'; A.why.push('a spool/pulley/sprocket on the output'); }
       else A.role = 'joint';
     }
@@ -689,7 +770,7 @@ export function findActuators(cad, opts = {}) {
     kind: A.kind, role: A.role, drive: A.drive, wheel: A.wheel,
     axis: r3(A.axis), pivot: mm3(A.face), tip: mm3(A.tip),
     output: A.output, attached: A.attached, body: A.body, mounts: A.mounts,
-    gears: A.gears, meshes: A.meshes,
+    gears: A.gears, meshes: A.meshes, belts: A.belts || [],
     part: A.part, partGuess: A.partGuess || null, family: A.family,
     spec: (A.part || A.partGuess) && typeof opts.hwFromPart === 'function' ? opts.hwFromPart(A.part || A.partGuess, '') : null,
     box: A.box, confidence: A.confidence, ambiguous: !!A.ambiguous, shapeOnly: !!A.shapeOnly, why: A.why
