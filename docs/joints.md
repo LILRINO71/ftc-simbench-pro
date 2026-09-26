@@ -137,7 +137,7 @@ gets its joints this way by itself, and **Find joints automatically** on the Mat
 runs it on demand. How it puts the pieces together:
 1. **Slides:** each moving slide stage becomes a slider. The middle stages follow the carriage.
 2. **Revolute joints:** each actuator that turns something becomes a revolute joint. A gear it
-   meshes with becomes a follower.
+   meshes with, or a pulley at the far end of a belt or chain, becomes a follower.
 3. **Rigid bodies:** the contact graph is cut wherever motion is known, at each actuator's output
    and between slide stages. What stays connected moves as one.
 4. **Owners and parents:** each joint owns the body its output is in. A joint hangs from whichever
@@ -149,6 +149,12 @@ On GearGurus 7832's robot, the finder in the app gets:
 - 158 of 171 moving parts, with no frame part moved
 
 The misses are mostly the left intake linkage, which the CAD draws folded through the chassis.
+
+One robot doesn't prove it works on other designs, so it's also tested on a **mechanism zoo**
+(`tools/mechgen.mjs`): arms on goBILDA gearmotors, servos and REV Core Hex motors, a turret,
+gear and belt drives, Viper-style slides, a linear rail with a carriage, and an intake roller.
+Each is tested with its part names and with every name stripped. It finds 23 of 24 joints and
+52 of 54 moving parts, and moves no frame part. The one miss is an unnamed Core Hex motor.
 The panel lists what to check: split bodies, motors that drive a spool, servos found by shape
 alone or with an uncertain output end. The joint editor fixes the rest.
 

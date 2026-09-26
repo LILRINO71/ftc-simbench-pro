@@ -34,11 +34,11 @@ const {autoRig}=(function(){
     let AC={actuators:[]};
     try{ AC=ARActuators.findActuators(cad,{driveFromCAD:c=>driveFromCAD(c,{front:opts.front}), hwFromPart}); }
     catch(e){ review.push("The actuator finder stopped: "+e.message); }
-    const joints=[], seeds={}, extra={};
+    const joints=[], seeds={}, extra={}, belts=new Set();
     for(const j of SL.joints||[]){
-      joints.push({id:j.id, kind:"linear", axis:j.axis, pivot:j.pivot, parent:"chassis", couple:j.couple});
+      joints.push({id:j.id, kind:"linear", axis:j.axis, pivot:j.pivot, parent:"chassis", couple:j.couple, mech:(SL.mechanisms||[]).findIndex(m=>m.jointIds.includes(j.id))});
       seeds[j.id]=j.parts.slice();
-      extra[j.id]={label:j.stage===j.stages-1?"Slide "+j.id.replace(/\D+/g,""):"Slide "+j.id.replace(/^slide(\d+).*/,"$1")+", stage "+j.stage,
+      extra[j.id]={label:j.carriage?"Carriage "+j.id.replace(/\D+/g,""):j.stage===j.stages-1?"Slide "+j.id.replace(/\D+/g,""):"Slide "+j.id.replace(/^slide(\d+).*/,"$1")+", stage "+j.stage,
         limits:j.limits?[0,+(j.limits[1]*1000).toFixed(0)]:null, fixed:(SL.mechanisms.find(m=>m.jointIds.includes(j.id))||{stages:[{rails:[]}]}).stages[0].rails};
     }
     const acts=(AC.actuators||[]);
@@ -57,6 +57,14 @@ const {autoRig}=(function(){
         joints.push({id:gid, kind:"revolute-lift", axis:ax, pivot:M.withCentre.map(v=>v/1000), parent:"chassis", couple:{to:id, ratio:M.ratio}});
         seeds[gid]=[M.with]; extra[gid]={label:extra[id].label+", geared", body:extra[id].body};
       }
+      // a pulley at the far end of a belt or chain turns the same way, at the ratio of their sizes
+      (A.belts||[]).forEach((B,k)=>{
+        const bid=id+" belt"+(A.belts.length>1?" "+(k+1):""), ax=dot(B.withAxis,A.axis)<0?B.withAxis.map(v=>-v):B.withAxis;
+        joints.push({id:bid, kind:"revolute-lift", axis:ax, pivot:B.withCentre.map(v=>v/1000), parent:"chassis", couple:{to:id, ratio:B.ratio}});
+        seeds[bid]=[B.with]; extra[bid]={label:extra[id].label+", belt", body:extra[id].body};
+        belts.add(B.belt);
+        if(!B.named) review.push("\""+extra[bid].label+"\": a belt or chain was found from its shape alone. Check its ratio ("+B.ratio+").");
+      });
     }
     const spool=acts.filter(A=>A.role==="unloaded"&&A.kind==="motor").length;
     if(spool&&(SL.joints||[]).length)
@@ -66,20 +74,43 @@ const {autoRig}=(function(){
     // actuator's output from its body, one slide stage from the next); what
     // stays connected moves as one
     const G=ARCarry.contactGraph(cad), n=S.length;
+    // a slide stage's hardware bolted to the fixed stage too (a bottom block the
+    // retracted stage rests on) stays with the frame: only the moving rail says so
+    const allRails=new Set(); for(const m of SL.mechanisms||[]) for(const g of m.stages) for(const i of g.rails) allRails.add(i);
+    const onFixed=new Map(), allStaged=new Set(), allSeeds=new Set(); for(const j of joints) for(const i of seeds[j.id]) allSeeds.add(i);
+    for(const m of SL.mechanisms||[]) for(const g of m.stages) for(const i of g.rails.concat(g.blocks||[],g.hw||[])) allStaged.add(i);
+    for(const j of joints){ if(j.kind!=="linear") continue; const fx=new Set(extra[j.id].fixed||[]); if(!fx.size) continue;
+      // held: touches the fixed rail and the frame beyond the slide (a block's rollers ride the fixed rail, but only that)
+      const onRail=new Set(), onFrame=new Set();
+      for(const e of G.edges) if(e.strong) for(const [u,v] of [[e.a,e.b],[e.b,e.a]]){ if(allRails.has(u)) continue;
+        if(fx.has(v)) onRail.add(u); else if(!allStaged.has(v)&&!allSeeds.has(v)) onFrame.add(u); }
+      const held=new Set([...onRail].filter(i=>onFrame.has(i)));
+      const keep=seeds[j.id].filter(i=>!held.has(i)); if(keep.length<seeds[j.id].length&&keep.length){ seeds[j.id].filter(i=>held.has(i)).forEach(i=>onFixed.set(i,j.mech)); seeds[j.id]=keep; } }
     const par=[...Array(n).keys()], find=i=>{ while(par[i]!==i){ par[i]=par[par[i]]; i=par[i]; } return i; };
     const cut=new Set(), key=(a,b)=>a<b?a+","+b:b+","+a;
     for(const j of joints){ const x=extra[j.id]; if(!x.body) continue;
       for(const a of seeds[j.id]) for(const b of x.body) cut.add(key(a,b)); }
+    // a belt or chain loop moves with neither pulley: it stays off every body
+    for(const e of G.edges) if(belts.has(e.a)||belts.has(e.b)) cut.add(key(e.a,e.b));
     const link=Array.from({length:n},()=>[]);
     const stageOf=new Map();
     (SL.mechanisms||[]).forEach((m,mi)=>m.stages.forEach((g,k)=>{ for(const i of g.rails.concat(g.blocks||[],g.hw||[])) stageOf.set(i,mi+":"+k); }));
-    // a contact on a joint's axis line (a shaft in a bearing, a hub on a spline) is where it turns
+    for(const [i,mi] of onFixed) stageOf.set(i,mi+":0");
+    // a contact on a joint's axis line (a shaft in a bearing, a hub on a spline)
+    // is where it turns, unless both parts are that joint's own output (a hub
+    // bolted face to face to its arm sits on the axis too, and doesn't turn)
     const onAxis=[];
-    for(const j of joints){ if(j.kind==="linear") continue; onAxis.push({p:j.pivot, a:j.axis}); }
-    const nearAxis=c=>onAxis.some(J=>{ const d=[c[0]-J.p[0],c[1]-J.p[1],c[2]-J.p[2]], t=dot(d,J.a);
-      if(Math.abs(t)>0.09) return false; const r=[d[0]-J.a[0]*t,d[1]-J.a[1]*t,d[2]-J.a[2]*t]; return Math.hypot(r[0],r[1],r[2])<0.009; });
+    // (along the axis: 90 mm either side of the pivot, or as far as the output reaches, a long roller shaft)
+    for(const j of joints){ if(j.kind==="linear") continue;
+      let t0=-0.09, t1=0.09;
+      for(const i of seeds[j.id]){ const B=G.box[i]; for(let k=0;k<8;k++){ const q=[k&1?B.mx[0]:B.mn[0],k&2?B.mx[1]:B.mn[1],k&4?B.mx[2]:B.mn[2]];
+        const t=dot([q[0]-j.pivot[0],q[1]-j.pivot[1],q[2]-j.pivot[2]],j.axis); t0=Math.min(t0,t-0.01); t1=Math.max(t1,t+0.01); } }
+      onAxis.push({p:j.pivot, a:j.axis, out:new Set(seeds[j.id]), t0, t1}); }
+    const nearAxis=(c,a,b)=>onAxis.some(J=>{ if(J.out.has(a)&&J.out.has(b)) return false;
+      const d=[c[0]-J.p[0],c[1]-J.p[1],c[2]-J.p[2]], t=dot(d,J.a);
+      if(t<J.t0||t>J.t1) return false; const r=[d[0]-J.a[0]*t,d[1]-J.a[1]*t,d[2]-J.a[2]*t]; return Math.hypot(r[0],r[1],r[2])<0.009; });
     for(const e of G.edges){
-      if(cut.has(key(e.a,e.b))||nearAxis(e.c)||(opts.strongOnly===true&&!e.strong)) continue;
+      if(cut.has(key(e.a,e.b))||nearAxis(e.c,e.a,e.b)||(opts.strongOnly===true&&!e.strong)) continue;
       const sa=stageOf.get(e.a), sb=stageOf.get(e.b);
       if(sa!=null&&sb!=null&&sa!==sb) continue;
       par[find(e.a)]=find(e.b); link[e.a].push(e.b); link[e.b].push(e.a);
@@ -87,7 +118,7 @@ const {autoRig}=(function(){
     // a part touching nothing (drawn with a gap) rides whatever it's nearest to
     const cnt=new Map(); for(let i=0;i<n;i++){ const r=find(i); cnt.set(r,(cnt.get(r)||0)+1); }
     const gap=(a,b)=>{ const A=G.box[a], B=G.box[b]; let d=0; for(let k=0;k<3;k++){ const g=Math.max(0,A.mn[k]-B.mx[k],B.mn[k]-A.mx[k]); d+=g*g; } return Math.sqrt(d); };
-    for(let i=0;i<n;i++){ if(cnt.get(find(i))!==1) continue;
+    for(let i=0;i<n;i++){ if(cnt.get(find(i))!==1||belts.has(i)) continue;
       let best=-1, bd=0.006; for(let k=0;k<n;k++){ if(k===i||cnt.get(find(k))===1||cut.has(key(i,k))) continue; const d=gap(i,k); if(d<bd){ bd=d; best=k; } }
       if(best>=0) par[find(i)]=find(best); }
     const comp=i=>find(i), compOf=idx=>majority(idx.map(comp),idx.map((_,k)=>k));
