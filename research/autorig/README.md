@@ -123,6 +123,8 @@ with every part renamed "Part N".
 | `viper-slide` | three side-by-side stages on a mount block |
 | `rail-carriage` | one linear rail with a carriage block straddling it (MGN12H) |
 | `intake-roller` | a motor, a coupler and a long roller shaft through two side plates |
+| `four-bar` | a parallel four-bar arm: the motor turns the lower link, the upper link swings on a pin in the tower, the coupler carries the payload |
+| `wrist-on-arm` | a servo wrist riding the end of a gearmotor arm (a joint on a joint: its parent has to be the arm) |
 
 It started at 12 of 24 joints and 20 of 54 moving parts, with 29 frame parts moved. It's now at
 **23 of 24 joints, 52 of 54 moving parts, 0 frame parts moved**. What changed:
@@ -146,6 +148,20 @@ It started at 12 of 24 joints and 20 of 54 moving parts, with 29 frame parts mov
 - **A single rail with a carriage block** is a slider (`findSlides` step 10).
 - **Slide hardware bolted to the fixed stage and the frame** (a Viper mount block the retracted
   stage rests on) stays with the frame.
+
+Then the four-bar and the wrist were added. The wrist worked as it was. The four-bar made the
+crank's output reach back round to its own case, which glued the whole robot to the crank. Now:
+- **A loop is a linkage.** When a driven joint's output reaches its own case, the finder looks
+  for pins in the loop: thin round parts parallel to the joint's axis. It cuts at them and looks
+  for a crank, a coupler and a rocker on three pins, the last one on the case's side.
+- **Only a four-bar gets cut.** A loop that doesn't resolve into one is left alone and listed for
+  a person to check. On Into The Deep, a servo output drawn touching the frame makes a loop
+  like that, and cutting at every "pin" in it (standoffs, screws, motor shafts) moved frame parts.
+- **The four-bar follows its crank exactly** (`follows.linkage: "four-bar"` in a joint spec):
+  the rocker's pin is where the two circles meet, on the side it was drawn. On a parallel
+  four-bar the rocker turns with the crank and the coupler stays level.
+
+That brings it to **33 of 34 joints, 76 of 78 moving parts, 0 frame parts moved**.
 
 Still missed: an unnamed Core Hex. With no name it's a box with a shaft through it, which is
 also what every bearing block on an axle looks like. `tests/autorig-zoo.test.mjs` runs the

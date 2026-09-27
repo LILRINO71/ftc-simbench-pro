@@ -132,6 +132,38 @@ export const MECHS = {
     for (const y of [-0.070, 0, 0.070]) kids.push(tag(inst(hub('Compliant Wheel 60A', 0.024, 0.020), along([0.110, y - 0.010, TOP + 0.070], Y)), 'roller'));
     return { kids, joints: [{ id: 'roller', kind: 'revolute', axis: Y, pivot: [0.110, -0.123, TOP + 0.070], actuator: 'motor' }] };
   },
+  /* a parallel four-bar: the motor turns the lower link; the upper link swings on a pin in the
+     tower; the coupler joins their ends on two more pins and carries the payload */
+  'four-bar': () => {
+    const pin = (name, c) => inst(part(name, [cyl(IDF, 0.004, 0.036)], COL.steel, 0.01), along(c, Y));
+    const kids = [post('Four-Bar Tower Plate', [0.10, 0.030, TOP + 0.130], [0.080, 0.006, 0.260]),
+      inst(motor5203('goBILDA 5203 Four-Bar Motor 5203-2402-0051'), along([0.10, 0.027, 0.200], Y)),
+      tag(inst(hub('1310 Series Hyper Hub'), along([0.10, 0.036, 0.200], Y)), 'crank'),
+      tag(inst(bar('Lower Four-Bar Link', [0.170, 0.008, 0.024]), frame([0.175, 0.052, 0.200])), 'crank'),
+      tag(inst(bar('Upper Four-Bar Link', [0.170, 0.008, 0.024]), frame([0.175, 0.052, 0.280])), 'rocker'),
+      tag(inst(bar('Four-Bar Coupler', [0.024, 0.008, 0.100]), frame([0.250, 0.060, 0.240])), 'coupler'),
+      tag(inst(bar('Four-Bar End Plate', [0.060, 0.008, 0.060], 0.04), frame([0.270, 0.068, 0.240])), 'coupler'),
+      pin('Pivot Pin Tower', [0.10, 0.030, 0.280]), pin('Pivot Pin Lower', [0.25, 0.048, 0.200]), pin('Pivot Pin Upper', [0.25, 0.048, 0.280])];
+    return { kids, ignore: ['Pivot Pin Tower', 'Pivot Pin Lower', 'Pivot Pin Upper'], joints: [
+      { id: 'crank', kind: 'revolute', axis: Y, pivot: [0.10, 0.027, 0.200], actuator: 'motor' },
+      { id: 'rocker', kind: 'revolute', axis: Y, pivot: [0.10, 0.052, 0.280], follows: 'crank', linkage: 'four-bar' },
+      { id: 'coupler', kind: 'revolute', axis: Y, pivot: [0.25, 0.052, 0.200], follows: 'crank', linkage: 'four-bar', parent: 'crank' }] };
+  },
+  /* a joint on a joint: a servo wrist on the end of a gearmotor arm, a claw plate on its horn */
+  'wrist-on-arm': () => {
+    const kids = [post('Tower Plate', [0.10, 0.030, TOP + 0.100], [0.060, 0.006, 0.200]),
+      inst(motor5203('goBILDA 5203 Arm Motor 5203-2402-0051'), along([0.10, 0.027, 0.250], Y)),
+      tag(inst(hub('1310 Series Hyper Hub'), along([0.10, 0.036, 0.250], Y)), 'arm'),
+      tag(inst(bar('Arm Channel', [0.300, 0.012, 0.024]), frame([0.240, 0.054, 0.250])), 'arm'),
+      tag(inst(bar('Arm End Plate', [0.012, 0.040, 0.050], 0.03), frame([0.396, 0.054, 0.250])), 'arm'),
+      tag(inst(servoCase('Wrist Servo 2000-0025-0002'), frame([0.4205, 0.054, 0.250], X, Y)), 'arm'),
+      tag(inst(spline('Wrist Spline'), along([0.439, 0.064, 0.250], X)), 'wrist'),
+      tag(inst(hub('Wrist Horn', 0.012, 0.003), along([0.445, 0.064, 0.250], X)), 'wrist'),
+      tag(inst(bar('Claw Plate', [0.004, 0.040, 0.060]), frame([0.450, 0.064, 0.250])), 'wrist')];
+    return { kids, joints: [
+      { id: 'arm', kind: 'revolute', axis: Y, pivot: [0.10, 0.027, 0.250], actuator: 'motor' },
+      { id: 'wrist', kind: 'revolute', axis: X, pivot: [0.439, 0.064, 0.250], actuator: 'servo', parent: 'arm' }] };
+  },
 };
 function tag(i, j) { i.j = j; return i; }
 

@@ -39,8 +39,10 @@ export function score(cad, R, truth) {
     else if (p) falseMove++;
   });
   const extra = found.filter((j) => !back[j.id]).map((j) => j.id + '(' + j.parts[0].solid.length + ')');
+  // a joint on a joint: the found parent has to be the true parent's match
+  const badParent = truth.joints.filter((t) => match[t.id] && t.parent && (found.find((j) => j.id === match[t.id]).parent || null) !== (match[t.parent] || '?')).map((t) => t.id);
   return { found: Object.keys(match).length, of: truth.joints.length, missing: truth.joints.filter((t) => !match[t.id]).map((t) => t.id),
-    moving, right, wrongJoint, missed, falseMove, extra, review: R ? R.review : [] };
+    moving, right, wrongJoint, missed, falseMove, extra, badParent, review: R ? R.review : [] };
 }
 
 if (import.meta.url === 'file:///' + process.argv[1].replace(/\\/g, '/') || process.argv[1].endsWith('eval.mjs')) {
@@ -52,7 +54,7 @@ if (import.meta.url === 'file:///' + process.argv[1].replace(/\\/g, '/') || proc
     rows.push(s);
     console.log(`${(nm + (strip ? ' (no names)' : '')).padEnd(28)} joints ${s.found}/${s.of}${s.missing.length ? ' missing ' + s.missing.join(',') : ''}` +
       ` | parts ${s.right}/${s.moving} right, ${s.wrongJoint} wrong joint, ${s.missed} missed, ${s.falseMove} frame moved` +
-      (s.extra.length ? ` | extra joints ${s.extra.join(' ')}` : ''));
+      (s.extra.length ? ` | extra joints ${s.extra.join(' ')}` : '') + (s.badParent.length ? ` | wrong parent ${s.badParent.join(',')}` : ''));
     if (verbose) { for (const r of s.review) console.log('     check: ' + r); if (R && R.spec) for (const j of R.spec.joints) console.log('     ' + j.id + ' ' + j.kind + ' axis ' + j.axis + ' pivot ' + j.pivot + ' parent ' + (j.parent || 'chassis') + ' parts ' + j.parts[0].solid.map((i) => cad.solids[i].name).join(', ')); }
   }
   const tot = (k) => rows.reduce((a, r) => a + r[k], 0);

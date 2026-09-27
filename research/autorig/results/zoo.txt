@@ -16,5 +16,9 @@ rail-carriage                joints 1/1 | parts 2/2 right, 0 wrong joint, 0 miss
 rail-carriage (no names)     joints 1/1 | parts 2/2 right, 0 wrong joint, 0 missed, 0 frame moved
 intake-roller                joints 1/1 | parts 5/5 right, 0 wrong joint, 0 missed, 0 frame moved
 intake-roller (no names)     joints 1/1 | parts 5/5 right, 0 wrong joint, 0 missed, 0 frame moved
+four-bar                     joints 3/3 | parts 5/5 right, 0 wrong joint, 0 missed, 0 frame moved
+four-bar (no names)          joints 3/3 | parts 5/5 right, 0 wrong joint, 0 missed, 0 frame moved
+wrist-on-arm                 joints 2/2 | parts 7/7 right, 0 wrong joint, 0 missed, 0 frame moved
+wrist-on-arm (no names)      joints 2/2 | parts 7/7 right, 0 wrong joint, 0 missed, 0 frame moved
 
-TOTAL joints 23/24 | moving parts right 52/54 | wrong joint 0 | missed 2 | frame moved 0
+TOTAL joints 33/34 | moving parts right 76/78 | wrong joint 0 | missed 2 | frame moved 0
