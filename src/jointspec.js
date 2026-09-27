@@ -24,7 +24,7 @@
    ============================================================ */
 const JOINT_SPEC_FORMAT="ftc-sim-bench.joints";
 
-const {applyJointSpec, jointSpecSelect, followQ, linkPin, sliderCrank, rodAngle, jointValues, mateJointQ, specFromCad, suggestJoint}=(function(){
+const {applyJointSpec, jointSpecSelect, followQ, linkPin, sliderCrank, rodAngle, fourBarPin, jointValues, mateJointQ, specFromCad, suggestJoint}=(function(){
   const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
   const sub=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]];
   const add=(a,b)=>[a[0]+b[0],a[1]+b[1],a[2]+b[2]];
@@ -59,6 +59,26 @@ const {applyJointSpec, jointSpecSelect, followQ, linkPin, sliderCrank, rodAngle,
     const u=sub(L.crankPin,L.pin), w=sub(linkPin(L,q),add(L.pin,mul(L.slideAxis,e)));
     return Math.atan2(dot(a,cross(u,w)),dot(u,w));
   }
+  /* ---- a four-bar: a crank, a coupler, a rocker on a frame pin ----
+     L also has ground (the rocker's frame pin), rocker (its length to pin)
+     and rod (the coupler, crankPin to pin). Where the coupler's far pin goes
+     with the crank at q, on the side it was drawn; null where it can't close. */
+  function fourBarPin(L,q){
+    const a=L.crankAxis, perp=v=>sub(v,mul(a,dot(a,v)));
+    const b=perp(sub(linkPin(L,q),L.ground)), d=Math.hypot(b[0],b[1],b[2]); if(d<1e-9) return null;
+    const x=(d*d+L.rocker*L.rocker-L.rod*L.rod)/(2*d), h2=L.rocker*L.rocker-x*x; if(h2<0) return null;
+    const e1=mul(b,1/d), e2=cross(a,e1);
+    const s0=dot(a,cross(perp(sub(L.crankPin,L.ground)),perp(sub(L.pin,L.ground))))<0?-1:1;
+    const up=mul(a,dot(a,sub(L.pin,L.ground)));
+    return add(L.ground,add(up,add(mul(e1,x),mul(e2,s0*Math.sqrt(h2)))));
+  }
+  // the rocker's turn about its own axis, or the coupler's turn relative to the crank it rides
+  function fourBarAngle(L,q,ax){
+    const C=fourBarPin(L,q); if(!C) return null;
+    const perp=v=>sub(v,mul(ax,dot(ax,v))), ang=(u,w)=>Math.atan2(dot(ax,cross(u,w)),dot(u,w));
+    if(L.role==="rocker") return ang(perp(sub(L.pin,L.ground)),perp(sub(C,L.ground)));
+    return ang(perp(sub(L.pin,L.crankPin)),perp(sub(C,linkPin(L,q))))-q*dot(ax,L.crankAxis);
+  }
   /* A follower's value from the joints that drive it. get(id) is a joint's
      drawn value — radians for a turn, metres for a slide — or null. */
   function followQ(m,get){
@@ -68,6 +88,7 @@ const {applyJointSpec, jointSpecSelect, followQ, linkPin, sliderCrank, rodAngle,
     if(!L) return q*(Number.isFinite(c.ratio)?c.ratio:1);
     if(c.via==="slider-crank") return sliderCrank(L,q);
     if(c.via==="rod"){ const e=get(L.slider); return rodAngle(L,q,e==null?0:e,m.axis); }
+    if(c.via==="four-bar") return fourBarAngle(L,q,m.axis);
     return null;
   }
   /* A measured joint's value (a mate, or a spec) from its device: metres
@@ -196,6 +217,11 @@ const {applyJointSpec, jointSpecSelect, followQ, linkPin, sliderCrank, rodAngle,
         if(!link.crankPin||!link.pin){ why.push("\""+j.id+"\": a linkage needs crankPin and pin."); continue; }
         link.rod=Math.hypot(...sub(link.crankPin,link.pin));
         m.couple={to:L.id, ratio:1, via:f.linkage, link};
+      }else if(f.linkage==="four-bar"){
+        const link={crankPivot:L.pivot, crankAxis:L.axis, crankPin:mm(f.crankPin), pin:mm(f.pin), ground:mm(f.ground), role:f.role==="rocker"?"rocker":"coupler"};
+        if(!link.crankPin||!link.pin||!link.ground){ why.push("\""+j.id+"\": a four-bar needs crankPin, pin and ground."); continue; }
+        link.rod=Math.hypot(...sub(link.crankPin,link.pin)); link.rocker=Math.hypot(...sub(link.ground,link.pin));
+        m.couple={to:L.id, ratio:1, via:"four-bar", link};
       }else m.couple={to:L.id, ratio:Number.isFinite(f.ratio)?f.ratio:1, via:f.via||"ratio"};
     }
     // reach: everything a joint carries, itself and downstream
@@ -237,7 +263,8 @@ const {applyJointSpec, jointSpecSelect, followQ, linkPin, sliderCrank, rodAngle,
       const dv=Object.keys(devices||{}).filter(d=>devices[d]===m.id); if(dv.length) j.device=dv.length===1?dv[0]:dv;
       if(m.couple&&!m.couple.link) j.follows={joint:m.couple.to, ratio:m.couple.ratio};
       else if(m.couple&&m.couple.link){ const L=m.couple.link; j.follows={joint:m.couple.to, linkage:m.couple.via, crankPin:r3(L.crankPin), pin:r3(L.pin)};
-        if(L.slider) j.follows.slider=L.slider; }
+        if(L.slider) j.follows.slider=L.slider;
+        if(L.ground){ j.follows.ground=r3(L.ground); j.follows.role=L.role; } }
       return j;
     });
     return {format:JOINT_SPEC_FORMAT, version:1, robot:(cad&&cad.name)||null, solids:((cad&&cad.solids)||[]).length, joints};
@@ -280,5 +307,5 @@ const {applyJointSpec, jointSpecSelect, followQ, linkPin, sliderCrank, rodAngle,
     const long=P.e[0].val>6*P.e[1].val;                // one long thing: a slide along it
     return {kind:long?"slider":"revolute", axis:tidy(long?P.e[0].vec:P.e[2].vec), pivot:P.c, from:null, how:"shape"};
   }
-  return {applyJointSpec, jointSpecSelect, followQ, linkPin, sliderCrank, rodAngle, jointValues, mateJointQ, specFromCad, suggestJoint};
+  return {applyJointSpec, jointSpecSelect, followQ, linkPin, sliderCrank, rodAngle, fourBarPin, jointValues, mateJointQ, specFromCad, suggestJoint};
 })();

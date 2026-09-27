@@ -149,6 +149,9 @@ const {sessionFromBench, packSession, unpackSession} = (function(){
       crankPin: vec3(at(v, "crankPin"), C, "link crankPin", null), pin: vec3(at(v, "pin"), C, "link pin", null),
       slideAxis: dir3(at(v, "slideAxis"), C, "link slideAxis"), rod: C.s(num(at(v, "rod"), 0, C, "link rod"))};
     const sl = str(at(v, "slider"), C, "link slider"); if(sl) L.slider = sl;
+    const g = vec3(at(v, "ground"), C, "link ground", null);
+    if(g){ L.ground = g; L.rocker = C.s(num(at(v, "rocker"), 0, C, "link rocker")); L.role = str(at(v, "role"), C, "link role") === "rocker" ? "rocker" : "coupler";
+      if(!(L.rocker > 0)) return null; }
     return L.crankPivot && L.crankPin && L.pin && L.rod > 0 ? L : null;
   }
   function readCad(v, C){
@@ -332,7 +335,8 @@ const {sessionFromBench, packSession, unpackSession} = (function(){
   const flat = pts => { const a = []; for(const p of pts) a.push(mmI(p[0]), mmI(p[1]), mmI(p[2])); return a; };
 
   const encLink = L => !L ? null : {crankPivot: vecI(L.crankPivot), crankAxis: L.crankAxis, crankPin: vecI(L.crankPin),
-    pin: vecI(L.pin), slideAxis: L.slideAxis, rod: mmI(L.rod), slider: L.slider || null};
+    pin: vecI(L.pin), slideAxis: L.slideAxis || null, rod: mmI(L.rod), slider: L.slider || null,
+    ground: L.ground ? vecI(L.ground) : null, rocker: L.rocker ? mmI(L.rocker) : null, role: L.role || null};
   const encCad = cad => !cad ? null : {
     name: cad.name, units: cad.units, pointCount: cad.pointCount,
     bbox: {min: vecI(cad.bbox.min), max: vecI(cad.bbox.max)},

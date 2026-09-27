@@ -30,7 +30,7 @@ const EXPORTS = [
   'onshapeApiLinks', 'parseOnshapeAssembly', 'applyMateLimits', 'matchOnshapeParts', 'applyOnshapeMates', 'mateQty',
   'rrDetect', 'rrParseHelpers', 'rrAttach', 'rrBuildPlan', 'rrSample', 'RRRuntime',
   'autoRig', 'ARActuators', 'ARSlides', 'ARCarry',
-  'JOINT_SPEC_FORMAT', 'applyJointSpec', 'jointSpecSelect', 'followQ', 'linkPin', 'sliderCrank', 'rodAngle', 'jointValues', 'mateJointQ', 'specFromCad', 'suggestJoint',
+  'JOINT_SPEC_FORMAT', 'applyJointSpec', 'jointSpecSelect', 'followQ', 'linkPin', 'sliderCrank', 'rodAngle', 'fourBarPin', 'jointValues', 'mateJointQ', 'specFromCad', 'suggestJoint',
   'robotFrame', 'frameUp', 'applyFrame', 'canonicalizeCAD', 'frontToRobot', 'robotToWorld', 'frontFromWheels', 'frontAcrossWheels', 'frameMatrix', 'FRAME_UP_ROWS', 'buildRig', 'ASSUMED_KG',
   'FTCSIM_MAGIC', 'packSession', 'unpackSession', 'sessionFromBench',
   'mathReport', 'mathText', 'mathMarkdown',
