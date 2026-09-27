@@ -109,10 +109,62 @@ const {autoRig}=(function(){
     const nearAxis=(c,a,b)=>onAxis.some(J=>{ if(J.out.has(a)&&J.out.has(b)) return false;
       const d=[c[0]-J.p[0],c[1]-J.p[1],c[2]-J.p[2]], t=dot(d,J.a);
       if(t<J.t0||t>J.t1) return false; const r=[d[0]-J.a[0]*t,d[1]-J.a[1]*t,d[2]-J.a[2]*t]; return Math.hypot(r[0],r[1],r[2])<0.009; });
+    const joins=e=>{ if(cut.has(key(e.a,e.b))||nearAxis(e.c,e.a,e.b)||(opts.strongOnly===true&&!e.strong)) return false;
+      const sa=stageOf.get(e.a), sb=stageOf.get(e.b); return !(sa!=null&&sb!=null&&sa!==sb); };
+    /* Passive pivots. A driven joint whose output reaches back round to its
+       own case closes a loop: a linkage, turning on pins nothing drives. A
+       pin is a thin round part parallel to the joint's axis; the parts it
+       passes through are cut apart where they meet around it. Only loops get
+       this: a single bolt elsewhere may just as well hold a bracket rigid. */
+    const loops=[];
+    {
+      const uf=()=>{ const p=[...Array(n).keys()], f=i=>{ while(p[i]!==i){ p[i]=p[p[i]]; i=p[i]; } return i; }; return {p,f}; };
+      const U0=uf(); for(const e of G.edges) if(joins(e)) U0.p[U0.f(e.a)]=U0.f(e.b);
+      const taken=new Set(); for(const j of joints){ for(const i of seeds[j.id]) taken.add(i); for(const i of extra[j.id].body||[]) taken.add(i); }
+      for(const j of joints){
+        const x=extra[j.id]; if(j.kind==="linear"||j.couple||!x.body||!x.body.length||!seeds[j.id].length) continue;
+        const loop=U0.f(seeds[j.id][0]); if(!x.body.some(b=>U0.f(b)===loop)) continue;
+        const a=j.axis, pins=[];
+        for(let i=0;i<n;i++){
+          if(U0.f(i)!==loop||taken.has(i)||allRails.has(i)) continue;
+          const P=S[i].pts; if(!P||P.length<4) continue;
+          let t0=Infinity, t1=-Infinity; const c=[0,0,0]; for(const q of P){ const t=dot(q,a); t0=Math.min(t0,t); t1=Math.max(t1,t); c[0]+=q[0]; c[1]+=q[1]; c[2]+=q[2]; }
+          for(let k=0;k<3;k++) c[k]/=P.length;
+          let r=0; for(const q of P){ const d=[q[0]-c[0],q[1]-c[1],q[2]-c[2]], t=dot(d,a); r=Math.max(r,Math.hypot(d[0]-a[0]*t,d[1]-a[1]*t,d[2]-a[2]*t)); }
+          if(r>0.009||t1-t0<2*r||t1-t0>0.15) continue;
+          // not on the joint's own axis (that is its shaft)
+          const v=[c[0]-j.pivot[0],c[1]-j.pivot[1],c[2]-j.pivot[2]], tv=dot(v,a);
+          if(Math.hypot(v[0]-a[0]*tv,v[1]-a[1]*tv,v[2]-a[2]*tv)<0.012) continue;
+          const on=new Set(); for(const e of G.edges){ if(e.a===i) on.add(e.b); else if(e.b===i) on.add(e.a); }
+          const members=[...on].filter(k=>!taken.has(k)||seeds[j.id].includes(k)||x.body.includes(k));
+          if(members.length<2) continue;
+          const near=e=>{ const d=[e.c[0]-c[0],e.c[1]-c[1],e.c[2]-c[2]], t=dot(d,a); return Math.hypot(d[0]-a[0]*t,d[1]-a[1]*t,d[2]-a[2]*t)<0.015; };
+          const cuts=new Set();
+          for(const e of G.edges){
+            if(e.a===i||e.b===i) cuts.add(key(e.a,e.b));
+            else if(members.includes(e.a)&&members.includes(e.b)&&near(e)) cuts.add(key(e.a,e.b));
+          }
+          pins.push({i, c, a, members, cuts});
+        }
+        // cut at every candidate pin: is it a crank, a coupler, a rocker and the case's side?
+        const U=uf(); for(const e of G.edges) if(joins(e)&&!pins.some(p=>p.cuts.has(key(e.a,e.b)))) U.p[U.f(e.a)]=U.f(e.b);
+        // the case's side: the body and what holds it (the case alone may sit apart, on its own axis)
+        const K=U.f(seeds[j.id][0]), Fs=new Set(x.body.map(U.f)); Fs.delete(K);
+        const P=pins.map(p=>({...p, comps:[...new Set(p.members.map(U.f))]})), has=(p,u)=>p.comps.includes(u);
+        let found=null;
+        for(const pB of P){ if(found||!has(pB,K)) continue;
+          for(const X of pB.comps){ if(found||X===K||Fs.has(X)) continue;
+            for(const pC of P){ if(found||pC===pB||!has(pC,X)) continue;
+              for(const Y of pC.comps){ if(found||Y===K||Fs.has(Y)||Y===X) continue;
+                const pD=P.find(p=>p!==pB&&p!==pC&&has(p,Y)&&p.comps.some(c=>Fs.has(c)));
+                if(pD) found={pB,pC,pD,xPart:pB.members.find(m=>U.f(m)===X),yPart:pC.members.find(m=>U.f(m)===Y)}; } } } }
+        if(!found){ review.push("\""+x.label+"\" closes a loop back to its own case (a linkage, or parts drawn touching). Check it in the CAD view."); continue; }
+        for(const p of [found.pB,found.pC,found.pD]) for(const k of p.cuts) cut.add(k);
+        loops.push({j, ...found});
+      }
+    }
     for(const e of G.edges){
-      if(cut.has(key(e.a,e.b))||nearAxis(e.c,e.a,e.b)||(opts.strongOnly===true&&!e.strong)) continue;
-      const sa=stageOf.get(e.a), sb=stageOf.get(e.b);
-      if(sa!=null&&sb!=null&&sa!==sb) continue;
+      if(!joins(e)) continue;
       par[find(e.a)]=find(e.b); link[e.a].push(e.b); link[e.b].push(e.a);
     }
     // a part touching nothing (drawn with a gap) rides whatever it's nearest to
@@ -126,6 +178,23 @@ const {autoRig}=(function(){
     const size=new Map(); for(let i=0;i<n;i++) size.set(comp(i),(size.get(comp(i))||0)+1);
     const drv=acts.filter(A=>A.drive).flatMap(A=>(A.body||[]).concat(A.mounts||[]));
     const frame=drv.length?+majority(drv.map(comp),drv.map((_,k)=>k)):[...size].sort((a,b)=>b[1]-a[1])[0][0];
+    /* A four-bar: the crank's body, a pin to the coupler, a pin to the rocker,
+       a pin to the case's side. The rocker and the coupler follow the crank. */
+    const fourBars=[];
+    for(const L of loops){
+      const j=L.j, x=extra[j.id];
+      const onPlane=p=>{ const t=dot([j.pivot[0]-p.c[0],j.pivot[1]-p.c[1],j.pivot[2]-p.c[2]],p.a); return [p.c[0]+p.a[0]*t,p.c[1]+p.a[1]*t,p.c[2]+p.a[2]*t]; };
+      const B=onPlane(L.pB), C=onPlane(L.pC), D=onPlane(L.pD);
+      const members=c=>{ const o=[]; for(let i=0;i<n;i++) if(comp(i)===c) o.push(i); return o; };
+      for(const [role,piv,part] of [["coupler",B,L.xPart],["rocker",D,L.yPart]]){
+        const id=j.id+" "+role;
+        joints.push({id, kind:"revolute-lift", axis:j.axis.slice(), pivot:piv, parent:role==="coupler"?j.id:"chassis",
+          couple:{to:j.id, linkage:"four-bar", crankPin:B, pin:C, ground:D, role}});
+        seeds[id]=members(comp(part)); extra[id]={label:x.label+", four-bar "+role, body:role==="rocker"?x.body:null, parentFixed:role==="coupler"?j.id:null};
+      }
+      fourBars.push(x.label);
+    }
+    if(fourBars.length) review.push("Four-bar linkages found from their pins: "+fourBars.map(l=>"\""+l+"\"").join(", ")+". Check they swing the right way.");
     // each joint owns the body its output is in. A body several joints claim
     // (a linkage closing a loop, an output drawn touching its own case) is
     // shared out by growing from each joint's output at once; a joint never
@@ -149,7 +218,8 @@ const {autoRig}=(function(){
     for(const j of joints) for(const i of seeds[j.id]) label[i]=j.id;     // a joint's own output is always its
     // parents: the joint most of a joint's own case (or fixed stage) rides
     for(const j of joints){
-      const x=extra[j.id], base=x.body&&x.body.length?x.body:x.fixed&&x.fixed.length?x.fixed:[];
+      const x=extra[j.id]; if(x.parentFixed){ j.parent=x.parentFixed; continue; }
+      const base=x.body&&x.body.length?x.body:x.fixed&&x.fixed.length?x.fixed:[];
       const p=base.length?majority(label,base):"chassis";
       j.parent=p&&p!==j.id&&p!=="chassis"?p:"chassis";
     }
@@ -166,7 +236,8 @@ const {autoRig}=(function(){
         if(j.parent!=="chassis") o.parent=j.parent;
         if(x.part) o.part=x.part;
         if(x.limits) o.limits=x.limits;
-        if(j.couple) o.follows={joint:j.couple.to, ratio:j.couple.ratio};
+        if(j.couple&&j.couple.linkage) o.follows={joint:j.couple.to, linkage:j.couple.linkage, crankPin:mm(j.couple.crankPin), pin:mm(j.couple.pin), ground:mm(j.couple.ground), role:j.couple.role};
+        else if(j.couple) o.follows={joint:j.couple.to, ratio:j.couple.ratio};
         return o;
       }), review};
     const moved=final.label.filter(l=>l!=null).length;

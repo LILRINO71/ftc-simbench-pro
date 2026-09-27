@@ -91,7 +91,7 @@ the code sends goes up, after any `setDirection(REVERSE)` in the code.
 | `limits` | Hard stops: mm for a slider, degrees for a revolute. |
 | `restPos` | The servo position the CAD was drawn at. A servo nothing has commanded yet stays here. |
 | `offsetDeg` | A drawn-pose fix, for a part the CAD left in an impossible spot (Into The Deep's left linkage was drawn folded through the floor). |
-| `follows` | `{joint, ratio}` for a cascade stage or a gear pair (`-1` for a meshed gear). `{joint, linkage:"slider-crank", crankPin, pin}` for a slide pushed by a crank through a rod. `{joint, linkage:"rod", slider, crankPin, pin}` for the rod itself. |
+| `follows` | `{joint, ratio}` for a cascade stage or a gear pair (`-1` for a meshed gear). `{joint, linkage:"slider-crank", crankPin, pin}` for a slide pushed by a crank through a rod. `{joint, linkage:"rod", slider, crankPin, pin}` for the rod itself. `{joint, linkage:"four-bar", crankPin, pin, ground, role}` for a four-bar: `crankPin` joins crank and coupler, `pin` joins coupler and rocker, `ground` is the rocker's frame pin, and `role` is `"rocker"` (it turns about `ground`) or `"coupler"` (it rides the crank, turning about `crankPin`). |
 | `parts` | Part picks, below. A later joint's pick wins over an earlier one's, so a child can take parts from its parent. |
 | `assign` | Hand fixes applied after all picks: these parts ride this joint, or `"chassis"`. |
 | `solids` | How many parts the STEP had when the spec was written, so a spec for another version of the file says so. |
@@ -138,6 +138,9 @@ runs it on demand. How it puts the pieces together:
 1. **Slides:** each moving slide stage becomes a slider. The middle stages follow the carriage.
 2. **Revolute joints:** each actuator that turns something becomes a revolute joint. A gear it
    meshes with, or a pulley at the far end of a belt or chain, becomes a follower.
+   An output that reaches back round to its own case is a linkage: the finder looks for the
+   pins it turns on (thin round parts parallel to the axis), and a crank, coupler and rocker on
+   three pins become a four-bar whose coupler and rocker follow the crank.
 3. **Rigid bodies:** the contact graph is cut wherever motion is known, at each actuator's output
    and between slide stages. What stays connected moves as one.
 4. **Owners and parents:** each joint owns the body its output is in. A joint hangs from whichever
@@ -152,9 +155,10 @@ The misses are mostly the left intake linkage, which the CAD draws folded throug
 
 One robot doesn't prove it works on other designs, so it's also tested on a **mechanism zoo**
 (`tools/mechgen.mjs`): arms on goBILDA gearmotors, servos and REV Core Hex motors, a turret,
-gear and belt drives, Viper-style slides, a linear rail with a carriage, and an intake roller.
-Each is tested with its part names and with every name stripped. It finds 23 of 24 joints and
-52 of 54 moving parts, and moves no frame part. The one miss is an unnamed Core Hex motor.
+gear and belt drives, Viper-style slides, a linear rail with a carriage, an intake roller, a
+four-bar arm and a servo wrist on a motor arm. Each is tested with its part names and with every
+name stripped. It finds 33 of 34 joints and 76 of 78 moving parts, and moves no frame part. The
+one miss is an unnamed Core Hex motor.
 The panel lists what to check: split bodies, motors that drive a spool, servos found by shape
 alone or with an uncertain output end. The joint editor fixes the rest.
 
