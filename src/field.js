@@ -57,11 +57,12 @@ const Field={
     return false;
   },
   tip(al){
-    const from=this.hive[al];
+    const from=this.hive[al], spilled=this.cells[al];
     this.hive[al]=-from;
     this.cells[al]=[];
     this.tips[al]++;
-    this.lastTip={al, from, to:-from, n:this.tips[al]};
+    // what was in the CELL falls out on the side it was up on (a match puts it on the tiles)
+    this.lastTip={al, from, to:-from, n:this.tips[al], spilled, id:(this.lastTip?this.lastTip.id:0)+1};
     this.version++;
   },
 

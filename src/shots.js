@@ -163,7 +163,7 @@ const Shots={
     const ball=this.cfg.ball, path=r.path||[];
     if(path.length<2) return null;
     const b={path, t:0, dur:(path.length-1)*SHOT_STEP_S, hit:!!r.hit, cause:r.cause, kind:ball,
-             color:ball==="nectar"?this.target():null, al:this.target(), v, why, odds, pos:path[0].slice()};
+             color:ball==="nectar"?this.target():null, al:this.target(), v, why, odds, pos:path[0].slice(), hive:Field.hive[this.target()]};
     this.flying.push(b); this.fired++;
     return b;
   },
@@ -197,13 +197,17 @@ const Shots={
     }
     for(const b of this.flying.filter(b=>b.done)){
       const od=b.odds!=null?` · a ${Math.round(b.odds*100)} % shot`:"";
+      // the HIVE tipped while it flew: the CELL it was aimed at is swinging down, not up
+      if(b.hit&&b.hive!=null&&Field.hive[b.al]!==b.hive){ b.hit=false; b.cause="tipped"; }
       if(b.hit){
         this.scored++;
         const tipped=Field.addToCell(b.al,b.kind,b.color);
         this.note(`IN the ${b.al.toUpperCase()} up-CELL at ${b.v.toFixed(1)} m/s${od}`+(tipped?` — TIP ${Field.tips[b.al]}`:""));
       }else{
         this.note(`Missed — ${CAUSE_TEXT[b.cause]||b.cause||"no score"} at ${b.v.toFixed(1)} m/s${od}`);
-        this.landed.push({pos:b.pos.slice(), vz:0, t:0, kind:b.kind, color:b.color});
+        // in a full match a miss stays on the tiles, where any robot can pick it up (src/match.js)
+        if(typeof Match!=="undefined"&&Match.on&&Match.bots.length){ const e=b.path[b.path.length-1]; Match.drop(b.kind,b.color,e[0]*IN,e[1]*IN); }
+        else this.landed.push({pos:b.pos.slice(), vz:0, t:0, kind:b.kind, color:b.color});
       }
     }
     this.flying=this.flying.filter(b=>!b.done);
@@ -228,7 +232,7 @@ const Shots={
     return {lo:edge(lo,-1), hi:edge(hi,1)};
   }
 };
-const CAUSE_TEXT={short:"fell short", long:"went long", lip:"hit the lip", roof:"hit the CELL roof", cell:"hit the CELL",
+const CAUSE_TEXT={tipped:"the HIVE tipped while it flew", short:"fell short", long:"went long", lip:"hit the lip", roof:"hit the CELL roof", cell:"hit the CELL",
   frame:"hit the HIVE frame", wall:"hit the wall", floor:"hit the floor"};
 
 /* The goBILDA motor in the Shot Sim's table nearest a free speed. */
