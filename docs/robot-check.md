@@ -22,6 +22,9 @@ pieces do that together:
    - the code's drive motors match the CAD's wheels
    - moving each joint a little doesn't push its parts into the frame. It only moves a joint the
      ways its limits allow, and a servo only as far as the team's code actually sends it.
+   - each driven joint has its motor or servo on its axis, and of the kind the code says
+   - the servo positions the code sends reach the joint at all, and RUN_TO_POSITION targets fit a slide's travel
+   - the CAD is drawn at robot size and weighs about what a robot weighs
 3. **Questions, in the team's own names.** Anything the check can't confirm becomes a question with
    its likely answers: *"Your code moves `outClaw`, but no joint is tied to it. Which one is it?"*,
    with each candidate joint's **show** button (it zooms to the parts and swings them) and a
@@ -43,11 +46,40 @@ A robot is **ready** when the check has nothing left to ask:
 | Joints | each joint carries parts and something drives it | to remove it, or which device drives it |
 | Drivetrain | the code's drive motors match the wheels on the floor | (a warning: check the drivetrain) |
 | Swing | moving a joint doesn't push its parts into the frame | to look: a frame part on the joint, or the wrong axis |
+| Axis | each driven turn has its motor or servo on its axis (within 4° and 8 mm) | to look: the axis or pivot is off, unless it's driven through gears or a belt |
+| Device kind | the actuator on that axis is the kind the code declares | which device really drives it |
+| Servo range | at least a fifth of what the code sends the servo to is within the joint's travel | which servo it really is, or the drawn position (a claw sent past its stop to squeeze is fine) |
+| Slide targets | RUN_TO_POSITION targets are within the slide's travel (10% + 1 cm) | to look: the spool (mm per tick) or the travel |
+| Scale and mass | 12 cm to 1.4 m across; 2 to 30 kg | the STEP's units; missing or solid-drawn parts |
 
 On GearGurus 7832's robot with its hand-written joints and the team's TeleOp, it's ready: all ten
 devices tied to joints, nothing to ask. With the finder's joints it asks nine questions: the eight
 servos plus the lift motor, whose likely answer is offered first (the slides). Put a frame rail on
 the arm and the swing check names the rail it hits. `tests/robotcheck.test.mjs` holds all of this.
+
+## Is the check enough? Break a correct robot and see
+
+`tests/robotcheck-mutations.test.mjs` starts from GearGurus 7832's robot set up right (its joints
+and the team's TeleOp), which must come back with nothing to ask. Then it breaks the robot the ways
+robots really get set up wrong, one at a time. Each mistake has to be caught by the check that
+names it:
+
+| Mistake | Caught by |
+|---|---|
+| a joint left out of the spec | devices: "your code moves outRot, but no joint is tied to it" |
+| a joint whose parts all stayed on the frame | joints: it moves no parts |
+| a frame rail put on the arm | swing: names the rail it hits |
+| the arm turning about the wrong axis (90° off) | axis: no motor on that axis |
+| the arm's pivot 8 cm from its motor | axis |
+| two servos swapped between joints | servo range: the code sends it where the joint can't go |
+| a servo joint drawn at the wrong position (restPos) | servo range |
+| a motor put on a servo's joint | device kind |
+| a follower of a joint that isn't there | joints |
+| the STEP read in the wrong units | scale |
+| the code drives more wheels than the CAD has | drivetrain |
+| the lift's spool three times too big | slide targets |
+
+A mistake the check doesn't catch yet belongs in that table first, as a failing test.
 
 ## The real-team test set
 
