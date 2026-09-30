@@ -17,5 +17,8 @@ const files = fs.readdirSync(path.join(ROOT, 'tests'))
   .map((f) => path.join('tests', f));
 
 if (!files.length) { console.error('no test files matched'); process.exit(1); }
-const r = spawnSync(process.execPath, ['--test', ...files], { cwd: ROOT, stdio: 'inherit' });
+// a test that never finishes fails by name after 3 minutes instead of stalling the run
+const args = ['--test', '--test-timeout=180000'];
+if (process.env.CI) args.push('--test-reporter=spec', '--test-concurrency=2');
+const r = spawnSync(process.execPath, [...args, ...files], { cwd: ROOT, stdio: 'inherit' });
 process.exit(r.status == null ? 1 : r.status);
