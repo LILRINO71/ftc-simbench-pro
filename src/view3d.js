@@ -972,10 +972,14 @@ const View={
       }
     }
     for(const id in this.botG) if(!seen.has(id)){ G.remove(this.botG[id]); this.dispose(this.botG[id]); delete this.botG[id]; }
-    // human players, each with the NECTAR tray still to enter
+    // human players, each with the NECTAR tray still to enter; seen through from the
+    // driver's view, where they stand between the camera and the field
+    const ghost=this.mode==="field";
     for(const al of ["red","blue"]){
       let g=this.humanG[al];
       if(!g){ g=this.humanG[al]=this.buildHuman(al); G.add(g); }
+      if(g.userData.ghost!==ghost){ g.userData.ghost=ghost;
+        g.traverse(o=>{ if(o.material&&!o.userData.ball){ o.material.transparent=ghost; o.material.opacity=ghost?0.22:1; o.material.depthWrite=!ghost; o.material.needsUpdate=true; } }); }
       const Hm=Match.humans[al], A=Hm.anim, k=A?Math.min(1,A.t/A.dur):0;
       g.userData.arm.rotation.z=A?(k<0.55?-k/0.55*2.4:-2.4+(k-0.55)/0.45*2.0):0;
       g.userData.tray.forEach((m,i)=>{ m.visible=i<Hm.tray-(A?1:0); });

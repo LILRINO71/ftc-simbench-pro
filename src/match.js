@@ -102,7 +102,7 @@ const Match={
 
   /* One 20 ms step, after the team's robot has moved. sim: the live Sim. */
   tick(dt,sim){
-    if(!this.on||!Field.ok||!this.bots.length) return;
+    if(!this.on||!Field.ok||!this.bots.length||this.t>=this.len) return;
     this.t+=dt;
     if(!this.obs) this.obs=Field.obstacles(0.46);
     this.spill();
