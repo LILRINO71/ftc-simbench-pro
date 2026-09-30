@@ -195,8 +195,10 @@ function selectOpMode(id){
   if(e.field||OPTS.obstaclesBy){ OPTS.obstacles=e.field==="other"?"walls":"all"; OPTS.obstaclesBy=e.field==="other"?e.id:null; }
   mapDevices();
   analyzeAll();
+  Field.reset(); Shots.reset();                                   // selected and INIT'd: a fresh match
   Sim.load(CODE,CAD,MAP,withPose());
   applyConfigOverrides(); Sim.init(); applyConfigOverrides();    // like a DS: selected and INIT'd, waiting for START
+  resetMatch();
   Shots.adopt(CODE); ShotUI.dirty=true; renderShotSetup();
   setActivePad(busiestPad(CODE)); Pads.defaults();
   buildGauges(); Graph.reset(); renderConfigVars(); renderLegend3D();
@@ -226,6 +228,7 @@ function dsInit(){
   Field.reset(); Shots.reset(); ShotUI.dirty=true;       // a fresh match: HIVEs as staged
   Sim.load(CODE,CAD,MAP,withPose());
   applyConfigOverrides(); Sim.init(); applyConfigOverrides();
+  resetMatch();
   buildGauges(); Graph.reset(); updateDS();
 }
 function dsStart(){
@@ -265,6 +268,36 @@ function updateClock(){
   $("#dsBar").style.width=Math.min(100,t/P*100).toFixed(1)+"%";
   c.classList.toggle("low",Sim.phase==="running"&&rem<=10);
   if(Sim.phase==="running"&&rem<=0) dsStop();          // the match period ended
+}
+
+/* ============================================================
+   THE MATCH — AI robots and HUMAN PLAYERS (src/match.js)
+   An alliance partner and two opponents the bench drives, and each
+   alliance's HUMAN PLAYER, playing the period the OpMode runs. On with the
+   "AI robots" switch; a fresh match (new seed) at every INIT.
+   ============================================================ */
+function resetMatch(){
+  const box=$("#matchOn"), want=!!(box&&box.checked&&Field.ok&&OPTS.obstacles!=="walls");
+  Match.on=want;
+  if(!want){ Match.bots=[]; Match.floor=[]; Match.flying=[]; Match.events=[]; renderMatchHud(true); return; }
+  Match.reset({period:CODE&&CODE.kind==="Autonomous"?"Autonomous":"TeleOp", user:Shots.alliance, userPose:Sim.chassis,
+    seed:1+Math.floor(Math.random()*99999), skill:$("#matchSkill").value});
+  renderMatchHud(true);
+}
+let HUD_T=0;
+function renderMatchHud(force){
+  const hud=$("#matchHud"); if(!hud) return;
+  const on=Match.on&&Match.bots.length>0;
+  hud.hidden=!on; if(!on) return;
+  const now=performance.now(); if(!force&&now-HUD_T<200) return; HUD_T=now;
+  const S=Match.score(Sim);
+  $("#mhRed").textContent=S.red.total; $("#mhBlue").textContent=S.blue.total;
+  const P=Match.period==="Autonomous"?"AUTO":"TELEOP";
+  $("#mhMid").textContent=Sim.phase==="stopped"&&Match.t>=Match.len-0.05?"FINAL":Sim.phase==="running"?P:P+" · ready";
+  const parts=r=>[r.tips?r.tips+" TIP"+(r.tips>1?"S":""):"", r.leave?"LEAVE "+r.leave:"", r.park?"PARK "+r.park:"",
+    r.flower+r.bottom?"FLOWERS "+(r.flower+r.bottom):"", r.cell?"CELL "+r.cell:"", r.garden?"GARDEN "+r.garden:""].filter(Boolean).join(" · ")||"—";
+  $("#mhParts").innerHTML=`<span class="red">${esc(parts(S.red))}</span><span class="blue">${esc(parts(S.blue))}</span>`;
+  $("#mhEvents").innerHTML=Match.events.slice(0,4).map(e=>`<li class="${e.al||""}"><span>${clockText(Match.len-e.t)}</span>${esc(e.text)}</li>`).join("");
 }
 
 /* ============================================================
@@ -1038,6 +1071,7 @@ function setAlliance(al,move){
   Shots.alliance=al==="blue"?"blue":"red"; View.alliance=Shots.alliance; store.set("ftcbench.alliance",Shots.alliance);
   if(View.mode==="field") View.setView("field");
   if(move&&CAD&&Sim.phase!=="running") placeAtStart();
+  if(Sim.phase!=="running") resetMatch();
   ShotUI.dirty=true; ShotUI.t=0; renderShotSetup();
 }
 /* Ticks per second at full speed for the flywheel as the code declares it,
@@ -1247,7 +1281,7 @@ function reloadSim(){
   if(!CODE||!CAD) return;
   const phase=Sim.phase;
   Sim.load(CODE,CAD,MAP,withPose()); applyConfigOverrides();
-  if(phase!=="stopped"){ Sim.init(); applyConfigOverrides(); }
+  if(phase!=="stopped"){ Sim.init(); applyConfigOverrides(); resetMatch(); }
   if(phase==="running") Sim.start();
   buildGauges(); renderPad(); renderLegend3D(); updateDS();
 }
@@ -2026,7 +2060,7 @@ function frame(now){
     Pads.meters();
     Graph.sample(); Graph.draw(); Graph.updateLegendValues();
     $("#dsPanel").innerHTML=renderDS();
-    updateClock(); updateConfigValues();
+    updateClock(); updateConfigValues(); renderMatchHud();
     const m=renderMech();
     if(m){ $("#mech").innerHTML=m.svg; $("#pipDeg").textContent=m.deg+"° off level"; }
     const c=Sim.chassis||{x:0,y:0,h:0};
@@ -2428,6 +2462,10 @@ function proBoot(){
   $("#btnStop").addEventListener("click",dsStop);
   $("#opSelect").addEventListener("change",e=>selectOpMode(e.target.value));
   $("#practice").checked=store.get("ftcbench.practice","0")==="1";
+  $("#matchOn").checked=store.get("ftcbench.match","1")==="1";
+  $("#matchSkill").value=store.get("ftcbench.matchSkill","typical");
+  $("#matchOn").addEventListener("change",e=>{ store.set("ftcbench.match",e.target.checked?"1":"0"); if(Sim.phase!=="running") resetMatch(); else { Match.on=e.target.checked; if(!Match.on) resetMatch(); } });
+  $("#matchSkill").addEventListener("change",e=>{ store.set("ftcbench.matchSkill",e.target.value); if(Sim.phase!=="running") resetMatch(); else Match.skill=e.target.value; });
   $("#practice").addEventListener("change",e=>{ store.set("ftcbench.practice",e.target.checked?"1":"0"); updateClock(); });
 
   // code

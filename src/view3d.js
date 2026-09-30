@@ -152,6 +152,7 @@ const View={
     if(Field.ok) this.buildField(); else this.buildPlainField();
     this.dynG=new THREE.Group(); this.world.add(this.dynG);
     this.ballPool=[]; this.arcLine=null;
+    this.matchG=null; this.matchShown=null;
 
     // everything that drives around; the CAD sits in frontG, raised onto the base
     this.chassisG=new THREE.Group(); this.world.add(this.chassisG);
@@ -687,7 +688,7 @@ const View={
       this.label(g,al.toUpperCase()+" ALLIANCE",(al==="red"?-1:1)*(H+14),0,al==="red"?-Math.PI/2:Math.PI/2,40,al==="red"?"#e0746c":"#6e9ff0");
       // the NECTAR tray each alliance starts with
       this.box(g,[(al==="red"?-1:1)*(H+30),0,1],[5,20,2],this.mat(0x2a2926),true);
-      for(let i=0;i<5;i++){ const b=this.ball("nectar",al); b.position.copy(this.fv([(al==="red"?-1:1)*(H+30),-7.2+i*3.6,3.9])); g.add(b); }
+      for(let i=0;i<5;i++){ const b=this.ball("nectar",al); b.position.copy(this.fv([(al==="red"?-1:1)*(H+30),-7.2+i*3.6,3.9])); b.userData.staged=true; g.add(b); }
     }
     this.label(g,"AUDIENCE",0,-H-12,0,34,"#8f8672");
 
@@ -728,7 +729,7 @@ const View={
       this.rect(g,gd.x0,gd.x1,gd.y0,gd.y1,m);
       // four POLLEN staged in a line in the GARDEN corner
       const cx=al==="red"?-H+1.5:H-1.5, cy=al==="red"?-H+1.5:H-1.5;
-      for(let i=0;i<4;i++){ const b=this.ball("pollen"); b.position.copy(this.fv([cx-s*i*2.9,cy,1.4])); g.add(b); }
+      for(let i=0;i<4;i++){ const b=this.ball("pollen"); b.position.copy(this.fv([cx-s*i*2.9,cy,1.4])); b.userData.staged=true; g.add(b); }
     }
 
     // FLOWERs: rings on four pipes, POLLEN stacked inside from the tile
@@ -743,7 +744,7 @@ const View={
       const n=fl.wall==="+y"?[0,1]:fl.wall==="-y"?[0,-1]:fl.wall==="+x"?[1,0]:[-1,0];
       const bs=[ax[0]+n[0]*(R+0.2),ax[1]+n[1]*(R+0.2),(fl.openingZ+fl.backstopTopZ)/2];
       this.box(g,bs,n[0]?[0.3,fl.openingDia,fl.backstopTopZ-fl.openingZ+0.3]:[fl.openingDia,0.3,fl.backstopTopZ-fl.openingZ+0.3],fm,true);
-      for(let i=0;i<4;i++){ const b=this.ball("pollen"); b.position.copy(this.fv([ax[0],ax[1],1.4+i*2.8])); g.add(b); }
+      for(let i=0;i<4;i++){ const b=this.ball("pollen"); b.position.copy(this.fv([ax[0],ax[1],1.4+i*2.8])); b.userData.staged=true; g.add(b); }
     }
 
     // HIVE frame: two leaning A-frames joined by a crossbar
@@ -928,7 +929,8 @@ const View={
       }
     }
     // balls in flight, and misses lying on the tiles
-    const want=Shots.flying.concat(Shots.landed);
+    const want=Shots.flying.concat(Shots.landed, typeof Match!=="undefined"&&Match.on?Match.flying:[]);
+    this.updateMatch();
     while(this.ballPool.length>want.length){ const m=this.ballPool.pop(); this.dynG.remove(m); }
     for(let i=0;i<want.length;i++){
       const b=want[i], key2=b.kind+"|"+(b.color||"");
@@ -936,6 +938,131 @@ const View={
       if(!m||m.userData.key!==key2){ if(m) this.dynG.remove(m); m=this.ball(b.kind,b.color); m.userData.key=key2; this.ballPool[i]=m; this.dynG.add(m); }
       m.position.copy(this.fv(b.pos));
     }
+  },
+
+  /* ---------------- the rest of the match (src/match.js) ----------------
+     The AI robots, the HUMAN PLAYERS at the alliance walls, every loose
+     element on the tiles and what's in each FLOWER. Drawn from Match's
+     state each frame; the staged elements the field was built with hide
+     while a match is on, because the match moves them. */
+  updateMatch(){
+    const live=typeof Match!=="undefined"&&Match.on&&Match.bots.length>0;
+    if(this.matchShown!==live){
+      this.matchShown=live;
+      this.fieldG.traverse(o=>{ if(o.userData&&o.userData.staged) o.visible=!live; });
+      if(this.matchG){ this.world.remove(this.matchG); this.dispose(this.matchG); this.matchG=null; }
+      if(live){ this.matchG=new THREE.Group(); this.world.add(this.matchG);
+        this.botG={}; this.humanG={}; this.floorBalls=new Map(); this.flowerKey=[]; this.flowerG=[]; }
+    }
+    if(!live) return;
+    const G=this.matchG;
+    // robots
+    const seen=new Set();
+    for(const b of Match.bots){
+      seen.add(b.id);
+      let g=this.botG[b.id];
+      if(!g){ g=this.botG[b.id]=this.buildBot(b); G.add(g); }
+      g.position.set(b.x,0,-b.y); g.rotation.y=b.h;
+      // what it's holding sits on top
+      const key=b.hold.map(e=>e.kind[0]+(e.color||"")).join(",");
+      if(g.userData.holdKey!==key){
+        g.userData.holdKey=key;
+        for(const m of g.userData.held) g.remove(m);
+        g.userData.held=b.hold.map((e,i)=>{ const m=this.ball(e.kind,e.color); m.position.set(-0.06+i*0.075-0.1,0.34,(i%2?0.05:-0.05)); g.add(m); return m; });
+      }
+    }
+    for(const id in this.botG) if(!seen.has(id)){ G.remove(this.botG[id]); this.dispose(this.botG[id]); delete this.botG[id]; }
+    // human players, each with the NECTAR tray still to enter
+    for(const al of ["red","blue"]){
+      let g=this.humanG[al];
+      if(!g){ g=this.humanG[al]=this.buildHuman(al); G.add(g); }
+      const Hm=Match.humans[al], A=Hm.anim, k=A?Math.min(1,A.t/A.dur):0;
+      g.userData.arm.rotation.z=A?(k<0.55?-k/0.55*2.4:-2.4+(k-0.55)/0.45*2.0):0;
+      g.userData.tray.forEach((m,i)=>{ m.visible=i<Hm.tray-(A?1:0); });
+      const ball=g.userData.throwBall;
+      ball.visible=!!A;
+      if(A){
+        const from=g.position.clone().add(new THREE.Vector3(0,1.55,0));
+        if(k<0.55){ ball.position.copy(from); }
+        else{ const u=(k-0.55)/0.45, to=new THREE.Vector3(A.to.x,0.05,-A.to.y);
+          ball.position.lerpVectors(from,to,u); ball.position.y+=Math.sin(Math.PI*u)*0.45; }
+      }
+    }
+    // loose elements on the tiles
+    const alive=new Set();
+    for(const e of Match.floor){
+      alive.add(e.id);
+      let m=this.floorBalls.get(e.id);
+      if(!m){ m=this.ball(e.kind,e.color); this.floorBalls.set(e.id,m); G.add(m); }
+      m.position.set(e.x,(e.kind==="nectar"?1.81:1.4)*IN,-e.y);
+    }
+    for(const [id,m] of this.floorBalls) if(!alive.has(id)){ G.remove(m); this.floorBalls.delete(id); }
+    // FLOWERs: the stack from the tile up
+    Match.flowers.forEach((f,i)=>{
+      const key=f.stack.map(e=>e.kind[0]+(e.color||"")).join(",");
+      if(this.flowerKey[i]===key) return;
+      this.flowerKey[i]=key;
+      if(this.flowerG[i]){ G.remove(this.flowerG[i]); }
+      const g=this.flowerG[i]=new THREE.Group(); G.add(g);
+      let z=0, prev=0;
+      for(const e of f.stack){ const r=e.kind==="nectar"?1.81:1.4; z+=prev+r; prev=r;
+        const m=this.ball(e.kind,e.color); m.position.set(f.x,z*IN,-f.y); g.add(m); }
+    });
+  },
+  /* A generic FTC robot: a drive base in bumpers of its alliance colour, a
+     tower with a hooded shooter at the back, an intake roller at the front. */
+  buildBot(b){
+    const g=new THREE.Group(), col=b.al==="red"?FIELD_COL.red:FIELD_COL.blue;
+    const dark=this.mat(0x2b2e33,{metalness:0.4,roughness:0.5}), alu=this.mat(0xb9c0c8,{metalness:0.6,roughness:0.35});
+    const bump=this.mat(col,{roughness:0.8}), black=this.mat(0x151515,{roughness:0.9});
+    const bx=(w,h,d,x,y,z,m)=>{ const o=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),m); o.position.set(x,y,z); o.castShadow=true; g.add(o); return o; };
+    const L=2*MATCH_BOT.hx, W=2*MATCH_BOT.hy;
+    bx(L-0.06,0.05,W-0.06,0,0.07,0,dark);                                  // chassis plate
+    bx(L,0.07,0.035,0,0.06,W/2-0.0175,bump); bx(L,0.07,0.035,0,0.06,-W/2+0.0175,bump);   // bumpers
+    bx(0.035,0.07,W-0.07,L/2-0.0175,0.06,0,bump); bx(0.035,0.07,W-0.07,-L/2+0.0175,0.06,0,bump);
+    for(const [x,z] of [[1,1],[1,-1],[-1,1],[-1,-1]]){
+      const wh=new THREE.Mesh(new THREE.CylinderGeometry(0.048,0.048,0.035,16),black);
+      wh.rotation.x=Math.PI/2; wh.position.set(x*(L/2-0.07),0.048,z*(W/2-0.06)); g.add(wh);
+    }
+    bx(0.03,0.30,0.03,-0.13,0.24,0.11,alu); bx(0.03,0.30,0.03,-0.13,0.24,-0.11,alu);       // tower
+    const hood=bx(0.16,0.012,0.2,-0.08,0.40,0,alu); hood.rotation.z=0.5;
+    const fly=new THREE.Mesh(new THREE.CylinderGeometry(0.048,0.048,0.05,18),black);
+    fly.rotation.x=Math.PI/2; fly.position.set(-0.1,0.37,0); g.add(fly);
+    const roll=new THREE.Mesh(new THREE.CylinderGeometry(0.03,0.03,W-0.08,12),this.mat(0x2f8a4a,{roughness:0.8}));
+    roll.rotation.x=Math.PI/2; roll.position.set(L/2+0.02,0.05,0); g.add(roll);
+    // "AI" on the bumpers, so nobody mistakes it for the team's robot
+    const cv=document.createElement("canvas"); cv.width=256; cv.height=64;
+    const c2=cv.getContext("2d"); c2.fillStyle="#fff"; c2.font="700 44px 'Barlow Semi Condensed', Arial, sans-serif";
+    c2.textAlign="center"; c2.textBaseline="middle"; c2.fillText("AI "+b.id.slice(2),128,34);
+    const lab=new THREE.Mesh(new THREE.PlaneGeometry(0.2,0.05),new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(cv),transparent:true}));
+    lab.position.set(0,0.06,W/2+0.001); g.add(lab);
+    const lab2=lab.clone(); lab2.position.set(0,0.06,-W/2-0.001); lab2.rotation.y=Math.PI; g.add(lab2);
+    g.userData.held=[]; g.userData.holdKey=null;
+    return g;
+  },
+  /* A HUMAN PLAYER behind the alliance wall, beside the LOADING ZONE, with the NECTAR tray. */
+  buildHuman(al){
+    const g=new THREE.Group(), s=al==="red"?-1:1, D=Field.data.field, z=D.loadingZones[al];
+    const shirt=this.mat(al==="red"?0xc6382f:0x2f6fd0,{roughness:0.85}), skin=this.mat(0xd9b08c,{roughness:0.8});
+    const pants=this.mat(0x2b2f38,{roughness:0.9}), shoe=this.mat(0x111111,{roughness:0.9});
+    const add=(geo,m,x,y,zz)=>{ const o=new THREE.Mesh(geo,m); o.position.set(x,y,zz); o.castShadow=true; g.add(o); return o; };
+    add(new THREE.CylinderGeometry(0.07,0.06,0.82,10),pants,0,0.41,0.1); add(new THREE.CylinderGeometry(0.07,0.06,0.82,10),pants,0,0.41,-0.1);
+    add(new THREE.BoxGeometry(0.16,0.06,0.12),shoe,0.03,0.03,0.1); add(new THREE.BoxGeometry(0.16,0.06,0.12),shoe,0.03,0.03,-0.1);
+    add(new THREE.BoxGeometry(0.24,0.6,0.42),shirt,0,1.12,0);
+    add(new THREE.SphereGeometry(0.11,16,12),skin,0,1.55,0);
+    add(new THREE.CylinderGeometry(0.045,0.04,0.58,8),shirt,0,1.1,-0.26).rotation.x=0.12;
+    // the throwing arm swings about the shoulder
+    const sh=new THREE.Group(); sh.position.set(0,1.38,0.26); g.add(sh);
+    const arm=new THREE.Mesh(new THREE.CylinderGeometry(0.045,0.04,0.58,8),shirt); arm.position.y=-0.29; arm.castShadow=true; sh.add(arm);
+    g.userData.arm=sh;
+    // the tray at their feet, the NECTAR still to enter
+    const tray=new THREE.Mesh(new THREE.BoxGeometry(0.5,0.05,0.13),this.mat(0x2a2926)); tray.position.set(0.25,0.4,-0.45); g.add(tray);
+    g.userData.tray=[0,1,2,3,4].map(i=>{ const b=this.ball("nectar",al); b.position.set(0.07+i*0.09,0.47,-0.45); g.add(b); return b; });
+    const tb=this.ball("nectar",al); tb.visible=false; this.matchG.add(tb); g.userData.throwBall=tb;
+    // just outside the wall, level with the middle of the LOADING ZONE, facing the field
+    g.position.set(s*(H_OF(D)+0.55),0,-((z.y0+z.y1)/2)*IN);
+    g.rotation.y=al==="red"?0:Math.PI;
+    return g;
   },
 
   setView(v){
@@ -981,6 +1108,7 @@ function deviceOn(mechId){
    in Dyn, so it divides. Unclamped, a 1200-tick RUN_TO_POSITION swung an arm
    2.2 turns through the chassis: a joint stops at the sweep a servo on it
    would get, a slide at its maxExt. */
+function H_OF(D){ return D.field.half*IN; }
 function mechPose(m,s,size){
   const k=normJointKind(m.kind), dir=m.dir||1, travel=s.act-s.restPos;
   // an Onshape mate: right-handed about the mate's own axis, inside its limits,

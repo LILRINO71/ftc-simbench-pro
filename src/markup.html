@@ -30,6 +30,10 @@
       <div class="ds-clock-bar"><i id="dsBar"></i></div>
     </div>
     <label class="practice"><input type="checkbox" id="practice"> no time limit</label>
+    <label class="practice" title="A partner and two opponents the bench drives, and both alliances' HUMAN PLAYERS, playing the period your OpMode runs"><input type="checkbox" id="matchOn"> AI robots</label>
+    <select class="match-skill" id="matchSkill" title="How good the AI teams are" aria-label="AI skill">
+      <option value="rookie">rookie</option><option value="typical" selected>typical</option><option value="elite">elite</option>
+    </select>
 
     <div class="ds-status">
       <span class="pill" id="phasePill">—</span>
@@ -299,6 +303,11 @@
         <div class="vp-fill"></div>
       </div>
       <div class="vp-hint" id="vpHint" hidden></div>
+      <div class="match-hud" id="matchHud" hidden>
+        <div class="mh-row"><span class="mh-al red"><b id="mhRed">0</b><small>RED</small></span><span class="mh-mid" id="mhMid">TELEOP</span><span class="mh-al blue"><b id="mhBlue">0</b><small>BLUE</small></span></div>
+        <div class="mh-parts" id="mhParts"></div>
+        <ol class="mh-events" id="mhEvents"></ol>
+      </div>
       <div class="vp-tip" id="vpTip" hidden>Drag to move · shift-drag to turn</div>
       <div class="cad-ui" id="cadUI" hidden>
         <aside class="cad-tree" aria-label="Instances">

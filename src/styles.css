@@ -751,3 +751,21 @@ kbd{display:inline-block; min-width:15px; padding:0 3px; border:1px solid var(--
 .onshape-note.ask{border-color:var(--warn);}
 .onshape-note.bad{border-color:var(--fail);}
 .onshape-note .btn-sm{margin-top:4px;}
+
+/* the match: AI robots and human players (src/match.js) */
+.match-skill{flex:none; font-size:11.5px; background:var(--panel-2); color:var(--tx-2); border:1px solid var(--line-2); border-radius:6px; padding:1px 4px;}
+.match-hud{position:absolute; top:44px; right:10px; z-index:4; min-width:230px; max-width:320px; pointer-events:none;
+  background:rgba(14,15,17,.78); border:1px solid rgba(255,255,255,.08); border-radius:10px; padding:7px 9px; color:#e8e6e1; font-size:11.5px;}
+.mh-row{display:flex; align-items:center; justify-content:space-between; gap:8px;}
+.mh-al{display:flex; align-items:baseline; gap:5px;}
+.mh-al b{font-family:var(--mono); font-size:24px; line-height:1;}
+.mh-al small{font-family:var(--cond); letter-spacing:.1em; font-size:10px; opacity:.8;}
+.mh-al.red b{color:#ff6b61} .mh-al.blue b{color:#69a3ff}
+.mh-mid{font-family:var(--cond); letter-spacing:.12em; font-size:10.5px; opacity:.75;}
+.mh-parts{display:flex; justify-content:space-between; gap:8px; margin-top:3px; font-size:10px; opacity:.85;}
+.mh-parts .red{color:#ffb1ab} .mh-parts .blue{color:#aecbff; text-align:right;}
+.mh-events{list-style:none; margin:5px 0 0; padding:4px 0 0; border-top:1px solid rgba(255,255,255,.08);}
+.mh-events li{font-size:10.5px; line-height:1.35; opacity:.9; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.mh-events li span{font-family:var(--mono); opacity:.6; margin-right:5px;}
+.mh-events li.red{color:#ffc4bf} .mh-events li.blue{color:#c3d8ff}
+@media (max-width:760px){ .match-skill{display:none;} .match-hud{top:40px; right:6px; min-width:180px;} }
