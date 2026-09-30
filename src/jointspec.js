@@ -237,7 +237,7 @@ const {applyJointSpec, jointSpecSelect, followQ, linkPin, sliderCrank, rodAngle,
     why.unshift(mechs.length+" joints from "+(spec.robot||"the joint spec")+"; "+used+" of "+solids.length+" parts ride on them, the rest are the frame.");
     const drives=(cad.mechs||[]).filter(m=>m.drive);
     cad.mechs=mechs.concat(drives);
-    cad.mates={source:"spec", name:spec.robot||null, joints:mechs.length, matched:used, parts:solids.length, loops:0, why};
+    cad.mates={source:"spec", auto:!!spec.auto, name:spec.robot||null, joints:mechs.length, matched:used, parts:solids.length, loops:0, why};
     return {report:cad.mates, devices, front:typeof spec.front==="string"?spec.front:null};
   }
   /* ---- the joint editor's helpers ----
