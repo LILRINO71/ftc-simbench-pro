@@ -41,6 +41,12 @@
       </div>
     </div>
 
+    <div class="online-wrap">
+      <button class="hdr-btn" id="onlineBtn" type="button" aria-expanded="false" aria-controls="onlinePanel" title="One match with other teams, each on their own computer">
+        <i aria-hidden="true"></i><span>Online</span><b class="on-badge" id="onlineBadge" hidden></b>
+      </button>
+    </div>
+
     <div class="ds-status">
       <span class="pill" id="phasePill">—</span>
 
@@ -309,6 +315,56 @@
         <div class="vp-fill"></div>
       </div>
       <div class="vp-hint" id="vpHint" hidden></div>
+      <aside class="online-panel" id="onlinePanel" hidden aria-label="Online match">
+        <div class="onp-head"><b id="onpTitle">Play online</b><span class="onp-sub" id="onpSub"></span><span class="spacer"></span>
+          <button class="btn-sm" id="onpClose" type="button" title="Hide this panel; the match goes on">Hide</button></div>
+        <p class="onp-msg" id="onpMsg" hidden></p>
+
+        <section id="onpStart">
+          <p class="onp-lede">One match with other teams, each driving their own robot and code on their own computer. Empty places get AI robots.</p>
+          <label class="onp-field"><span>Your team</span><input id="onpName" maxlength="24" placeholder="Team number or name" autocomplete="off" spellcheck="false"></label>
+          <div class="onp-actions">
+            <button class="btn-sm primary" id="onpQuick" type="button">Quick match</button>
+            <button class="btn-sm" id="onpHost" type="button">Host a match</button>
+          </div>
+          <form class="onp-join" id="onpJoinForm"><input id="onpCode" maxlength="5" placeholder="Code" aria-label="Match code" autocomplete="off" spellcheck="false"><button class="btn-sm" type="submit">Join</button></form>
+          <h4>Open matches</h4>
+          <ul class="onp-list" id="onpList"></ul>
+          <p class="onp-fine">Browsers connect straight to each other (WebRTC), found through public relays; the match itself never goes through a server. Like any peer-to-peer game, the other players' browsers can see your IP address. Some school networks block these connections.</p>
+        </section>
+
+        <section id="onpRoom" hidden>
+          <div class="onp-code"><span>Match</span><b id="onpCodeShow">—</b><button class="btn-sm" id="onpCopy" type="button">Copy invite link</button></div>
+          <div class="onp-slots" id="onpSlots"></div>
+          <p class="onp-watch" id="onpWatch"></p>
+          <div class="onp-ready" id="onpReady"></div>
+          <div class="onp-hostctl" id="onpHostCtl" hidden>
+            <div class="onp-row"><span>Period</span><div class="seg" id="onpPeriod"><button type="button" data-p="TeleOp">TeleOp 2:00</button><button type="button" data-p="Autonomous">Auto 0:30</button></div></div>
+            <div class="onp-row"><span>AI robots</span><select class="match-skill" id="onpSkill" aria-label="AI skill"><option value="rookie">Rookie</option><option value="typical">Typical</option><option value="elite">Elite</option></select></div>
+            <label class="onp-row"><span>Listed under Open matches</span><input type="checkbox" id="onpPub"></label>
+            <button class="btn-sm primary onp-go" id="onpGo" type="button">Start the match</button>
+            <p class="onp-wait" id="onpWait"></p>
+          </div>
+        </section>
+
+        <section id="onpPlay" hidden>
+          <div class="onp-live" id="onpLive"></div>
+          <canvas class="onp-map" id="onpMap" aria-label="The field from above. Click to mark a spot for your alliance."></canvas>
+          <div class="seg onp-markseg" id="onpMarkSeg" title="Click the field to show your alliance"><button type="button" data-m="go" class="on">Go here</button><button type="button" data-m="shoot">Shoot from here</button><button type="button" data-m="defend">Defend here</button></div>
+        </section>
+
+        <section id="onpEnd" hidden>
+          <div id="onpFinal"></div>
+          <button class="btn-sm primary" id="onpAgain" type="button" hidden>Play again</button>
+        </section>
+
+        <section class="onp-talk" id="onpTalk" hidden>
+          <ol class="onp-chat" id="onpChat"></ol>
+          <form class="onp-say" id="onpSay"><select id="onpTo" aria-label="Send to"><option value="team">Alliance</option><option value="all">Everyone</option></select><input id="onpText" maxlength="200" placeholder="Message" aria-label="Message" autocomplete="off"><button class="btn-sm" type="submit">Send</button></form>
+        </section>
+
+        <div class="onp-foot" id="onpFoot" hidden><button class="btn-sm" id="onpLeave" type="button">Leave the match</button><span class="onp-ping" id="onpPing"></span></div>
+      </aside>
       <div class="match-hud" id="matchHud" hidden>
         <div class="mh-row"><span class="mh-al red"><b id="mhRed">0</b><small>RED</small></span><span class="mh-mid" id="mhMid">TELEOP</span><span class="mh-al blue"><b id="mhBlue">0</b><small>BLUE</small></span></div>
         <div class="mh-parts" id="mhParts"></div>

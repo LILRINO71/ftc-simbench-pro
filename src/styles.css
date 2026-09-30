@@ -865,3 +865,88 @@ table.grid th{font-size:11px; font-weight:500;}
 .cell-tele .cell-head h3{color:var(--tx);}
 #phasePill.accentp{color:var(--tx-3);}
 #phasePill.live{color:var(--pass);}
+
+/* online: one match, players on different computers (src/net.js) */
+.online-wrap{position:relative; flex:none;}
+.online-wrap .hdr-btn{border-color:var(--line); background:var(--panel);}
+.online-wrap .hdr-btn i{width:6px; height:6px; border-radius:50%; background:var(--line); flex:none;}
+.online-wrap .hdr-btn.on i{background:var(--pass); box-shadow:0 0 0 3px color-mix(in srgb, var(--pass) 22%, transparent);}
+.on-badge{font-family:var(--mono); font-size:10.5px; font-weight:600; letter-spacing:.06em; color:var(--tx-3);}
+.online-panel{position:absolute; top:44px; left:10px; z-index:6; width:340px; max-width:calc(100% - 20px); max-height:calc(100% - 54px); overflow:auto;
+  background:var(--panel); color:var(--tx); border:1px solid var(--line); border-radius:12px; box-shadow:var(--shadow); padding:12px 13px 10px; font-size:12.5px;}
+.onp-head{display:flex; align-items:baseline; gap:8px; margin-bottom:8px;}
+.onp-head b{font-size:14px; font-weight:600;}
+.onp-sub{color:var(--tx-3); font-size:11.5px;}
+.onp-head .spacer{flex:1;}
+.onp-msg{margin:0 0 9px; padding:7px 9px; border-radius:7px; background:var(--panel-2); color:var(--tx-2);}
+.onp-msg.warn{background:var(--warn-soft); color:var(--warn);}
+.onp-msg.fail{background:var(--fail-soft); color:var(--fail);}
+.onp-lede{margin:0 0 10px; color:var(--tx-2);}
+.onp-field{display:flex; flex-direction:column; gap:3px; margin-bottom:9px;}
+.onp-field span{color:var(--tx-3); font-size:11.5px;}
+.online-panel input[type=text],.online-panel input:not([type]),.online-panel select{font:inherit; color:var(--tx); background:var(--panel-2); border:1px solid var(--line); border-radius:6px; padding:5px 8px;}
+.online-panel input:focus,.online-panel select:focus{outline:2px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset:0; border-color:transparent;}
+.onp-actions{display:flex; gap:6px; margin-bottom:8px;}
+.onp-actions .btn-sm{flex:1; padding:6px 9px;}
+.onp-join{display:flex; gap:6px;}
+.onp-join input{flex:1; font-family:var(--mono)!important; letter-spacing:.2em; text-transform:uppercase;}
+.online-panel h4{margin:13px 0 5px; font-size:11.5px; font-weight:600; color:var(--tx-3);}
+.onp-list{list-style:none; margin:0; padding:0; border:1px solid var(--line-2); border-radius:8px;}
+.onp-list li{display:flex; align-items:center; gap:8px; padding:7px 9px; border-top:1px solid var(--line-2);}
+.onp-list li:first-child{border-top:0;}
+.onp-list li div{flex:1; min-width:0;}
+.onp-list li b{display:block; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.onp-list li small{color:var(--tx-3);}
+.onp-list .onp-empty{color:var(--tx-3); justify-content:center;}
+.onp-fine{margin:10px 0 0; color:var(--tx-3); font-size:11px; line-height:1.45;}
+.onp-code{display:flex; align-items:baseline; gap:8px; margin-bottom:10px;}
+.onp-code span{color:var(--tx-3);}
+.onp-code b{font-family:var(--mono); font-size:19px; letter-spacing:.18em; flex:1;}
+.onp-slots{display:grid; grid-template-columns:1fr 1fr; gap:6px;}
+.onp-slot{border:1px solid var(--line-2); border-left:3px solid; border-radius:7px; padding:6px 8px; min-height:52px; display:flex; flex-direction:column; gap:2px;}
+.onp-slot.red{border-left-color:#d8544a;} .onp-slot.blue{border-left-color:#3f7fe0;}
+.onp-slot small{color:var(--tx-3); font-size:10.5px; letter-spacing:.06em;}
+.onp-slot b{font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.onp-slot .ai{color:var(--tx-3); font-weight:500;}
+.onp-slot .st{font-size:11px; color:var(--tx-3);}
+.onp-slot .st.ok{color:var(--pass);}
+.onp-slot.me{background:var(--panel-2);}
+.onp-slot .btn-sm{align-self:flex-start; margin-top:2px; padding:1px 7px; font-size:11px;}
+.onp-watch{margin:7px 0 0; color:var(--tx-3); font-size:11.5px;}
+.onp-watch:empty{display:none;}
+.onp-ready{margin-top:10px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; color:var(--tx-2);}
+.onp-ready .bad{color:var(--warn);}
+.onp-hostctl{margin-top:11px; padding-top:9px; border-top:1px solid var(--line-2);}
+.onp-row{display:flex; align-items:center; justify-content:space-between; gap:8px; padding:4px 0; color:var(--tx-2);}
+.onp-row input{accent-color:var(--accent);}
+.onp-go{width:100%; margin-top:8px; padding:7px;}
+.onp-wait{margin:6px 0 0; color:var(--tx-3); font-size:11.5px;}
+.onp-wait:empty{display:none;}
+.onp-live{display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 10px; margin-bottom:8px; color:var(--tx-2);}
+.onp-live b{font-weight:600; color:var(--tx);}
+.onp-live .red{color:#d8544a;} .onp-live .blue{color:#3f7fe0;}
+.onp-map{display:block; width:100%; aspect-ratio:1; border-radius:8px; cursor:crosshair; background:#15161a;}
+.onp-markseg{margin-top:6px; display:flex;}
+.onp-markseg button{flex:1; font-size:11.5px;}
+.onp-final{display:flex; align-items:center; justify-content:center; gap:16px; padding:6px 0 4px;}
+.onp-final b{font-family:var(--mono); font-size:30px; line-height:1;}
+.onp-final .red b{color:#d8544a;} .onp-final .blue b{color:#3f7fe0;}
+.onp-final small{display:block; text-align:center; color:var(--tx-3); font-size:10.5px; letter-spacing:.08em;}
+.onp-verdict{text-align:center; margin:2px 0 8px; font-weight:600;}
+.onp-stats{width:100%; border-collapse:collapse; font-size:12px; margin-bottom:8px;}
+.onp-stats td,.onp-stats th{padding:4px 6px; border-top:1px solid var(--line-2); text-align:left;}
+.onp-stats th{color:var(--tx-3); font-weight:500; border-top:0;}
+.onp-stats td.n{text-align:right; font-family:var(--mono);}
+.onp-stats tr.red td:first-child{box-shadow:inset 3px 0 #d8544a;} .onp-stats tr.blue td:first-child{box-shadow:inset 3px 0 #3f7fe0;}
+.onp-talk{margin-top:11px; padding-top:9px; border-top:1px solid var(--line-2);}
+.onp-chat{list-style:none; margin:0 0 6px; padding:0; max-height:150px; overflow:auto; display:flex; flex-direction:column; gap:3px;}
+.onp-chat:empty::before{content:"Messages go here. Alliance messages only reach your partner."; color:var(--tx-3); font-size:11.5px;}
+.onp-chat li{line-height:1.4; word-wrap:break-word;}
+.onp-chat li b{font-weight:600; margin-right:5px;}
+.onp-chat li.red b{color:#d8544a;} .onp-chat li.blue b{color:#3f7fe0;}
+.onp-chat li i{font-style:normal; font-size:10px; color:var(--tx-3); border:1px solid var(--line); border-radius:4px; padding:0 3px; margin-right:4px;}
+.onp-say{display:flex; gap:5px;}
+.onp-say input{flex:1; min-width:0;}
+.onp-foot{display:flex; align-items:center; justify-content:space-between; margin-top:10px;}
+.onp-ping{color:var(--tx-3); font-family:var(--mono); font-size:11px;}
+@media (max-width:760px){ .online-panel{width:calc(100% - 12px); left:6px; top:40px;} }

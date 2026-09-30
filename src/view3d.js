@@ -946,13 +946,13 @@ const View={
      state each frame; the staged elements the field was built with hide
      while a match is on, because the match moves them. */
   updateMatch(){
-    const live=typeof Match!=="undefined"&&Match.on&&Match.bots.length>0;
+    const live=typeof Match!=="undefined"&&Match.live();
     if(this.matchShown!==live){
       this.matchShown=live;
       this.fieldG.traverse(o=>{ if(o.userData&&o.userData.staged) o.visible=!live; });
       if(this.matchG){ this.world.remove(this.matchG); this.dispose(this.matchG); this.matchG=null; }
       if(live){ this.matchG=new THREE.Group(); this.world.add(this.matchG);
-        this.botG={}; this.humanG={}; this.floorBalls=new Map(); this.flowerKey=[]; this.flowerG=[]; }
+        this.botG={}; this.humanG={}; this.floorBalls=new Map(); this.flowerKey=[]; this.flowerG=[]; this.markG=[]; }
     }
     if(!live) return;
     const G=this.matchG;
@@ -970,6 +970,14 @@ const View={
         for(const m of g.userData.held) g.remove(m);
         g.userData.held=b.hold.map((e,i)=>{ const m=this.ball(e.kind,e.color); m.position.set(-0.06+i*0.075-0.1,0.34,(i%2?0.05:-0.05)); g.add(m); return m; });
       }
+    }
+    // online: the other drivers' robots, their size, their team on the bumpers
+    for(const p of Match.players){
+      const id="pl:"+p.id, key=[p.al,p.hx.toFixed(3),p.hy.toFixed(3),p.name].join("|"); seen.add(id);
+      let g=this.botG[id];
+      if(g&&g.userData.key!==key){ G.remove(g); this.dispose(g); g=null; }
+      if(!g){ g=this.botG[id]=this.buildBot({id, al:p.al, hx:p.hx, hy:p.hy, label:p.name}); g.userData.key=key; G.add(g); }
+      g.position.set(p.x,0,-p.y); g.rotation.y=p.h;
     }
     for(const id in this.botG) if(!seen.has(id)){ G.remove(this.botG[id]); this.dispose(this.botG[id]); delete this.botG[id]; }
     // human players, each with the NECTAR tray still to enter; seen through from the
@@ -1001,6 +1009,17 @@ const View={
       m.position.set(e.x,(e.kind==="nectar"?1.81:1.4)*IN,-e.y);
     }
     for(const [id,m] of this.floorBalls) if(!alive.has(id)){ G.remove(m); this.floorBalls.delete(id); }
+    // the alliance's marks on the field (src/net.js): a ring that pulses where a partner pointed
+    const marks=typeof Online!=="undefined"&&Online.state==="playing"?Online.liveMarks():[];
+    if(!this.markG){ this.markG=[]; }
+    while(this.markG.length<marks.length){
+      const m=new THREE.Mesh(new THREE.RingGeometry(0.16,0.2,40),new THREE.MeshBasicMaterial({color:0xffffff, transparent:true, opacity:0.9, side:THREE.DoubleSide, depthWrite:false}));
+      m.rotation.x=-Math.PI/2; G.add(m); this.markG.push(m);
+    }
+    const tt=performance.now()/1000;
+    this.markG.forEach((m,i)=>{ const k=marks[i]; m.visible=!!k; if(!k) return;
+      m.material.color.setHex(k.what==="shoot"?0xf0b54a:k.what==="defend"?0x6fd3e0:0xffffff);
+      m.position.set(k.x,0.012,-k.y); const s=1+0.18*Math.sin(tt*5); m.scale.set(s,s,s); });
     // FLOWERs: the stack from the tile up
     Match.flowers.forEach((f,i)=>{
       const key=f.stack.map(e=>e.kind[0]+(e.color||"")).join(",");
@@ -1020,7 +1039,7 @@ const View={
     const dark=this.mat(0x2b2e33,{metalness:0.4,roughness:0.5}), alu=this.mat(0xb9c0c8,{metalness:0.6,roughness:0.35});
     const bump=this.mat(col,{roughness:0.8}), black=this.mat(0x151515,{roughness:0.9});
     const bx=(w,h,d,x,y,z,m)=>{ const o=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),m); o.position.set(x,y,z); o.castShadow=true; g.add(o); return o; };
-    const L=2*MATCH_BOT.hx, W=2*MATCH_BOT.hy;
+    const L=2*(b.hx||MATCH_BOT.hx), W=2*(b.hy||MATCH_BOT.hy);
     bx(L-0.06,0.05,W-0.06,0,0.07,0,dark);                                  // chassis plate
     bx(L,0.07,0.035,0,0.06,W/2-0.0175,bump); bx(L,0.07,0.035,0,0.06,-W/2+0.0175,bump);   // bumpers
     bx(0.035,0.07,W-0.07,L/2-0.0175,0.06,0,bump); bx(0.035,0.07,W-0.07,-L/2+0.0175,0.06,0,bump);
@@ -1036,8 +1055,10 @@ const View={
     roll.rotation.x=Math.PI/2; roll.position.set(L/2+0.02,0.05,0); g.add(roll);
     // "AI" on the bumpers, so nobody mistakes it for the team's robot
     const cv=document.createElement("canvas"); cv.width=256; cv.height=64;
-    const c2=cv.getContext("2d"); c2.fillStyle="#fff"; c2.font="700 44px 'Barlow Semi Condensed', Arial, sans-serif";
-    c2.textAlign="center"; c2.textBaseline="middle"; c2.fillText("AI "+b.id.slice(2),128,34);
+    const c2=cv.getContext("2d"), text=b.label||"AI "+b.id.slice(2);
+    let px=44; c2.font="700 "+px+"px 'Barlow Semi Condensed', Arial, sans-serif";
+    while(px>18&&c2.measureText(text).width>240){ px-=2; c2.font="700 "+px+"px 'Barlow Semi Condensed', Arial, sans-serif"; }
+    c2.fillStyle="#fff"; c2.textAlign="center"; c2.textBaseline="middle"; c2.fillText(text,128,34);
     const lab=new THREE.Mesh(new THREE.PlaneGeometry(0.2,0.05),new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(cv),transparent:true}));
     lab.position.set(0,0.06,W/2+0.001); g.add(lab);
     const lab2=lab.clone(); lab2.position.set(0,0.06,-W/2-0.001); lab2.rotation.y=Math.PI; g.add(lab2);

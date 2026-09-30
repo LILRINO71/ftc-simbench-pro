@@ -212,6 +212,7 @@ function selectOpMode(id){
   setActivePad(busiestPad(CODE)); Pads.defaults();
   buildGauges(); Graph.reset(); renderConfigVars(); renderLegend3D();
   renderOpList(); renderOpSelect(); renderCompareSelects(); updateDS();
+  NetUI.opChanged();
 }
 function addOpModeFromText(file,text){
   if(!isOpModeSource(text)&&/\bclass\s+\w+/.test(text)){
@@ -232,7 +233,9 @@ function addOpModeFromText(file,text){
 const PERIOD={TeleOp:120, Autonomous:30};
 function withPose(){ OPTS.startPose=Object.assign({x:0,y:0,h:0},Sim.chassis||{}); return OPTS; }
 function applyConfigOverrides(){ for(const k in CONFIG_OVR) Sim.vars[k]=CONFIG_OVR[k]; }
-function dsInit(){
+/* The INIT button. Online, the match INITs and STARTs everyone together (NetUI). */
+function dsInit(){ if(Online.inMatch()) return; initNow(); }
+function initNow(){
   if(!CODE||Sim.phase==="running") return;
   Field.reset(); Shots.reset(); ShotUI.dirty=true;       // a fresh match: HIVEs as staged
   Sim.load(CODE,CAD,MAP,withPose());
@@ -241,7 +244,7 @@ function dsInit(){
   buildGauges(); Graph.reset(); updateDS();
 }
 function dsStart(){
-  if(!CODE) return;
+  if(!CODE||Online.inMatch()) return;
   if(Sim.phase!=="init") dsInit();
   Sim.start(); updateDS();
 }
@@ -252,6 +255,7 @@ function updateDS(){
   bi.disabled=!(ph==="loaded"||ph==="stopped");
   bs.disabled=ph!=="init";
   bx.disabled=!(ph==="init"||ph==="running");
+  if(Online.inMatch()){ bi.disabled=true; bs.disabled=true; }
   bi.classList.toggle("next",!bi.disabled);
   bs.classList.toggle("next",!bs.disabled);
   bx.classList.toggle("live",ph==="running");
@@ -260,6 +264,8 @@ function updateDS(){
   const pill=$("#phasePill"); pill.textContent=P[0]; pill.className="pill "+P[1];
   const hint=$("#vpHint");
   if(!CODE){ hint.hidden=true; }
+  else if(Online.playing()&&ph==="init"){ hint.hidden=false; hint.innerHTML=`Online match: it starts on its own<small>everyone's robot STARTs at the same moment</small>`; }
+  else if(Online.state==="done"){ hint.hidden=false; hint.innerHTML=`Match over<small>the host can start another · Leave the match to drive on your own</small>`; }
   else if(ph==="init"){ hint.hidden=false; hint.innerHTML=`Press START to run “${esc(CODE.opmode||"OpMode")}”<small>INIT already ran everything before waitForStart()</small>`; }
   else if(ph==="loaded"||ph==="stopped"){ hint.hidden=false; hint.innerHTML=`Press INIT<small>${ph==="stopped"?"then START to run it again":"to run the setup code"}</small>`; }
   else hint.hidden=true;
@@ -268,7 +274,7 @@ function updateDS(){
 const clockText=s=>{ s=Math.max(0,s); return Math.floor(s/60)+":"+String(Math.floor(s%60)).padStart(2,"0"); };
 function updateClock(){
   const kind=CODE&&CODE.kind==="Autonomous"?"Autonomous":"TeleOp";
-  const P=PERIOD[kind], practice=$("#practice").checked;
+  const P=PERIOD[kind], practice=$("#practice").checked&&!Online.inMatch();
   const t=(Sim.phase==="running"||Sim.phase==="stopped")?Sim.t:0;
   const c=$("#dsClock");
   if(practice){ c.textContent=clockText(t); $("#dsBar").style.width="0"; c.classList.remove("low"); return; }
@@ -286,6 +292,9 @@ function updateClock(){
    "AI robots" switch; a fresh match (new seed) at every INIT.
    ============================================================ */
 function resetMatch(){
+  // online, the match is the one everyone plays (src/net.js), not this bench's own
+  if(Online.playing()){ Online.matchReset(Sim); renderMatchHud(true); return; }
+  if(Online.state==="done"){ renderMatchHud(true); return; }
   const box=$("#matchOn"), want=!!(box&&box.checked&&Field.ok&&OPTS.obstacles!=="walls");
   Match.on=want;
   if(!want){ Match.bots=[]; Match.floor=[]; Match.flying=[]; Match.events=[]; renderMatchHud(true); return; }
@@ -296,13 +305,16 @@ function resetMatch(){
 let HUD_T=0;
 function renderMatchHud(force){
   const hud=$("#matchHud"); if(!hud) return;
-  const on=Match.on&&Match.bots.length>0;
+  const on=Match.live();
   hud.hidden=!on; if(!on) return;
   const now=performance.now(); if(!force&&now-HUD_T<200) return; HUD_T=now;
-  const S=Match.score(Sim);
+  // online, the host keeps the score; a guest shows the host's
+  const S=Online.guest()&&Online.score?Online.score:Match.score(Sim);
   $("#mhRed").textContent=S.red.total; $("#mhBlue").textContent=S.blue.total;
   const P=Match.period==="Autonomous"?"AUTO":"TELEOP";
-  $("#mhMid").textContent=Sim.phase==="stopped"&&Match.t>=Match.len-0.05?"FINAL":Sim.phase==="running"?P:P+" · ready";
+  const cd=Online.playing()?Online.countdown():0;
+  $("#mhMid").textContent=Online.state==="done"?"FINAL":cd>0?"STARTS IN "+Math.ceil(cd):Online.playing()?P:
+    Sim.phase==="stopped"&&Match.t>=Match.len-0.05?"FINAL":Sim.phase==="running"?P:P+" · ready";
   const parts=r=>[r.tips?r.tips+" TIP"+(r.tips>1?"S":""):"", r.leave?"LEAVE "+r.leave:"", r.park?"PARK "+r.park:"",
     r.flower+r.bottom?"FLOWERS "+(r.flower+r.bottom):"", r.cell?"CELL "+r.cell:"", r.garden?"GARDEN "+r.garden:""].filter(Boolean).join(" · ")||"—";
   $("#mhParts").innerHTML=`<span class="red">${esc(parts(S.red))}</span><span class="blue">${esc(parts(S.blue))}</span>`;
@@ -2051,17 +2063,290 @@ const Editor={
 };
 
 /* ============================================================
+   ONLINE — one match with other teams, each on their own computer
+   (src/net.js). The panel finds or hosts a match, deals the places,
+   INITs and STARTs this robot with everyone else, and keeps the chat
+   and the alliance's marks on a map of the field.
+   ============================================================ */
+const NetUI={
+  loading:null, markKind:"go", joinT:0, was:"off", quickT:null,
+  init(){
+    $("#onlineBtn").addEventListener("click",()=>this.toggle());
+    $("#onpClose").addEventListener("click",()=>this.show(false));
+    $("#onpName").value=store.get("ftcbench.netName","");
+    $("#onpName").addEventListener("change",()=>this.name());
+    $("#onpQuick").addEventListener("click",()=>this.quick());
+    $("#onpHost").addEventListener("click",()=>this.hostNow(false));
+    $("#onpJoinForm").addEventListener("submit",e=>{ e.preventDefault(); this.joinCode($("#onpCode").value); });
+    $("#onpCode").addEventListener("input",e=>{ e.target.value=e.target.value.toUpperCase().replace(/[^A-Z0-9]/g,""); });
+    $("#onpCopy").addEventListener("click",()=>this.copyInvite());
+    $("#onpGo").addEventListener("click",()=>{ if(!Online.start()) this.render(); });
+    $("#onpAgain").addEventListener("click",()=>Online.again());
+    $("#onpLeave").addEventListener("click",()=>{ Online.leave(); if(Online.lobby==null) Online.browse(); resetMatch(); this.say(""); this.render(); });
+    $("#onpSkill").addEventListener("change",e=>Online.set({skill:e.target.value}));
+    $("#onpPub").addEventListener("change",e=>Online.set({pub:e.target.checked}));
+    $$("#onpPeriod button").forEach(b=>b.addEventListener("click",()=>Online.set({period:b.dataset.p})));
+    $$("#onpMarkSeg button").forEach(b=>b.addEventListener("click",()=>{ this.markKind=b.dataset.m; $$("#onpMarkSeg button").forEach(x=>x.classList.toggle("on",x===b)); }));
+    $("#onpMap").addEventListener("click",e=>this.mapClick(e));
+    $("#onpSay").addEventListener("submit",e=>{ e.preventDefault(); const t=$("#onpText"); Online.say(t.value,$("#onpTo").value==="team"); t.value=""; });
+    $("#onpSlots").addEventListener("click",e=>{ const b=e.target.closest("button[data-slot]"); if(b) Online.pick(b.dataset.slot==="none"?null:b.dataset.slot); });
+    $("#onpReady").addEventListener("click",e=>{ const b=e.target.closest("button[data-ready]"); if(b) Online.setReady(b.dataset.ready==="1",this.kind()); });
+    $("#onpList").addEventListener("click",e=>{ const b=e.target.closest("button[data-code]"); if(b) this.joinCode(b.dataset.code,b.dataset.hid); });
+    Online.onChange((what,data)=>this.on(what,data));
+    // an invite link opened in a tab that already has SimBench open only changes the fragment
+    addEventListener("hashchange",()=>{ if(/^#join=/i.test(location.hash)) this.invited(location.hash.slice(6)); });
+  },
+  show(o){ $("#onlinePanel").hidden=!o; $("#onlineBtn").setAttribute("aria-expanded",String(!!o)); if(o) this.render(); },
+  async toggle(){
+    if(!$("#onlinePanel").hidden){ this.show(false); return; }
+    this.show(true);
+    if(await this.connect()&&Online.state==="off") Online.browse();
+    this.render();
+  },
+  /* Trystero, the first time: from jsDelivr, pinned to one version */
+  connect(){
+    if(Online.T) return Promise.resolve(true);
+    if(!this.loading) this.loading=netTrystero().then(T=>{
+      Online.use(T);
+      T.onError=d=>this.say("A player couldn't connect: "+String((d&&d.error&&d.error.message)||(d&&d.error)||"no reason given")+
+        ". Some school and company networks block direct connections between browsers.","warn");
+      return true;
+    }).catch(e=>{ this.loading=null; this.say("Couldn't load the online library ("+String(e&&e.message||e)+"). Check the internet connection and try again.","fail"); return false; });
+    return this.loading;
+  },
+  say(text,kind){ const m=$("#onpMsg"); m.hidden=!text; m.textContent=text||""; m.className="onp-msg"+(kind?" "+kind:""); },
+  name(){ const v=netStr($("#onpName").value,24); $("#onpName").value=v; if(v) store.set("ftcbench.netName",v); return v; },
+  needName(){ const n=this.name(); if(!n){ this.say("Put your team number or name in first. The other players see it.","warn"); $("#onpName").focus(); } return n; },
+  kind(){ return CODE&&CODE.kind==="Autonomous"?"Autonomous":"TeleOp"; },
+  async hostNow(pub){
+    const n=this.needName(); if(!n||!await this.connect()) return;
+    this.say("");
+    Online.host({name:n, pub, period:this.kind(), skill:$("#matchSkill").value});
+  },
+  async joinCode(code,hid){
+    const n=this.needName(); if(!n||!await this.connect()) return;
+    code=String(code||"").toUpperCase();
+    if(!/^[A-HJ-NP-Z2-9]{5}$/.test(code)){ this.say("A match code is 5 letters and numbers, like K7QMX.","warn"); return; }
+    this.say(""); this.joinT=performance.now();
+    Online.join(code,{name:n, hid:hid||null});
+  },
+  /* Quick match: the fullest open match there is, or a new listed one if there's none. */
+  async quick(){
+    const n=this.needName(); if(!n||!await this.connect()) return;
+    Online.browse(); this.say("Looking for an open match…");
+    clearInterval(this.quickT);
+    const t0=performance.now();
+    const look=()=>{
+      if(Online.state!=="off"){ clearInterval(this.quickT); return; }
+      const L=Online.openMatches();
+      if(L.length){ clearInterval(this.quickT); this.joinCode(L[0].code,L[0].hid); return; }
+      if(performance.now()-t0>4500){ clearInterval(this.quickT);
+        this.hostNow(true).then(()=>this.say("No open match right now, so you're hosting one. Other teams find it under Open matches.")); }
+    };
+    this.quickT=setInterval(look,400); look();
+  },
+  invited(code){
+    try{ history.replaceState(null,"",location.pathname+location.search); }catch(e){}
+    code=String(code||"").toUpperCase().replace(/[^A-Z0-9]/g,"").slice(0,5);
+    this.show(true); $("#onpCode").value=code;
+    this.say("You were invited to match "+code+". Put your team in and press Join.");
+    this.connect();
+  },
+  copyInvite(){
+    const url=location.origin+location.pathname+"#join="+Online.code;
+    const done=()=>{ const b=$("#onpCopy"); b.textContent="Copied"; setTimeout(()=>{ b.textContent="Copy invite link"; },1500); };
+    try{ navigator.clipboard.writeText(url).then(done,()=>prompt("The invite link:",url)); }catch(e){ prompt("The invite link:",url); }
+  },
+  opChanged(){ const me=Online.me(); if(me&&Online.state==="room"&&me.ready) Online.setReady(true,this.kind()); else this.render(); },
+
+  /* what the session says */
+  on(what){
+    if(what==="start") this.begin();
+    if(what==="error"){ this.say(Online.why||"The match ended.","warn"); resetMatch(); this.show(true); }
+    if(what==="end"){ this.show(true); if(Sim.phase==="running") dsStop(); else updateDS(); }
+    if(what==="room"||what==="error") updateDS();
+    if(what==="room"&&this.was!==Online.state){
+      // back from a match to the room, or out of it: the field is this bench's own again
+      if((this.was==="done"||this.was==="playing")&&!Online.inMatch()) resetMatch();
+      if(Online.state==="off"&&Online.T) Online.browse();
+    }
+    this.was=Online.state;
+    this.render();
+  },
+  /* START: this robot to its place, INIT, and START with everyone when the countdown ends */
+  begin(){
+    if(Sim.phase==="running") Sim.stop();
+    const slot=Online.mySlot();
+    if(slot&&CODE&&CAD){
+      setAlliance(netAl(slot),false);
+      const p=netSlotPose(slot,footprintOf(CAD,OPTS.front));
+      Sim.chassis={x:p.x, y:p.y, h:p.h}; Sim.vel={x:0,y:0}; OPTS.startPose=Object.assign({},p);
+      initNow();
+    }else resetMatch();
+    updateDS(); this.render();
+  },
+  tick(){
+    if(Online.playing()&&!Online.started&&Online.now()>=Online.startAt){
+      Online.started=true;
+      if(Online.mySlot()&&Sim.phase==="init"){ Sim.start(); updateDS(); }
+    }
+    if(Online.state==="joining"&&this.joinT&&performance.now()-this.joinT>15000){
+      this.joinT=0; Online.leave();
+      this.say("Nobody answered. Check the code; the host may have closed the room, or a network between you blocks direct connections.","warn");
+    }
+  },
+  slow(){
+    const st=Online.state, btn=$("#onlineBtn"), badge=$("#onlineBadge");
+    btn.classList.toggle("on",st!=="off");
+    badge.hidden=st==="off"; badge.textContent=st==="playing"?"LIVE":st==="done"?"FINAL":Online.code||"";
+    if($("#onlinePanel").hidden) return;
+    if(st==="playing"){ this.renderLive(); this.drawMap(); }
+    if(st==="off") this.renderList();
+  },
+
+  /* ---- drawing the panel ---- */
+  render(){
+    const st=Online.state;
+    $("#onpStart").hidden=st!=="off";
+    $("#onpRoom").hidden=!(st==="room"||st==="joining");
+    $("#onpPlay").hidden=st!=="playing";
+    $("#onpEnd").hidden=st!=="done";
+    $("#onpTalk").hidden=st==="off"||st==="joining";
+    $("#onpFoot").hidden=st==="off";
+    $("#onpTitle").textContent=st==="off"?"Play online":st==="joining"?"Joining…":st==="done"?"Match over":"Match "+Online.code;
+    $("#onpSub").textContent=st==="off"?"":Online.role==="host"?"you're hosting":"";
+    $("#onpLeave").textContent=st==="joining"?"Cancel":"Leave the match";
+    if(st==="off") this.renderList();
+    if(st==="room"||st==="joining") this.renderRoom();
+    if(st==="playing") this.renderLive();
+    if(st==="done") this.renderEnd();
+    this.renderChat();
+    this.slow();
+  },
+  renderList(){
+    const L=Online.T?Online.openMatches():null;
+    const html=!Online.T?`<li class="onp-empty">Opens when you go online</li>`:!L.length?`<li class="onp-empty">None right now. Host one, or use Quick match.</li>`:
+      L.map(a=>`<li><div><b>${esc(a.name)}</b><small>${a.period==="Autonomous"?"Auto 0:30":"TeleOp 2:00"} · ${a.n} in the room · ${a.open} place${a.open===1?"":"s"} free</small></div>`+
+        `<button class="btn-sm" type="button" data-code="${esc(a.code)}" data-hid="${esc(a.hid)}">Join</button></li>`).join("");
+    setHTML($("#onpList"),html);
+  },
+  renderRoom(){
+    const st=Online.state, me=Online.me(), host=Online.role==="host";
+    $("#onpCodeShow").textContent=Online.code||"—";
+    $("#onpCopy").hidden=st==="joining";
+    if(st==="joining"){ setHTML($("#onpSlots"),`<p class="onp-watch">Asking the host's browser to let you in…</p>`); $("#onpReady").innerHTML=""; $("#onpHostCtl").hidden=true; $("#onpWatch").textContent=""; return; }
+    const cards=NET_SLOTS.map(s=>{
+      const id=Online.holder(s), p=id&&Online.players[id], al=netAl(s), mine=id===Online.self;
+      const who=p?`<b>${esc(p.name)}${mine?" (you)":""}</b><span class="st${p.ready?" ok":""}">${p.ready?"ready":"getting ready"}${p.host?" · host":""}</span>`:
+        `<b class="ai">AI robot</b>`;
+      const act=!p&&me?`<button class="btn-sm" type="button" data-slot="${s}">Take this place</button>`:mine?`<button class="btn-sm" type="button" data-slot="none">Just watch</button>`:"";
+      return `<div class="onp-slot ${al}${mine?" me":""}"><small>${al.toUpperCase()} ${s.slice(-1)}</small>${who}${act}</div>`;
+    });
+    // red on the left, blue on the right, place 1 above place 2
+    setHTML($("#onpSlots"),[cards[0],cards[2],cards[1],cards[3]].join(""));
+    const watch=Object.values(Online.players).filter(p=>!p.slot).map(p=>esc(p.name)+(p.id===Online.self?" (you)":""));
+    setHTML($("#onpWatch"),watch.length?"Watching: "+watch.join(", "):"");
+    // this robot: the right kind of OpMode, then ready
+    const want=Online.settings.period, have=CODE?this.kind():null;
+    let r="";
+    if(me&&me.slot){
+      if(!CODE||!CAD) r=`<span class="bad">Load a robot and an OpMode first.</span>`;
+      else if(have!==want) r=`<span class="bad">This match is ${want==="Autonomous"?"an Auto":"a TeleOp"}: pick ${want==="Autonomous"?"an Autonomous":"a TeleOp"} OpMode in the OpMode menu.</span>`;
+      else r=`<span>“${esc(CODE.opmode||"OpMode")}”</span>`+(me.ready?`<button class="btn-sm" type="button" data-ready="0">Not ready</button>`:`<button class="btn-sm primary" type="button" data-ready="1">I'm ready</button>`);
+    }
+    setHTML($("#onpReady"),r);
+    $("#onpHostCtl").hidden=!host;
+    if(host){
+      $$("#onpPeriod button").forEach(b=>b.classList.toggle("on",b.dataset.p===want));
+      $("#onpSkill").value=Online.settings.skill; $("#onpPub").checked=Online.pub;
+      $("#onpGo").disabled=!Online.canStart();
+      $("#onpWait").textContent=Online.waitingFor().join(" · ");
+    }
+  },
+  renderLive(){
+    const slot=Online.mySlot(), cd=Online.countdown(), al=slot?netAl(slot):null, left=Math.max(0,Match.len-Match.t);
+    const who=Object.values(Online.players).filter(p=>p.slot).map(p=>`<span class="${netAl(p.slot)}">${esc(p.name)}</span>`).join(" ");
+    setHTML($("#onpLive"),(slot?`<b class="${al}">${al.toUpperCase()} ${slot.slice(-1)}</b>`:`<b>Watching</b>`)+
+      `<span>${cd>0?"starts in "+Math.ceil(cd):clockText(Math.ceil(left))+" left"}</span>`+who);
+    $("#onpMarkSeg").hidden=!slot;
+    $("#onpPing").textContent=Online.role==="guest"&&Online.rtt?Math.round(Online.rtt)+" ms to the host":"";
+  },
+  renderEnd(){
+    const F=Online.final; if(!F) return;
+    const r=F.score.red.total, b=F.score.blue.total, al=Online.mySlot()?Online.myAl():null;
+    const verdict=r===b?"A tie":(r>b?"Red":"Blue")+" wins"+(al?(al===(r>b?"red":"blue")?". Your alliance won.":". Your alliance lost."):"");
+    const rows=F.stats.map(s=>`<tr class="${netAl(s.slot)}"><td>${esc(s.name)}</td><td class="n">${s.fired}</td><td class="n">${s.scored}</td></tr>`).join("");
+    setHTML($("#onpFinal"),`<div class="onp-final"><div class="red"><b>${r}</b><small>RED</small></div><div class="blue"><b>${b}</b><small>BLUE</small></div></div>`+
+      `<p class="onp-verdict">${esc(verdict)}</p><table class="onp-stats"><tr><th>Robot</th><th class="n">Shots</th><th class="n">In</th></tr>${rows}</table>`+
+      (Online.role==="host"?"":`<p class="onp-wait">The host can start another match with everyone in the same places.</p>`));
+    $("#onpAgain").hidden=Online.role!=="host";
+  },
+  renderChat(){
+    const ol=$("#onpChat"), atEnd=ol.scrollTop+ol.clientHeight>=ol.scrollHeight-4;
+    setHTML(ol,Online.chat.slice(-50).map(c=>`<li class="${c.al||""}">${c.team?"<i>alliance</i>":""}<b>${esc(c.name)}</b>${esc(c.text)}</li>`).join(""));
+    if(atEnd) ol.scrollTop=ol.scrollHeight;
+    const to=$("#onpTo"); to.disabled=!Online.mySlot(); if(!Online.mySlot()) to.value="all";
+  },
+
+  /* ---- the map: the field from above, the robots, the loose elements, the alliance's marks ---- */
+  drawMap(){
+    const cv=$("#onpMap"); if(!cv||!Field.ok||!cv.clientWidth) return;
+    const dpr=window.devicePixelRatio||1, S=Math.round(cv.clientWidth*dpr);
+    if(cv.width!==S){ cv.width=S; cv.height=S; }
+    const c=cv.getContext("2d"), H=Field.half(), k=S/(2*H), X=x=>(x+H)*k, Y=y=>(H-y)*k;
+    c.clearRect(0,0,S,S); c.fillStyle="#1b1c20"; c.fillRect(0,0,S,S);
+    c.strokeStyle="rgba(255,255,255,.05)"; c.lineWidth=1;
+    for(let i=1;i<6;i++){ const v=Math.round(i*S/6)+0.5; c.beginPath(); c.moveTo(v,0); c.lineTo(v,S); c.moveTo(0,v); c.lineTo(S,v); c.stroke(); }
+    for(const al of ["red","blue"]){ const z=Match.zone(al);
+      c.fillStyle=al==="red"?"rgba(216,84,74,.22)":"rgba(63,127,224,.22)"; c.fillRect(X(z.x0),Y(z.y1),(z.x1-z.x0)*k,(z.y1-z.y0)*k); }
+    c.lineCap="round"; c.strokeStyle="rgba(214,211,200,.38)";
+    if(!this.obs) this.obs=Field.obstacles(0.46);
+    for(const o of this.obs){ c.lineWidth=Math.max(1.5,2*o.r*k); c.beginPath(); c.moveTo(X(o.a[0]),Y(o.a[1])); c.lineTo(X(o.b[0]),Y(o.b[1])); c.stroke(); }
+    for(const e of Match.floor){ c.fillStyle=e.kind==="nectar"?(e.color==="red"?"#ff7a70":"#7fb0ff"):"#e2c24a";
+      c.beginPath(); c.arc(X(e.x),Y(e.y),2.2*dpr,0,7); c.fill(); }
+    const box=(x,y,h,hx,hy,al,me,label)=>{
+      c.save(); c.translate(X(x),Y(y)); c.rotate(-h);
+      c.fillStyle=me?(al==="red"?"#d8544a":"#3f7fe0"):(al==="red"?"rgba(216,84,74,.45)":"rgba(63,127,224,.45)");
+      c.strokeStyle=me?"#fff":(al==="red"?"#e07a71":"#78a6ee"); c.lineWidth=(me?2:1.2)*dpr;
+      c.fillRect(-hx*k,-hy*k,2*hx*k,2*hy*k); c.strokeRect(-hx*k,-hy*k,2*hx*k,2*hy*k);
+      c.beginPath(); c.moveTo(0,0); c.lineTo(hx*k,0); c.stroke();
+      c.restore();
+      if(label){ c.fillStyle="rgba(255,255,255,.85)"; c.font=`${10*dpr}px ${getComputedStyle(document.body).fontFamily}`; c.textAlign="center";
+        c.fillText(label,X(x),Y(y)-Math.max(hx,hy)*k-4*dpr); }
+    };
+    for(const b of Match.bots) box(b.x,b.y,b.h,MATCH_BOT.hx,MATCH_BOT.hy,b.al,false,"AI");
+    for(const p of Match.players) box(p.x,p.y,p.h,p.hx,p.hy,p.al,false,p.name.slice(0,12));
+    if(Online.mySlot()&&Sim.footprint){ const ch=Sim.chassis, fp=Sim.footprint, co=Math.cos(ch.h), si=Math.sin(ch.h), ox=fp.ox||0, oy=fp.oy||0;
+      box(ch.x+ox*co-oy*si,ch.y+ox*si+oy*co,ch.h,fp.hx,fp.hy,Online.myAl(),true,"you"); }
+    const t=performance.now()/1000;
+    for(const m of Online.liveMarks()){
+      const col=m.what==="shoot"?"#f0b54a":m.what==="defend"?"#6fd3e0":"#ffffff", r=(7+2*Math.sin(t*5))*dpr;
+      c.strokeStyle=col; c.lineWidth=2*dpr; c.beginPath(); c.arc(X(m.x),Y(m.y),r,0,7); c.stroke();
+      c.fillStyle=col; c.font=`600 ${9.5*dpr}px ${getComputedStyle(document.body).fontFamily}`; c.textAlign="center";
+      c.fillText(m.what==="shoot"?"shoot":m.what==="defend"?"defend":"go",X(m.x),Y(m.y)+r+10*dpr);
+    }
+  },
+  mapClick(e){
+    if(!Online.mySlot()||!Field.ok) return;
+    const cv=$("#onpMap"), r=cv.getBoundingClientRect(), H=Field.half(), k=r.width/(2*H);
+    Online.mark((e.clientX-r.left)/k-H,H-(e.clientY-r.top)/k,this.markKind);
+  }
+};
+
+/* ============================================================
    MAIN LOOP
    ============================================================ */
-let last=performance.now(), acc=0, slowAcc=0, loopErr=null;
+let last=performance.now(), acc=0, slowAcc=0, loopErr=null, frameAt=0;
 function guarded(fn){ try{ fn(); }catch(e){ if(!loopErr){ loopErr=e; console.error("bench:",e); } } }
 function frame(now){
+  frameAt=performance.now();
   const dt=Math.min(0.1,(now-last)/1000); last=now;
   guarded(()=>{
     Pads.poll();
     acc+=dt; let n=0;
-    while(acc>=0.02&&n++<8){ Sim.tick(0.02); acc-=0.02; }
+    while(acc>=0.02&&n++<8){ Sim.tick(0.02); Online.step(0.02,Sim); acc-=0.02; }
     if(acc>0.5) acc=0;
+    NetUI.tick();
     View.update(); View.render(); updateGauges(); Pads.mirror();
   });
   slowAcc+=dt;
@@ -2082,10 +2367,21 @@ function frame(now){
     const lp=$("#loopPill");
     lp.textContent=Sim.phase==="running"?Sim.t.toFixed(1)+" s · 50 Hz":Sim.phase; lp.className="pill"+(Sim.phase==="running"?" live":"");
     $$(".bindrow").forEach(r=>r.classList.toggle("active",!!Sim.pad[activePad][r.dataset.btn]));
-    MathTab.tick(); Status.render();
+    MathTab.tick(); Status.render(); NetUI.slow();
   }); }
   requestAnimationFrame(frame);
 }
+// a hidden or covered window gets no animation frames (even one that says it's visible), but an
+// online match, a host's above all, has to go on: step it from a timer while the frames are gone
+setInterval(()=>{
+  if(Online.state==="off"||performance.now()-frameAt<300) return;
+  guarded(()=>{
+    const now=performance.now(); acc+=Math.min(2,(now-last)/1000); last=now;
+    let n=0; while(acc>=0.02&&n++<100){ Sim.tick(0.02); Online.step(0.02,Sim); acc-=0.02; }
+    if(acc>0.5) acc=0;
+    NetUI.tick();
+  });
+},200);
 
 /* ============================================================
    PRO — one status light, the walkthrough, .ftcsim workspaces,
@@ -2482,9 +2778,10 @@ function proBoot(){
   addEventListener("keydown",e=>{ if(e.key==="Escape"&&!mm.hidden) openMatch(false); });
   $("#matchOn").addEventListener("change",matchDot); matchDot();
   $("#matchSkill").value=store.get("ftcbench.matchSkill","typical");
-  $("#matchOn").addEventListener("change",e=>{ store.set("ftcbench.match",e.target.checked?"1":"0"); if(Sim.phase!=="running") resetMatch(); else { Match.on=e.target.checked; if(!Match.on) resetMatch(); } });
-  $("#matchSkill").addEventListener("change",e=>{ store.set("ftcbench.matchSkill",e.target.value); if(Sim.phase!=="running") resetMatch(); else Match.skill=e.target.value; });
+  $("#matchOn").addEventListener("change",e=>{ store.set("ftcbench.match",e.target.checked?"1":"0"); if(Online.inMatch()) return; if(Sim.phase!=="running") resetMatch(); else { Match.on=e.target.checked; if(!Match.on) resetMatch(); } });
+  $("#matchSkill").addEventListener("change",e=>{ store.set("ftcbench.matchSkill",e.target.value); if(Online.inMatch()) return; if(Sim.phase!=="running") resetMatch(); else Match.skill=e.target.value; });
   $("#practice").addEventListener("change",e=>{ store.set("ftcbench.practice",e.target.checked?"1":"0"); updateClock(); });
+  NetUI.init();
 
   // code
   $("#addOpMode").addEventListener("click",()=>$("#codeFile").click());
@@ -2586,6 +2883,7 @@ function proBoot(){
   RAILS_READY=true;
   requestAnimationFrame(frame);
   try{
+    if(/^#join=/i.test(location.hash)) NetUI.invited(location.hash.slice(6));
     if(/^#onshape=/.test(location.hash)) takeOnshapeHash();
     else if(new URLSearchParams(location.search).get("robot")!=="sample") loadDefaultRobot();
   }catch(e){}
