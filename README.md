@@ -47,6 +47,7 @@ project. There are four layers, from exact to automatic:
 | **Automatic joint finder** | Finds actuators, slide stacks and the parts each joint carries, straight from geometry, for any STEP. Runs by itself when a robot has no mates and no spec, and lists what a person should check. | ✅ `src/autorig.js`, from the measured prototypes in [research/autorig](research/autorig/README.md) |
 
 | **The match** | An alliance partner and two opponents the bench drives, and both alliances' human players, playing AUTO or TELEOP by the manual's rules, sharing the HIVEs with the team's robot, with a live scoreboard. | ✅ `src/match.js`, [docs/match.md](docs/match.md) |
+| **Online matches** | One match with other teams, each on their own computer with their own robot and code: Quick match, a room code or an invite link, alliance chat, marks on the field. Browsers connect directly; the host's bench keeps the score. | ✅ `src/net.js`, [docs/online.md](docs/online.md) |
 | **Robot check** | Checks the joints, wherever they came from, against the team's own OpMode: every motor and servo it moves has a joint, every joint carries parts and is driven, nothing swings through the frame. What it can't confirm becomes a question in the team's device names, with the likely answers and a button to see each one move. | ✅ `src/robotcheck.js`, [docs/robot-check.md](docs/robot-check.md) |
 
 The goal is that every robot ends up right: exact from Onshape mates when there are any, and
@@ -86,6 +87,8 @@ Open **https://ftc-simbench-pro.pages.dev**. It loads GearGurus 7832's Into The 
 - **Drop your own robot anywhere on the page:** a `.step`, your `.java` OpModes, and any helper
   classes. Add an Onshape assembly JSON or a joint spec if you have one.
 - `?robot=sample` opens the small built-in sample instead.
+- **Online** in the top bar plays one match with other teams, each on their own computer. Use
+  **Quick match**, or host and send the invite link ([docs/online.md](docs/online.md)).
 
 | The joint editor | The team's Road Runner auto |
 |---|---|
@@ -119,7 +122,7 @@ exactly as it ships, so the whole simulator is tested without a browser. The mod
 | Path | What's there |
 |---|---|
 | [`src/`](src/README.md) | The app: engine modules, the 3D and CAD views, the UI. |
-| [`tests/`](tests/README.md) | 457 `node:test` tests: the robot corpus, physics, parser, Road Runner, the real robot end to end. |
+| [`tests/`](tests/README.md) | 529 `node:test` tests: the robot corpus, physics, parser, Road Runner, the real robot end to end, the match, online play. |
 | [`tools/`](tools/README.md) | The build, the minifier, the test runner, the robot corpus generator, the Onshape mates CLI. |
 | [`assets/robots/`](assets/robots/into-the-deep/README.md) | The default robot: GearGurus 7832's STEP (gzipped), its joint spec, and the team's OpModes. |
 | [`research/autorig/`](research/autorig/README.md) | The automatic joint finder study: three prototypes, measured against the real robot. |
@@ -133,7 +136,7 @@ exactly as it ships, so the whole simulator is tested without a browser. The mod
 ```bash
 npm install            # dev dependency only: occt-import-js, for the geometry tests
 npm run build          # dev build  -> dist/index.html (open it, or serve dist/)
-npm test               # the whole suite: 457 tests
+npm test               # the whole suite: 529 tests
 npm run build:ship     # what Cloudflare Pages builds: comments and layout stripped
 ```
 
@@ -169,3 +172,5 @@ see [LICENSE](LICENSE). The free, MIT-licensed bench it grew from is
 - OpenCascade meshing is [occt-import-js](https://github.com/kovacsv/occt-import-js) (LGPL-2.1),
   loaded from jsDelivr at run time.
 - 3D is [three.js](https://threejs.org) r128 (MIT).
+- Online matches connect through [Trystero](https://github.com/dmotz/trystero) (MIT), loaded from
+  jsDelivr only when a player goes online.
