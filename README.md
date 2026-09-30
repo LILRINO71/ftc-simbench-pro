@@ -46,8 +46,12 @@ project. There are four layers, from exact to automatic:
 | **Click-to-fix editor** | In the CAD view: click parts, pick what they ride on, make a joint (the axis is suggested from the selected spline, gear or rail), flip it, try it. Every edit is a joint spec you can download. | ✅ `src/cadview.js` |
 | **Automatic joint finder** | Finds actuators, slide stacks and the parts each joint carries, straight from geometry, for any STEP. Runs by itself when a robot has no mates and no spec, and lists what a person should check. | ✅ `src/autorig.js`, from the measured prototypes in [research/autorig](research/autorig/README.md) |
 
-The goal: drop in any robot and get the right joints automatically, with the editor there to fix
-whatever the finder gets wrong. You shouldn't need a hand-written spec per robot.
+| **Robot check** | Checks the joints, wherever they came from, against the team's own OpMode: every motor and servo it moves has a joint, every joint carries parts and is driven, nothing swings through the frame. What it can't confirm becomes a question in the team's device names, with the likely answers and a button to see each one move. | ✅ `src/robotcheck.js`, [docs/robot-check.md](docs/robot-check.md) |
+
+The goal is that every robot ends up right: exact from Onshape mates when there are any, and
+otherwise checked against the team's code, with a few questions only that team can answer.
+Nothing wrong is shown without saying so. Real teams' CAD ([research/realcad](research/realcad/README.md))
+is the test set.
 
 ## What it does today
 
@@ -140,6 +144,8 @@ check the live build by comparing its `SIMBENCH_BUILD` hash with a local ship bu
 - **The physics is a model, not a measurement.** Mass comes from CAD shapes and material density,
   or from a vendor figure when a part is recognised. Every number in the Math tab says where it
   came from. Check a real robot on a real field before you bet a match on it.
+- **Guessed joints need a person.** On real teams' CAD the finder alone makes mistakes, which is
+  why the robot check asks about anything it can't confirm. Onshape mates skip the guessing.
 - **Automatic joints are a first draft.** The finder is measured on one real robot so far (see
   [research/autorig](research/autorig/README.md)). On it, it finds every joint, and every part it
   moves really moves, but 13 of 171 moving parts stay on the frame, mostly where the CAD itself

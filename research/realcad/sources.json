@@ -1,0 +1,13 @@
+{
+  "about": "Real FTC team CAD published on GitHub, used to test the bench on robots it wasn't built around. The files are downloaded by fetch.mjs into a folder outside the repo and never committed (AGENTS.md rule 6). Each stays under its owner's terms; we only read it.",
+  "files": [
+    { "name": "ftc8375-worlds-2016.step", "repo": "EricTownselAdams/FTCCadFolder", "ref": "master", "path": "DriveTrain/Robot/Other/OtherSources/Phoenix/FTC8375_Worlds_Robot_2016.step", "what": "FTC 8375 Vulcan Robotics, 2016 World Championship robot, whole robot" },
+    { "name": "ultimate-drivebase.stp", "repo": "EricTownselAdams/FTCCadFolder", "ref": "master", "path": "DriveTrain/Robot/Other/OtherSources/Ultimate FTC Drivebase/Assembly.stp", "what": "a published drivebase" },
+    { "name": "ftc8400-arm-2024.step", "repo": "perfectparadox8400/8400_2024_CAD", "ref": "main", "path": "Arm/Arm Assembly.STEP", "what": "FTC 8400 Perfect Paradox, 2024 arm with slides (REV)" },
+    { "name": "centerstage-deposit.step", "repo": "tristxn-li/CenterstageCAD", "ref": "main", "path": "deposit assembly (1).step", "what": "CENTERSTAGE deposit: lift, servo wrist and claws" },
+    { "name": "centerstage-intake.step", "repo": "tristxn-li/CenterstageCAD", "ref": "main", "path": "intake assembly (3).step", "what": "CENTERSTAGE intake: roller motor, servo, belts" },
+    { "name": "ftc19234-itd-claw.step", "repo": "lazarcloud/IntoTheDeep-Claw", "ref": "main", "path": "Claw/Claw2D2 v41.step", "what": "FTC 19234 ByteForce, INTO THE DEEP claw" },
+    { "name": "ftc30843-decode-intake.step", "repo": "Goggomer/KSS-One-Autonomous-Prime-30843-FTC-Deocode-Robot", "ref": "main", "path": "30843 Intake Transfer System.step", "what": "FTC 30843, DECODE intake and transfer (exported as 2 bodies)" },
+    { "name": "gobilda-uchannel-chassis.step", "repo": "gForceGP/Integrated-Mecanum-Drive", "ref": "main", "path": "Drivebase_Examples/goBILDA U-Channel Chassis.step", "what": "goBILDA U-channel mecanum chassis" }
+  ]
+}

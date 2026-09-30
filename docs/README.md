@@ -3,6 +3,7 @@
 | Guide | What it covers |
 |---|---|
 | [joints.md](joints.md) | How a STEP file becomes a moving robot: Onshape mates, joint specs (with the format reference), the click-to-fix editor, and the automatic finder. |
+| [robot-check.md](robot-check.md) | How every robot ends up right: exact Onshape mates, the robot check against the team's code, and the questions it asks. The real-team CAD test set. |
 | [code-support.md](code-support.md) | Which Java runs: TeleOps, plain autos, Road Runner 1.0 autos with helper classes, and what is simulated differently from the real robot. |
 | [../DEPLOY.md](../DEPLOY.md) | Hosting the built page on Cloudflare Pages. |
 | [../AGENTS.md](../AGENTS.md) | How the coding agents on this repo share it: rules, file claims, conventions (motor direction, robot frame, joints). |
