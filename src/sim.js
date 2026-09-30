@@ -348,7 +348,8 @@ const Sim={
     this.driveChassis(dt);
     Shots.tick(dt,this.chassis);
     // the rest of the match (src/match.js): only the live sim plays it, never a probe's copy
-    if(this===Sim&&this.phase==="running"&&typeof Match!=="undefined"&&Match.on) Match.tick(dt,this);
+    // (online, src/net.js steps it instead, whatever this robot is doing)
+    if(this===Sim&&this.phase==="running"&&typeof Match!=="undefined"&&Match.on&&!Match.net) Match.tick(dt,this);
   },
   /* A slide carrying its load out moves the centre of mass with it. The shift
      is the carried mass over the mass the dynamics actually runs on — never the
@@ -396,7 +397,7 @@ const Sim={
     if(sn>1e-9) t=Math.min(t,(H-y)/sn); if(sn<-1e-9) t=Math.min(t,(-H-y)/sn);
     for(const o of this.obstacles||[]) t=Math.min(t,rayCapsule(x,y,c,sn,o));
     if(this===Sim&&typeof Match!=="undefined"&&Match.on)
-      for(const b of Match.bots) t=Math.min(t,rayCapsule(x,y,c,sn,{a:[b.x,b.y], b:[b.x,b.y], r:MATCH_BOT.hx}));
+      for(const b of Match.bots.concat(Match.players)) t=Math.min(t,rayCapsule(x,y,c,sn,{a:[b.x,b.y], b:[b.x,b.y], r:b.hx||MATCH_BOT.hx}));
     return Math.max(0,t);
   },
   /* What a drive motor does to its wheel: its output in the code's frame,

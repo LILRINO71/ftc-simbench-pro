@@ -18,6 +18,9 @@
    CELLs, the same scatter), so a TIP is a TIP whoever makes it, and the
    team's robot and these push each other around. Everything random comes
    from one seeded source, so a match replays exactly.
+   Online (src/net.js), some places are other people's robots instead
+   (Match.players): the host's bench plays the match with them in it, and
+   every other bench only mirrors it (Match.mirror), pushing its own robot.
    Units: metres and radians in the field frame (field.js), like
    Sim.chassis; ball flight paths are the Shot Sim's inches.
    ============================================================ */
@@ -39,9 +42,15 @@ const Match={
   on:false, skill:"typical", seed:1, period:"TeleOp", len:120, user:"red",
   bots:[], humans:null, floor:[], flowers:[], flying:[], events:[], placed:[], entries:[],
   version:0, t:0, rnd:null, nid:0, seenTip:0, tips0:{red:0, blue:0}, spotCache:null, obs:null,
+  // online: the other drivers' robots as boxes {id, al, name, x, y, h, hx, hy}; net, this match is
+  // an online one; mirror, the host plays it and this bench follows; noUser, this bench only watches
+  players:[], net:false, mirror:false, noUser:false,
+  /* Is there a match on the field? */
+  live(){ return this.on&&(this.bots.length>0||this.net); },
 
   /* A fresh match: the field as staged, the three robots at legal starts.
-     o: {period:"TeleOp"|"Autonomous", user:"red"|"blue", userPose, seed, skill} */
+     o: {period:"TeleOp"|"Autonomous", user:"red"|"blue", userPose, seed, skill,
+         slots (online): {red1, red2, blue1, blue2: "user" | "ai" | "remote"}, AI robots only in "ai" places} */
   reset(o){
     o=o||{};
     this.period=o.period==="Autonomous"?"Autonomous":"TeleOp";
@@ -72,6 +81,14 @@ const Match={
       const side=i%2?1:-1, al=i%4<2?"red":"blue", hx=Field.data.field.hive.hiveX[al];
       this.drop("pollen",null,(hx+(this.rnd()*2-1)*20)*IN,side*(30+this.rnd()*22)*IN);
     }
+    if(o.slots){
+      for(const s of ["red1","red2","blue1","blue2"]) if(o.slots[s]==="ai"){
+        const al=/^blue/.test(s)?"blue":"red";
+        this.addBot(al,/2$/.test(s)?(al==="red"?-45:45)*IN:0,s.slice(-1),s);
+      }
+      this.version++;
+      return;
+    }
     // the partner takes the start slot away from the team's robot; two opponents on the other wall
     const other=this.user==="red"?"blue":"red", up=o.userPose||Field.startPose(this.user);
     const slots=al=>[0,(al==="red"?-45:45)*IN];
@@ -80,9 +97,9 @@ const Match={
     slots(other).forEach((y,i)=>this.addBot(other,y,"opponent "+(i+1)));
     this.version++;
   },
-  addBot(al,y,role){
+  addBot(al,y,role,place){
     const s=al==="red"?-1:1, H=Field.half();
-    const b={id:"ai"+(this.bots.length+1), al, role, name:(al==="red"?"Red ":"Blue ")+role+" (AI)",
+    const b={id:"ai"+(this.bots.length+1), al, role, place:place||null, name:(al==="red"?"Red ":"Blue ")+role+" (AI)",
       x:s*(H-MATCH_BOT.hx), y, h:al==="red"?0:Math.PI, vx:0, vy:0,
       hold:[], plan:null, route:null, cool:0.2+this.bots.length*0.15, fire:0, stuck:0, best:1e9, fired:0, scored:0, skip:new Map()};
     b.x0=b.x; b.y0=b.y;
@@ -102,7 +119,7 @@ const Match={
 
   /* One 20 ms step, after the team's robot has moved. sim: the live Sim. */
   tick(dt,sim){
-    if(!this.on||!Field.ok||!this.bots.length||this.t>=this.len) return;
+    if(!this.live()||!Field.ok||this.t>=this.len) return;
     this.t+=dt;
     if(!this.obs) this.obs=Field.obstacles(0.46);
     this.spill();
@@ -368,7 +385,7 @@ const Match={
     const z=this.zone(b.al), s=b.al==="red"?-1:1, x=s*(Field.half()-MATCH_BOT.hx-0.05);
     const ys=[z.y0+0.02,(z.y0+z.y1)/2,z.y1-0.02], busy=[];
     for(const o of this.bots) if(o!==b&&o.slot) busy.push(o.slot);
-    if(this.userBody) busy.push(this.userBody);
+    busy.push(...this.people());
     let best=ys[1], bd=-1;
     for(const y of ys){ const m=Math.min(9,...busy.map(p=>Math.hypot(p.x-x,p.y-y))); if(m>bd+1e-6){ bd=m; best=y; } }
     b.slot={x, y:best, h:b.al==="red"?0:Math.PI};
@@ -464,7 +481,7 @@ const Match={
     if(side) for(let j=0;j<N;j++) for(let i=0;i<N;i++){ const x=-H+(i+0.5)*C; if(x*side<MATCH_BOT.hx+0.02) block[j*N+i]=1; }
     // robots nearby, where they are now; ones far off will have moved by the time it gets there
     let bodies=this.bots.filter(o=>o!==self).map(o=>({x:o.x, y:o.y, r:Math.hypot(MATCH_BOT.hx,MATCH_BOT.hy)*0.8}));
-    if(this.userBody) bodies.push({x:this.userBody.x, y:this.userBody.y, r:this.userBody.r});
+    bodies.push(...this.people());
     if(self) bodies=bodies.filter(o=>Math.hypot(o.x-self.x,o.y-self.y)<1.3);
     for(const o of bodies){
       const rr=o.r+R0, i0=Math.floor((o.x-rr+H)/C), i1=Math.floor((o.x+rr+H)/C), j0=Math.floor((o.y-rr+H)/C), j1=Math.floor((o.y+rr+H)/C);
@@ -523,42 +540,58 @@ const Match={
     if(Math.abs(b.x-x0)>1e-6) b.vx=0;
     if(Math.abs(b.y-y0)>1e-6) b.vy=0;
   },
-  /* Everyone else on the field, as circles: the other AI robots and the team's robot. */
+  /* The robots people drive, as circles: the team's own and, online, everyone else's. */
+  people(){
+    const out=this.players.map(p=>({x:p.x, y:p.y, r:Math.hypot(p.hx,p.hy)*0.8}));
+    if(this.userBody) out.push(this.userBody);
+    return out;
+  },
+  /* Everyone else on the field, as circles: the other AI robots and the robots people drive. */
   others(b){
     const out=this.bots.filter(o=>o!==b).map(o=>({x:o.x, y:o.y, r:Math.hypot(MATCH_BOT.hx,MATCH_BOT.hy)*0.8}));
-    const u=this.userBody; if(u) out.push(u);
-    return out;
+    return out.concat(this.people());
   },
   /* Robots can't share a spot: two boxes that overlap are pushed apart along
      the shallowest way out (exact for rotated boxes), half each. The team's
-     robot takes its half too; the walls and the HIVE still hold it after. */
+     robot takes its half too; the walls and the HIVE still hold it after.
+     Online, another driver's robot moves only on its own computer: against
+     it, this bench moves its own robots its half of the way, once a tick,
+     and that computer does the other half. A mirror moves no AI robot. */
   separate(sim){
-    const fp=sim&&sim.footprint, ch=sim&&sim.chassis;
+    const fp=sim&&sim.footprint, ch=sim&&sim.chassis, me=!!(fp&&ch&&!this.noUser), mine=!this.mirror;
     this.userBody=null;
     const userBox=()=>{ const c=Math.cos(ch.h), s=Math.sin(ch.h), ox=fp.ox||0, oy=fp.oy||0;
       return {x:ch.x+ox*c-oy*s, y:ch.y+ox*s+oy*c, h:ch.h, hx:fp.hx, hy:fp.hy}; };
-    if(fp&&ch){ const u=userBox(); this.userBody={x:u.x, y:u.y, r:Math.hypot(fp.hx,fp.hy)*0.8}; }
     const box=b=>({x:b.x, y:b.y, h:b.h, hx:MATCH_BOT.hx, hy:MATCH_BOT.hy});
     const stopInto=(b,nx,ny)=>{ const into=b.vx*nx+b.vy*ny; if(into<0){ b.vx-=into*nx; b.vy-=into*ny; } };
+    // the other drivers' robots: our half, once
+    for(const P of this.players){
+      if(mine) for(const B of this.bots){
+        const m=boxPush(box(B),P); if(!m) continue;
+        B.x+=m[0]/2; B.y+=m[1]/2; const l=Math.hypot(m[0],m[1])||1; stopInto(B,m[0]/l,m[1]/l);
+      }
+      if(me){ const m=boxPush(userBox(),P); if(m){ ch.x+=m[0]/2; ch.y+=m[1]/2; } }
+    }
     for(let pass=0; pass<4; pass++){
       let moved=false;
-      for(let i=0;i<this.bots.length;i++) for(let j=i+1;j<this.bots.length;j++){
+      if(mine) for(let i=0;i<this.bots.length;i++) for(let j=i+1;j<this.bots.length;j++){
         const A=this.bots[i], B=this.bots[j], m=boxPush(box(A),box(B));
         if(!m) continue;
         moved=true; A.x+=m[0]/2; A.y+=m[1]/2; B.x-=m[0]/2; B.y-=m[1]/2;
         const l=Math.hypot(m[0],m[1])||1; stopInto(A,m[0]/l,m[1]/l); stopInto(B,-m[0]/l,-m[1]/l);
       }
-      if(fp&&ch) for(const B of this.bots){
+      if(me) for(const B of this.bots){
         const m=boxPush(box(B),userBox());
         if(!m) continue;
-        moved=true; B.x+=m[0]/2; B.y+=m[1]/2; ch.x-=m[0]/2; ch.y-=m[1]/2;
-        const l=Math.hypot(m[0],m[1])||1; stopInto(B,m[0]/l,m[1]/l);
+        if(mine){ moved=true; B.x+=m[0]/2; B.y+=m[1]/2; ch.x-=m[0]/2; ch.y-=m[1]/2;
+          const l=Math.hypot(m[0],m[1])||1; stopInto(B,m[0]/l,m[1]/l); }
+        else if(pass===0){ ch.x-=m[0]/2; ch.y-=m[1]/2; }       // the host moves the AI robot its half
       }
-      for(const B of this.bots) this.keepOnField(B);
-      if(fp&&ch&&Field.ok) Field.collide(ch,fp,sim.obstacles||[]);
+      if(mine) for(const B of this.bots) this.keepOnField(B);
+      if(me&&Field.ok) Field.collide(ch,fp,sim.obstacles||[]);
       if(!moved) break;
     }
-    if(fp&&ch){ const u=userBox(); this.userBody={x:u.x, y:u.y, r:Math.hypot(fp.hx,fp.hy)*0.8}; }
+    if(me){ const u=userBox(); this.userBody={x:u.x, y:u.y, r:Math.hypot(fp.hx,fp.hy)*0.8}; }
   },
 
   /* ---------------- HUMAN PLAYERS (G426/G427) ---------------- */
@@ -591,7 +624,8 @@ const Match={
   /* ---------------- the score, as the period stands now ---------------- */
   robotsOf(al,sim){
     const out=this.bots.filter(b=>b.al===al).map(b=>({x:b.x, y:b.y, h:b.h, hx:MATCH_BOT.hx, hy:MATCH_BOT.hy, x0:b.x0, name:b.name}));
-    if(al===this.user&&sim&&sim.chassis&&sim.footprint){
+    for(const p of this.players) if(p.al===al) out.push({x:p.x, y:p.y, h:p.h, hx:p.hx, hy:p.hy, name:p.name});
+    if(al===this.user&&!this.noUser&&sim&&sim.chassis&&sim.footprint){
       const ch=sim.chassis, fp=sim.footprint, c=Math.cos(ch.h), s=Math.sin(ch.h), ox=fp.ox||0, oy=fp.oy||0;
       out.push({x:ch.x+ox*c-oy*s, y:ch.y+ox*s+oy*c, h:ch.h, hx:fp.hx, hy:fp.hy, name:"your robot"});
     }

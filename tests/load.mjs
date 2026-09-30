@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { buildRobot } from '../tools/stepgen.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const ENGINE = ['hardware', 'samples', 'step', 'hull', 'inertia', 'expr', 'java', 'roadrunner', 'mapping', 'robotconfig', 'compare', 'analyze', 'drivetrain', 'frame', 'mates', 'onshapelink', 'jointspec', 'autorig-lib', 'autorig', 'robotcheck', 'dynamics', 'field', 'shots', 'match', 'controllers', 'session', 'mathdoc', 'gitimport', 'onboarding', 'sim'];
+const ENGINE = ['hardware', 'samples', 'step', 'hull', 'inertia', 'expr', 'java', 'roadrunner', 'mapping', 'robotconfig', 'compare', 'analyze', 'drivetrain', 'frame', 'mates', 'onshapelink', 'jointspec', 'autorig-lib', 'autorig', 'robotcheck', 'dynamics', 'field', 'shots', 'match', 'net', 'controllers', 'session', 'mathdoc', 'gitimport', 'onboarding', 'sim'];
 const EXPORTS = [
   'Field', 'Shots', 'IN', 'TIP_GRAMS', 'FRONTS', 'footprintOf', 'capsulePush', 'nearestMotorId', 'SHOOTER_JAVA',
   'convexHull', 'boxCorners', 'solidTriangles', 'thinPoints', 'solidKind', 'sampleSolids', 'robotBase', 'makeRng',
@@ -20,7 +20,7 @@ const EXPORTS = [
   'splitStepRecords', 'parseSTEP', 'classifyMechs', 'recomputeChain', 'rigCarries', 'rigRoots', 'mlabel',
   'JOINT_KINDS', 'leverOf', 'holdTorque', 'armAngleDeg',
   'parseExpr', 'evalNode', 'parseJava', 'deriveBindings', 'travelRange', 'isCommanded',
-  'Match', 'MATCH_SKILL', 'MATCH_PTS', 'segCrossesBox', 'boxPush', 'autoMap', 'wheelCorner', 'detectDrivetrain', 'analyze', 'checkRobot', 'isDriveDevice', 'isCommanded', 'Sim', 'driveProbe', 'driveVerdict',
+  'Match', 'MATCH_SKILL', 'MATCH_PTS', 'segCrossesBox', 'boxPush', 'Online', 'netLoopback', 'netCode', 'netSlotPose', 'netSlotY', 'netEl', 'netEls', 'NET_SLOTS', 'NET_PROTO', 'autoMap', 'wheelCorner', 'detectDrivetrain', 'analyze', 'checkRobot', 'isDriveDevice', 'isCommanded', 'Sim', 'driveProbe', 'driveVerdict',
   'AUTO_JAVA', 'coverage', 'lineAt', 'collectStaticFields',
   'parseRobotConfig', 'checkRobotConfig', 'configKind', 'codeKind', 'diffOpModes',
   // Pro

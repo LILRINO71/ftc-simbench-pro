@@ -156,8 +156,11 @@ const Shots={
     if(!this.rnd) this.rnd=makeRng(this.seed);
     const odds=this.odds(pose,vel,32);
     const L=this.sample(v0,this.cfg.hoodDeg,this.yawDeg(pose),this.spread(v0),this.rnd,vel);
-    const r=Field.E.classifyShot(this.params(pose),L.th,L.v,L.yaw);
-    return this.launchPath(r,L.v,why,odds);
+    const p=this.params(pose), r=Field.E.classifyShot(p,L.th,L.v,L.yaw);
+    const b=this.launchPath(r,L.v,why,odds);
+    // online, away from the host: the host's Shot Sim flies this same launch and decides it (src/net.js)
+    if(b&&typeof Online!=="undefined"&&Online.guest()&&Online.playing()){ b.net=true; Online.shot(p,L.th,L.v,L.yaw); }
+    return b;
   },
   launchPath(r,v,why,odds){
     const ball=this.cfg.ball, path=r.path||[];
@@ -199,6 +202,7 @@ const Shots={
       const od=b.odds!=null?` · a ${Math.round(b.odds*100)} % shot`:"";
       // the HIVE tipped while it flew: the CELL it was aimed at is swinging down, not up
       if(b.hit&&b.hive!=null&&Field.hive[b.al]!==b.hive){ b.hit=false; b.cause="tipped"; }
+      if(b.net){ this.note(b.hit?`IN, the host says how it counts · ${b.v.toFixed(1)} m/s${od}`:`Missed — ${CAUSE_TEXT[b.cause]||b.cause||"no score"} at ${b.v.toFixed(1)} m/s${od}`); continue; }
       if(b.hit){
         this.scored++;
         const tipped=Field.addToCell(b.al,b.kind,b.color);
@@ -206,7 +210,7 @@ const Shots={
       }else{
         this.note(`Missed — ${CAUSE_TEXT[b.cause]||b.cause||"no score"} at ${b.v.toFixed(1)} m/s${od}`);
         // in a full match a miss stays on the tiles, where any robot can pick it up (src/match.js)
-        if(typeof Match!=="undefined"&&Match.on&&Match.bots.length){ const e=b.path[b.path.length-1]; Match.drop(b.kind,b.color,e[0]*IN,e[1]*IN); }
+        if(typeof Match!=="undefined"&&Match.live()){ const e=b.path[b.path.length-1]; Match.drop(b.kind,b.color,e[0]*IN,e[1]*IN); }
         else this.landed.push({pos:b.pos.slice(), vz:0, t:0, kind:b.kind, color:b.color});
       }
     }
