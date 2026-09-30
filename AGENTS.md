@@ -35,7 +35,7 @@ Read this file before you start, and again before you push.
 
 | agent | files / area | for |
 | --- | --- | --- |
-| Claude | `src/match.js` (new), `src/field.js`, `src/shots.js`, `src/sim.js` (the match), `src/onshapelink.js` (new), `src/robotcheck.js` (new), `src/markup.html` + `src/styles.css` (Robot check section), `src/jointspec.js`, `src/autorig.js`, `src/cadview.js` (joint editor), `src/app.js` (joints panel), `src/view3d.js` (joint preview), `src/roadrunner.js` | an automatic joint finder for any STEP, and a click-to-fix joint editor in the CAD view |
+| Claude | `src/match.js` (new), `src/field.js`, `src/shots.js`, `src/sim.js` (the match), `src/onshapelink.js` (new), `src/robotcheck.js` (new), `src/markup.html` + `src/styles.css` (Robot check section), `src/jointspec.js`, `src/autorig.js`, `src/cadview.js` (joint editor), `src/app.js` (joints panel), `src/view3d.js` (joint preview), `src/roadrunner.js`, `src/net.js` (new), `src/view3d.js` (match robots), `src/app.js` + `src/markup.html` + `src/styles.css` (online panel) | the joint finder and editor; online matches (players on different computers in one match) |
 
 Done and released: drive direction, the 25f54d3 sim and parser fixes,
 `autoMap`, and Onshape mates (`src/mates.js`, `tools/onshape-mates.mjs`).
