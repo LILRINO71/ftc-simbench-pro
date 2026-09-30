@@ -256,3 +256,77 @@ test('online: the host leaving ends it for the guest, with a reason', () => {
   assert.ok(!G.M.net && !G.M.mirror, 'back to a match on its own');
   assert.ok(G.events.some((e) => e.what === 'error'));
 });
+
+test('online: peer ids like __proto__, constructor and toString are only ever ordinary keys', () => {
+  const hub = loadWithField().netLoopback();
+  const H = computer(hub, 'host');
+  H.O.host({ name: 'Host' });
+  const rooms = {};
+  for (const id of ['__proto__', 'constructor', 'toString']) rooms[id] = hub.endpoint(id).join('m-' + H.O.code);
+  hub.flush();
+  rooms.constructor.send({ k: 'chat', text: 'not in the room' });            // never said hello
+  rooms.toString.send({ k: 'ready', ready: true, kind: 'TeleOp' });
+  rooms.__proto__.send({ k: 'hello', name: 'Proto', proto: H.E.NET_PROTO });
+  rooms.__proto__.send({ k: 'pose', x: 1, y: 1, h: 0 });
+  hub.flush();
+  assert.equal(Object.prototype.name, undefined, 'nothing lands on Object.prototype');
+  assert.equal(({}).slot, undefined);
+  assert.equal(H.O.chat.length, 0, 'a stranger can\'t chat');
+  assert.equal(H.O.players.__proto__.name, 'Proto', '"__proto__" is just a player like any other');
+  assert.deepEqual(Object.keys(H.O.players).sort(), ['__proto__', 'host']);
+});
+
+test('online: someone who joins after the final waits in the room, and plays the next match', () => {
+  const hub = loadWithField().netLoopback();
+  const { H, G } = twoInAMatch(hub, 'Autonomous');
+  run(hub, [H, G], 3 + 30.5);
+  assert.equal(H.O.state, 'done');
+  const L = computer(hub, 'late');
+  L.O.join(H.O.code, { name: 'Late' }); hub.flush();
+  assert.equal(L.O.state, 'room', 'not dropped into a match that is over');
+  H.O.again(); hub.flush();
+  L.O.pick('blue1'); hub.flush();
+  for (const pc of [H, G, L]) pc.O.setReady(true, 'Autonomous');
+  hub.flush();
+  assert.ok(H.O.start(), H.O.waitingFor().join('; ')); hub.flush();
+  placeAll([H, G, L]);
+  run(hub, [H, G, L], 5);
+  for (const pc of [G, L]) {
+    assert.equal(pc.O.state, 'playing');
+    assert.deepEqual(pc.F.tips, H.F.tips); assert.deepEqual(pc.F.cells, H.F.cells);
+    assert.equal(pc.M.players.length, 2);
+  }
+});
+
+test('online: a robot that has turned many times still shows its real heading', () => {
+  const hub = loadWithField().netLoopback();
+  const { H, G } = twoInAMatch(hub);
+  run(hub, [H, G], 3.2);
+  G.sim.chassis.h = Math.PI + 40 * 2 * Math.PI + 0.3;                          // 40 turns and a bit
+  run(hub, [H, G], 1);
+  const seen = H.M.players.find((p) => p.id === 'guest').h;
+  assert.ok(Math.abs(Math.atan2(Math.sin(seen - G.sim.chassis.h), Math.cos(seen - G.sim.chassis.h))) < 0.02, `seen at ${seen.toFixed(2)} rad`);
+  assert.ok(Math.abs(seen) <= Math.PI + 1e-9);
+});
+
+test('online: a shot before the host has heard where that robot is doesn\'t count', () => {
+  const hub = loadWithField().netLoopback();
+  const { H, G } = twoInAMatch(hub);
+  run(hub, [H], 3.3);                                                        // the guest hasn't sent a pose
+  const sp = G.M.spots('red', 'pollen')[0];
+  G.O.shot(G.M.params('red', sp.x, sp.y, 'pollen'), 70, sp.v, sp.yaw); hub.flush();
+  assert.equal(H.O.players.guest.fired || 0, 0);
+});
+
+test('online: robots go out 20 times a second and the match 12', () => {
+  const hub = loadWithField().netLoopback();
+  const { H, G } = twoInAMatch(hub);
+  run(hub, [H, G], 3.2);
+  let poses = 0, snaps = 0;
+  const onPose = H.O.onPose.bind(H.O), applySnap = G.O.applySnap.bind(G.O);
+  H.O.onPose = (m, f) => { poses++; onPose(m, f); };
+  G.O.applySnap = (m) => { snaps++; applySnap(m); };
+  run(hub, [H, G], 3);
+  assert.ok(Math.abs(poses / 3 - 20) <= 1, poses / 3 + ' poses a second');
+  assert.ok(Math.abs(snaps / 3 - 12) <= 1, snaps / 3 + ' snapshots a second');
+});

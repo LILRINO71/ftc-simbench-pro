@@ -84,7 +84,7 @@ const Match={
     if(o.slots){
       for(const s of ["red1","red2","blue1","blue2"]) if(o.slots[s]==="ai"){
         const al=/^blue/.test(s)?"blue":"red";
-        this.addBot(al,/2$/.test(s)?(al==="red"?-45:45)*IN:0,s.slice(-1),s);
+        this.addBot(al,netSlotY(s),s.slice(-1),s);
       }
       this.version++;
       return;
@@ -560,8 +560,7 @@ const Match={
   separate(sim){
     const fp=sim&&sim.footprint, ch=sim&&sim.chassis, me=!!(fp&&ch&&!this.noUser), mine=!this.mirror;
     this.userBody=null;
-    const userBox=()=>{ const c=Math.cos(ch.h), s=Math.sin(ch.h), ox=fp.ox||0, oy=fp.oy||0;
-      return {x:ch.x+ox*c-oy*s, y:ch.y+ox*s+oy*c, h:ch.h, hx:fp.hx, hy:fp.hy}; };
+    const userBox=()=>footBox(ch,fp);
     const box=b=>({x:b.x, y:b.y, h:b.h, hx:MATCH_BOT.hx, hy:MATCH_BOT.hy});
     const stopInto=(b,nx,ny)=>{ const into=b.vx*nx+b.vy*ny; if(into<0){ b.vx-=into*nx; b.vy-=into*ny; } };
     // the other drivers' robots: our half, once
@@ -625,10 +624,8 @@ const Match={
   robotsOf(al,sim){
     const out=this.bots.filter(b=>b.al===al).map(b=>({x:b.x, y:b.y, h:b.h, hx:MATCH_BOT.hx, hy:MATCH_BOT.hy, x0:b.x0, name:b.name}));
     for(const p of this.players) if(p.al===al) out.push({x:p.x, y:p.y, h:p.h, hx:p.hx, hy:p.hy, name:p.name});
-    if(al===this.user&&!this.noUser&&sim&&sim.chassis&&sim.footprint){
-      const ch=sim.chassis, fp=sim.footprint, c=Math.cos(ch.h), s=Math.sin(ch.h), ox=fp.ox||0, oy=fp.oy||0;
-      out.push({x:ch.x+ox*c-oy*s, y:ch.y+ox*s+oy*c, h:ch.h, hx:fp.hx, hy:fp.hy, name:"your robot"});
-    }
+    if(al===this.user&&!this.noUser&&sim&&sim.chassis&&sim.footprint)
+      out.push(Object.assign(footBox(sim.chassis,sim.footprint),{name:"your robot"}));
     return out;
   },
   score(sim){
@@ -671,6 +668,12 @@ function segCrossesBox(a,b,B){
   const clip=(p,q)=>{ if(Math.abs(p)<1e-12) return q>0; const r=q/p; if(p<0){ if(r>t1) return false; if(r>t0) t0=r; } else { if(r<t0) return false; if(r<t1) t1=r; } return true; };
   if(!clip(-dx,a.x+B.x)||!clip(dx,B.x-a.x)||!clip(-dy,a.y+B.y)||!clip(dy,B.y-a.y)) return false;
   return t1-t0>1e-6;
+}
+/* The box a robot takes up on the field: its footprint (fp: hx, hy, and ox, oy off the
+   drivetrain centre along its heading) around the chassis pose ch. */
+function footBox(ch,fp){
+  const c=Math.cos(ch.h), s=Math.sin(ch.h), ox=fp.ox||0, oy=fp.oy||0;
+  return {x:ch.x+ox*c-oy*s, y:ch.y+ox*s+oy*c, h:ch.h, hx:fp.hx, hy:fp.hy};
 }
 /* How far to move box A so it no longer overlaps box B (both {x, y, h, hx, hy}),
    along the axis they overlap least on (separating axes); null when apart. */

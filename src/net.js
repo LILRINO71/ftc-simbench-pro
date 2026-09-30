@@ -34,6 +34,11 @@ const netAl=s=>/^blue/.test(s||"")?"blue":"red";
 const netNum=(v,lo,hi,d)=>typeof v==="number"&&isFinite(v)?Math.max(lo,Math.min(hi,v)):d;
 const netStr=(v,n)=>typeof v==="string"?v.replace(/[\u0000-\u001f\u007f]/g,"").trim().slice(0,n):"";
 const netR=v=>Math.round(v*1000)/1000;
+const netWrap=a=>a-2*Math.PI*Math.round(a/(2*Math.PI));   // any angle into -pi..pi, in one step
+/* Dictionaries keyed by another computer's id: no prototype, so an id like
+   "__proto__" or "constructor" is only ever an ordinary key. */
+const netMap=()=>Object.create(null);
+const netIdOk=id=>typeof id==="string"&&id.length>0&&id.length<=64;
 const netCodeOk=c=>typeof c==="string"&&/^[A-HJ-NP-Z2-9]{5}$/.test(c);
 function netCode(rnd){ rnd=rnd||Math.random; let s=""; for(let i=0;i<5;i++) s+=NET_ABC[Math.floor(rnd()*NET_ABC.length)]; return s; }
 /* Where a place starts (G304): place 1 in the middle of the alliance wall, place 2 toward its corner. */
@@ -63,7 +68,6 @@ function netLoopback(){
             for(const [id,m] of R) if(id!==self&&(!T||T.indexOf(id)>=0)) queue.push(()=>{ if(R.get(id)===m&&m.msg) m.msg(JSON.parse(data),self); });
           },
           onMessage(f){ me.msg=f; }, onJoin(f){ me.join=f; }, onLeave(f){ me.leave=f; },
-          peers(){ return [...R.keys()].filter(id=>id!==self); },
           leave(){ if(R.get(self)!==me) return; R.delete(self); for(const [,m] of R) queue.push(()=>m.leave&&m.leave(self)); }
         };
         for(const [id,m] of R){ queue.push(()=>m.join&&m.join(self)); queue.push(()=>R.get(self)===me&&me.join&&me.join(id)); }
@@ -79,15 +83,17 @@ function netLoopback(){
 async function netTrystero(){
   const T=await import(NET_LIB);
   const out={self:T.selfId, onError:null, join(name){
-    const r=T.joinRoom({appId:NET_APP}, name, {onJoinError:d=>{ if(out.onError) out.onError(d); }});
+    const r=T.joinRoom({appId:NET_APP}, name, {onJoinError:d=>{ if(out.onError) out.onError(Object.assign({room:name},d)); }});
     const a=r.makeAction("m");
     let msg=null, jn=null, lv=null;
     a.onMessage=(d,meta)=>{ if(msg) msg(d, meta&&meta.peerId); };
     r.onPeerJoin=id=>{ if(jn) jn(id); };
     r.onPeerLeave=id=>{ if(lv) lv(id); };
-    return {send(m,to){ return a.send(m, to==null?undefined:{target:to}); },
-      onMessage(f){ msg=f; }, onJoin(f){ jn=f; }, onLeave(f){ lv=f; },
-      peers(){ return Object.keys(r.getPeers()); }, leave(){ r.leave(); }};
+    return {send(m,to){
+        // a peer that just left, or a closed channel: the message is lost, nothing more
+        try{ const p=a.send(m, to==null?undefined:{target:to}); if(p&&p.catch) p.catch(()=>{}); }catch(e){}
+      },
+      onMessage(f){ msg=f; }, onJoin(f){ jn=f; }, onLeave(f){ lv=f; }, leave(){ r.leave(); }};
   }};
   return out;
 }
@@ -97,13 +103,13 @@ const Online={
   T:null, self:null, room:null, lobby:null,
   state:"off",           // off | joining | room | playing | done
   role:null,             // host | guest
-  code:null, pub:false, hostId:null, name:"", fp:null,
+  code:null, pub:false, hostId:null, name:"",
   settings:{period:"TeleOp", skill:"typical"},
-  players:{},            // everyone in the room, this computer too: id -> {id, name, slot, ready, kind, host}
-  remote:{},             // the other drivers' robots as last heard
-  slots:null, seed:1, startAt:0, started:false,
-  ads:{}, chat:[], marks:[], score:null, final:null, why:null,
-  offset:0, rtt:0, syncs:[], acc:null, fid:0, heard:{},
+  players:netMap(),      // everyone in the room, this computer too: id -> {id, name, slot, ready, kind, host}
+  remote:netMap(),       // the other drivers' robots as last heard
+  slots:null, seed:1, startAt:0, started:false, lastStart:null, fieldKey:null,
+  ads:netMap(), chat:[], marks:[], score:null, final:null, why:null,
+  offset:0, rtt:0, syncs:[], acc:null, fid:0, heard:netMap(),
   now:()=>Date.now(),
   subs:[],
 
@@ -115,7 +121,6 @@ const Online={
   me(){ return this.players[this.self]||null; },
   mySlot(){ const p=this.me(); return p?p.slot:null; },
   myAl(){ return netAl(this.mySlot()); },
-  hosting(){ return this.role==="host"&&this.state!=="off"; },
   guest(){ return this.role==="guest"&&this.state!=="off"; },
   playing(){ return this.state==="playing"; },
   inMatch(){ return this.state==="playing"||this.state==="done"; },
@@ -129,9 +134,9 @@ const Online={
     L.onMessage((m,from)=>this.lobbyMsg(m,from));
     L.onJoin(id=>{ if(this.pub&&this.role==="host"&&this.state==="room") L.send(this.ad(),id); });
   },
-  unbrowse(){ if(this.lobby){ try{ this.lobby.leave(); }catch(e){} this.lobby=null; } this.ads={}; },
+  unbrowse(){ if(this.lobby){ try{ this.lobby.leave(); }catch(e){} this.lobby=null; } this.ads=netMap(); },
   lobbyMsg(m,from){
-    if(!m||m.k!=="ad"||!from||!netCodeOk(m.code)) return;
+    if(!m||m.k!=="ad"||!netIdOk(from)||!netCodeOk(m.code)) return;
     if(m.gone){ delete this.ads[m.code]; this.emit("ads"); return; }
     this.ads[m.code]={code:m.code, hid:from, name:netStr(m.name,40)||"An FTC match",
       period:m.period==="Autonomous"?"Autonomous":"TeleOp", skill:MATCH_SKILL[m.skill]?m.skill:"typical",
@@ -153,8 +158,8 @@ const Online={
   /* ---- hosting and joining ---- */
   reset(){
     this.state="off"; this.role=null; this.code=null; this.pub=false; this.hostId=null; this.why=null;
-    this.players={}; this.remote={}; this.slots=null; this.started=false; this.score=null; this.final=null;
-    this.chat=[]; this.marks=[]; this.syncs=[]; this.offset=0; this.rtt=0; this.heard={};
+    this.players=netMap(); this.remote=netMap(); this.slots=null; this.started=false; this.score=null; this.final=null;
+    this.chat=[]; this.marks=[]; this.syncs=[]; this.offset=0; this.rtt=0; this.heard=netMap(); this.lastStart=null; this.fieldKey=null;
     this.acc={pose:0, snap:0, sync:0, ad:0};
   },
   open(){
@@ -163,12 +168,12 @@ const Online={
     R.onJoin(id=>this.peerJoin(id));
     R.onLeave(id=>this.peerLeave(id));
   },
-  /* o: {name, pub, period, skill, fp:{hx, hy}} */
+  /* o: {name, pub, period, skill} */
   host(o){
     o=o||{};
     if(!this.T) return false;
     this.leave(); this.reset();
-    this.role="host"; this.state="room"; this.pub=!!o.pub; this.name=netStr(o.name,24)||"Host"; this.fp=o.fp||null;
+    this.role="host"; this.state="room"; this.pub=!!o.pub; this.name=netStr(o.name,24)||"Host";
     this.code=netCodeOk(o.code)?o.code:netCode(); this.hostId=this.self;
     this.settings={period:o.period==="Autonomous"?"Autonomous":"TeleOp", skill:MATCH_SKILL[o.skill]?o.skill:"typical"};
     this.players[this.self]={id:this.self, name:this.name, slot:"red1", ready:false, kind:null, host:true};
@@ -178,14 +183,14 @@ const Online={
     this.emit("room");
     return true;
   },
-  /* o: {name, hid (the host, when the lobby said), fp} */
+  /* o: {name, hid (the host, when the lobby said)} */
   join(code,o){
     o=o||{};
     code=netStr(code,8).toUpperCase();
     if(!this.T||!netCodeOk(code)) return false;
     this.leave(); this.reset();
-    this.role="guest"; this.state="joining"; this.code=code; this.name=netStr(o.name,24)||"Guest"; this.fp=o.fp||null;
-    this.hostId=o.hid||null;
+    this.role="guest"; this.state="joining"; this.code=code; this.name=netStr(o.name,24)||"Guest";
+    this.hostId=netIdOk(o.hid)?o.hid:null;
     this.players[this.self]={id:this.self, name:this.name, slot:null, ready:false, kind:null};
     this.unbrowse();
     this.open();
@@ -221,7 +226,7 @@ const Online={
 
   /* ---- messages ---- */
   recv(m,from){
-    if(!m||typeof m!=="object"||typeof m.k!=="string"||typeof from!=="string") return;
+    if(!m||typeof m!=="object"||typeof m.k!=="string"||!netIdOk(from)) return;
     const fromHost=this.role==="guest"&&from===this.hostId;
     switch(m.k){
       case "hello": return this.onHello(m,from);
@@ -262,8 +267,8 @@ const Online={
     p.name=netStr(m.name,24)||"Guest";
     this.room.send(Object.assign(this.rosterMsg(),{k:"welcome", now:this.now()}),from);
     this.sendRoster();
-    // arriving mid-match: they watch
-    if(this.inMatch()&&this.lastStart) this.room.send(Object.assign({},this.lastStart,{late:true}),from);
+    // arriving mid-match: they watch (after the end, they're simply in the room for the next one)
+    if(this.state==="playing"&&this.lastStart) this.room.send(Object.assign({},this.lastStart,{late:true}),from);
   },
   rosterMsg(){
     return {k:"roster", state:this.state, settings:this.settings,
@@ -276,7 +281,7 @@ const Online={
     this.emit("room");
   },
   onRoster(m){
-    const P={};
+    const P=netMap();
     for(const p of (Array.isArray(m.players)?m.players:[]).slice(0,NET_MAX_PLAYERS)){
       const id=netStr(p&&p.id,64); if(!id) continue;
       P[id]={id, name:netStr(p.name,24)||"Player", slot:NET_SLOTS.indexOf(p.slot)>=0?p.slot:null, ready:!!p.ready,
@@ -288,7 +293,8 @@ const Online={
     const s=m.settings||{};
     this.settings={period:s.period==="Autonomous"?"Autonomous":"TeleOp", skill:MATCH_SKILL[s.skill]?s.skill:"typical"};
     if(this.state==="joining") this.state="room";
-    if(m.state==="room"&&this.state==="done"){ this.state="room"; this.final=null; this.unmatch(); }
+    // the host is back in the room: so is everyone, whatever they last saw
+    if(m.state==="room"&&this.inMatch()){ this.state="room"; this.final=null; this.unmatch(); }
     this.emit("room");
   },
 
@@ -358,7 +364,7 @@ const Online={
     this.slots=m.slots; this.seed=m.seed;
     this.settings={period:m.period, skill:m.skill};
     this.startAt=m.at-(this.role==="host"?0:this.offset);
-    this.state="playing"; this.started=false; this.score=null; this.final=null; this.marks=[];
+    this.state="playing"; this.started=false; this.score=null; this.final=null; this.marks=[]; this.fieldKey=null;
     for(const id in this.players){ this.players[id].fired=0; this.players[id].scored=0; }
     this.acc={pose:0, snap:0, sync:0, ad:0};
     if(typeof Field!=="undefined"&&Field.ok) Field.reset();
@@ -381,34 +387,40 @@ const Online={
     if(this.state==="off"||!this.room) return;
     this.acc.sync+=dt;
     if(this.role==="guest"&&this.hostId&&this.acc.sync>=(this.syncs.length<4?0.5:4)){ this.acc.sync=0; this.sync(); }
-    if(this.role==="host"&&this.pub&&this.state==="room"&&this.lobby){ this.acc.ad+=dt; if(this.acc.ad>=2){ this.acc.ad=0; this.lobby.send(this.ad()); } }
+    if(this.role==="host"&&this.pub&&this.state==="room"&&this.lobby&&this.due("ad",dt,2)) this.lobby.send(this.ad());
     if(this.state!=="playing") return;
     this.smooth(dt);
     // my robot, to everyone
-    this.acc.pose+=dt;
-    if(this.mySlot()&&sim&&sim.chassis&&this.acc.pose>=1/NET_HZ.pose){ this.acc.pose=0; this.room.send(this.poseMsg(sim)); }
+    if(this.due("pose",dt,1/NET_HZ.pose)&&this.mySlot()&&sim&&sim.chassis) this.room.send(this.poseMsg(sim));
     if(this.now()<this.startAt) return;
     if(this.role==="host"){
       if(Match.t<Match.len){
         Match.tick(dt,sim);
         this.flightsOut();
-        this.acc.snap+=dt;
-        if(this.acc.snap>=1/NET_HZ.snap){ this.acc.snap=0; this.room.send(this.snap(sim)); }
+        if(this.due("snap",dt,1/NET_HZ.snap)) this.room.send(this.snap(sim));
       }else if(!this.final) this.finish(sim);
     }else this.mirror(dt,sim);
   },
 
+  /* Every `period` seconds on the 50 Hz steps, keeping the remainder so the rate is the rate. */
+  due(what,dt,period){
+    const a=this.acc[what]=(this.acc[what]||0)+dt;
+    if(a<period-1e-9) return false;
+    this.acc[what]=a>=2*period?0:a-period;
+    return true;
+  },
+
   /* ---- robots: mine out, the others in ---- */
   poseMsg(sim){
-    const ch=sim.chassis, fp=sim.footprint||{hx:MATCH_BOT.hx, hy:MATCH_BOT.hy}, c=Math.cos(ch.h), s=Math.sin(ch.h), ox=fp.ox||0, oy=fp.oy||0;
-    const v=sim.vel||{x:0, y:0};
-    return {k:"pose", x:netR(ch.x+ox*c-oy*s), y:netR(ch.y+ox*s+oy*c), h:netR(ch.h), vx:netR(v.x||0), vy:netR(v.y||0), hx:netR(fp.hx), hy:netR(fp.hy)};
+    const b=footBox(sim.chassis,sim.footprint||{hx:MATCH_BOT.hx, hy:MATCH_BOT.hy}), v=sim.vel||{x:0, y:0};
+    // the chassis heading keeps counting turns; the wire carries it as -pi..pi
+    return {k:"pose", x:netR(b.x), y:netR(b.y), h:netR(netWrap(b.h)), vx:netR(v.x||0), vy:netR(v.y||0), hx:netR(b.hx), hy:netR(b.hy)};
   },
   onPose(m,from){
     const p=this.players[from]; if(!p||!p.slot||!this.inMatch()) return;
     const H=(typeof Field!=="undefined"&&Field.ok?Field.half():1.83)+0.2;
     const R=this.remote[from]||(this.remote[from]={id:from});
-    R.tx=netNum(m.x,-H,H,0); R.ty=netNum(m.y,-H,H,0); R.th=netNum(m.h,-100,100,0);
+    R.tx=netNum(m.x,-H,H,0); R.ty=netNum(m.y,-H,H,0); R.th=netWrap(netNum(m.h,-1e6,1e6,0));
     R.vx=netNum(m.vx,-4,4,0); R.vy=netNum(m.vy,-4,4,0);
     R.hx=netNum(m.hx,0.08,0.35,MATCH_BOT.hx); R.hy=netNum(m.hy,0.08,0.35,MATCH_BOT.hy); R.age=0;
     if(R.x==null){ R.x=R.tx; R.y=R.ty; R.h=R.th; }
@@ -440,7 +452,7 @@ const Online={
     if(this.often(from,"shot",150)) return;
     const al=netAl(p.slot), R=this.remote[from], L=Field.data.field.field.half-9;
     const x=netNum(m.x,-L,L,0), y=netNum(m.y,-L,L,0);
-    if(R&&Math.hypot(x*IN-R.x,y*IN-R.y)>1.2) return;                 // not from where that robot is
+    if(!R||Math.hypot(x*IN-R.x,y*IN-R.y)>1.2) return;                // not from where that robot is (or it hasn't said)
     const kind=m.ball==="nectar"?"nectar":"pollen", motors=(Field.data.motors&&Field.data.motors.motors)||[];
     const hs=Array.isArray(m.hs)?m.hs:[], side=v=>v===1||v===-1?v:null;
     const hive={red:side(hs[0])||Field.hive.red, blue:side(hs[1])||Field.hive.blue};
@@ -524,7 +536,7 @@ const Online={
     for(const row of (Array.isArray(m.bots)?m.bots:[]).slice(0,4)){
       if(!Array.isArray(row)) continue;
       const b=M.bots.find(x=>x.id===row[0]); if(!b) continue;
-      b.nx=num(row[1],b.x); b.ny=num(row[2],b.y); b.nh=netNum(row[3],-100,100,b.h);
+      b.nx=num(row[1],b.x); b.ny=num(row[2],b.y); b.nh=netWrap(netNum(row[3],-1e6,1e6,b.h));
       b.vx=netNum(row[4],-4,4,0); b.vy=netNum(row[5],-4,4,0); b.hold=netEls(row[6],4); b.age=0;
     }
     if(Array.isArray(m.floor)) M.floor=m.floor.slice(0,300).filter(Array.isArray).map(r=>{ const e=netEls(r[1],1)[0]||{kind:"pollen", color:null};
