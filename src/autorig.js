@@ -51,20 +51,23 @@ const {autoRig}=(function(){
       extra[id]={label:(A.kind==="servo"?"Servo ":"Motor ")+na, part:A.part||A.partGuess||null, body:(A.body||[]).concat(A.mounts||[])};
       if(A.ambiguous) review.push("\""+extra[id].label+"\": which end of the servo is its output isn't certain. Check its axis in the CAD view.");
       if(A.shapeOnly) review.push("\""+extra[id].label+"\" was found from its shape alone (no name or part number says what it is).");
-      // a gear it meshes with turns the other way, at the ratio of their sizes
+      // a gear it meshes with turns the other way, and a pulley at the far end of a belt or
+      // chain the same way, at the ratio of their sizes; each driven part once, each name its own
+      const followed=new Set(), uid=base=>{ let k=base, n=2; while(joints.some(j=>j.id===k)) k=base+" "+(n++); return k; };
       for(const M of A.meshes||[]){
-        const gid=id+" gear", ax=dot(M.withAxis,A.axis)<0?M.withAxis.map(v=>-v):M.withAxis;
+        if(followed.has(M.with)) continue; followed.add(M.with);
+        const gid=uid(id+" gear"), ax=dot(M.withAxis,A.axis)<0?M.withAxis.map(v=>-v):M.withAxis;
         joints.push({id:gid, kind:"revolute-lift", axis:ax, pivot:M.withCentre.map(v=>v/1000), parent:"chassis", couple:{to:id, ratio:M.ratio}});
         seeds[gid]=[M.with]; extra[gid]={label:extra[id].label+", geared", body:extra[id].body};
       }
-      // a pulley at the far end of a belt or chain turns the same way, at the ratio of their sizes
-      (A.belts||[]).forEach((B,k)=>{
-        const bid=id+" belt"+(A.belts.length>1?" "+(k+1):""), ax=dot(B.withAxis,A.axis)<0?B.withAxis.map(v=>-v):B.withAxis;
+      for(const B of A.belts||[]){
+        belts.add(B.belt);
+        if(followed.has(B.with)) continue; followed.add(B.with);
+        const bid=uid(id+" belt"), ax=dot(B.withAxis,A.axis)<0?B.withAxis.map(v=>-v):B.withAxis;
         joints.push({id:bid, kind:"revolute-lift", axis:ax, pivot:B.withCentre.map(v=>v/1000), parent:"chassis", couple:{to:id, ratio:B.ratio}});
         seeds[bid]=[B.with]; extra[bid]={label:extra[id].label+", belt", body:extra[id].body};
-        belts.add(B.belt);
         if(!B.named) review.push("\""+extra[bid].label+"\": a belt or chain was found from its shape alone. Check its ratio ("+B.ratio+").");
-      });
+      }
     }
     const spool=acts.filter(A=>A.role==="unloaded"&&A.kind==="motor").length;
     if(spool&&(SL.joints||[]).length)
@@ -228,6 +231,13 @@ const {autoRig}=(function(){
     const final={label, members:{}};
     for(const j of joints) final.members[j.id]=[];
     label.forEach((l,i)=>{ if(l) final.members[l].push(i); });
+    // a joint that ends up carrying nothing (its gear or pulley went to another joint) isn't one;
+    // what hung from it or followed it hangs from, or follows, what it did
+    for(let again=true; again;){ again=false;
+      for(const j of joints.slice()){
+        if(final.members[j.id].length||joints.some(k=>k.parent===j.id||(k.couple&&k.couple.to===j.id))) continue;
+        joints.splice(joints.indexOf(j),1); again=true;
+      } }
     const spec={format:JOINT_SPEC_FORMAT, version:1, robot:(cad.name||"this robot")+" (found automatically)", solids:S.length, auto:true,
       about:"Found from the STEP file's geometry by src/autorig.js. Check each joint in the CAD view; fix anything with the joint editor.",
       joints:joints.map(j=>{

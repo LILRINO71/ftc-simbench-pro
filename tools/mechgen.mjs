@@ -83,6 +83,20 @@ export const MECHS = {
       { id: 'pinion', kind: 'revolute', axis: Y, pivot: [0.10, 0.027, 0.200], actuator: 'motor' },
       { id: 'arm', kind: 'revolute', axis: Y, pivot: [0.10, 0.036, 0.240], follows: 'pinion', ratio: -1 / 3 }] };
   },
+  /* one pinion driving two gears, above and below it, each with its own arm (FTC 8375's 2016 robot has this) */
+  'twin-gears': () => {
+    const kids = [post('Gear Tower Plate', [0.10, 0.030, TOP + 0.110], [0.080, 0.006, 0.220]),
+      inst(motor5203('goBILDA 5203 Arm Motor 5203-2402-0019'), along([0.10, 0.027, 0.200], Y)),
+      tag(inst(hub('Pinion Gear 20T', 0.010, 0.008), along([0.10, 0.036, 0.200], Y)), 'pinion')];
+    for (const [k, z, sx] of [['upper', 0.240, 1], ['lower', 0.160, -1]]) kids.push(
+      tag(inst(hexShaft('Axle ' + k, 0.040), along([0.10, 0.020, z], Y)), k),
+      tag(inst(hub('Gear 60T ' + k, 0.030, 0.008), along([0.10, 0.036, z], Y)), k),
+      tag(inst(bar('Arm ' + k, [0.200, 0.010, 0.020]), frame([0.10 + sx * 0.130, 0.049, z])), k));
+    return { kids, ignore: ['Axle upper', 'Axle lower'], joints: [
+      { id: 'pinion', kind: 'revolute', axis: Y, pivot: [0.10, 0.027, 0.200], actuator: 'motor' },
+      { id: 'upper', kind: 'revolute', axis: Y, pivot: [0.10, 0.036, 0.240], follows: 'pinion', ratio: -1 / 3 },
+      { id: 'lower', kind: 'revolute', axis: Y, pivot: [0.10, 0.036, 0.160], follows: 'pinion', ratio: -1 / 3 }] };
+  },
   /* a belt: a small pulley on the motor, a big one on the arm's shaft up the tower */
   'arm-belt': () => {
     // the belt's two straight runs, each riding both pulley rims (6 mm wide, 1.5 mm thick)

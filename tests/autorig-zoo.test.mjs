@@ -33,3 +33,14 @@ test('zoo: an unnamed Core Hex is still missed (so this test notices when it is 
   assert.equal(s.falseMove, 0);
   assert.deepEqual(s.missing, ['arm']);
 });
+
+test('zoo: every found spec loads, with each joint named once (a pinion driving two gears gave both "motor 1 gear")', () => {
+  for (const name of Object.keys(MECHS)) for (const strip of [false, true]) {
+    const { text } = buildMech(name, { strip });
+    const R = E.autoRig(E.parseSTEP(text), {});
+    if (!R || !R.spec) continue;
+    const ids = R.spec.joints.map((j) => j.id);
+    assert.equal(new Set(ids).size, ids.length, name + ': ' + ids.join(', '));
+    assert.doesNotThrow(() => E.applyJointSpec(E.parseSTEP(text), R.spec), name);
+  }
+});
