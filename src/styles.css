@@ -1,54 +1,54 @@
-/* BIOBUZZ: honey on warm charcoal. Red and blue stay for the alliances only. */
+/* Calm instrument: graphite and paper. Honey marks only the next thing to press;
+   red and blue stay for the alliances. */
 :root{
   color-scheme:light;
-  --bg:#F4EFE5; --panel:#FFFDF8; --panel-2:#F8F3E9; --line:#E1D7C4; --line-2:#ECE4D5;
-  --tx:#1F1A11; --tx-2:#554C3B; --tx-3:#766B57;
-  --accent:#EDA70E; --accent-tx:#8A5C00; --accent-ink:#1F1500; --accent-soft:#FBEFCF; --accent-line:#E3C46C;
-  --pass:#1F7A3A; --pass-soft:#E1F1E4;
-  --warn:#B04A12; --warn-soft:#FBE6D6;
-  --fail:#B8352D; --fail-soft:#F8E0DD;
-  --viewport:#12100C; --viewport-2:#1E1A12;
-  --code-bg:#FBF7EE; --code-gutter:#F3EDE1;
-  --syn-k:#A15C00; --syn-t:#6B4B16; --syn-s:#2E7D32; --syn-n:#B04A12; --syn-c:#8F846F; --syn-a:#8545A8; --syn-g:#0E6F86;
-  --shadow:0 1px 2px rgba(40,30,10,.06), 0 8px 24px rgba(40,30,10,.08);
-  /* chart: validated categorical order, hairline grid */
+  --bg:#EFEEEA; --panel:#FAFAF8; --panel-2:#F3F2EE; --line:#DDDBD4; --line-2:#E8E6E1;
+  --tx:#1B1C1F; --tx-2:#4A4D54; --tx-3:#73767D;
+  --accent:#E3A738; --accent-tx:#855A0B; --accent-ink:#1E1604; --accent-soft:#F4EAD4; --accent-line:#DFC68D;
+  --pass:#2C7A45; --pass-soft:#E3EEE6;
+  --warn:#A2561B; --warn-soft:#F3E7DB;
+  --fail:#AF3A33; --fail-soft:#F3E0DE;
+  --viewport:#0F1012; --viewport-2:#18191C;
+  --code-bg:#FAFAF8; --code-gutter:#F1F0EC;
+  --syn-k:#8F5A08; --syn-t:#5E5134; --syn-s:#2F6F3B; --syn-n:#A2561B; --syn-c:#8B8D92; --syn-a:#7A4E9E; --syn-g:#1F6B7E;
+  --shadow:0 1px 2px rgba(20,20,25,.05), 0 10px 30px rgba(20,20,25,.08);
   --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100; --s5:#e87ba4; --s6:#008300; --s7:#4a3aa7; --s8:#e34948;
-  --grid:#EFE8DA; --axis:#D5CAB4;
+  --grid:#ECEAE5; --axis:#D3D0C8;
   --mono:'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace;
-  --cond:'Barlow Semi Condensed', 'Arial Narrow', system-ui, sans-serif;
-  --body:'Barlow', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --cond:'Instrument Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --body:'Instrument Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
 }
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
     color-scheme:dark;
-    --bg:#0F0D0A; --panel:#171410; --panel-2:#1E1A14; --line:#302A21; --line-2:#252019;
-    --tx:#EEE6D5; --tx-2:#BDB29C; --tx-3:#8C826E;
-    --accent:#F2B230; --accent-tx:#F4BE4C; --accent-ink:#1A1204; --accent-soft:#2D2412; --accent-line:#6B5418;
-    --pass:#5DBE72; --pass-soft:#132416;
-    --warn:#EE7F42; --warn-soft:#2E1C10;
-    --fail:#EC5B51; --fail-soft:#2F1614;
-    --viewport:#0C0A08; --viewport-2:#18140E;
-    --code-bg:#13110D; --code-gutter:#191612;
-    --syn-k:#F2B230; --syn-t:#E6D2A4; --syn-s:#9CCB86; --syn-n:#F0935C; --syn-c:#7E7462; --syn-a:#C79BFF; --syn-g:#6FD0E0;
-    --shadow:0 1px 2px rgba(0,0,0,.45), 0 10px 28px rgba(0,0,0,.4);
+    --bg:#0C0D0F; --panel:#121316; --panel-2:#17181C; --line:#25272C; --line-2:#1C1E22;
+    --tx:#E5E4E0; --tx-2:#A6A8AD; --tx-3:#777A81;
+    --accent:#E8B44E; --accent-tx:#EBC06A; --accent-ink:#1B1406; --accent-soft:#262115; --accent-line:#584820;
+    --pass:#62BD7B; --pass-soft:#132019;
+    --warn:#DF8A50; --warn-soft:#271C14;
+    --fail:#E6665D; --fail-soft:#291718;
+    --viewport:#0A0B0D; --viewport-2:#131417;
+    --code-bg:#101114; --code-gutter:#15161A;
+    --syn-k:#E3B04E; --syn-t:#D7CDB6; --syn-s:#98C487; --syn-n:#E79463; --syn-c:#6F737B; --syn-a:#B99AF0; --syn-g:#72C6D6;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 12px 32px rgba(0,0,0,.38);
     --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#008300; --s7:#9085e9; --s8:#e66767;
-    --grid:#262119; --axis:#3A3328;
+    --grid:#202226; --axis:#34373D;
   }
 }
 :root[data-theme="dark"]{
   color-scheme:dark;
-  --bg:#0F0D0A; --panel:#171410; --panel-2:#1E1A14; --line:#302A21; --line-2:#252019;
-  --tx:#EEE6D5; --tx-2:#BDB29C; --tx-3:#8C826E;
-  --accent:#F2B230; --accent-tx:#F4BE4C; --accent-ink:#1A1204; --accent-soft:#2D2412; --accent-line:#6B5418;
-  --pass:#5DBE72; --pass-soft:#132416;
-  --warn:#EE7F42; --warn-soft:#2E1C10;
-  --fail:#EC5B51; --fail-soft:#2F1614;
-  --viewport:#0C0A08; --viewport-2:#18140E;
-  --code-bg:#13110D; --code-gutter:#191612;
-  --syn-k:#F2B230; --syn-t:#E6D2A4; --syn-s:#9CCB86; --syn-n:#F0935C; --syn-c:#7E7462; --syn-a:#C79BFF; --syn-g:#6FD0E0;
-  --shadow:0 1px 2px rgba(0,0,0,.45), 0 10px 28px rgba(0,0,0,.4);
+  --bg:#0C0D0F; --panel:#121316; --panel-2:#17181C; --line:#25272C; --line-2:#1C1E22;
+  --tx:#E5E4E0; --tx-2:#A6A8AD; --tx-3:#777A81;
+  --accent:#E8B44E; --accent-tx:#EBC06A; --accent-ink:#1B1406; --accent-soft:#262115; --accent-line:#584820;
+  --pass:#62BD7B; --pass-soft:#132019;
+  --warn:#DF8A50; --warn-soft:#271C14;
+  --fail:#E6665D; --fail-soft:#291718;
+  --viewport:#0A0B0D; --viewport-2:#131417;
+  --code-bg:#101114; --code-gutter:#15161A;
+  --syn-k:#E3B04E; --syn-t:#D7CDB6; --syn-s:#98C487; --syn-n:#E79463; --syn-c:#6F737B; --syn-a:#B99AF0; --syn-g:#72C6D6;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 12px 32px rgba(0,0,0,.38);
   --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#008300; --s7:#9085e9; --s8:#e66767;
-  --grid:#262119; --axis:#3A3328;
+  --grid:#202226; --axis:#34373D;
 }
 
 *{box-sizing:border-box}
@@ -769,3 +769,99 @@ kbd{display:inline-block; min-width:15px; padding:0 3px; border:1px solid var(--
 .mh-events li span{font-family:var(--mono); opacity:.6; margin-right:5px;}
 .mh-events li.red{color:#ffc4bf} .mh-events li.blue{color:#c3d8ff}
 @media (max-width:760px){ .match-skill{display:none;} .match-hud{top:40px; right:6px; min-width:180px;} }
+
+/* ================= calm layer =================
+   Sentence case in one typeface instead of spaced capitals, controls that sit
+   back until they're needed, and the honey kept for the next Driver Station
+   step (and the tab you're on). */
+body{font-size:13px; letter-spacing:0; -webkit-font-smoothing:antialiased;}
+.op-pick label,.sec-head h3,.cell-head h3,table.grid th,.pip-head,.gauge .gsub,.score .l,.fignore,.fdetails summary,.ffix b,
+.ignored-head h4,.vk span,.shot-pick label,.chart h4,.cmp-sec h4,.cmp-row .ctl .st,.tour-step,.msec h4,.chainrow .cj,.brand-text span,
+.rail-strip,.kind,.tag,.mh-al small,.mh-mid{text-transform:none; letter-spacing:0;}
+.sec-head h3,.cell-head h3{font-size:12.5px; font-weight:600; color:var(--tx);}
+.sec{padding:14px 16px;}
+.sec-head h3:hover{color:var(--tx-2);}
+.hint{color:var(--tx-3);}
+table.grid th{font-size:11px; font-weight:500;}
+.op-pick label{font-size:11px; font-weight:500;}
+.rail-strip{font-size:12px; font-weight:500; letter-spacing:.02em;}
+.tabs button[role=tab]{font-size:13px; font-weight:500;}
+.tabs button[aria-selected="true"]{font-weight:600;}
+
+/* the bar: fewer, quieter things */
+.dsbar{gap:14px; padding:0 16px;}
+.brand-mark{width:26px; height:26px;}
+.brand-text b{font-size:16px; font-weight:600; letter-spacing:-.01em;}
+.brand-text span{font-family:var(--body); font-size:11px; color:var(--tx-3); margin-top:1px;}
+.brand-text .pro{background:transparent; color:var(--accent-tx); border:1px solid var(--accent-line); font-family:var(--body); font-size:10px; font-weight:600; letter-spacing:0; text-transform:none; padding:0 5px;}
+.op-pick{border-left-color:var(--line);}
+.op-select-wrap select{font-size:13.5px; font-weight:500; background:var(--panel); border-radius:7px;}
+.kind{font-family:var(--body); font-size:10.5px; font-weight:600; background:transparent; color:var(--tx-3); border-color:var(--line);}
+.kind.auto{background:transparent; color:var(--warn); border-color:color-mix(in srgb, var(--warn) 45%, var(--line));}
+.ds-btn{font-family:var(--body); font-weight:600; font-size:12.5px; letter-spacing:.03em; min-width:74px; height:34px; border-width:1px; background:var(--panel); color:var(--tx-2);}
+.ds-btn:hover:not(:disabled){border-color:var(--tx-3); color:var(--tx);}
+.ds-btn.next{box-shadow:0 1px 0 rgba(0,0,0,.06), 0 6px 18px color-mix(in srgb, var(--accent) 28%, transparent);}
+.ds-clock{font-size:20px; font-weight:600;}
+.hdr-btn,.status-chip,.ctrl-chip,.theme-btn{background:transparent; border-color:transparent; font-family:var(--body); font-weight:500; font-size:12.5px; color:var(--tx-2);}
+.hdr-btn:hover,.ctrl-chip:hover,.theme-btn:hover{background:var(--panel-2); border-color:var(--line); color:var(--tx);}
+.hdr-btn.support{background:transparent; border-color:transparent; color:var(--tx-3);}
+.hdr-btn.support span{display:none;}
+.hdr-btn.support:hover{color:var(--fail);}
+.ctrl-chip:not(.live) #ctrlLabel{display:none;}
+.ctrl-chip{padding:0 9px;}
+.ctrl-chip.live{background:var(--pass-soft); border-color:transparent;}
+.status-chip{border-color:transparent;}
+.status-chip.go{background:transparent; border-color:transparent;}
+.status-chip .dot{box-shadow:none; width:7px; height:7px;}
+#phasePill{border-color:transparent; background:transparent; font-family:var(--body); font-size:11.5px;}
+
+/* the Match menu (AI robots, their skill, the clock) */
+.match-wrap{position:relative; flex:none;}
+.match-wrap .hdr-btn{border-color:var(--line); background:var(--panel);}
+.match-wrap .hdr-btn i{width:6px; height:6px; border-radius:50%; background:var(--line); flex:none;}
+.match-wrap .hdr-btn.on i{background:var(--pass);}
+.match-menu{left:auto; right:0; min-width:290px; max-width:calc(100vw - 24px); padding:6px;}
+.mm-row{display:flex; align-items:flex-start; gap:10px; padding:9px 10px; border-radius:8px; cursor:pointer; font-size:12.5px; color:var(--tx);}
+.mm-row:hover{background:var(--panel-2);}
+.mm-row input{margin-top:3px; accent-color:var(--accent);}
+.mm-row b{display:block; font-weight:600;}
+.mm-row small{display:block; color:var(--tx-3); font-size:11.5px; margin-top:1px;}
+.mm-row.skill{align-items:center; justify-content:space-between; cursor:default;}
+.mm-row .match-skill{font-size:12.5px; padding:3px 6px; border-radius:6px;}
+
+/* quiet buttons: a soft wash for the recommended one, no filled blocks */
+.btn-sm{font-family:var(--body); font-weight:500; background:var(--panel); border-radius:6px;}
+.btn-sm:hover{border-color:var(--tx-3); color:var(--tx);}
+.btn-sm.primary{background:var(--accent-soft); border-color:transparent; color:var(--accent-tx); font-weight:600;}
+.btn-sm.primary:hover:not(:disabled){filter:none; border-color:var(--accent-line); color:var(--accent-tx);}
+.seg button.on{background:var(--panel); color:var(--tx); box-shadow:0 0 0 1px var(--line), 0 1px 2px rgba(0,0,0,.08);}
+.menu button:hover{background:var(--panel-2); color:var(--tx);}
+.rc-cand{background:var(--panel);}
+.bm-link{background:var(--accent-soft); color:var(--accent-tx) !important; border:1px dashed var(--accent-line);}
+
+/* the viewport's overlays: neutral glass, not warm brown */
+.vp-title{color:#8B8F96;}
+.vp-hint{color:#ECEBE7;}
+.vp-hint small{color:#9A9DA3;}
+.vp-tip,.pip{background:rgba(12,13,15,.82); border-color:rgba(255,255,255,.08);}
+.btn-ghost{background:rgba(255,255,255,.05); color:#CFD1D5; border-color:rgba(255,255,255,.12);}
+.match-hud{background:rgba(12,13,15,.72); border-color:rgba(255,255,255,.07);}
+.vp-tour{position:absolute; left:14px; bottom:14px; z-index:3; display:inline-flex; align-items:center; gap:8px; padding:7px 12px; border-radius:18px;
+  background:rgba(12,13,15,.78); color:#ECEBE7; border:1px solid rgba(255,255,255,.12); font:500 12.5px var(--body); cursor:pointer;
+  backdrop-filter:blur(6px); animation:tourIn .5s .8s both;}
+.vp-tour:hover{border-color:rgba(232,180,78,.6);}
+.vp-tour i{width:6px; height:6px; border-radius:50%; background:var(--accent);}
+.vp-tour span{color:#9A9DA3; margin-left:2px;}
+@keyframes tourIn{from{opacity:0; transform:translateY(6px)} to{opacity:1; transform:none}}
+
+/* the dock: the same panel, calmer */
+.dock{background:var(--panel);}
+.cell-tele .cell-head{border-bottom-color:var(--line-2);}
+.cell-tele .pill{background:transparent; border-color:var(--line); color:var(--tx-3);}
+.cell-tele .pill.live{border-color:var(--pass); color:var(--pass);}
+.pill{font-family:var(--body); font-size:11px;}
+.cell-tele{background:#0E0F11;}
+.cell-tele .cell-head{background:var(--panel);}
+.cell-tele .cell-head h3{color:var(--tx);}
+#phasePill.accentp{color:var(--tx-3);}
+#phasePill.live{color:var(--pass);}

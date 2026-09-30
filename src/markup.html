@@ -29,11 +29,17 @@
       <div class="ds-clock" id="dsClock" aria-live="off">2:00</div>
       <div class="ds-clock-bar"><i id="dsBar"></i></div>
     </div>
-    <label class="practice"><input type="checkbox" id="practice"> no time limit</label>
-    <label class="practice" title="A partner and two opponents the bench drives, and both alliances' HUMAN PLAYERS, playing the period your OpMode runs"><input type="checkbox" id="matchOn"> AI robots</label>
-    <select class="match-skill" id="matchSkill" title="How good the AI teams are" aria-label="AI skill">
-      <option value="rookie">rookie</option><option value="typical" selected>typical</option><option value="elite">elite</option>
-    </select>
+    <div class="match-wrap">
+      <button class="hdr-btn" id="matchBtn" type="button" aria-expanded="false" aria-controls="matchMenu" title="The rest of the match: AI robots, human players, the clock">
+        <i aria-hidden="true"></i><span>Match</span>
+      </button>
+      <div class="menu match-menu" id="matchMenu" hidden>
+        <label class="mm-row"><input type="checkbox" id="matchOn"><span><b>AI robots and human players</b><small>A partner and two opponents the bench drives, and both alliances' human players</small></span></label>
+        <label class="mm-row skill"><span><b>How good the AI teams are</b></span>
+          <select class="match-skill" id="matchSkill" aria-label="AI skill"><option value="rookie">Rookie</option><option value="typical" selected>Typical</option><option value="elite">Elite</option></select></label>
+        <label class="mm-row"><input type="checkbox" id="practice"><span><b>No time limit</b><small>Practice: the clock counts up and never stops the OpMode</small></span></label>
+      </div>
+    </div>
 
     <div class="ds-status">
       <span class="pill" id="phasePill">—</span>
@@ -309,6 +315,7 @@
         <ol class="mh-events" id="mhEvents"></ol>
       </div>
       <div class="vp-tip" id="vpTip" hidden>Drag to move · shift-drag to turn</div>
+      <button class="vp-tour" id="vpTour" type="button" hidden><i aria-hidden="true"></i>New here? Take the tour<span>1 min</span></button>
       <div class="cad-ui" id="cadUI" hidden>
         <aside class="cad-tree" aria-label="Instances">
           <div class="cad-tree-head"><b>Instances</b><span class="cad-count" id="cadCount"></span><span class="spacer"></span><button class="cad-btn" id="cadShowAll" type="button">Show all</button></div>

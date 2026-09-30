@@ -25,6 +25,7 @@ let RAILS_READY=false;             // after boot, picking a tab opens its panel
    TABS
    ============================================================ */
 function initTabs(){
+  calmLayoutOnce();
   $$(".tabs").forEach(nav=>{
     nav.addEventListener("click",e=>{ const b=e.target.closest("button[data-tab]"); if(b) selectTab(nav,b.dataset.tab); });
     nav.addEventListener("keydown",e=>{
@@ -39,6 +40,14 @@ function initTabs(){
   });
 }
 const TAB_RENAMED={code:"teleop", hardware:"robot", rig:"robot", config:"tune"};
+/* The first view, once per browser: the field and the OpMode list. The analysis
+   panel, the dock and the torque inset start folded; each opens with one click
+   and remembers how it was left from then on. */
+function calmLayoutOnce(){
+  if(store.get("ftcbench.layout","1")==="2") return;
+  store.set("ftcbench.rail.right","0"); store.set("ftcbench.dock","0"); store.set("ftcbench.pip","0");
+  store.set("ftcbench.tab.left","teleop"); store.set("ftcbench.layout","2");
+}
 function selectTab(nav,tab){
   tab=TAB_RENAMED[tab]||tab;
   nav.querySelectorAll("button[data-tab]").forEach(b=>b.setAttribute("aria-selected",String(b.dataset.tab===tab)));
@@ -2156,12 +2165,15 @@ const Tour={
       else if(e.key==="ArrowLeft") this.go(this.i-1);
     });
     setHTML($("#tourDots"),TOUR.map(()=>"<i></i>").join(""));
-    if(store.get("ftcbench.tour.seen","0")!=="1") setTimeout(()=>this.start(0),450);
+    // offered, not forced: a small link on the field until the tour has been seen once
+    const chip=$("#vpTour");
+    if(chip){ chip.hidden=store.get("ftcbench.tour.seen","0")==="1"; chip.addEventListener("click",()=>this.start(0)); }
   },
   start(n){ $("#tourOverlay").hidden=false; $("#tourSkip").checked=store.get("ftcbench.tour.seen","0")==="1"; this.go(n); },
   close(){
     $("#tourOverlay").hidden=true; this.light(null);
     store.set("ftcbench.tour.seen","1");
+    const chip=$("#vpTour"); if(chip) chip.hidden=true;
   },
   go(n){
     this.i=Math.max(0,Math.min(TOUR.length-1,n));
@@ -2463,6 +2475,12 @@ function proBoot(){
   $("#opSelect").addEventListener("change",e=>selectOpMode(e.target.value));
   $("#practice").checked=store.get("ftcbench.practice","0")==="1";
   $("#matchOn").checked=store.get("ftcbench.match","1")==="1";
+  const mb=$("#matchBtn"), mm=$("#matchMenu"), matchDot=()=>mb.classList.toggle("on",$("#matchOn").checked);
+  const openMatch=o=>{ mm.hidden=!o; mb.setAttribute("aria-expanded",String(o)); };
+  mb.addEventListener("click",e=>{ e.stopPropagation(); openMatch(mm.hidden); });
+  document.addEventListener("click",e=>{ if(!mm.hidden&&!e.target.closest(".match-wrap")) openMatch(false); });
+  addEventListener("keydown",e=>{ if(e.key==="Escape"&&!mm.hidden) openMatch(false); });
+  $("#matchOn").addEventListener("change",matchDot); matchDot();
   $("#matchSkill").value=store.get("ftcbench.matchSkill","typical");
   $("#matchOn").addEventListener("change",e=>{ store.set("ftcbench.match",e.target.checked?"1":"0"); if(Sim.phase!=="running") resetMatch(); else { Match.on=e.target.checked; if(!Match.on) resetMatch(); } });
   $("#matchSkill").addEventListener("change",e=>{ store.set("ftcbench.matchSkill",e.target.value); if(Sim.phase!=="running") resetMatch(); else Match.skill=e.target.value; });
