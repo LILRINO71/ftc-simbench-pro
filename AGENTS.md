@@ -35,7 +35,7 @@ Read this file before you start, and again before you push.
 
 | agent | files / area | for |
 | --- | --- | --- |
-| Claude | `src/jointspec.js`, `src/autorig.js` (new), `src/cadview.js` (joint editor), `src/app.js` (joints panel), `src/view3d.js` (joint preview), `src/roadrunner.js` | an automatic joint finder for any STEP, and a click-to-fix joint editor in the CAD view |
+| Claude | `src/robotcheck.js` (new), `src/markup.html` + `src/styles.css` (Robot check section), `src/jointspec.js`, `src/autorig.js`, `src/cadview.js` (joint editor), `src/app.js` (joints panel), `src/view3d.js` (joint preview), `src/roadrunner.js` | an automatic joint finder for any STEP, and a click-to-fix joint editor in the CAD view |
 
 Done and released: drive direction, the 25f54d3 sim and parser fixes,
 `autoMap`, and Onshape mates (`src/mates.js`, `tools/onshape-mates.mjs`).
