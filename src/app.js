@@ -1430,19 +1430,80 @@ function takeRobotConfig(file){ readText(file,text=>setRobotConfig(text,file.nam
    The two JSON files come from Onshape's own API, opened in a tab that's
    signed in to Onshape: no keys, nothing sent anywhere but Onshape.
    ============================================================ */
-const MATES={asm:null, features:null, name:null, report:null};
+const MATES={asm:null, features:null, name:null, report:null, url:null};
+/* ---- mates from the "Send to SimBench" bookmark (src/onshapelink.js) ----
+   They arrive in this page's #onshape= fragment. If the team already has
+   their own robot open in another SimBench tab, that tab is offered them
+   and this one steps aside; otherwise they wait here for the STEP. */
+const SB_CHANNEL=(()=>{ try{ return typeof BroadcastChannel==="function"?new BroadcastChannel("ftc-simbench"):null; }catch(e){ return null; } })();
+let ONSHAPE_OFFER=null;
+const ownRobot=()=>!!(LAST_STEP&&CAD&&LAST_STEP.name!==DEFAULT_ROBOT.step);
+function onshapeNote(html,kind){
+  const n=$("#onshapeNote"); if(!n) return;
+  n.hidden=!html; n.className="onshape-note"+(kind?" "+kind:""); n.innerHTML=html||"";
+  const nav=$('.tabs[data-tabs="left"]'); if(html&&nav) selectTab(nav,"robot");
+}
+async function takeOnshapeHash(){
+  const h=location.hash.slice("#onshape=".length);
+  try{ history.replaceState(null,"",location.pathname+location.search); }catch(e){}
+  onshapeNote("Unpacking the mates from Onshape …");
+  let p;
+  try{ p=await readOnshapeHash(h); }
+  catch(e){ onshapeNote("The link from Onshape couldn't be read: "+esc(e.message)+". Click the bookmark again, or use the steps under <b>Or by hand</b>.","bad"); return; }
+  // their robot is already open in another tab: that one takes the mates
+  if(SB_CHANNEL){
+    const id=Math.random().toString(36).slice(2);
+    const taken=await new Promise(res=>{
+      const on=e=>{ const d=e.data; if(d&&d.type==="onshape-taken"&&d.id===id){ clearTimeout(t); SB_CHANNEL.removeEventListener("message",on); res(d); } };
+      const t=setTimeout(()=>{ SB_CHANNEL.removeEventListener("message",on); res(null); },900);
+      SB_CHANNEL.addEventListener("message",on);
+      SB_CHANNEL.postMessage({type:"onshape", id, p:Object.assign({format:ONSHAPE_FORMAT},p)});
+    });
+    if(taken){
+      onshapeNote("Sent the mates of <b>"+esc(p.name)+"</b> to your open SimBench tab with <b>"+esc(taken.robot)+"</b>. Switch to it and click <b>Apply</b>. You can close this tab.","ok");
+      setTimeout(()=>{ try{ window.close(); }catch(e){} },2500);
+      return;
+    }
+  }
+  holdOnshape(p);
+}
+/* Use them: on the team's robot straight away, or when its STEP is dropped
+   (parseAndLoad applies MATES by itself), never on the default robot. */
+function holdOnshape(p){
+  MATES.asm=p.asm; MATES.features=p.features; MATES.name=p.name; MATES.url=p.url||null; MATES.report=null; MATES.fromLink=true;
+  JOINTS.spec=null; JOINTS.report=null; ONSHAPE_OFFER=null;
+  if(ownRobot()) applyMates();
+  else{
+    $("#mateStatus").textContent="Got the mates of "+p.name+". Drop the STEP of the same assembly and they apply to it.";
+    onshapeNote("Got the mates of <b>"+esc(p.name)+"</b> from Onshape. Now drop the STEP you exported from that assembly "+
+      "(Onshape: right-click the assembly tab, <b>Export</b>, STEP) into <b>Robot CAD</b> below, and every joint is exact.","ask");
+  }
+}
+if(SB_CHANNEL) SB_CHANNEL.addEventListener("message",e=>{
+  const d=e.data; if(!d||d.type!=="onshape"||!ownRobot()) return;
+  let p; try{ p=checkOnshapePayload(d.p); }catch(x){ return; }
+  ONSHAPE_OFFER=p;
+  SB_CHANNEL.postMessage({type:"onshape-taken", id:d.id, robot:LAST_STEP.name});
+  onshapeNote("Mates from Onshape (<b>"+esc(p.name)+"</b>) arrived. <button class='btn-sm primary' id='onshapeApply'>Apply to "+esc(LAST_STEP.name)+"</button> <button class='btn-sm' id='onshapeLater'>Not now</button>","ask");
+  $("#onshapeApply").addEventListener("click",()=>{ if(ONSHAPE_OFFER) holdOnshape(ONSHAPE_OFFER); });
+  $("#onshapeLater").addEventListener("click",()=>{ ONSHAPE_OFFER=null; onshapeNote(""); });
+});
 /* A joint spec (src/jointspec.js): the joints written down by hand. It
    belongs to one STEP file and comes back each time that file is parsed. */
 const JOINTS={spec:null, name:null, step:null, report:null, devices:null};
 function takeMates(file){
   readText(file,text=>{
     let j; try{ j=JSON.parse(text); }catch(e){ $("#mateStatus").textContent=file.name+" isn't JSON — save the page Onshape shows as a .json file."; $("#mateDrop").className="drop bad"; return; }
+    if(j&&j.format===ONSHAPE_FORMAT){
+      let p; try{ p=checkOnshapePayload(j); }catch(e){ $("#mateStatus").textContent=file.name+": "+e.message; $("#mateDrop").className="drop bad"; return; }
+      holdOnshape(p); return;
+    }
     if(j&&j.format===JOINT_SPEC_FORMAT){
       MATES.asm=MATES.features=MATES.name=MATES.report=null;
       JOINTS.spec=j; JOINTS.name=file.name; JOINTS.step=LAST_STEP?LAST_STEP.name:null;
       applyJoints(); return;
     }
-    if(j&&j.rootAssembly){ MATES.asm=j; MATES.name=file.name; JOINTS.spec=null; JOINTS.report=null; }
+    if(j&&j.rootAssembly){ MATES.asm=j; MATES.name=file.name; MATES.fromLink=false; JOINTS.spec=null; JOINTS.report=null; }
     else if(j&&(Array.isArray(j.features)||Array.isArray(j))) MATES.features=j;
     else { $("#mateStatus").textContent=file.name+" isn't an Onshape assembly definition or features list."; $("#mateDrop").className="drop bad"; return; }
     applyMates();
@@ -1466,6 +1527,8 @@ function applyMates(){
     st.textContent=MATES.name+" · "+rep.matched+" of "+rep.parts+" parts matched"+(MATES.features?" · limits":"");
     drop.className="drop ok"; $("#mateClear").hidden=false;
     note.innerHTML=rep.why.map(w=>"<li>"+esc(w)+"</li>").join("");
+    if(MATES.fromLink) onshapeNote("Joints from your Onshape mates (<b>"+esc(MATES.name)+"</b>) are on <b>"+esc(LAST_STEP?LAST_STEP.name:"this robot")+"</b>: "+
+      rep.joints+" joint"+(rep.joints===1?"":"s")+", "+rep.matched+" of "+rep.parts+" parts matched. The Robot check below says if anything still needs you.",rep.matched<rep.parts*0.5?"bad":"ok");
   }catch(e){
     st.textContent="Couldn't apply the mates — "+e.message; drop.className="drop bad"; pill.textContent="error"; pill.className="pill bad";
   }
@@ -1597,7 +1660,8 @@ function robotCheckAct(act,a){
   if(act==="click"){ CadView.pendingDevice=a; if(!CadView.on) CadView.enter();
     const h=document.querySelector(".cad-hint"); if(h){ h.textContent="Click the part "+a+" moves, then 'New joint from this part'"; h.classList.add("ask"); } return; }
   if(act==="guess"){ const f=$("#jointsFind"); if(f) f.click(); return; }
-  if(act==="mates"){ const u=$("#mateUrl"); if(u){ u.scrollIntoView({block:"center"}); u.focus(); } }
+  if(act==="mates"){ const nav=$('.tabs[data-tabs="left"]'); if(nav) selectTab(nav,"robot");
+    const q=$("#onshapeQuick"); if(q){ q.scrollIntoView({block:"center"}); q.classList.add("flash"); setTimeout(()=>q.classList.remove("flash"),1600); } }
 }
 
 /* The automatic joint finder (src/autorig.js): a joint spec from the STEP's
@@ -1676,7 +1740,7 @@ function mapDevices(){
 }
 function clearMates(){
   if(JOINTS.spec){ JOINTS.spec=JOINTS.report=JOINTS.devices=null; JOINTS.name=JOINTS.step=null; }
-  MATES.asm=MATES.features=MATES.name=MATES.report=null;
+  MATES.asm=MATES.features=MATES.name=MATES.report=MATES.url=null; MATES.fromLink=false; onshapeNote("");
   $("#matePill").textContent="none"; $("#matePill").className="pill"; $("#mateClear").hidden=true;
   $("#mateNote").innerHTML=""; $("#mateDrop").className="drop";
   $("#mateStatus").textContent="Drop the assembly definition, and the features file too if you want limits.";
@@ -1697,6 +1761,12 @@ function wireMates(){
     $("#mateDefLink").href=L.def; $("#mateFeatLink").href=L.features;
   });
   $("#mateClear").addEventListener("click",clearMates);
+  const bm=$("#mateBookmarklet");
+  if(bm){
+    bm.href=onshapeBookmarklet(location.origin+location.pathname);
+    bm.addEventListener("click",e=>{ e.preventDefault();
+      $("#bmNote").innerHTML="That one runs on your <b>Onshape</b> tab: drag it to your bookmarks bar (Ctrl+Shift+B shows the bar), then click it there with your robot's assembly open."; });
+  }
   $("#jointsDownload").addEventListener("click",downloadJoints);
   $("#jointsFind").addEventListener("click",()=>{ if(CAD) findJoints(CAD,false); });
   $("#jointsReset").addEventListener("click",()=>{
@@ -2459,5 +2529,8 @@ function proBoot(){
   saveRig();
   RAILS_READY=true;
   requestAnimationFrame(frame);
-  try{ if(new URLSearchParams(location.search).get("robot")!=="sample") loadDefaultRobot(); }catch(e){}
+  try{
+    if(/^#onshape=/.test(location.hash)) takeOnshapeHash();
+    else if(new URLSearchParams(location.search).get("robot")!=="sample") loadDefaultRobot();
+  }catch(e){}
 })();
