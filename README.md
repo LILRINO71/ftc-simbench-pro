@@ -41,7 +41,7 @@ project. There are four layers, from exact to automatic:
 
 | Layer | What it is | Status |
 |---|---|---|
-| **Onshape mates** | Read the assembly's own mates from Onshape: exact axes, travel limits and gear relations, with no guessing. | ✅ `src/mates.js` |
+| **Onshape mates** | Read the assembly's own mates from Onshape: exact axes, travel limits and gear relations, with no guessing. A **Send to SimBench** bookmark brings them over in one click from the team's Onshape tab, with their own sign-in and no API key. | ✅ `src/mates.js`, `src/onshapelink.js` |
 | **Joint spec** | A small JSON file that says the same by hand: parts, axis, pivot, travel, which device drives it. It also covers cascade slides and servo slider-crank linkages. | ✅ `src/jointspec.js`, [docs/joints.md](docs/joints.md) |
 | **Click-to-fix editor** | In the CAD view: click parts, pick what they ride on, make a joint (the axis is suggested from the selected spline, gear or rail), flip it, try it. Every edit is a joint spec you can download. | ✅ `src/cadview.js` |
 | **Automatic joint finder** | Finds actuators, slide stacks and the parts each joint carries, straight from geometry, for any STEP. Runs by itself when a robot has no mates and no spec, and lists what a person should check. | ✅ `src/autorig.js`, from the measured prototypes in [research/autorig](research/autorig/README.md) |

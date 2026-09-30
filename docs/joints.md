@@ -22,9 +22,22 @@ pin-slot) out from the chassis as a joint tree. Each joint gets its true axis an
 it carries, its limits from the features list, and any gear, rack or screw relation to another
 joint.
 
-The **Mates & joints** panel on the Robot tab builds the two API links from an assembly URL. Open
-them in a browser that's signed in to Onshape, save the pages, and drop them on the panel. No API
-keys are needed. For scripting there's `tools/onshape-mates.mjs`.
+**In one click** (`src/onshapelink.js`): drag **Send to SimBench** from the **Mates & joints**
+panel to the bookmarks bar once. Then, on the robot's assembly tab in Onshape, click the bookmark.
+It reads that assembly's definition and mate features from Onshape's API with the team's own
+sign-in (the same two pages as below) and opens SimBench with them packed into the address's
+`#fragment`. A fragment never leaves the browser, so no server sees the robot, and no API key is
+needed.
+- **Robot already open:** if the team's robot is open in another SimBench tab, that tab offers
+  **Apply**, and the new tab closes.
+- **Robot not open yet:** the mates wait for the STEP of the same assembly and apply as soon as it's
+  dropped. They never go onto the default robot.
+- **Very big assembly:** it doesn't fit in an address, so the bookmark saves one `.onshape.json`
+  file to drop instead.
+
+**By hand**, the same panel builds the two API links from an assembly URL. Open them in a browser
+that's signed in to Onshape, save the pages, and drop them on the panel. For scripting there's
+`tools/onshape-mates.mjs`.
 
 ## 2. A joint spec: written down once
 

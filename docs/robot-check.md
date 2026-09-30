@@ -11,8 +11,10 @@ that team's own robot and code, and that it never shows a wrong robot without sa
 pieces do that together:
 
 1. **Exact joints when they exist.** Onshape mates (`src/mates.js`) give exact axes, pivots,
-   limits and the parts each joint carries. No API key is needed: the Robot tab builds two links
-   to open while signed in to Onshape, and the saved pages are dropped back in.
+   limits and the parts each joint carries. The **Send to SimBench** bookmark
+   (`src/onshapelink.js`) brings them over in one click from the team's Onshape tab, using their
+   own sign-in. The robot travels inside the link, so nothing is uploaded, and no API key is needed.
+   There's still a by-hand way: two links to open while signed in, with the saved pages dropped back in.
 2. **A robot check against the team's own code** (`src/robotcheck.js`, the **Robot check** section
    of the Robot tab). Whatever the joints came from, it checks them against the OpMode:
    - every motor and servo the code moves drives a joint
