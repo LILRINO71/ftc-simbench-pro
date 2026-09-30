@@ -1238,7 +1238,7 @@ function renderLegend3D(){ $("#pip").hidden=!liftState().aS; }
 function analyzeAll(){
   if(!CODE||!CAD) return;
   FINDINGS=analyze(CODE,CAD,MAP,OPTS);
-  renderFindings(); renderTables(); renderRig(); renderCoverage();
+  renderFindings(); renderTables(); renderRig(); renderCoverage(); renderRobotCheck();
   Status.render(); MathTab.invalidate();
 }
 /* Rebuild the simulation after a rig or hardware change, keeping the Driver
@@ -1529,6 +1529,70 @@ function editJoints(change){
   applyJoints();
   return true;
 }
+/* ============================================================
+   ROBOT CHECK — the robot against the team's own code (src/robotcheck.js),
+   as questions with their likely answers. An answer lands in the robot's
+   joint spec like any other edit, so it's asked once.
+   ============================================================ */
+let RC=null;
+function renderRobotCheck(){
+  const box=$("#robotCheck"), pill=$("#rcPill"); if(!box) return;
+  if(!CAD||!CODE){ box.innerHTML=`<p class="hint">Load a robot and an OpMode to check them together.</p>`; pill.textContent="—"; pill.className="pill"; return; }
+  try{ RC=checkRobot(CAD,CODE,MAP,{isCommanded:n=>isCommanded(CODE,n)}); }
+  catch(e){ box.innerHTML=`<p class="hint">The robot check stopped: ${esc(e.message)}</p>`; return; }
+  pill.textContent=RC.ready?(RC.warn?RC.warn+" to confirm":"ready"):RC.need+" to answer";
+  pill.className="pill "+(RC.ready?(RC.warn?"warnp":"ok"):"bad");
+  const SEV={fail:"ANSWER",warn:"CONFIRM",ok:"OK"};
+  const btn=(act,arg,txt,cls)=>`<button class="btn-sm${cls?" "+cls:""}" data-rc="${act}" data-a="${esc(arg)}">${esc(txt)}</button>`;
+  const ok=RC.items.filter(i=>i.sev==="ok"), open=RC.items.filter(i=>i.sev!=="ok");
+  const row=(it,n)=>{
+    let acts="";
+    if(it.ask==="pick-parts"){
+      acts=(it.candidates||[]).map(c=>`<span class="rc-cand">${esc(c.label)} ${btn("show",c.joint,"show")}${btn("pair",it.device+"|"+c.joint,"this one","primary")}</span>`).join("")+
+        btn("click",it.device,"Click it in the CAD view");
+    }else if(it.ask==="pick-device"){
+      acts=btn("show",it.joint,"show")+(it.candidates||[]).map(c=>btn("pair",c.device+"|"+it.joint,c.device)).join("")+btn("drop",it.joint,"not a joint");
+    }else if(it.ask==="drop-joint") acts=btn("show",it.joint,"show")+btn("drop",it.joint,"remove it","primary");
+    else if(it.ask==="look"&&it.joint) acts=btn("show",it.joint,"show");
+    else if(it.ask==="mates") acts=btn("mates","","Use my Onshape mates");
+    return `<div class="rc-item ${it.sev}"><div class="rc-head"><span class="rc-sev">${SEV[it.sev]}</span><span class="rc-text">${esc(it.text)}</span></div>${acts?`<div class="rc-acts">${acts}</div>`:""}</div>`;
+  };
+  box.innerHTML=(open.length?open.map(row).join(""):`<p class="rc-done">Everything your code moves has a joint, and every joint checks out.</p>`)+
+    (ok.length?`<details class="rc-ok"><summary>${ok.length} checked</summary>${ok.map(row).join("")}</details>`:"");
+  box.querySelectorAll("[data-rc]").forEach(b=>b.addEventListener("click",()=>robotCheckAct(b.dataset.rc,b.dataset.a)));
+}
+function partsOfJoint(id){
+  const kids=new Set([id]); let grew=true;
+  while(grew){ grew=false; for(const m of CAD.mechs) if(m.parent&&kids.has(m.parent)&&!kids.has(m.id)){ kids.add(m.id); grew=true; } }
+  const o=[]; (CAD.solids||[]).forEach((s,i)=>{ if(kids.has(s.mech)) o.push(i); }); return o;
+}
+// swing a joint back and forth for a moment in the CAD view, its parts picked out
+let RC_WIGGLE=null;
+function showJoint(id){
+  const m=CAD&&CAD.mechs.find(x=>x.id===id); if(!m) return;
+  if(!CadView.on) CadView.enter();
+  // the CAD view picks meshes; each knows its part (solid)
+  const parts=new Set(partsOfJoint(id)), asg=View.exactAsg;
+  if(asg&&asg.solid){ const meshes=[]; asg.solid.forEach((si,j)=>{ if(parts.has(si)) meshes.push(j); }); if(meshes.length) CadView.select(meshes); }
+  // and look at them
+  const P=[...parts].flatMap(i=>CAD.solids[i].pts||[]);
+  if(P.length&&CAD.bbox){ const lo=[0,1,2].map(k=>Math.min(...P.map(p=>p[k]))), hi=[0,1,2].map(k=>Math.max(...P.map(p=>p[k])));
+    const c=[0,1,2].map(k=>(lo[k]+hi[k])/2), d=Math.hypot(hi[0]-lo[0],hi[1]-lo[1],hi[2]-lo[2]), b=CAD.bbox, D=Math.hypot(b.max[0]-b.min[0],b.max[1]-b.min[1],b.max[2]-b.min[2]);
+    CadView.target=CadView.loc(c); CadView.zoom=Math.max(1,Math.min(4,0.8*D/Math.max(d,0.02))); }
+  clearInterval(RC_WIGGLE); const t0=performance.now(), lin=normJointKind(m.kind)==="linear";
+  RC_WIGGLE=setInterval(()=>{ const t=(performance.now()-t0)/1000;
+    if(t>3){ clearInterval(RC_WIGGLE); View.preview=null; return; }
+    View.preview={id, q:(lin?0.08:0.5)*Math.sin(t*Math.PI*1.3)+(lin?0:(m.q0||0))}; },30);
+}
+function robotCheckAct(act,a){
+  if(act==="show") return showJoint(a);
+  if(act==="pair"){ const [dev,joint]=a.split("|"); changeJoint(joint,{device:dev}); return; }
+  if(act==="drop"){ removeJoint(a); return; }
+  if(act==="click"){ CadView.pendingDevice=a; if(!CadView.on) CadView.enter();
+    const h=document.querySelector(".cad-hint"); if(h){ h.textContent="Click the part "+a+" moves, then 'New joint from this part'"; h.classList.add("ask"); } return; }
+  if(act==="mates"){ const u=$("#mateUrl"); if(u){ u.scrollIntoView({block:"center"}); u.focus(); } }
+}
+
 /* The automatic joint finder (src/autorig.js): a joint spec from the STEP's
    geometry alone, with what a person should check. quiet: it ran by itself
    on a new robot, so finding nothing leaves the old guess in place. */

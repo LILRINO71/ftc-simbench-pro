@@ -377,14 +377,16 @@ const CadView={
     if(t.id==="cadNewJoint"){
       const g=suggestJoint(CAD,S), asg=View.exactAsg, cur=asg&&asg.group[this.sel[0]];
       this.newJoint={label:"Joint "+(CAD.mechs.filter(m=>!m.drive).length+1), kind:g?g.kind:"revolute",
-        axis:g?g.axis:[0,0,1], pivot:g?g.pivot:[0,0,0], from:g&&g.from, parent:CAD.mechs.some(m=>m.id===cur&&!m.drive)?cur:"chassis", device:"", k:0};
+        axis:g?g.axis:[0,0,1], pivot:g?g.pivot:[0,0,0], from:g&&g.from, parent:CAD.mechs.some(m=>m.id===cur&&!m.drive)?cur:"chassis", device:this.pendingDevice||"", k:0};
+      if(this.pendingDevice) this.newJoint.label=this.pendingDevice;
       redo(); return true; }
     if(t.id==="cadNjCancel"){ this.newJoint=null; redo(); return true; }
     if(t.id==="cadNjFlip"&&this.newJoint){ this.newJoint.axis=this.newJoint.axis.map(v=>-v); redo(); return true; }
     if(t.id==="cadNjAxis"&&this.newJoint){ const A=[[1,0,0],[0,1,0],[0,0,1]]; this.newJoint.k=(this.newJoint.k+1)%3; this.newJoint.axis=A[this.newJoint.k]; this.newJoint.from="the robot's "+"xyz"[this.newJoint.k]+" axis"; redo(); return true; }
     if(t.id==="cadNjMake"&&this.newJoint){
       const N=this.newJoint; N.label=$("#cadNjName").value.trim()||N.label;
-      if(addJoint(N,S)) this.newJoint=null;
+      if(addJoint(N,S)){ this.newJoint=null; this.pendingDevice=null;
+        const h=document.querySelector(".cad-hint"); if(h){ h.textContent="Right-drag rotate · middle-drag pan · scroll zoom · click a part"; h.classList.remove("ask"); } }
       redo(); return true; }
     const g=View.exactAsg&&View.exactAsg.group[this.sel[0]];
     if(t.id==="cadFlip"&&g){ const m=CAD.mechs.find(x=>x.id===g); if(m) changeJoint(g,{axis:m.axis.map(v=>-v)}); redo(); return true; }
