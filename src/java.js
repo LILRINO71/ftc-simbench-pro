@@ -672,19 +672,29 @@ function isCommanded(code,name){
   return found;
 }
 
-/* Positions a device is commanded to, for gauge ranges and travel checks. */
-function travelRange(code,devName){
+/* Positions a device is commanded to, for gauge ranges and travel checks.
+   op: the setter to read (setPosition by default; setTargetPosition for a
+   motor's RUN_TO_POSITION targets, which autos set too). */
+function travelRange(code,devName,op){
+  op=op||"setPosition";
   const vals=[]; const seenVar={};
   const scan=(list)=>{ for(const st of list){
     if(st.kind==="if"){ scan(st.then); if(st.else) scan(st.else); }
-    else if(st.kind==="call" && st.dev===devName && st.op==="setPosition"){
+    else if(st.kind==="while") scan(st.body||[]);
+    // a setter the parser keeps as a plain method call (setTargetPosition, say)
+    else if(st.kind==="objcall" && st.obj===devName && st.meth===op && st.args && st.args[0]){
+      const v=staticValue(st.args[0],code);
+      if(v!==null) vals.push(v); else if(st.args[0].o==="id") seenVar[st.args[0].v]=1;
+    }
+    else if(st.kind==="call" && st.dev===devName && st.op===op){
       const v=staticValue(st.ast,code);
       if(v!==null) vals.push(v);
       else if(st.ast && st.ast.o==="id") seenVar[st.ast.v]=1;
     }
   }};
-  scan(code.stmts);
-  for(const i of code.inits) if(i.dev===devName&&i.op==="setPosition"){
+  scan(code.stmts||[]);
+  if(op!=="setPosition"&&Array.isArray(code.auto)) scan(code.auto);
+  for(const i of code.inits||[]) if(i.dev===devName&&i.op===op){
     const v=staticValue(i.ast,code); if(v!==null) vals.push(v);
   }
   // a servo fed from a variable sweeps wherever that variable is clamped

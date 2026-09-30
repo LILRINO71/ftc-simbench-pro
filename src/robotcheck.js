@@ -11,6 +11,12 @@
      drive      the code's drive motors match the CAD's wheels
      swing      moving each joint a little doesn't push its parts through
                 the frame both ways (wrong parts, or a wrong axis)
+     axis       each driven turn has its motor or servo on its axis, and of
+                the kind the code says (a wrong axis or pivot, a swapped device)
+     range      the servo positions the code sends reach the joint at all
+                (the wrong servo on it, or the wrong drawn position)
+     targets    RUN_TO_POSITION targets fit the slide's travel
+     scale      drawn at robot size and about a robot's weight (the STEP's units)
    Each item: {key, sev: "ok"|"warn"|"fail", text, device?, joint?, ask?}.
    ask says what to ask the team: "pick-parts" (click what this device
    moves), "drop-joint", "pick-device" (which of your devices drives it),
@@ -39,6 +45,19 @@ const {checkRobot}=(function(){
     return {R, t:sub(p,Rp)};
   }
   const sevRank={fail:0,warn:1,ok:2};
+  // from the geometry alone, so once per CAD (the joints change, the parts don't)
+  const ACTS=new WeakMap(), MASS=new WeakMap();
+  function cadActuators(cad){
+    if(!cad||typeof ARActuators==="undefined") return [];
+    if(ACTS.has(cad)) return ACTS.get(cad);
+    let A=[]; try{ A=ARActuators.findActuators(cad,{driveFromCAD:c=>driveFromCAD(c,{}), hwFromPart}).actuators||[]; }catch(e){ A=[]; }
+    ACTS.set(cad,A); return A;
+  }
+  function cadMass(cad){
+    if(MASS.has(cad)) return MASS.get(cad);
+    let kg=0; try{ kg=massProps(cad).kg||0; }catch(e){ kg=0; }
+    MASS.set(cad,kg); return kg;
+  }
 
   function checkRobot(cad,code,map,opts){
     opts=opts||{};
@@ -99,6 +118,59 @@ const {checkRobot}=(function(){
     for(const it of items) if(it.ask==="pick-device"){
       const m=byId.get(it.joint);
       it.candidates=loose.map(d=>({device:d.name, v:fits(d,m)})).filter(c=>c.v>0).sort((a,b)=>b.v-a.v).map(c=>({device:c.device}));
+    }
+
+    // the CAD itself: drawn at robot size, about a robot's weight
+    const bb=cad&&cad.bbox;
+    if(bb&&S.length){
+      const size=Math.max(bb.max[0]-bb.min[0],bb.max[1]-bb.min[1],bb.max[2]-bb.min[2]);
+      if(size>1.4||size<0.12) put({key:"scale", sev:"fail", text:"The robot is "+(size>=1?size.toFixed(1)+" m":(size*1000).toFixed(0)+" mm")+
+        " across; an FTC robot is about half a metre. The STEP's units are probably wrong (inches read as millimetres, or the other way)."});
+      else{ const kg=cadMass(cad);
+        if(kg>30||kg<2) put({key:"mass", sev:"warn", text:"The CAD comes to "+kg.toFixed(1)+" kg; FTC robots are usually 6 to 18 kg. "+
+          "Parts may be drawn solid that are hollow, or missing; the physics drives this mass."}); }
+    }
+    // each driven turn: its motor or servo on its axis, of the kind the code says
+    const A=cadActuators(cad).filter(a=>a.role!=="drive");
+    const onAxis=(a,m)=>{ if(Math.abs(dot(a.axis,m.axis))<Math.cos(4*DEG)) return false;
+      const d=sub(a.pivot.map(v=>v/1000),m.pivot||[0,0,0]), t=dot(d,m.axis); return Math.hypot(d[0]-m.axis[0]*t,d[1]-m.axis[1]*t,d[2]-m.axis[2]*t)<0.008; };
+    if(A.length) for(const m of mechs){
+      if(normJointKind(m.kind)==="linear"||m.couple||!driven.has(m.id)||!m.axis) continue;
+      const dv=acts.find(d=>d.name===driven.get(m.id)); if(!dv) continue;
+      const hit=A.find(a=>onAxis(a,m));
+      if(!hit){ put({key:"axis:"+m.id, sev:"warn", joint:m.id, device:dv.name, ask:"look",
+        text:"No motor or servo in the CAD sits on \""+label(m)+"\"'s axis. If "+dv.name+" turns it through gears, a belt or a chain, that's fine; otherwise the joint's axis or pivot is off."}); continue; }
+      const wantServo=/servo/i.test(dv.type||"");
+      if(wantServo!==(hit.kind==="servo")) put({key:"kind:"+m.id, sev:"warn", joint:m.id, device:dv.name, ask:"pick-device",
+        text:"Your code drives \""+label(m)+"\" with "+dv.name+", a "+(wantServo?"servo":"motor")+", but the CAD has a "+hit.kind+" on that joint's axis. The wrong device on this joint?"});
+    }
+    // servo positions the joint can't reach at all: the wrong servo on it, or the wrong drawn position
+    for(const m of mechs){
+      if(m.couple||!driven.has(m.id)||!m.limits||!Number.isFinite(m.restPos)||normJointKind(m.kind)==="linear") continue;
+      const dv=acts.find(d=>d.name===driven.get(m.id));
+      if(!dv||!/servo/i.test(dv.type||"")||/crservo/i.test(dv.type||"")||typeof travelRange!=="function") continue;
+      const tr=travelRange(code,dv.name); if(!tr) continue;
+      const spec=typeof specFor==="function"?specFor(dv,m,"code"):null, k=((spec&&spec.travelDeg)||300)*DEG*(m.dir||1);
+      const q1=(tr.lo-m.restPos)*k, q2=(tr.hi-m.restPos)*k, lo=Math.min(q1,q2), hi=Math.max(q1,q2);
+      const L0=Number.isFinite(m.limits[0])?m.limits[0]:-Infinity, L1=Number.isFinite(m.limits[1])?m.limits[1]:Infinity, M=5*DEG;
+      const deg=v=>(v/DEG).toFixed(0);
+      // a claw is sent past its stop to squeeze (most of its range still lands inside); a joint
+      // that can reach hardly any of what the code asks is on the wrong servo or drawn wrong
+      const reach=Math.max(0,Math.min(hi,L1+M)-Math.max(lo,L0-M)), span=hi-lo;
+      if((hi<L0-M||lo>L1+M)||(span>10*DEG&&reach<0.2*span)) put({key:"range:"+m.id, sev:"fail", joint:m.id, device:dv.name, ask:"pick-device",
+        text:"Your code sends "+dv.name+" between "+tr.lo+" and "+tr.hi+", which would turn \""+label(m)+"\" "+deg(lo)+"° to "+deg(hi)+"° from where it's drawn, "+
+          "but it only moves "+deg(L0)+"° to "+deg(L1)+"°. The wrong servo on this joint, or the wrong drawn position (restPos)."});
+    }
+    // RUN_TO_POSITION targets past the end of a slide
+    for(const m of mechs){
+      if(m.couple||!driven.has(m.id)||!m.limits||normJointKind(m.kind)!=="linear"||typeof travelRange!=="function") continue;
+      const dv=acts.find(d=>d.name===driven.get(m.id)); if(!dv||!/dcmotor/i.test(dv.type||"")) continue;
+      const tr=travelRange(code,dv.name,"setTargetPosition"); if(!tr) continue;
+      const spec=typeof specFor==="function"?specFor(dv,m,"code"):null, tpr=28*((spec&&spec.ratio)||19.2);
+      const mm=Math.max(Math.abs(tr.lo),Math.abs(tr.hi))*slideMmPerTick(m,tpr), top=Math.max(Math.abs(m.limits[0]||0),Math.abs(m.limits[1]||0))*1000;
+      if(top>0&&mm>top*1.1+10) put({key:"targets:"+m.id, sev:"warn", joint:m.id, device:dv.name, ask:"look",
+        text:"Your code sends "+dv.name+" to "+Math.max(Math.abs(tr.lo),Math.abs(tr.hi))+" ticks, "+mm.toFixed(0)+" mm up \""+label(m)+"\", but it only travels "+top.toFixed(0)+
+          " mm. The spool (mm per tick) or the slide's travel is off, or the code drives it into its stop."});
     }
 
     // the drivetrain
