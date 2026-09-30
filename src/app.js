@@ -1536,10 +1536,13 @@ function editJoints(change){
    ============================================================ */
 let RC=null;
 function renderRobotCheck(){
-  const box=$("#robotCheck"), pill=$("#rcPill"); if(!box) return;
-  if(!CAD||!CODE){ box.innerHTML=`<p class="hint">Load a robot and an OpMode to check them together.</p>`; pill.textContent="—"; pill.className="pill"; return; }
+  // shown twice: in the Robot tab, and at the top of the Checks tab
+  const boxes=[$("#robotCheck"),$("#rcChecks")].filter(Boolean), pill=$("#rcPill"); if(!boxes.length) return;
+  const put=h=>boxes.forEach(b=>{ b.innerHTML=(b.id==="rcChecks"?rcHead():"")+h; });
+  const rcHead=()=>`<div class="rc-title"><b>Robot check</b><span class="pill ${RC?(RC.ready?(RC.warn?"warnp":"ok"):"bad"):""}">${RC?(RC.ready?(RC.warn?RC.warn+" to confirm":"ready"):RC.need+" to answer"):"—"}</span></div>`;
+  if(!CAD||!CODE){ RC=null; put(`<p class="hint">Load a robot and an OpMode to check them together.</p>`); if(pill){ pill.textContent="—"; pill.className="pill"; } return; }
   try{ RC=checkRobot(CAD,CODE,MAP,{isCommanded:n=>isCommanded(CODE,n)}); }
-  catch(e){ box.innerHTML=`<p class="hint">The robot check stopped: ${esc(e.message)}</p>`; return; }
+  catch(e){ RC=null; put(`<p class="hint">The robot check stopped: ${esc(e.message)}</p>`); return; }
   pill.textContent=RC.ready?(RC.warn?RC.warn+" to confirm":"ready"):RC.need+" to answer";
   pill.className="pill "+(RC.ready?(RC.warn?"warnp":"ok"):"bad");
   const SEV={fail:"ANSWER",warn:"CONFIRM",ok:"OK"};
@@ -1557,9 +1560,12 @@ function renderRobotCheck(){
     else if(it.ask==="mates") acts=btn("mates","","Use my Onshape mates");
     return `<div class="rc-item ${it.sev}"><div class="rc-head"><span class="rc-sev">${SEV[it.sev]}</span><span class="rc-text">${esc(it.text)}</span></div>${acts?`<div class="rc-acts">${acts}</div>`:""}</div>`;
   };
-  box.innerHTML=(open.length?open.map(row).join(""):`<p class="rc-done">Everything your code moves has a joint, and every joint checks out.</p>`)+
-    (ok.length?`<details class="rc-ok"><summary>${ok.length} checked</summary>${ok.map(row).join("")}</details>`:"");
-  box.querySelectorAll("[data-rc]").forEach(b=>b.addEventListener("click",()=>robotCheckAct(b.dataset.rc,b.dataset.a)));
+  // nothing to ask: say so, and say when there would be (joints the bench had to guess)
+  const guessed=RC.items.some(i=>i.key==="source"&&i.ask==="mates");
+  put((open.length?open.map(row).join(""):`<p class="rc-done">Nothing to ask: every motor and servo your code moves has a joint, and every joint checks out.</p>`+
+      (guessed?"":`<p class="hint">These joints were made for this robot, so there are no questions. A robot with no Onshape mates or joint spec gets its joints guessed, and then this asks you about anything it isn't sure of. ${btn("guess","","See it with guessed joints")}</p>`))+
+    (ok.length?`<details class="rc-ok"><summary>${ok.length} checked</summary>${ok.map(row).join("")}</details>`:""));
+  boxes.forEach(box=>box.querySelectorAll("[data-rc]").forEach(b=>b.addEventListener("click",()=>robotCheckAct(b.dataset.rc,b.dataset.a))));
 }
 function partsOfJoint(id){
   const kids=new Set([id]); let grew=true;
@@ -1590,6 +1596,7 @@ function robotCheckAct(act,a){
   if(act==="drop"){ removeJoint(a); return; }
   if(act==="click"){ CadView.pendingDevice=a; if(!CadView.on) CadView.enter();
     const h=document.querySelector(".cad-hint"); if(h){ h.textContent="Click the part "+a+" moves, then 'New joint from this part'"; h.classList.add("ask"); } return; }
+  if(act==="guess"){ const f=$("#jointsFind"); if(f) f.click(); return; }
   if(act==="mates"){ const u=$("#mateUrl"); if(u){ u.scrollIntoView({block:"center"}); u.focus(); } }
 }
 
