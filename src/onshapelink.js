@@ -72,9 +72,15 @@ async function readOnshapeHash(h){
   if(typeof DecompressionStream!=="function") throw new Error("this browser can't unpack it; use the manual steps below");
   const bytes=onshapeBytes(h);
   if(bytes.length>20e6) throw new Error("the link is too big");
-  let text;
-  try{ text=await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"))).text(); }
-  catch(e){ throw new Error("the link is damaged"); }
+  // gzip or nothing: some decompressors never finish on data that isn't
+  if(bytes.length<18||bytes[0]!==0x1f||bytes[1]!==0x8b) throw new Error("the link is damaged");
+  let text, timer;
+  try{
+    text=await Promise.race([
+      new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"))).text(),
+      new Promise((_,no)=>{ timer=setTimeout(()=>no(new Error("timeout")),15000); })]);
+  }catch(e){ throw new Error("the link is damaged"); }
+  finally{ clearTimeout(timer); }
   let p; try{ p=JSON.parse(text); }catch(e){ throw new Error("the link is damaged"); }
   return checkOnshapePayload(p);
 }

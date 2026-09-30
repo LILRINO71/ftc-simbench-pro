@@ -106,6 +106,10 @@ test('bookmark: a Part Studio tab (no assembly definition) is refused with a mes
 test('SimBench side: a damaged or foreign #fragment is refused, and only the two documents are kept', async () => {
   await assert.rejects(E.readOnshapeHash('%%%not base64'), /damaged/);
   await assert.rejects(E.readOnshapeHash('aGVsbG8'), /damaged/);           // base64, not gzip
+  // gzip that's cut off half way: refused, not waited on for ever
+  const whole = (await import('node:zlib')).gzipSync(JSON.stringify({ format: E.ONSHAPE_FORMAT, asm: { rootAssembly: {} } }));
+  const cut = Buffer.from(whole.subarray(0, whole.length - 12)).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  await assert.rejects(E.readOnshapeHash(cut), /damaged/);
   assert.throws(() => E.checkOnshapePayload({ format: 'something else', asm: { rootAssembly: {} } }), /isn't mates/);
   assert.throws(() => E.checkOnshapePayload({ format: E.ONSHAPE_FORMAT, asm: {} }), /no assembly/);
   const p = E.checkOnshapePayload({ format: E.ONSHAPE_FORMAT, asm: { rootAssembly: {} }, features: 'x', name: 'n'.repeat(999), url: 'https://evil.example/x', extra: 1 });
