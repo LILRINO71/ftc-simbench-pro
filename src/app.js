@@ -190,6 +190,8 @@ function renderOpSelect(){
 
 function selectOpMode(id){
   const e=entry(id); if(!e) return;
+  // online, mid-match: the robot could never START again, and the field isn't this bench's to reset
+  if(Online.playing()&&CODE){ NetUI.say("The OpMode can't change during an online match. Leave the match first.","warn"); renderOpSelect(); return; }
   if(Sim.phase==="running") Sim.stop();
   CURRENT_ID=id; store.set("ftcbench.current",id);
   Editor.set(e.source); $("#srcName").textContent=e.file;
@@ -204,7 +206,8 @@ function selectOpMode(id){
   if(e.field||OPTS.obstaclesBy){ OPTS.obstacles=e.field==="other"?"walls":"all"; OPTS.obstaclesBy=e.field==="other"?e.id:null; }
   mapDevices();
   analyzeAll();
-  Field.reset(); Shots.reset();                                   // selected and INIT'd: a fresh match
+  if(!Online.inMatch()) Field.reset();                            // selected and INIT'd: a fresh match
+  Shots.reset();
   Sim.load(CODE,CAD,MAP,withPose());
   applyConfigOverrides(); Sim.init(); applyConfigOverrides();    // like a DS: selected and INIT'd, waiting for START
   resetMatch();
@@ -237,7 +240,9 @@ function applyConfigOverrides(){ for(const k in CONFIG_OVR) Sim.vars[k]=CONFIG_O
 function dsInit(){ if(Online.inMatch()) return; initNow(); }
 function initNow(){
   if(!CODE||Sim.phase==="running") return;
-  Field.reset(); Shots.reset(); ShotUI.dirty=true;       // a fresh match: HIVEs as staged
+  // a fresh match: HIVEs as staged (online, src/net.js staged them for everyone at START)
+  if(!Online.inMatch()) Field.reset();
+  Shots.reset(); ShotUI.dirty=true;
   Sim.load(CODE,CAD,MAP,withPose());
   applyConfigOverrides(); Sim.init(); applyConfigOverrides();
   resetMatch();
@@ -256,6 +261,7 @@ function updateDS(){
   bs.disabled=ph!=="init";
   bx.disabled=!(ph==="init"||ph==="running");
   if(Online.inMatch()){ bi.disabled=true; bs.disabled=true; }
+  $("#opSelect").disabled=Online.playing();
   bi.classList.toggle("next",!bi.disabled);
   bs.classList.toggle("next",!bs.disabled);
   bx.classList.toggle("live",ph==="running");
@@ -292,9 +298,8 @@ function updateClock(){
    "AI robots" switch; a fresh match (new seed) at every INIT.
    ============================================================ */
 function resetMatch(){
-  // online, the match is the one everyone plays (src/net.js), not this bench's own
-  if(Online.playing()){ Online.matchReset(Sim); renderMatchHud(true); return; }
-  if(Online.state==="done"){ renderMatchHud(true); return; }
+  // online, the match is the one everyone plays: src/net.js staged it at START, and nothing here resets it
+  if(Online.inMatch()){ renderMatchHud(true); return; }
   const box=$("#matchOn"), want=!!(box&&box.checked&&Field.ok&&OPTS.obstacles!=="walls");
   Match.on=want;
   if(!want){ Match.bots=[]; Match.floor=[]; Match.flying=[]; Match.events=[]; renderMatchHud(true); return; }
@@ -1088,7 +1093,9 @@ function placeAtStart(){
   const p=Field.ok?Field.startPose(Shots.alliance,footprintOf(CAD,OPTS.front)):{x:0,y:0,h:0};
   Sim.chassis={x:p.x,y:p.y,h:p.h}; OPTS.startPose=Object.assign({},p);
 }
-function setAlliance(al,move){
+/* online: the match deals the alliance (NetUI.begin passes dealt); nobody changes sides mid-match */
+function setAlliance(al,move,dealt){
+  if(Online.inMatch()&&!dealt){ renderShotSetup(); return; }
   Shots.alliance=al==="blue"?"blue":"red"; View.alliance=Shots.alliance; store.set("ftcbench.alliance",Shots.alliance);
   if(View.mode==="field") View.setView("field");
   if(move&&CAD&&Sim.phase!=="running") placeAtStart();
@@ -2108,8 +2115,11 @@ const NetUI={
     if(Online.T) return Promise.resolve(true);
     if(!this.loading) this.loading=netTrystero().then(T=>{
       Online.use(T);
-      T.onError=d=>this.say("A player couldn't connect: "+String((d&&d.error&&d.error.message)||(d&&d.error)||"no reason given")+
-        ". Some school and company networks block direct connections between browsers.","warn");
+      T.onError=d=>{
+        if(!d||!Online.code||d.room!=="m-"+Online.code) return;       // a stranger in the lobby, not this match
+        this.say("A player couldn't connect: "+String((d.error&&d.error.message)||d.error||"no reason given")+
+          ". Some school and company networks block direct connections between browsers.","warn");
+      };
       return true;
     }).catch(e=>{ this.loading=null; this.say("Couldn't load the online library ("+String(e&&e.message||e)+"). Check the internet connection and try again.","fail"); return false; });
     return this.loading;
@@ -2178,7 +2188,7 @@ const NetUI={
     if(Sim.phase==="running") Sim.stop();
     const slot=Online.mySlot();
     if(slot&&CODE&&CAD){
-      setAlliance(netAl(slot),false);
+      setAlliance(netAl(slot),false,true);
       const p=netSlotPose(slot,footprintOf(CAD,OPTS.front));
       Sim.chassis={x:p.x, y:p.y, h:p.h}; Sim.vel={x:0,y:0}; OPTS.startPose=Object.assign({},p);
       initNow();
@@ -2294,6 +2304,7 @@ const NetUI={
     const dpr=window.devicePixelRatio||1, S=Math.round(cv.clientWidth*dpr);
     if(cv.width!==S){ cv.width=S; cv.height=S; }
     const c=cv.getContext("2d"), H=Field.half(), k=S/(2*H), X=x=>(x+H)*k, Y=y=>(H-y)*k;
+    const font=this.font||(this.font=getComputedStyle(document.body).fontFamily);
     c.clearRect(0,0,S,S); c.fillStyle="#1b1c20"; c.fillRect(0,0,S,S);
     c.strokeStyle="rgba(255,255,255,.05)"; c.lineWidth=1;
     for(let i=1;i<6;i++){ const v=Math.round(i*S/6)+0.5; c.beginPath(); c.moveTo(v,0); c.lineTo(v,S); c.moveTo(0,v); c.lineTo(S,v); c.stroke(); }
@@ -2311,18 +2322,17 @@ const NetUI={
       c.fillRect(-hx*k,-hy*k,2*hx*k,2*hy*k); c.strokeRect(-hx*k,-hy*k,2*hx*k,2*hy*k);
       c.beginPath(); c.moveTo(0,0); c.lineTo(hx*k,0); c.stroke();
       c.restore();
-      if(label){ c.fillStyle="rgba(255,255,255,.85)"; c.font=`${10*dpr}px ${getComputedStyle(document.body).fontFamily}`; c.textAlign="center";
+      if(label){ c.fillStyle="rgba(255,255,255,.85)"; c.font=`${10*dpr}px ${font}`; c.textAlign="center";
         c.fillText(label,X(x),Y(y)-Math.max(hx,hy)*k-4*dpr); }
     };
     for(const b of Match.bots) box(b.x,b.y,b.h,MATCH_BOT.hx,MATCH_BOT.hy,b.al,false,"AI");
     for(const p of Match.players) box(p.x,p.y,p.h,p.hx,p.hy,p.al,false,p.name.slice(0,12));
-    if(Online.mySlot()&&Sim.footprint){ const ch=Sim.chassis, fp=Sim.footprint, co=Math.cos(ch.h), si=Math.sin(ch.h), ox=fp.ox||0, oy=fp.oy||0;
-      box(ch.x+ox*co-oy*si,ch.y+ox*si+oy*co,ch.h,fp.hx,fp.hy,Online.myAl(),true,"you"); }
+    if(Online.mySlot()&&Sim.footprint){ const u=footBox(Sim.chassis,Sim.footprint); box(u.x,u.y,u.h,u.hx,u.hy,Online.myAl(),true,"you"); }
     const t=performance.now()/1000;
     for(const m of Online.liveMarks()){
       const col=m.what==="shoot"?"#f0b54a":m.what==="defend"?"#6fd3e0":"#ffffff", r=(7+2*Math.sin(t*5))*dpr;
       c.strokeStyle=col; c.lineWidth=2*dpr; c.beginPath(); c.arc(X(m.x),Y(m.y),r,0,7); c.stroke();
-      c.fillStyle=col; c.font=`600 ${9.5*dpr}px ${getComputedStyle(document.body).fontFamily}`; c.textAlign="center";
+      c.fillStyle=col; c.font=`600 ${9.5*dpr}px ${font}`; c.textAlign="center";
       c.fillText(m.what==="shoot"?"shoot":m.what==="defend"?"defend":"go",X(m.x),Y(m.y)+r+10*dpr);
     }
   },
