@@ -123,7 +123,11 @@ function robotFrame(cad,opts){
     origin=[c[0]+d*upv[0], c[1]+d*upv[1], c[2]+d*upv[2]];
     originWhy="bbox"; floorWhy="the bottom of the CAD";
   }
-  const O=origin;
+  // the robot setup can move the centre (opts.shift: metres along the canonical x and y,
+  // the drive base's middle as the team knows it), when no wheels in the CAD say where it is
+  let O=origin;
+  const sh=opts&&opts.shift;
+  if(Array.isArray(sh)&&(sh[0]||sh[1])){ O=[0,1,2].map(i=>origin[i]+R[0][i]*(sh[0]||0)+R[1][i]*(sh[1]||0)); }
   // opts.front turns "canonical" into "robot": x forward, y left. The parser
   // never passes it — front stays a live toggle — but anything that wants the
   // robot's own axes can ask.
@@ -132,6 +136,7 @@ function robotFrame(cad,opts){
   const toCanon=p=>rot([p[0]-O[0],p[1]-O[1],p[2]-O[2]]);
   const F={
     up:U.up, upWhy:U.why, origin:O, originWhy, floorWhy, wheels:ws.length, R, front:(opts&&opts.front)||null,
+    shift:Array.isArray(sh)&&(sh[0]||sh[1])?[+sh[0]||0,+sh[1]||0]:null,
     toCanon, toRobot:p=>yaw(toCanon(p)), dirToRobot:v=>yaw(rot(v)),
     fromRobot:q=>[R[0][0]*q[0]+R[1][0]*q[1]+R[2][0]*q[2]+O[0],
                   R[0][1]*q[0]+R[1][1]*q[1]+R[2][1]*q[2]+O[1],
@@ -213,7 +218,7 @@ function canonicalizeCAD(cad,opts){
   // the built-in sample's reached 10 cm below its lowest part, so the floor
   // went there and the whole robot hovered above the tiles.
   const gb=geomBox(cad);
-  const F=robotFrame({solids:cad.solids, bbox:gb||cad.bbox},{up:opts&&opts.up});
+  const F=robotFrame({solids:cad.solids, bbox:gb||cad.bbox},{up:opts&&opts.up, shift:opts&&opts.shift});
   cad.bbox=applyFrame(F,{points:cad.points, solids:cad.solids, placements:cad.placements, bbox:cad.bbox});
   for(const m of cad.mechs||[]){
     if(m.pivot) m.pivot=F.toRobot(m.pivot);
@@ -263,5 +268,5 @@ function applyFrame(F,data){
    the UI and to move raw-CAD meshes (the tessellator's) the same way. */
 function frameRecord(F){
   return {up:F.up, upWhy:F.upWhy, origin:F.origin.slice(), originWhy:F.originWhy, floorWhy:F.floorWhy,
-          wheels:F.wheels, R:F.R.map(r=>r.slice()), M:frameMatrix(F)};
+          wheels:F.wheels, R:F.R.map(r=>r.slice()), M:frameMatrix(F), shift:F.shift||null};
 }

@@ -950,3 +950,22 @@ table.grid th{font-size:11px; font-weight:500;}
 .onp-foot{display:flex; align-items:center; justify-content:space-between; margin-top:10px;}
 .onp-ping{color:var(--tx-3); font-family:var(--mono); font-size:11px;}
 @media (max-width:760px){ .online-panel{width:calc(100% - 12px); left:6px; top:40px;} }
+
+/* the robot setup: four checks, once per robot */
+.su-steps{list-style:none; margin:8px 0 0; padding:0; display:flex; flex-direction:column; gap:6px; counter-reset:su;}
+.su-step{border:1px solid var(--line-2); border-radius:8px; padding:8px 10px; counter-increment:su; background:var(--panel);}
+.su-step.done{border-color:color-mix(in srgb, var(--pass) 35%, var(--line-2));}
+.su-head{display:flex; align-items:baseline; gap:8px;}
+.su-head b{font-weight:600;}
+.su-head b::before{content:counter(su) ". "; color:var(--tx-3); font-weight:500;}
+.su-step.done .su-head b::before{content:"\2713  "; color:var(--pass);}
+.su-st{color:var(--tx-2); font-size:12px; margin-left:auto; text-align:right;}
+.su-why{margin:4px 0 0; color:var(--tx-3); font-size:11.5px; line-height:1.4;}
+.su-why.warn{color:var(--warn);}
+.su-row{display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-top:7px;}
+.su-row .seg button{font-size:11.5px; padding:2px 7px;}
+.su-form{display:grid; grid-template-columns:auto 1fr; gap:5px 8px; align-items:center; margin-top:8px; font-size:12px; color:var(--tx-2);}
+.su-form input,.su-form select{font:inherit; color:var(--tx); background:var(--panel-2); border:1px solid var(--line); border-radius:6px; padding:3px 6px; width:100%; min-width:0;}
+.su-form .su-pair{display:flex; gap:5px;}
+.vp-setup{left:auto; right:14px; bottom:58px;}
+.vp-setup i{background:var(--warn);}

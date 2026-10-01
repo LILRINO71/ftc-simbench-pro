@@ -11,7 +11,7 @@ const store={
 };
 
 let CODE=null, CAD=null, MAP={}, FINDINGS=[], activePad=2;
-const OPTS={payloadKg:0.180, duty:0.30, trust:"code", robotConfig:null, front:"+x", baseModel:"auto", shooterModel:"auto"};
+const OPTS={payloadKg:0.180, duty:0.30, trust:"code", robotConfig:null, front:"+x", baseModel:"auto", shooterModel:"auto", shift:null};
 let IGNORED={};
 try{ IGNORED=JSON.parse(store.get("ftcbench.ignored","{}"))||{}; }catch(e){ IGNORED={}; }
 function saveIgnored(){ store.set("ftcbench.ignored",JSON.stringify(IGNORED)); }
@@ -635,7 +635,10 @@ function exportRig(){
       axis:m.axis?m.axis.map(v=>+v.toFixed(4)):null,
       leverMm:m.leverOverride!=null?+(m.leverOverride*1000).toFixed(1):null,
       part:m.part||null, manual:!!m.manual, inferred:!!m.inferred })),
-    devices:Object.assign({},RIG_DEVICES,MAP), hardware:HW_USER, ignored:Object.keys(IGNORED)
+    devices:Object.assign({},RIG_DEVICES,MAP), hardware:HW_USER, ignored:Object.keys(IGNORED),
+    // the robot setup (SetupUI): which way is up, where the drive base's middle is, the
+    // drive base when set by hand, and which checks the team has been through
+    up:OPTS.up||null, shift:OPTS.shift||null, drive:(CAD&&CAD.driveSpec)||null, setup:Object.assign({},SETUP.done)
   };
 }
 function applyRig(r){
@@ -648,6 +651,8 @@ function applyRig(r){
   if(/^(auto|show|hide)$/.test(r.baseModel||"")) OPTS.baseModel=r.baseModel;
   if(/^(auto|show|hide)$/.test(r.shooterModel||"")) OPTS.shooterModel=r.shooterModel;
   if(r.shot&&typeof r.shot==="object") Shots.cfg=Object.assign(Shots.defaults(),r.shot);
+  if(r.drive&&typeof r.drive==="object") CAD.driveSpec=cleanDriveSpec(r.drive); else delete CAD.driveSpec;
+  SETUP.done=Object.assign({},r.setup&&typeof r.setup==="object"?r.setup:{});
   const byId={}; CAD.mechs.forEach(m=>byId[m.id]=m);
   for(const j of (r.joints||[])){
     let m=byId[j.id];
@@ -1289,7 +1294,7 @@ function refitRobot(){
     Sim.rig=buildRig(CAD,Sim.drivetrain,Sim.base,Sim.dev,OPTS);
     Sim.dstate=Sim.rig?Dyn.reset(Sim.rig):null;
   }
-  renderFrameNote(); Physics.sync(); Status.render();
+  renderFrameNote(); Physics.sync(); Status.render(); SetupUI.render();
 }
 
 /* ============================================================
@@ -1331,7 +1336,7 @@ function syncOptionControls(){
 function loadCAD(cad,label,cls){
   // one frame for everything (src/frame.js): the parser does this for STEP
   // files; the sample and older workspaces come through here
-  canonicalizeCAD(cad,{up:OPTS.up});
+  canonicalizeCAD(cad,{up:OPTS.up, shift:OPTS.shift});
   EXACT={state:"none", msg:null};            // a STEP's exactGeometry() sets it loading right after
   CAD=cad;
   $("#cadStatus").textContent=label; $("#cadDrop").className="drop "+(cls||"ok");
@@ -1341,6 +1346,7 @@ function loadCAD(cad,label,cls){
   $("#vpDims").textContent=`${mm(b.max[0]-b.min[0])} × ${mm(b.max[1]-b.min[1])} × ${mm(b.max[2]-b.min[2])} mm`;
   // the front defaults to the way the wheels roll; a saved rig can still say otherwise
   RIG_DEVICES={}; HW_USER={}; Shots.cfg=null; OPTS.front=frontFromWheels(cad)||"+x"; OPTS.baseModel="auto"; OPTS.shooterModel="auto";
+  SETUP.done={}; delete cad.driveSpec;
   const restored=loadSavedRig();
   View.hiddenParts=new Set();
   View.load(cad);
@@ -1369,10 +1375,11 @@ function takeCAD(file){
 function parseAndLoad(done){
   if(!LAST_STEP) return;
   const {name,text}=LAST_STEP, mb=(text.length/1048576).toFixed(1);
+  SetupUI.beforeParse(name);
   $("#cadStatus").textContent="parsing "+mb+" MB …";
   setTimeout(()=>{
     try{
-      const cad=parseSTEP(text,msg=>{ $("#cadStatus").textContent=msg; },{up:OPTS.up});
+      const cad=parseSTEP(text,msg=>{ $("#cadStatus").textContent=msg; },{up:OPTS.up, shift:OPTS.shift});
       cad.name=name;
       // a joint spec belongs to the file it was written for; another robot drops it
       if(JOINTS.spec&&JOINTS.step!==name){ JOINTS.spec=JOINTS.report=JOINTS.devices=null; JOINTS.name=JOINTS.step=null; }
@@ -1560,6 +1567,7 @@ function takeMates(file){
       let p; try{ p=checkOnshapePayload(j); }catch(e){ $("#mateStatus").textContent=file.name+": "+e.message; $("#mateDrop").className="drop bad"; return; }
       holdOnshape(p); return;
     }
+    if(j&&j.format===SETUP_FORMAT){ SetupUI.take(j,file.name); return; }
     if(j&&j.format===JOINT_SPEC_FORMAT){
       MATES.asm=MATES.features=MATES.name=MATES.report=null;
       JOINTS.spec=j; JOINTS.name=file.name; JOINTS.step=LAST_STEP?LAST_STEP.name:null;
@@ -1655,12 +1663,154 @@ function editJoints(change){
   return true;
 }
 /* ============================================================
+   ROBOT SETUP — once per robot
+   The bench finds a robot's floor, front, drive base and joints by itself,
+   and gets most robots right. For the rest, a team checks four things once,
+   fixes what's wrong by clicking (or, for the drive base, by typing the
+   numbers off their chassis), and that's saved: in this browser for the
+   STEP's file name (re-exports keep the name), and as one setup file to
+   share. Nothing here needs the bench to be changed for a robot.
+   ============================================================ */
+const SETUP={done:{}};
+const SETUP_FORMAT="ftc-simbench.robot";
+const SETUP_STEPS=["up","front","drive","joints"];
+/* A drive base set by hand, checked: only known kinds, numbers in metres and in range. */
+function cleanDriveSpec(d){
+  const num=(v,lo,hi,def)=>{ v=+v; return isFinite(v)?Math.max(lo,Math.min(hi,v)):def; };
+  return {kind:["mecanum","tank","x"].includes(d.kind)?d.kind:"mecanum", n:[2,4,6].includes(+d.n)?+d.n:4,
+    d:num(d.d,0.04,0.2,0.096), track:num(d.track,0.1,0.6,0.36), base:num(d.base,0,0.6,0.3), pattern:d.pattern==="O"?"O":"X"};
+}
+const SetupUI={
+  formOpen:false, pending:null,
+  /* the saved setup for a STEP about to be read: up and the drive base's centre decide its frame */
+  beforeParse(name){
+    if(this.pending&&(!this.pending.cad||this.pending.cad===name)){
+      const P=this.pending; this.pending=null;
+      if(P.rig) store.set("ftcbench.rig."+name,JSON.stringify(P.rig));
+      if(P.joints) store.set(jointsKey(name),JSON.stringify(P.joints));
+    }
+    let r=null; try{ r=JSON.parse(store.get("ftcbench.rig."+name,"null")); }catch(e){ r=null; }
+    OPTS.up=r&&FRAME_UP_ROWS[r.up]?r.up:undefined;
+    OPTS.shift=r&&Array.isArray(r.shift)?r.shift.map(v=>Math.max(-0.4,Math.min(0.4,+v||0))):null;
+    $$("#upSeg button").forEach(b=>b.classList.toggle("on",(b.dataset.up||undefined)===OPTS.up));
+  },
+  /* a setup file: this robot's (or the next one dropped with it) */
+  take(j,file){
+    const rig=j.rig&&typeof j.rig==="object"?j.rig:null, joints=j.joints&&j.joints.format===JOINT_SPEC_FORMAT?j.joints:null;
+    const cad=typeof j.cad==="string"?j.cad:null;
+    if(CAD&&LAST_STEP&&(!cad||cad===LAST_STEP.name)){
+      if(rig) store.set("ftcbench.rig."+LAST_STEP.name,JSON.stringify(rig));
+      if(joints){ store.set(jointsKey(LAST_STEP.name),JSON.stringify(joints)); JOINTS.spec=joints; JOINTS.step=LAST_STEP.name; JOINTS.name=file; }
+      parseAndLoad();
+      $("#cadStatus").textContent="setup applied from "+file;
+    }else{
+      // the STEP isn't here yet (dropped together, it's read after): it gets this when it is
+      this.pending={cad, rig, joints};
+      $("#cadStatus").textContent="setup "+file+" is waiting for its robot"+(cad?" ("+cad+")":"");
+    }
+  },
+  download(){
+    if(!CAD) return;
+    const name=(CAD.name||"robot").replace(/\.(step|stp)$/i,"");
+    const out={format:SETUP_FORMAT, version:1, cad:LAST_STEP?LAST_STEP.name:CAD.name, saved:new Date().toISOString(),
+      rig:exportRig(), joints:JOINTS.spec&&JOINTS.spec.format===JOINT_SPEC_FORMAT?JOINTS.spec:(savedJoints(CAD.name)||null)};
+    const a=document.createElement("a");
+    a.href=URL.createObjectURL(new Blob([JSON.stringify(out,null,1)],{type:"application/json"}));
+    a.download=name+".simbench.json"; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+  },
+  isDefault(){ return typeof DEFAULT_ROBOT!=="undefined"&&CAD&&CAD.name===DEFAULT_ROBOT.step; },
+  complete(){ return SETUP_STEPS.every(k=>SETUP.done[k]); },
+  confirm(k){ SETUP.done[k]=true; saveRig(); this.render(); },
+  /* the drive base as typed: kind, wheel size, track, wheelbase, rollers, and the base's centre */
+  applyForm(){
+    const v=id=>$("#"+id)&&$("#"+id).value, mm=x=>(+x||0)/1000;
+    const spec=cleanDriveSpec({kind:v("suKind"), n:v("suN"), d:mm(v("suD")), track:mm(v("suTrack")), base:mm(v("suBase")), pattern:v("suPat")});
+    // the centre, forward and left of where it is now, into the CAD's own axes
+    const fw=mm(v("suFwd")), lf=mm(v("suLeft")), F=dtFrame({up:"+z", front:OPTS.front}), old=OPTS.shift||[0,0];
+    const shift=[old[0]+F.fwd[0]*fw+F.left[0]*lf, old[1]+F.fwd[1]*fw+F.left[1]*lf];
+    CAD.driveSpec=spec; SETUP.done.drive=true; this.formOpen=false;
+    if(fw||lf){ OPTS.shift=shift; saveRig(); if(LAST_STEP){ parseAndLoad(); return; } }
+    saveRig(); refitRobot(); if(CODE) rebuild(); this.render();
+  },
+  backToCad(){ if(!CAD) return; delete CAD.driveSpec; OPTS.shift=null; SETUP.done.drive=false; saveRig(); if(LAST_STEP) parseAndLoad(); else { refitRobot(); this.render(); } },
+  render(){
+    const box=$("#setupSteps"), pill=$("#setupPill"), chip=$("#vpSetup"); if(!box) return;
+    if(!CAD){ box.innerHTML=""; return; }
+    let D=null; try{ D=driveFromCAD(CAD,{front:OPTS.front}); }catch(e){ D=null; }
+    const F=CAD.frame||{}, n=SETUP_STEPS.filter(k=>SETUP.done[k]).length, def=this.isDefault();
+    pill.textContent=def?"ready":n===4?"set up":n+" of 4 checked"; pill.className="pill"+(def||n===4?" ok":"");
+    chip.hidden=def||n===4||!LAST_STEP||this.chipGone===CAD;
+    const seg=(attr,vals,cur)=>`<div class="seg">${vals.map(([v,t])=>`<button type="button" data-${attr}="${v}" class="${v===cur?"on":""}">${t}</button>`).join("")}</div>`;
+    const ok=k=>SETUP.done[k]?"":`<button class="btn-sm primary" type="button" data-su-ok="${k}">Looks right</button>`;
+    const li=(k,title,st,body)=>`<li class="su-step${SETUP.done[k]?" done":""}"><div class="su-head"><b>${title}</b><span class="su-st">${esc(st)}</span></div>${body}</li>`;
+    const out=[];
+    // 1. floor and up
+    out.push(li("up","Floor and up",F.up?"up is "+F.up:"",
+      `<p class="su-why">${esc(F.upWhy?"Found: "+F.upWhy+".":"")} Is the robot standing on its wheels, the right way up?</p>`+
+      `<div class="su-row">${seg("su-up",[["","auto"],["+z","Z"],["+y","Y"],["-y","−Y"],["+x","X"],["-x","−X"]],OPTS.up||"")}${ok("up")}</div>`));
+    // 2. front
+    const fw=frontFromWheels(CAD);
+    out.push(li("front","Front","front is "+OPTS.front,
+      `<p class="su-why">${fw?(fw.slice(1)===OPTS.front.slice(1)?"Along the way its wheels roll.":"Across the way its wheels roll: is that right?"):"Its wheels don't say."} In the top view the front faces up the screen.</p>`+
+      `<div class="su-row">${seg("su-front",[["+x","+x"],["+y","+y"],["-x","−x"],["-y","−y"]],OPTS.front)}<button class="btn-sm" type="button" data-su-view="top">Top view</button>${ok("front")}</div>`));
+    // 3. the drive base
+    const W=D?D.wheels:[], kind={mecanum:"Mecanum",tank:"Tank",x:"X-drive",omni:"Omni",swerve:"Swerve",unknown:"Not found"}[D?D.kind:"unknown"]||"Not found";
+    const r=W.length?W.reduce((s,w)=>s+w.r,0)/W.length:0;
+    const sum=W.length?kind+", "+W.length+" wheels of "+Math.round(r*2000)+" mm, "+Math.round((D.track||0)*1000)+" × "+Math.round((D.base||0)*1000)+" mm":"no drive wheels found";
+    const notes=((D&&D.why)||[]).filter(t=>/mirror|Check that wheel|"O" pattern|can't strafe|set by hand|from each wheel|read off/.test(t));
+    const pat=W.length===4&&D.kind==="mecanum"?(W.every(w=>w.roller===((w.corner==="FL"||w.corner==="BR")?1:-1))?"X":"O"):"X";
+    const fieldsOpen=this.formOpen||!W.length;
+    const form=fieldsOpen?`<div class="su-form">
+        <span>Type</span><select id="suKind">${[["mecanum","Mecanum"],["tank","Tank (traction / omni sides)"],["x","X-drive (omni at 45°)"]].map(([v,t])=>`<option value="${v}"${(D&&D.kind===v)?" selected":""}>${t}</option>`).join("")}</select>
+        <span>Wheels</span><select id="suN"><option>4</option><option>6</option><option>2</option></select>
+        <span>Wheel ⌀ mm</span><input id="suD" type="number" min="40" max="200" step="1" value="${Math.round(r*2000)||96}" list="suWheelSizes"><datalist id="suWheelSizes"><option value="96">goBILDA 96 mm mecanum</option><option value="104">goBILDA 104 mm</option><option value="140">goBILDA 140 mm</option><option value="75">REV 75 mm mecanum</option><option value="90">REV 90 mm traction</option><option value="100">AndyMark 4 in</option></datalist>
+        <span>Track mm</span><input id="suTrack" type="number" min="100" max="600" step="1" value="${Math.round((D&&D.track||0.36)*1000)}" title="left to right, wheel centre to wheel centre">
+        <span>Wheelbase mm</span><input id="suBase" type="number" min="0" max="600" step="1" value="${Math.round((D&&D.base||0.3)*1000)}" title="front axle to back axle">
+        <span>Rollers</span><select id="suPat"><option value="X"${pat==="X"?" selected":""}>X from above (standard)</option><option value="O"${pat==="O"?" selected":""}>O from above</option></select>
+        <span>Move centre</span><div class="su-pair"><input id="suFwd" type="number" step="1" value="0" title="mm forward"><input id="suLeft" type="number" step="1" value="0" title="mm left"></div>
+      </div>
+      <div class="su-row"><button class="btn-sm primary" type="button" data-su-drive="apply">Use these</button>${W.length?`<button class="btn-sm" type="button" data-su-drive="close">Cancel</button>`:""}</div>`:"";
+    out.push(li("drive","Drive base",sum,
+      `<p class="su-why">${D&&D.set?"Set by hand.":W.length?"Found in the CAD.":"The CAD has no drive wheels the bench can read: type the numbers off your chassis (a kit's are on its product page)."}</p>`+
+      notes.map(t=>`<p class="su-why${/Check|can't|"O"/.test(t)?" warn":""}">${esc(t)}</p>`).join("")+
+      (fieldsOpen?form:`<div class="su-row">${ok("drive")}<button class="btn-sm" type="button" data-su-drive="open">Set it by numbers</button>${D&&D.set?`<button class="btn-sm" type="button" data-su-drive="auto">Back to what the CAD shows</button>`:""}</div>`)));
+    // 4. joints and the code
+    const q=RC?RC.need+RC.warn:null;
+    out.push(li("joints","Joints and your code",q==null?"":q?q+" to look at":"nothing to ask",
+      `<p class="su-why">${CODE?"Every motor and servo your code moves needs a joint that moves the right parts. The robot check below asks about anything it can't be sure of.":"Load your OpMode (Java) to check the joints against it."}</p>`+
+      `<div class="su-row"><button class="btn-sm" type="button" data-su-goto="robotcheck">Robot check</button><button class="btn-sm" type="button" data-su-cad="1">Fix joints in the CAD view</button>${ok("joints")}</div>`));
+    setHTML(box,out.join(""));
+  },
+  init(){
+    $("#setupDownload").addEventListener("click",()=>this.download());
+    $("#vpSetup").addEventListener("click",()=>{ const nav=$('.tabs[data-tabs="left"]'); if(nav) selectTab(nav,"robot");
+      const s=document.querySelector('[data-sec="setup"]'); if(s) s.scrollIntoView({block:"start", behavior:"smooth"}); this.chipGone=CAD; this.render(); });
+    $("#setupSteps").addEventListener("click",e=>{
+      const b=e.target.closest("button"); if(!b) return;
+      const d=b.dataset;
+      if(d.suOk) this.confirm(d.suOk);
+      else if(d.suUp!==undefined){ OPTS.up=d.suUp||undefined; SETUP.done.up=true; saveRig(); if(LAST_STEP) parseAndLoad(); }
+      else if(d.suFront){ OPTS.front=d.suFront; SETUP.done.front=true; refitRobot(); syncOptionControls(); saveRig(); ShotUI.dirty=true; this.render(); }
+      else if(d.suView){ View.setView(d.suView); $$("#viewSeg button").forEach(x=>x.classList.toggle("on",x.dataset.v===d.suView)); }
+      else if(d.suDrive==="open"){ this.formOpen=true; this.render(); }
+      else if(d.suDrive==="close"){ this.formOpen=false; this.render(); }
+      else if(d.suDrive==="apply") this.applyForm();
+      else if(d.suDrive==="auto") this.backToCad();
+      else if(d.suGoto){ const s=document.querySelector('[data-sec="'+d.suGoto+'"]'); if(s) s.scrollIntoView({block:"start", behavior:"smooth"}); }
+      else if(d.suCad){ CadView.enter(); $$("#viewSeg button").forEach(x=>x.classList.toggle("on",x.dataset.v==="cad")); }
+    });
+  }
+};
+
+/* ============================================================
    ROBOT CHECK — the robot against the team's own code (src/robotcheck.js),
    as questions with their likely answers. An answer lands in the robot's
    joint spec like any other edit, so it's asked once.
    ============================================================ */
 let RC=null;
-function renderRobotCheck(){
+/* The robot check, and the setup step that counts its questions. */
+function renderRobotCheck(){ renderRobotCheckNow(); SetupUI.render(); }
+function renderRobotCheckNow(){
   // shown twice: in the Robot tab, and at the top of the Checks tab
   const boxes=[$("#robotCheck"),$("#rcChecks")].filter(Boolean), pill=$("#rcPill"); if(!boxes.length) return;
   const put=h=>boxes.forEach(b=>{ b.innerHTML=(b.id==="rcChecks"?rcHead():"")+h; });
@@ -2778,6 +2928,7 @@ function proBoot(){
   const syncUp=()=>$$("#upSeg button").forEach(b=>b.classList.toggle("on",(b.dataset.up||undefined)===OPTS.up));
   $("#upSeg").addEventListener("click",e=>{ const b=e.target.closest("button"); if(!b) return;
     OPTS.up=b.dataset.up||undefined; syncUp();
+    if(CAD){ SETUP.done.up=true; saveRig(); }
     if(LAST_STEP) parseAndLoad();
     else $("#frameNote").textContent="Up can be changed for a STEP file you drop in; the built-in sample is already Z-up."; });
   syncUp(); renderFrameNote();
@@ -2839,7 +2990,7 @@ function proBoot(){
   $("#matchOn").addEventListener("change",e=>{ store.set("ftcbench.match",e.target.checked?"1":"0"); if(Online.inMatch()) return; if(Sim.phase!=="running") resetMatch(); else { Match.on=e.target.checked; if(!Match.on) resetMatch(); } });
   $("#matchSkill").addEventListener("change",e=>{ store.set("ftcbench.matchSkill",e.target.value); if(Online.inMatch()) return; if(Sim.phase!=="running") resetMatch(); else Match.skill=e.target.value; });
   $("#practice").addEventListener("change",e=>{ store.set("ftcbench.practice",e.target.checked?"1":"0"); updateClock(); });
-  NetUI.init();
+  NetUI.init(); SetupUI.init();
 
   // code
   $("#addOpMode").addEventListener("click",()=>$("#codeFile").click());

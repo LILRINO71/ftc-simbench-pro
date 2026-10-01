@@ -3,6 +3,7 @@
 | Guide | What it covers |
 |---|---|
 | [joints.md](joints.md) | How a STEP file becomes a moving robot: Onshape mates, joint specs (with the format reference), the click-to-fix editor, and the automatic finder. |
+| [robot-setup.md](robot-setup.md) | Setting up a robot once: the four checks, setting the drive base by numbers, saving and sharing the setup file, and what the bench reads by itself first. |
 | [online.md](online.md) | Online matches: finding or hosting one, the room, chat and marks, how the host keeps one match for everyone, the network and what it can't do yet. |
 | [match.md](match.md) | The AI robots and human players: what they do, the rules they keep, the skill levels. |
 | [robot-check.md](robot-check.md) | How every robot ends up right: exact Onshape mates, the robot check against the team's code, and the questions it asks. The real-team CAD test set. |

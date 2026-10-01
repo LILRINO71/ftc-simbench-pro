@@ -557,9 +557,44 @@ function dtIsKiwi(ws){
   });
 }
 
+/* A drive base set by hand in the robot setup (cad.driveSpec), for any CAD:
+   {kind: "mecanum" | "tank" | "x", n: 2, 4 or 6 wheels, d: wheel diameter,
+   track: left-right between wheel centres, base: front-back between the
+   front and back axles (metres), pattern: "X" or "O" for mecanum rollers}.
+   The wheels stand round the robot's centre (the frame origin, which the
+   setup can move), on the floor, rolling along the robot's front. */
+const DRIVE_SPEC_KINDS={mecanum:4, tank:4, x:4};
+function driveFromSpec(spec,F){
+  const kind=DRIVE_SPEC_KINDS[spec.kind]?spec.kind:"tank";
+  const n=kind==="tank"&&[2,4,6].includes(spec.n)?spec.n:4;
+  const r=Math.max(0.02,Math.min(0.1,(+spec.d||0.096)/2)), track=Math.max(0.1,Math.min(0.6,+spec.track||0.36)), base=Math.max(0,Math.min(0.6,+spec.base||0.3));
+  const xs=n===2?[0]:n===6?[base/2,0,-base/2]:[base/2,-base/2], why=["The drive base is set by hand in the robot setup: "+
+    ({mecanum:"mecanum",tank:"tank",x:"X-drive"})[kind]+", "+n+" wheels of "+(r*2000).toFixed(0)+" mm, "+(track*1000).toFixed(0)+" mm track"+(n>2?", "+(base*1000).toFixed(0)+" mm wheelbase":"")+"."];
+  const ws=[];
+  for(const x of xs) for(const y of [track/2,-track/2]){
+    const c=[F.fwd[0]*x+F.left[0]*y+F.up[0]*r, F.fwd[1]*x+F.left[1]*y+F.up[1]*r, F.fwd[2]*x+F.left[2]*y+F.up[2]*r];
+    // an X-drive's wheels sit at 45 degrees, rolling round the centre
+    const ax=kind==="x"?[(x>0)===(y>0)?-1:1,1].map(v=>v/Math.SQRT2):[0,1];
+    const axis=[F.fwd[0]*ax[0]+F.left[0]*ax[1], F.fwd[1]*ax[0]+F.left[1]*ax[1], F.fwd[2]*ax[0]+F.left[2]*ax[1]];
+    ws.push({name:"wheel (set by hand)", part:null, c, axis, r, width:0.04, x, y, z:r, ax, skew:dtSkew(ax), roller:0, steer:false, corner:null, alpha:0});
+  }
+  dtCorners(ws);
+  if(kind==="mecanum"){
+    const o=spec.pattern==="O"?-1:1;
+    ws.forEach(w=>{ w.roller=o*((w.corner==="FL"||w.corner==="BR")?1:-1); });
+    why.push(spec.pattern==="O"?"Rollers in an \"O\" pattern, as set: it can't turn in place.":"Rollers in the standard X pattern.");
+  }
+  dtOrient(ws,kind);
+  for(const w of ws){ w.mount=w.y>0?-1:1; w.mountHow="assumed"; }
+  why.push("Motor direction: each wheel driven the standard way, by a motor inboard of it, so the left side is what a program reverses with setDirection(REVERSE).");
+  const wheels=ws.map(dtPublic);
+  return {kind, confidence:1, set:true, why, wheels, track, base:n>2?base:0, ik:ikMatrix(kind,wheels)};
+}
+
 function driveFromCAD(cad,opts){
   const why=[], F=dtFrame(opts);
   const nothing=msg=>{ why.push(msg); return {kind:"unknown",confidence:0,why,wheels:[],track:0,base:0,ik:[]}; };
+  if(cad&&cad.driveSpec&&typeof cad.driveSpec==="object") return driveFromSpec(cad.driveSpec,F);
 
   const solids=((cad&&cad.solids)||[]).filter(s=>s&&s.pts&&s.pts.length>3);
   if(!solids.length){

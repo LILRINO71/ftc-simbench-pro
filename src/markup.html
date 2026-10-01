@@ -168,6 +168,12 @@
         <p class="hint" id="frameNote"></p>
         <p class="hint" id="exactNote"></p>
       </div>
+      <div class="sec" data-sec="setup">
+        <div class="sec-head"><h3>Robot setup</h3><span class="pill" id="setupPill">—</span><span class="spacer"></span>
+          <button class="btn-sm" id="setupDownload" type="button" title="This robot's whole setup in one file: give it to teammates to drop in with the STEP">Download setup</button></div>
+        <p class="hint">Check each step once. Whatever you set is saved for this robot and comes back every time it loads, also after you export the CAD again. <b>Download setup</b> gives your team the same robot: drop the file in with the STEP.</p>
+        <ol class="su-steps" id="setupSteps"></ol>
+      </div>
       <div class="sec" data-sec="robotcheck">
         <div class="sec-head"><h3>Robot check</h3><span class="pill" id="rcPill">—</span></div>
         <p class="hint">Your robot, checked against your own code: every motor and servo it moves has a joint, every joint carries parts and has something driving it, and nothing swings through the frame. Anything the bench can't be sure of is a question here.</p>
@@ -371,6 +377,7 @@
         <ol class="mh-events" id="mhEvents"></ol>
       </div>
       <div class="vp-tip" id="vpTip" hidden>Drag to move · shift-drag to turn</div>
+      <button class="vp-tour vp-setup" id="vpSetup" type="button" hidden><i aria-hidden="true"></i>New robot: set it up once<span>4 quick checks</span></button>
       <button class="vp-tour" id="vpTour" type="button" hidden><i aria-hidden="true"></i>New here? Take the tour<span>1 min</span></button>
       <div class="cad-ui" id="cadUI" hidden>
         <aside class="cad-tree" aria-label="Instances">
