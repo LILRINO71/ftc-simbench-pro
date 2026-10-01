@@ -1141,7 +1141,8 @@ function shotTick(now){
   }else ShotUI.odds=null;
   updateArc();
   const sc=$("#shotCount"), r=ShotUI.res;
-  if(sc){ const k=r?VERDICT_CLASS[r.verdict]:""; sc.textContent=r?(k==="pass"?"✓":k==="warn"?"~":"✕"):""; sc.className="count"+(k==="fail"?" fail":k==="warn"?" warn":""); }
+  // no flywheel in the code: the verdict is a what-if, so the tab gets no red cross
+  if(sc){ const k=r&&Shots.cfg.shooter?VERDICT_CLASS[r.verdict]:""; sc.textContent=!k?"":(k==="pass"?"✓":k==="warn"?"~":"✕"); sc.className="count"+(k==="fail"?" fail":k==="warn"?" warn":""); }
   if(paneVisible("shot")){ if(fresh) renderShotVerdict(); renderShotLive(); renderHives(); renderShotLog(); }
 }
 function updateArc(){
@@ -1164,9 +1165,12 @@ function renderShotVerdict(){
   if(!Field.ok){ el.className="verdict"; el.innerHTML=`<div class="vs">The BIOBUZZ field didn't load, so there is nothing to shoot at. Everything else on the bench works.</div>`; return; }
   const r=ShotUI.res, c=Sim.chassis, al=Shots.target().toUpperCase();
   if(!r){ el.className="verdict"; el.innerHTML=`<div class="vs">Working out the shot from here…</div>`; return; }
-  const b=r.best;
-  el.className="verdict "+(VERDICT_CLASS[r.verdict]||"");
-  el.innerHTML=`<div class="vhead"><span class="vw">${esc(r.verdict)}</span><span class="vr">${Math.round((r.hitRate||0)*100)}% score</span></div>
+  const b=r.best, what=!Shots.cfg||!Shots.cfg.shooter;
+  el.className="verdict "+(what?"":VERDICT_CLASS[r.verdict]||"");
+  el.innerHTML=what
+    ?`<div class="vhead"><span class="vw">No shooter</span></div>
+    <div class="vs">This OpMode has no flywheel. A tuned shooter here would be <b>${esc(r.verdict.toLowerCase())}</b>: ${Math.round((r.hitRate||0)*100)}% of shots in, from ${Math.round(r.distIn)} in to the ${al} up-CELL.</div>`
+    :`<div class="vhead"><span class="vw">${esc(r.verdict)}</span><span class="vr">${Math.round((r.hitRate||0)*100)}% score</span></div>
     <div class="vs">From x ${(c.x/IN).toFixed(0)}, y ${(c.y/IN).toFixed(0)} in to the ${al} up-CELL, ${Math.round(r.distIn)} in away. ${esc(r.reason||"")}</div>
     ${b?`<div class="vk"><div><b>${b.thetaDeg.toFixed(0)}°</b><span>launch</span></div><div><b>${b.v.toFixed(2)}</b><span>m/s exit</span></div><div><b>${r.motor?Math.round(r.motor.motorRpm).toLocaleString():"—"}</b><span>motor rpm</span></div></div>`:""}
     ${(r.warnings||[]).map(w=>`<div class="vwarn">${esc(w.text)}</div>`).join("")}`;
@@ -1181,7 +1185,7 @@ function renderShotLive(){
     const moving=Math.hypot(Sim.vel.x,Sim.vel.y)>0.05?" — while driving":"";
     out.push(`<div class="odds ${cls}"><span class="big">${Math.round(o*100)}%</span><span>of shots go in if you fire now${moving}.<br><span class="dim">${esc(aimNote)}</span></span></div>`);
   }
-  if(!cfg.shooter) out.push(`<div>This OpMode has no flywheel motor. The verdict above is what a tuned shooter could do from here — pick a motor below if it has another name.</div>`);
+  if(!cfg.shooter) out.push(`<div>If the flywheel has another name, pick it below.</div>`);
   else out.push(`<div><code>${esc(cfg.shooter)}</code> ${spin>0.01
     ?`at <b>${Math.round(spin*100)}%</b> of free speed → ${Math.round(Math.min(full.rpm,spin*full.free)).toLocaleString()} rpm → <b>${Shots.exitSpeed().toFixed(2)} m/s</b>`
     :"is stopped"+(Sim.phase==="running"?"":" — press START")}</div>`);
@@ -1760,9 +1764,11 @@ const SetupUI={
     const notes=((D&&D.why)||[]).filter(t=>/mirror|Check that wheel|"O" pattern|can't strafe|set by hand|from each wheel|read off/.test(t));
     const pat=W.length===4&&D.kind==="mecanum"?(W.every(w=>w.roller===((w.corner==="FL"||w.corner==="BR")?1:-1))?"X":"O"):"X";
     const fieldsOpen=this.formOpen||!W.length;
+    // the form opens on what the base is now: a 6-wheel tank must not come back as 4 because nobody touched the box
+    const nW=[2,4,6].includes(W.length)?W.length:4;
     const form=fieldsOpen?`<div class="su-form">
         <span>Type</span><select id="suKind">${[["mecanum","Mecanum"],["tank","Tank (traction / omni sides)"],["x","X-drive (omni at 45°)"]].map(([v,t])=>`<option value="${v}"${(D&&D.kind===v)?" selected":""}>${t}</option>`).join("")}</select>
-        <span>Wheels</span><select id="suN"><option>4</option><option>6</option><option>2</option></select>
+        <span>Wheels</span><select id="suN">${[4,6,2].map(k=>`<option${k===nW?" selected":""}>${k}</option>`).join("")}</select>
         <span>Wheel ⌀ mm</span><input id="suD" type="number" min="40" max="200" step="1" value="${Math.round(r*2000)||96}" list="suWheelSizes"><datalist id="suWheelSizes"><option value="96">goBILDA 96 mm mecanum</option><option value="104">goBILDA 104 mm</option><option value="140">goBILDA 140 mm</option><option value="75">REV 75 mm mecanum</option><option value="90">REV 90 mm traction</option><option value="100">AndyMark 4 in</option></datalist>
         <span>Track mm</span><input id="suTrack" type="number" min="100" max="600" step="1" value="${Math.round((D&&D.track||0.36)*1000)}" title="left to right, wheel centre to wheel centre">
         <span>Wheelbase mm</span><input id="suBase" type="number" min="0" max="600" step="1" value="${Math.round((D&&D.base||0.3)*1000)}" title="front axle to back axle">
@@ -2608,13 +2614,16 @@ const Status={
   render(){
     const s=this.compute();
     const chip=$("#statusChip"); if(!chip) return;
-    if(this.cur&&this.cur.level===s.level&&this.cur.label===s.label&&this.cur.items.length===s.items.length){ this.cur=s; return; }
+    // the same count can hide a different list: one warning cleared and another raised
+    const key=s.items.map(i=>i.level+":"+i.text).join("|");
+    if(this.cur&&this.cur.level===s.level&&this.cur.label===s.label&&this.cur.key===key){ this.cur=Object.assign(s,{key}); return; }
     const wasWorse=this.cur&&s.rank>this.cur.rank;
-    this.cur=s;
+    this.cur=Object.assign(s,{key});
     chip.className="status-chip "+s.level;
     $("#statusLabel").textContent=s.label;
     chip.title=s.headline;
-    $("#statusHead").textContent=s.level==="go"?"Nothing to report":s.headline;
+    // the list says each one; the head only counts them, so it doesn't repeat the first row
+    $("#statusHead").textContent=s.level==="go"?"Nothing to report":s.items.length>1?s.label:s.headline;
     setHTML($("#statusList"), s.items.length
       ? s.items.map((i,n)=>`<button class="row ${i.level}" data-go="${esc(i.where)}" data-n="${n}"><i></i><span>${esc(i.text)}</span></button>`).join("")
       : `<p class="ok">Code, CAD and configuration agree. Nothing is over its limit.</p>`);
@@ -2656,7 +2665,6 @@ const Tour={
   i:0, hi:null,
   wire(){
     $("#helpBtn").addEventListener("click",()=>this.start(0));
-    $("#replayTour").addEventListener("click",()=>{ Menu.open(false); this.start(0); });
     $("#tourClose").addEventListener("click",()=>this.close());
     $("#tourBack").addEventListener("click",()=>this.go(this.i-1));
     $("#tourNext").addEventListener("click",()=>{ if(this.i>=TOUR.length-1) this.close(); else this.go(this.i+1); });

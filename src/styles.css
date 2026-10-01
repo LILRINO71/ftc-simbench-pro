@@ -669,7 +669,7 @@ kbd{display:inline-block; min-width:15px; padding:0 3px; border:1px solid var(--
 /* ============================================================
    CAD VIEW — Onshape's graphics area: light, quiet, the model first
    ============================================================ */
-.viewport.cad .vp-hint,.viewport.cad .pip,.viewport.cad .vp-readout,.viewport.cad .vp-tip{display:none!important;}
+.viewport.cad .vp-hint,.viewport.cad .pip,.viewport.cad .vp-readout,.viewport.cad .vp-tip,.viewport.cad .vp-chips,.viewport.cad .match-hud{display:none!important;}
 .viewport.cad .vp-title{color:#4b5663;}
 .cad-ui{position:absolute; inset:0; pointer-events:none; font-family:var(--body); color:#1f2933;}
 .cad-ui>*{pointer-events:auto;}
@@ -846,7 +846,8 @@ table.grid th{font-size:11px; font-weight:500;}
 .vp-tip,.pip{background:rgba(12,13,15,.82); border-color:rgba(255,255,255,.08);}
 .btn-ghost{background:rgba(255,255,255,.05); color:#CFD1D5; border-color:rgba(255,255,255,.12);}
 .match-hud{background:rgba(12,13,15,.72); border-color:rgba(255,255,255,.07);}
-.vp-tour{position:absolute; left:14px; bottom:14px; z-index:3; display:inline-flex; align-items:center; gap:8px; padding:7px 12px; border-radius:18px;
+.vp-chips{display:flex; flex-wrap:wrap; gap:8px; align-items:flex-end; min-width:0;}
+.vp-tour{display:inline-flex; align-items:center; gap:8px; padding:7px 12px; border-radius:18px;
   background:rgba(12,13,15,.78); color:#ECEBE7; border:1px solid rgba(255,255,255,.12); font:500 12.5px var(--body); cursor:pointer;
   backdrop-filter:blur(6px); animation:tourIn .5s .8s both;}
 .vp-tour:hover{border-color:rgba(232,180,78,.6);}
@@ -969,3 +970,16 @@ table.grid th{font-size:11px; font-weight:500;}
 .su-form .su-pair{display:flex; gap:5px;}
 .vp-setup{left:auto; right:14px; bottom:58px;}
 .vp-setup i{background:var(--warn);}
+
+/* the bar and the overlays, made to fit a 1366 px laptop */
+.op-pick{min-width:150px;}
+.vp-chips .vp-tour{pointer-events:auto; white-space:nowrap;}
+.vp-readout{white-space:nowrap;}
+/* the scoreboard owns the top right: the START hint moves left out of its way */
+.viewport:has(> .match-hud:not([hidden])) .vp-hint{left:12px; transform:none;}
+.tabs button[role=tab]{padding-left:6px; padding-right:6px;}
+@media (max-width:1500px) and (min-width:1181px){
+  #phasePill,.vp-tour span{display:none;}
+  .tabs button[role=tab]{padding-left:5px; padding-right:5px;}
+  .ds-btn{min-width:0; padding:0 12px;}
+}
