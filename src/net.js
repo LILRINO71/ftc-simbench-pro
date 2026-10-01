@@ -12,6 +12,11 @@
    from the same launch and decides it, so every TIP is decided in one
    place. Robots that touch push each other apart, each computer moving its
    own robot half the way.
+   Each player's robot is drawn on the other computers from its own CAD:
+   a light copy (src/robotlite.js) goes to each of them once, and every
+   pose after that carries where each mechanism is. Robots and the match
+   are drawn a tenth of a second behind, between two things actually
+   heard, so they move smoothly however the network bunches messages.
 
    Browsers talk to each other directly (WebRTC). They find each other
    through public relays (the Trystero library, loaded only when a player
@@ -22,7 +27,7 @@
    Every message from another computer is untrusted: each is checked and
    clamped before it touches the match.
    ============================================================ */
-const NET_PROTO=1;
+const NET_PROTO=2;                                 // 2: timed poses, mechanisms, robot copies
 const NET_APP="ftc-simbench-pro";
 const NET_LIB="https://cdn.jsdelivr.net/npm/trystero@0.25.4/+esm";
 const NET_SLOTS=["red1","red2","blue1","blue2"];
@@ -30,6 +35,8 @@ const NET_ABC="ABCDEFGHJKLMNPQRSTUVWXYZ23456789";   // no 0/O or 1/I to misread
 const NET_HZ={pose:20, snap:12};
 const NET_LEAD_MS=3000;                            // START to the match: a countdown, and time to INIT
 const NET_MAX_PLAYERS=8;                           // four drivers, the rest watch
+const NET_DELAY=100;                               // ms behind the newest robot pose and snapshot, to draw between two
+const NET_MODEL_MAX=6*1024*1024;                   // a robot's light copy, packed: bigger isn't one
 const netAl=s=>/^blue/.test(s||"")?"blue":"red";
 const netNum=(v,lo,hi,d)=>typeof v==="number"&&isFinite(v)?Math.max(lo,Math.min(hi,v)):d;
 const netStr=(v,n)=>typeof v==="string"?v.replace(/[\u0000-\u001f\u007f]/g,"").trim().slice(0,n):"";
@@ -67,7 +74,11 @@ function netLoopback(){
             const data=JSON.stringify(msg), T=to==null?null:[].concat(to);
             for(const [id,m] of R) if(id!==self&&(!T||T.indexOf(id)>=0)) queue.push(()=>{ if(R.get(id)===m&&m.msg) m.msg(JSON.parse(data),self); });
           },
-          onMessage(f){ me.msg=f; }, onJoin(f){ me.join=f; }, onLeave(f){ me.leave=f; },
+          sendBin(buf,meta,to){
+            const T=[].concat(to), M=JSON.stringify(meta||{});
+            for(const [id,m] of R) if(id!==self&&T.indexOf(id)>=0) queue.push(()=>{ if(R.get(id)===m&&m.bin) m.bin(buf.slice(0),JSON.parse(M),self); });
+          },
+          onMessage(f){ me.msg=f; }, onBin(f){ me.bin=f; }, onJoin(f){ me.join=f; }, onLeave(f){ me.leave=f; },
           leave(){ if(R.get(self)!==me) return; R.delete(self); for(const [,m] of R) queue.push(()=>m.leave&&m.leave(self)); }
         };
         for(const [id,m] of R){ queue.push(()=>m.join&&m.join(self)); queue.push(()=>R.get(self)===me&&me.join&&me.join(id)); }
@@ -84,18 +95,72 @@ async function netTrystero(){
   const T=await import(NET_LIB);
   const out={self:T.selfId, onError:null, join(name){
     const r=T.joinRoom({appId:NET_APP}, name, {onJoinError:d=>{ if(out.onError) out.onError(Object.assign({room:name},d)); }});
-    const a=r.makeAction("m");
-    let msg=null, jn=null, lv=null;
+    const a=r.makeAction("m"), b=r.makeAction("b");
+    let msg=null, bin=null, jn=null, lv=null;
     a.onMessage=(d,meta)=>{ if(msg) msg(d, meta&&meta.peerId); };
+    b.onMessage=(d,meta)=>{ const ab=netAB(d); if(bin&&ab) bin(ab, (meta&&meta.metadata)||{}, meta&&meta.peerId); };
     r.onPeerJoin=id=>{ if(jn) jn(id); };
     r.onPeerLeave=id=>{ if(lv) lv(id); };
     return {send(m,to){
         // a peer that just left, or a closed channel: the message is lost, nothing more
         try{ const p=a.send(m, to==null?undefined:{target:to}); if(p&&p.catch) p.catch(()=>{}); }catch(e){}
       },
-      onMessage(f){ msg=f; }, onJoin(f){ jn=f; }, onLeave(f){ lv=f; }, leave(){ r.leave(); }};
+      sendBin(buf,meta,to){ try{ const p=b.send(buf,{target:to, metadata:meta}); if(p&&p.catch) p.catch(()=>{}); }catch(e){} },
+      onMessage(f){ msg=f; }, onBin(f){ bin=f; }, onJoin(f){ jn=f; }, onLeave(f){ lv=f; }, leave(){ r.leave(); }};
   }};
   return out;
+}
+
+/* Binary arrives as an ArrayBuffer or as a view of one (a Uint8Array over part
+   of a bigger buffer), depending on how the transport chunked it: exactly its
+   own bytes as an ArrayBuffer either way, or null for anything else. */
+function netAB(d){
+  if(d instanceof ArrayBuffer) return d;
+  if(ArrayBuffer.isView(d)) return d.buffer.slice(d.byteOffset,d.byteOffset+d.byteLength);
+  return null;
+}
+/* gzip in and out, as the browser (and Node) do it. Unpacking stops past `max`
+   bytes and after 10 s: a damaged or hostile stream never hangs or floods. */
+async function netGzip(buf){
+  const s=new Blob([buf]).stream().pipeThrough(new CompressionStream("gzip"));
+  return await new Response(s).arrayBuffer();
+}
+async function netGunzip(buf,max){
+  const b=new Uint8Array(buf);
+  if(b.length<18||b[0]!==0x1f||b[1]!==0x8b) throw new Error("not gzip");
+  const read=(async()=>{
+    const rd=new Blob([b]).stream().pipeThrough(new DecompressionStream("gzip")).getReader(), parts=[]; let n=0;
+    for(;;){ const {done,value}=await rd.read(); if(done) break; n+=value.length; if(n>max){ rd.cancel(); throw new Error("too big"); } parts.push(value); }
+    const out=new Uint8Array(n); let o=0; for(const p of parts){ out.set(p,o); o+=p.length; }
+    return out.buffer;
+  })();
+  let timer; const late=new Promise((_,no)=>{ timer=setTimeout(()=>no(new Error("timed out")),10000); });
+  try{ return await Promise.race([read,late]); } finally{ clearTimeout(timer); }
+}
+async function netHash(buf){
+  const d=new Uint8Array(await crypto.subtle.digest("SHA-256",buf));
+  let s=""; for(let i=0;i<16;i++) s+=d[i].toString(16).padStart(2,"0");
+  return s;
+}
+/* A new sample into a buffer: in time order, at most 12. One older than the
+   newest is late (dropped), unless it's a whole second older: then the sender's
+   clock was put right, and the buffer starts again from it. */
+function netKeep(buf,s){
+  const last=buf[buf.length-1];
+  if(last&&s.t<=last.t){ if(last.t-s.t<1000) return false; buf.length=0; }
+  buf.push(s); if(buf.length>12) buf.shift();
+  return true;
+}
+/* Between two heard samples (by time t, ms), or a little past the newest. */
+function netSample(buf,t){
+  if(!buf.length) return null;
+  const last=buf[buf.length-1];
+  if(t>=last.t){ const a=Math.min(0.25,(t-last.t)/1000);
+    return {x:last.x+(last.vx||0)*a, y:last.y+(last.vy||0)*a, h:last.h, cx:last.cx+(last.vx||0)*a, cy:last.cy+(last.vy||0)*a}; }
+  let i=buf.length-1; while(i>0&&buf[i-1].t>t) i--;
+  if(i===0) return buf[0];
+  const A=buf[i-1], B=buf[i], k=(t-A.t)/Math.max(1,B.t-A.t);
+  return {x:A.x+(B.x-A.x)*k, y:A.y+(B.y-A.y)*k, h:A.h+wrapA(B.h-A.h)*k, cx:A.cx+(B.cx-A.cx)*k, cy:A.cy+(B.cy-A.cy)*k};
 }
 
 /* ---------------- the session ---------------- */
@@ -110,6 +175,9 @@ const Online={
   slots:null, seed:1, startAt:0, started:false, lastStart:null, fieldKey:null,
   ads:netMap(), chat:[], marks:[], score:null, final:null, why:null,
   offset:0, rtt:0, syncs:[], acc:null, fid:0, heard:netMap(),
+  // robots' light copies: mine (packed, and its hash), every one heard of by hash, and whose is whose
+  model:null, models:netMap(), modelOf:netMap(), asked:netMap(), shown:netMap(), jointsOf:null,
+  pend:[],               // a guest's snapshots and flights, held to be shown on the robots' (delayed) clock
   now:()=>Date.now(),
   subs:[],
 
@@ -160,11 +228,13 @@ const Online={
     this.state="off"; this.role=null; this.code=null; this.pub=false; this.hostId=null; this.why=null;
     this.players=netMap(); this.remote=netMap(); this.slots=null; this.started=false; this.score=null; this.final=null;
     this.chat=[]; this.marks=[]; this.syncs=[]; this.offset=0; this.rtt=0; this.heard=netMap(); this.lastStart=null; this.fieldKey=null;
+    this.modelOf=netMap(); this.asked=netMap(); this.shown=netMap(); this.pend=[];
     this.acc={pose:0, snap:0, sync:0, ad:0};
   },
   open(){
     const R=this.room=this.T.join("m-"+this.code);
     R.onMessage((m,from)=>this.recv(m,from));
+    if(R.onBin) R.onBin((buf,meta,from)=>this.recvModel(buf,meta,from));
     R.onJoin(id=>this.peerJoin(id));
     R.onLeave(id=>this.peerLeave(id));
   },
@@ -210,6 +280,8 @@ const Online={
   lost(why){ const w=why; this.leave(); this.why=w; this.emit("error",w); },
 
   peerJoin(id){
+    // whoever arrives hears which robot this is, and asks for it if it doesn't have it
+    if(this.model&&this.room) this.room.send({k:"mdl", h:this.model.hash},id);
     // until it knows the host, a guest says hello to everyone who's there
     if(this.role==="guest"&&this.state==="joining"&&(!this.hostId||this.hostId===id))
       this.room.send({k:"hello", name:this.name, proto:NET_PROTO}, id);
@@ -252,6 +324,11 @@ const Online={
       case "chat": return this.onChat(m,from);
       case "mark": return this.onMark(m,from);
       case "sync": return this.onSync(m,from);
+      case "mdl": return this.onModelSaid(m,from);
+      case "getmdl":
+        if(this.model&&m.h===this.model.hash&&this.players[from]&&!this.often(from,"getmdl",3000)&&this.room.sendBin)
+          this.room.sendBin(this.model.gz,{h:this.model.hash},from);
+        return;
     }
   },
   /* A message a player may send only so often. */
@@ -267,6 +344,7 @@ const Online={
     p.name=netStr(m.name,24)||"Guest";
     this.room.send(Object.assign(this.rosterMsg(),{k:"welcome", now:this.now()}),from);
     this.sendRoster();
+    this.wantModels();
     // arriving mid-match: they watch (after the end, they're simply in the room for the next one)
     if(this.state==="playing"&&this.lastStart) this.room.send(Object.assign({},this.lastStart,{late:true}),from);
   },
@@ -295,6 +373,7 @@ const Online={
     if(this.state==="joining") this.state="room";
     // the host is back in the room: so is everyone, whatever they last saw
     if(m.state==="room"&&this.inMatch()){ this.state="room"; this.final=null; this.unmatch(); }
+    this.wantModels();
     this.emit("room");
   },
 
@@ -364,7 +443,7 @@ const Online={
     this.slots=m.slots; this.seed=m.seed;
     this.settings={period:m.period, skill:m.skill};
     this.startAt=m.at-(this.role==="host"?0:this.offset);
-    this.state="playing"; this.started=false; this.score=null; this.final=null; this.marks=[]; this.fieldKey=null;
+    this.state="playing"; this.started=false; this.score=null; this.final=null; this.marks=[]; this.fieldKey=null; this.pend=[];
     for(const id in this.players){ this.players[id].fired=0; this.players[id].scored=0; }
     this.acc={pose:0, snap:0, sync:0, ad:0};
     if(typeof Field!=="undefined"&&Field.ok) Field.reset();
@@ -388,8 +467,9 @@ const Online={
     this.acc.sync+=dt;
     if(this.role==="guest"&&this.hostId&&this.acc.sync>=(this.syncs.length<4?0.5:4)){ this.acc.sync=0; this.sync(); }
     if(this.role==="host"&&this.pub&&this.state==="room"&&this.lobby&&this.due("ad",dt,2)) this.lobby.send(this.ad());
+    if(this.due("models",dt,5)) this.wantModels();                    // a robot that didn't come: ask again
     if(this.state!=="playing") return;
-    this.smooth(dt);
+    this.smooth();
     // my robot, to everyone
     if(this.due("pose",dt,1/NET_HZ.pose)&&this.mySlot()&&sim&&sim.chassis) this.room.send(this.poseMsg(sim));
     if(this.now()<this.startAt) return;
@@ -412,31 +492,93 @@ const Online={
 
   /* ---- robots: mine out, the others in ---- */
   poseMsg(sim){
-    const b=footBox(sim.chassis,sim.footprint||{hx:MATCH_BOT.hx, hy:MATCH_BOT.hy}), v=sim.vel||{x:0, y:0};
+    const ch=sim.chassis, b=footBox(ch,sim.footprint||{hx:MATCH_BOT.hx, hy:MATCH_BOT.hy}), v=sim.vel||{x:0, y:0};
     // the chassis heading keeps counting turns; the wire carries it as -pi..pi
-    return {k:"pose", x:netR(b.x), y:netR(b.y), h:netR(netWrap(b.h)), vx:netR(v.x||0), vy:netR(v.y||0), hx:netR(b.hx), hy:netR(b.hy)};
+    const m={k:"pose", t:Math.round(this.now()+(this.role==="host"?0:this.offset)), x:netR(b.x), y:netR(b.y), cx:netR(ch.x), cy:netR(ch.y),
+      h:netR(netWrap(b.h)), vx:netR(v.x||0), vy:netR(v.y||0), hx:netR(b.hx), hy:netR(b.hy)};
+    // where each mechanism is (the light copy's segments), every other pose
+    // (jm: the copy they're for, so nobody poses an old copy's parts with a new one's places)
+    if(this.jointsOf&&this.model&&(this.poseN=(this.poseN||0)+1)%2===0){ const j=this.jointsOf(); if(Array.isArray(j)){ m.j=j; m.jm=this.model.hash.slice(0,8); } }
+    return m;
   },
   onPose(m,from){
     const p=this.players[from]; if(!p||!p.slot||!this.inMatch()) return;
     const H=(typeof Field!=="undefined"&&Field.ok?Field.half():1.83)+0.2;
-    const R=this.remote[from]||(this.remote[from]={id:from});
-    R.tx=netNum(m.x,-H,H,0); R.ty=netNum(m.y,-H,H,0); R.th=netWrap(netNum(m.h,-1e6,1e6,0));
-    R.vx=netNum(m.vx,-4,4,0); R.vy=netNum(m.vy,-4,4,0);
-    R.hx=netNum(m.hx,0.08,0.35,MATCH_BOT.hx); R.hy=netNum(m.hy,0.08,0.35,MATCH_BOT.hy); R.age=0;
-    if(R.x==null){ R.x=R.tx; R.y=R.ty; R.h=R.th; }
+    const R=this.remote[from]||(this.remote[from]={id:from, buf:[]});
+    const x=netNum(m.x,-H,H,0), y=netNum(m.y,-H,H,0);
+    const s={t:this.heardAt(m.t), x, y, cx:netNum(m.cx,-H,H,x), cy:netNum(m.cy,-H,H,y),
+      h:netWrap(netNum(m.h,-1e6,1e6,0)), vx:netNum(m.vx,-4,4,0), vy:netNum(m.vy,-4,4,0)};
+    if(!netKeep(R.buf,s)) return;
+    R.hx=netNum(m.hx,0.08,0.35,MATCH_BOT.hx); R.hy=netNum(m.hy,0.08,0.35,MATCH_BOT.hy);
+    if(Array.isArray(m.j)&&m.j.length<=96*7){ R.j=m.j.map(v=>netNum(v,-1e5,1e5,0)); R.jm=typeof m.jm==="string"?m.jm.slice(0,8):""; }
   },
-  /* The other drivers' robots, drawn and pushed where they were last heard, a little ahead. */
-  smooth(dt){
-    const k=Math.min(1,dt*15), out=[];
+  /* The host's clock, here. */
+  hostNow(){ return this.now()+(this.role==="host"?0:this.offset); },
+  /* A sample's time on the host's clock: a sender whose clock runs ahead (or lies)
+     is taken as now, so it can't push every later sample out. */
+  heardAt(t){ const now=this.hostNow(); t=netNum(t,0,1e16,now); return t>now+1000?now:t; },
+  /* The other drivers' robots, drawn and pushed where they were a tenth of a second ago. */
+  smooth(){
+    const t=this.hostNow()-NET_DELAY, out=[];
     for(const id in this.remote){
       const R=this.remote[id], p=this.players[id];
       if(!p||!p.slot){ delete this.remote[id]; continue; }
-      R.age+=dt; const a=Math.min(R.age,0.2);
-      R.x+=(R.tx+R.vx*a-R.x)*k; R.y+=(R.ty+R.vy*a-R.y)*k; R.h+=wrapA(R.th-R.h)*k;
-      out.push({id, al:netAl(p.slot), slot:p.slot, name:p.name, x:R.x, y:R.y, h:R.h, hx:R.hx, hy:R.hy, vx:R.vx, vy:R.vy});
+      const S=netSample(R.buf,t); if(!S) continue;
+      const last=R.buf[R.buf.length-1];
+      out.push({id, al:netAl(p.slot), slot:p.slot, name:p.name, x:S.x, y:S.y, h:S.h, cx:S.cx, cy:S.cy,
+        hx:R.hx, hy:R.hy, vx:last.vx, vy:last.vy, j:R.j||null, jm:R.jm||""});
     }
     if(typeof Match!=="undefined") Match.players=out;
   },
+
+  /* ---- robots' light copies ---- */
+  /* This computer's robot, packed (gzip of liteEncode) and named by its hash. */
+  /* lite: the unpacked copy, so a match where someone else has the same robot
+     (the default one, say) needs no download at all */
+  setModel(gz,hash,lite){
+    if(!(gz instanceof ArrayBuffer)||typeof hash!=="string") return;
+    if(lite&&lite.segs) this.models[hash]=lite;
+    if(this.model&&this.model.hash===hash) return;
+    this.model={gz, hash};
+    if(this.room) this.room.send({k:"mdl", h:hash});
+  },
+  /* Said as soon as two computers meet, which can be before either is in the
+     other's room list: remembered, and fetched once the sender is a player. */
+  onModelSaid(m,from){
+    if(typeof m.h!=="string"||!/^[0-9a-f]{32}$/.test(m.h)) return;
+    if(this.modelOf[from]!==m.h&&Object.keys(this.modelOf).length>=NET_MAX_PLAYERS*2&&!this.players[from]) return;
+    this.modelOf[from]=m.h;
+    this.wantModels();
+  },
+  /* Ask each player for its robot that isn't here yet: once, and again after 20 s if nothing came. */
+  wantModels(){
+    if(!this.room) return;
+    const t=this.now();
+    for(const id in this.modelOf){
+      if(!this.players[id]) continue;
+      const h=this.modelOf[id];
+      if(this.models[h]){ if(this.shown[id]!==h){ this.shown[id]=h; this.emit("model",id); } continue; }
+      const a=this.asked[h];
+      if(a&&t-a.t<20000) continue;
+      this.asked[h]={t, from:id};
+      this.room.send({k:"getmdl", h},id);
+    }
+  },
+  async recvModel(buf,meta,from){
+    const h=meta&&meta.h, a=typeof h==="string"&&this.asked[h];
+    if(!a||a.from!==from||a.got||!(buf instanceof ArrayBuffer)||buf.byteLength>NET_MODEL_MAX) return;
+    a.got=true;
+    try{
+      if(await netHash(buf)!==h) return;                              // not what it said it was
+      const lite=liteDecode(await netGunzip(buf,NET_MODEL_MAX*4));
+      if(!lite) return;
+      const keys=Object.keys(this.models); if(keys.length>=12) delete this.models[keys[0]];
+      this.models[h]=lite;
+      for(const id in this.modelOf) if(this.modelOf[id]===h) this.emit("model",id);
+    }catch(e){ a.got=false; }
+  },
+  /* The light copy to draw for a player, once it's here. */
+  modelFor(id){ const h=this.modelOf[id]; return h?this.models[h]||null:null; },
 
   /* ---- shots ---- */
   /* guest: a ball this robot just fired; the host flies it again and decides it */
@@ -450,9 +592,9 @@ const Online={
     const p=this.players[from];
     if(this.state!=="playing"||!p||!p.slot||!Field.ok||this.now()<this.startAt||Match.t>=Match.len) return;
     if(this.often(from,"shot",150)) return;
-    const al=netAl(p.slot), R=this.remote[from], L=Field.data.field.field.half-9;
+    const al=netAl(p.slot), R=this.remote[from], at=R&&R.buf[R.buf.length-1], L=Field.data.field.field.half-9;
     const x=netNum(m.x,-L,L,0), y=netNum(m.y,-L,L,0);
-    if(!R||Math.hypot(x*IN-R.x,y*IN-R.y)>1.2) return;                // not from where that robot is (or it hasn't said)
+    if(!at||!(Math.hypot(x*IN-at.x,y*IN-at.y)<=1.2)) return;         // not from where that robot is (or it hasn't said)
     const kind=m.ball==="nectar"?"nectar":"pollen", motors=(Field.data.motors&&Field.data.motors.motors)||[];
     const hs=Array.isArray(m.hs)?m.hs:[], side=v=>v===1||v===-1?v:null;
     const hive={red:side(hs[0])||Field.hive.red, blue:side(hs[1])||Field.hive.blue};
@@ -480,7 +622,7 @@ const Online={
     const P=[], n=f.path.length, every=4, r1=v=>Math.round(v*10)/10;
     for(let i=0;i<n-1;i+=every) P.push(f.path[i].map(r1));
     P.push(f.path[n-1].map(r1));
-    this.room.send({k:"fly", fid:f.fid, owner:f.owner||"", kind:f.kind, color:f.color||"", step:SHOT_STEP_S*every, path:P});
+    this.room.send({k:"fly", ht:Math.round(this.now()), fid:f.fid, owner:f.owner||"", kind:f.kind, color:f.color||"", step:SHOT_STEP_S*every, path:P});
   },
   onFly(m){
     if(m.owner===this.self||!this.inMatch()) return;
@@ -488,15 +630,30 @@ const Online={
       .filter(q=>Array.isArray(q)&&q.length===3).map(q=>q.map(v=>netNum(v,-400,400,0)));
     if(path.length<2) return;
     const step=netNum(m.step,0.001,0.1,0.02), kind=m.kind==="nectar"?"nectar":"pollen";
-    Match.flying.push({path, step, t:0, dur:(path.length-1)*step, kind, color:kind==="nectar"?(m.color==="blue"?"blue":"red"):null,
-      pos:path[0].slice(), fid:netNum(m.fid,0,1e9,0), mirror:true});
-    if(Match.flying.length>60) Match.flying.shift();
+    // it leaves when the robot that fired it is seen to fire: on the robots' clock
+    this.hold(this.heardAt(m.ht),{fly:{path, step, t:0, dur:(path.length-1)*step, kind, color:kind==="nectar"?(m.color==="blue"?"blue":"red"):null,
+      pos:path[0].slice(), fid:netNum(m.fid,0,1e9,0), mirror:true}});
+  },
+  /* A guest shows the host's match as it was NET_DELAY ago, the robots and what
+     they do to the field alike: a ball leaves the floor as the robot reaches it. */
+  hold(ht,e){
+    e.ht=ht; this.pend.push(e);
+    while(this.pend.length>48) this.show(this.pend.shift());
+    this.drain();
+  },
+  drain(){
+    const t=this.hostNow()-NET_DELAY;
+    while(this.pend.length&&this.pend[0].ht<=t) this.show(this.pend.shift());
+  },
+  show(e){
+    if(e.fly){ Match.flying.push(e.fly); if(Match.flying.length>60) Match.flying.shift(); }
+    else this.applyState(e.snap);
   },
 
   /* ---- the host's match, to everyone ---- */
   snap(sim){
     const M=Match, L=Field.lastTip;
-    return {k:"snap", t:netR(M.t),
+    return {k:"snap", t:netR(M.t), ht:Math.round(this.now()),
       hive:[Field.hive.red,Field.hive.blue], tips:[Field.tips.red,Field.tips.blue],
       cells:[Field.cells.red.map(netEl).join(""),Field.cells.blue.map(netEl).join("")],
       tip:L?[L.id,L.al,L.from,L.by||""]:null,
@@ -515,7 +672,21 @@ const Online={
       o[al]=c; }
     return o;
   },
+  /* A snapshot: the AI robots into their buffers now (they're drawn between two),
+     the rest held and shown on the same delayed clock. */
   applySnap(m){
+    const M=Match; if(!M.on||!Field.ok) return;
+    const H=Field.half()+0.2, num=(v,d)=>netNum(v,-H,H,d), ht=this.heardAt(m.ht);
+    for(const row of (Array.isArray(m.bots)?m.bots:[]).slice(0,4)){
+      if(!Array.isArray(row)) continue;
+      const b=M.bots.find(x=>x.id===row[0]); if(!b) continue;
+      const x=num(row[1],b.x), y=num(row[2],b.y), vx=netNum(row[4],-4,4,0), vy=netNum(row[5],-4,4,0);
+      b.buf=b.buf||[];
+      netKeep(b.buf,{t:ht, x, y, cx:x, cy:y, h:netWrap(netNum(row[3],-1e6,1e6,b.h)), vx, vy, hold:netEls(row[6],4)});
+    }
+    this.hold(ht,{snap:m});
+  },
+  applyState(m){
     const M=Match; if(!M.on||!Field.ok) return;
     const H=Field.half()+0.2, side=v=>v===1?1:-1, num=(v,d)=>netNum(v,-H,H,d);
     M.t=netNum(m.t,0,M.len,M.t);
@@ -533,12 +704,6 @@ const Online={
       const al=T[1]==="blue"?"blue":"red";
       Field.lastTip={id:netNum(T[0],0,1e6,0), al, from:side(T[2]), to:-side(T[2]), n:Field.tips[al], by:netStr(T[3],40)||undefined, spilled:[]};
     }
-    for(const row of (Array.isArray(m.bots)?m.bots:[]).slice(0,4)){
-      if(!Array.isArray(row)) continue;
-      const b=M.bots.find(x=>x.id===row[0]); if(!b) continue;
-      b.nx=num(row[1],b.x); b.ny=num(row[2],b.y); b.nh=netWrap(netNum(row[3],-1e6,1e6,b.h));
-      b.vx=netNum(row[4],-4,4,0); b.vy=netNum(row[5],-4,4,0); b.hold=netEls(row[6],4); b.age=0;
-    }
     if(Array.isArray(m.floor)) M.floor=m.floor.slice(0,300).filter(Array.isArray).map(r=>{ const e=netEls(r[1],1)[0]||{kind:"pollen", color:null};
       return {id:netNum(r[0],0,1e9,0), kind:e.kind, color:e.color, x:num(r[2],0), y:num(r[3],0), claim:null}; });
     if(Array.isArray(m.flowers)) m.flowers.slice(0,M.flowers.length).forEach((s,i)=>{ M.flowers[i].stack=netEls(s,FLOWER_CAP); });
@@ -552,11 +717,13 @@ const Online={
   mirror(dt,sim){
     const M=Match;
     if(M.t<M.len) M.t=Math.min(M.len,M.t+dt);
-    const k=Math.min(1,dt*12);
+    this.drain();
+    const t=this.hostNow()-NET_DELAY;
     for(const b of M.bots){
-      if(b.nx==null) continue;
-      b.age=(b.age||0)+dt; const a=Math.min(b.age,0.25);
-      b.x+=(b.nx+b.vx*a-b.x)*k; b.y+=(b.ny+b.vy*a-b.y)*k; b.h+=wrapA(b.nh-b.h)*k;
+      const S=b.buf&&netSample(b.buf,t); if(!S) continue;
+      b.x=S.x; b.y=S.y; b.h=S.h;
+      let k=b.buf.length-1; while(k>0&&b.buf[k].t>t) k--;
+      const at=b.buf[k]; b.vx=at.vx; b.vy=at.vy; if(at.hold) b.hold=at.hold;
     }
     for(const al of ["red","blue"]){ const A=M.humans[al].anim; if(A) A.t=Math.min(A.dur,A.t+dt); }
     for(const f of M.flying){

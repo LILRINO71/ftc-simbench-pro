@@ -112,24 +112,31 @@ test('online: one clock. A guest whose computer runs 7 s fast still starts with 
   // the start instant, each in its own clock: 7 s apart, the same moment
   assert.ok(Math.abs((G.O.startAt - 7000) - H.O.startAt) < 5, `${G.O.startAt - 7000} vs ${H.O.startAt}`);
   run(hub, [H, G], 3.5);
-  assert.ok(H.M.t > 0.4 && Math.abs(G.M.t - H.M.t) < 0.1, `host ${H.M.t.toFixed(2)} s, guest ${G.M.t.toFixed(2)} s`);
+  // the guest shows the match a tenth of a second behind, on purpose (src/net.js NET_DELAY)
+  assert.ok(H.M.t > 0.4 && Math.abs(G.M.t - (H.M.t - 0.1)) < 0.06, `host ${H.M.t.toFixed(2)} s, guest ${G.M.t.toFixed(2)} s`);
 });
 
 test('online: each sees the other\'s robot where it is, and the AI robots and the field where the host has them', () => {
   const hub = loadWithField().netLoopback();
   const { H, G } = twoInAMatch(hub);
   run(hub, [H, G], 3.2);                       // the countdown
-  // the guest drives up the field; the host sits
-  run(hub, [H, G], 6, (pc) => { if (pc === G) { pc.sim.chassis.y += 0.6 * 0.02; pc.sim.vel = { x: 0, y: 0.6 }; } });
+  // the guest drives up the field; the host sits. The host's AI robots, step by step, to compare with
+  // where the guest draws them: a tenth of a second behind, on purpose (between two snapshots heard)
+  const past = [];
+  run(hub, [H, G], 6, (pc) => {
+    if (pc === G) { pc.sim.chassis.y += 0.6 * 0.02; pc.sim.vel = { x: 0, y: 0.6 }; }
+    else past.push({ t: H.clock.t, bots: H.M.bots.map((b) => ({ x: b.x, y: b.y })) });
+  });
   const hp = G.M.players.find((p) => p.id === 'host'), gp = H.M.players.find((p) => p.id === 'guest');
   assert.ok(hp && gp, 'each has the other');
   assert.ok(Math.hypot(hp.x - H.sim.chassis.x, hp.y - H.sim.chassis.y) < 0.02, 'the host robot, on the guest');
   assert.ok(Math.hypot(gp.x - G.sim.chassis.x, gp.y - G.sim.chassis.y) < 0.08, 'the guest robot, on the host (a moving one, a step behind)');
   assert.equal(gp.al, 'red'); assert.equal(gp.name, 'Team 222');
-  for (const b of H.M.bots) {
-    const m = G.M.bots.find((x) => x.id === b.id);
-    assert.ok(Math.hypot(m.x - b.x, m.y - b.y) < 0.12, `${b.name}: ${(Math.hypot(m.x - b.x, m.y - b.y) * 100).toFixed(1)} cm off`);
-  }
+  const then = past.reduce((a, p) => (Math.abs(p.t - (H.clock.t - 100)) < Math.abs(a.t - (H.clock.t - 100)) ? p : a));
+  H.M.bots.forEach((b, i) => {
+    const m = G.M.bots.find((x) => x.id === b.id), d = Math.hypot(m.x - then.bots[i].x, m.y - then.bots[i].y);
+    assert.ok(d < 0.04, `${b.name}: ${(d * 100).toFixed(1)} cm from where the host had it 0.1 s before`);
+  });
   assert.deepEqual(G.F.hive, H.F.hive);
   assert.deepEqual(G.F.tips, H.F.tips);
   assert.deepEqual(G.M.floor.map((e) => e.id).sort(), H.M.floor.map((e) => e.id).sort());
@@ -237,8 +244,9 @@ test('online: junk and lies from anyone but the host change nothing, and nothing
   assert.ok(G.M.bots.every((b, i) => Math.abs(b.x - bots[i]) < 0.5), 'the AI robots stay where the host has them');
   assert.ok(!('stranger' in H.O.players) || H.O.players.stranger.slot === null, 'a stranger never gets a place mid-match');
   // a snap from the real host with nonsense in it is clamped, not believed
-  H.O.room.send({ k: 'snap', t: 5, hive: [7, 'x'], tips: [-4, 1e9], cells: [123, 'zz'], bots: 'no', floor: [[1, 'q', 'x', 1e9]], flowers: [5], humans: [[9e9, -1, 'x']], ev: [[1, { a: 1 }, 'green']], score: { red: { total: 'lots' } } });
+  H.O.room.send({ k: 'snap', t: 5, ht: H.clock.t, hive: [7, 'x'], tips: [-4, 1e9], cells: [123, 'zz'], bots: 'no', floor: [[1, 'q', 'x', 1e9]], flowers: [5], humans: [[9e9, -1, 'x']], ev: [[1, { a: 1 }, 'green']], score: { red: { total: 'lots' } } });
   hub.flush();
+  for (let i = 0; i < 8; i++) { G.clock.t += 20; G.O.step(0.02, G.sim); }      // shown a tenth of a second later
   assert.ok([1, -1].includes(G.F.hive.red) && [1, -1].includes(G.F.hive.blue));
   assert.ok(G.F.tips.blue <= 99 && G.F.tips.red >= 0);
   assert.ok(Math.abs(G.M.floor[0].y) <= G.F.half() + 0.2);
@@ -329,4 +337,95 @@ test('online: robots go out 20 times a second and the match 12', () => {
   run(hub, [H, G], 3);
   assert.ok(Math.abs(poses / 3 - 20) <= 1, poses / 3 + ' poses a second');
   assert.ok(Math.abs(snaps / 3 - 12) <= 1, snaps / 3 + ' snapshots a second');
+});
+
+test('online: each robot\'s light copy reaches the others once, checked against its hash', async () => {
+  const hub = loadWithField().netLoopback();
+  const { H, G } = twoInAMatch(hub);
+  // the guest's robot: a small light copy, packed the way the app packs it
+  const pos = Float32Array.from([0, 0, 0, 0.4, 0, 0, 0, 0.4, 0, 0, 0, 0.3]), idx = Uint32Array.from([0, 1, 2, 0, 2, 3, 0, 3, 1, 1, 3, 2]);
+  const lite = G.E.liteBuild({ pal: [[200, 50, 50]], shapes: [{ pos, idx }],
+    parts: [{ seg: 'chassis', shape: 0, m: null }, { seg: 'arm', shape: 0, m: null }] }, { cell: 0.001 });
+  const gz = await G.E.netGzip(G.E.liteEncode(lite)), hash = await G.E.netHash(gz);
+  G.O.setModel(gz, hash);
+  hub.flush();                                             // "mdl" -> "getmdl" -> the bytes
+  for (let i = 0; i < 50 && !H.O.modelFor('guest'); i++) { await new Promise((r) => setTimeout(r, 20)); hub.flush(); }
+  const got = H.O.modelFor('guest');
+  assert.ok(got, 'the host has the guest\'s robot');
+  assert.deepEqual(got.segs.map((s) => s.id), ['chassis', 'arm']);
+  assert.ok(H.events.some((e) => e.what === 'model' && e.data === 'guest'));
+  // announced again: it's here already, nothing is fetched
+  H.O.onModelSaid({ h: hash }, 'guest');
+  assert.equal(hub.queue.length, 0);
+  // bytes that aren't what was announced are thrown away
+  const H2 = computer(hub, 'h2');
+  H2.O.host({ name: 'x' });
+  const R = hub.endpoint('liar').join('m-' + H2.O.code); hub.flush();
+  R.send({ k: 'hello', name: 'Liar', proto: H2.E.NET_PROTO }); hub.flush();
+  R.send({ k: 'mdl', h: hash }); hub.flush();              // claims the guest's robot...
+  R.sendBin(await G.E.netGzip(new ArrayBuffer(100)), { h: hash }, 'h2'); hub.flush();   // ...and sends junk
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(H2.O.modelFor('liar'), null);
+});
+
+test('online: poses carry each mechanism\'s place to the others', () => {
+  const hub = loadWithField().netLoopback();
+  const { H, G } = twoInAMatch(hub);
+  G.O.jointsOf = () => [10, 20, 30, 0, 0, 0, 10000];
+  run(hub, [H, G], 3.5);
+  assert.equal(H.M.players.find((p) => p.id === 'guest').j, null, 'no robot copy sent yet: no places for one');
+  G.O.model = { hash: 'ab'.repeat(16), gz: new ArrayBuffer(0) };
+  run(hub, [H, G], 0.3);
+  const p = H.M.players.find((q) => q.id === 'guest');
+  assert.deepEqual(p.j, [10, 20, 30, 0, 0, 0, 10000]);
+  assert.equal(p.jm, 'abababab', 'and which copy they belong to');
+});
+
+test('online: robots are drawn between two poses heard, not jumping to the newest', () => {
+  const E = loadWithField();
+  const buf = [{ t: 0, x: 0, y: 0, cx: 0, cy: 0, h: 3.1, vx: 1, vy: 0 }, { t: 100, x: 1, y: 2, cx: 1, cy: 2, h: -3.1, vx: 1, vy: 0 }];
+  const m = E.netSample(buf, 50);
+  assert.ok(Math.abs(m.x - 0.5) < 1e-9 && Math.abs(m.y - 1) < 1e-9);
+  assert.ok(Math.abs(Math.abs(m.h) - Math.PI) < 0.01, 'the short way round, through pi');
+  const ahead = E.netSample(buf, 1100);
+  assert.ok(Math.abs(ahead.x - 1.25) < 1e-9, 'past the newest: a quarter second ahead at most');
+});
+
+test('online: a robot set before joining (as the app does it) still reaches everyone, both ways', async () => {
+  const hub = loadWithField().netLoopback();
+  const H = computer(hub, 'host'), G = computer(hub, 'guest');
+  const pack = async (pc, n) => {
+    const pos = Float32Array.from([0, 0, 0, n, 0, 0, 0, n, 0]), lite = pc.E.liteBuild({ pal: [[9, 9, 9]], shapes: [{ pos }], parts: [{ seg: 'chassis', shape: 0, m: null }] }, { cell: 0.001 });
+    const gz = await pc.E.netGzip(pc.E.liteEncode(lite)); pc.O.setModel(gz, await pc.E.netHash(gz));
+  };
+  await pack(H, 0.4); await pack(G, 0.3);
+  H.O.host({ name: 'Host' });
+  G.O.join(H.O.code, { name: 'Guest' });
+  for (let i = 0; i < 60 && !(H.O.modelFor('guest') && G.O.modelFor('host')); i++) { hub.flush(); await new Promise((r) => setTimeout(r, 15)); }
+  assert.ok(G.O.modelFor('host'), 'the guest has the robot of the host');
+  assert.ok(H.O.modelFor('guest'), 'the host has the robot of the guest');
+});
+
+test('online: binary in any shape a transport hands it over comes out as exactly its bytes', () => {
+  const E = loadWithField();
+  const big = new Uint8Array([9, 9, 1, 2, 3, 9]), view = big.subarray(2, 5);
+  assert.deepEqual([...new Uint8Array(E.netAB(view))], [1, 2, 3], 'a view over part of a bigger buffer');
+  assert.deepEqual([...new Uint8Array(E.netAB(big.buffer))], [9, 9, 1, 2, 3, 9]);
+  assert.equal(E.netAB('nope'), null);
+});
+
+test('online: a pose from a clock running ahead cannot freeze that robot, and a corrected clock starts again', () => {
+  const E = loadWithField(), buf = [];
+  assert.ok(E.netKeep(buf, { t: 1000 }) && E.netKeep(buf, { t: 1050 }));
+  assert.equal(E.netKeep(buf, { t: 1040 }), false, 'a late one is dropped');
+  assert.ok(E.netKeep(buf, { t: 20 }), 'a second older: the clock was put right');
+  assert.deepEqual(buf.map((s) => s.t), [20]);
+  const hub = E.netLoopback(), { H, G } = twoInAMatch(hub);
+  run(hub, [H, G], 3.3);
+  G.O.offset += 1e9;                                       // a guest whose clock says next year
+  run(hub, [H, G], 0.5);
+  G.O.offset -= 1e9;
+  const before = H.M.players.find((p) => p.id === 'guest').x;
+  run(hub, [H, G], 1, (pc) => { if (pc === G) pc.sim.chassis.x += 0.01; });
+  assert.ok(H.M.players.find((p) => p.id === 'guest').x - before > 0.3, 'the host still sees it move');
 });
