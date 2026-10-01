@@ -51,7 +51,7 @@ test('the wheel is the hub plus its rollers: 96 mm, not the 53 mm hub', () => {
   const g = E.driveFromCAD(robot(), { front: '+x' });
   assert.equal(g.wheels.length, 4, 'four wheels, not the rollers as extra ones');
   for (const w of g.wheels) assert.ok(Math.abs(w.r - 0.048) < 0.0015, `wheel radius ${(w.r * 1000).toFixed(1)} mm, expected 48`);
-  assert.ok(g.why.some((s) => /built from several parts/.test(s)), 'and says so: ' + g.why.join(' | '));
+  assert.ok(g.why.some((s) => /built from several parts|made of several parts/.test(s)), 'and says so: ' + g.why.join(' | '));
 });
 
 test('the robot stands on its rollers: the floor is 48 mm under the axles, not 26.5', () => {

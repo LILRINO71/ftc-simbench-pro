@@ -50,7 +50,13 @@ function frameWheels(solids){
     if(!(g.r>0.012&&g.r<0.16)||g.round<0.75||g.width>2.2*g.r) continue;
     out.push(dtGrowWheel(g,solids));                  // a hub and its rollers are one wheel
   }
-  if(out.length>=2) return dtUniqueWheels(out,g=>g);
+  // wheels made of many parts (src/drivetrain.js): the wheel assemblies themselves
+  // wheels made of many parts, where they stand like a drive base (src/drivetrain.js)
+  const D=dtDriveComposites(solids,null), comp=D.wheels.map(c=>c.g);
+  const all=dtUniqueWheels(comp.concat(out),g=>g);
+  if(all.length>=2) return all;
+  // one wheel drawn and its base's four drive motors in the CAD: the other three by mirroring
+  if(D.single&&all.length===1){ const copies=dtMirrorWheel(D.wheels[0].g,D.single.c0,D.single.up); if(copies) return [D.wheels[0].g].concat(copies); }
   const byShape=dtShapeWheels(solids,null);
   return byShape?byShape.wheels.map(c=>c.g):out;
 }
@@ -151,8 +157,9 @@ function robotFrame(cad,opts){
    wheels, a kiwi). The sign can't be read off a wheel: a 180-degree error
    only swaps which end is drawn as the front, and turning stays exact. */
 function frontFromWheels(cad){
+  // one drive wheel is enough: its axle says which way the robot rolls
   const ws=dtOnFloor(frameWheels((cad&&cad.solids)||[]),[0,0,1]);
-  if(ws.length<2) return null;
+  if(!ws.length) return null;
   let ax=0, ay=0;
   for(const w of ws){ ax+=Math.abs(w.axis[0]); ay+=Math.abs(w.axis[1]); }
   ax/=ws.length; ay/=ws.length;

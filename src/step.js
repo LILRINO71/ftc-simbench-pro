@@ -490,7 +490,11 @@ function parseSTEP(text, onProgress, opts){
   solids.sort((a,b)=>b.size-a.size);
   if(solids.length>1800) solids.length=1800;
   { const at=new Map(solids.map((s,i)=>[s,i]));
-    for(const l of leafOccs){ l.solid=l.sd&&at.has(l.sd)?at.get(l.sd):-1; delete l.sd; delete l.seen; } }
+    for(const l of leafOccs){ l.solid=l.sd&&at.has(l.sd)?at.get(l.sd):-1;
+      // the sub-assemblies this part sits in, outermost first: a wheel that is ten
+      // rollers and two plates is still one occurrence of one wheel assembly
+      if(l.sd&&at.has(l.sd)&&l.path.length) l.sd.asm=l.path.map(p=>({k:p.k, n:p.n}));
+      delete l.sd; delete l.seen; } }
   onProgress && onProgress(solids.length+" parts");
 
   /* ---- one frame for everything downstream (src/frame.js): +z up, origin at

@@ -142,6 +142,165 @@ function dtGrowWheel(g,solids){
   const mid=(lo+hi)/2;
   return Object.assign({},g,{c:[g.c[0]+a[0]*mid,g.c[1]+a[1]*mid,g.c[2]+a[2]*mid], r:R, width:hi-lo, grown:n});
 }
+/* ---- wheels made of many parts ----
+   Most real FTC wheels are not one part. A goBILDA or REV mecanum wheel is
+   two side plates and ten or more rollers, each roller itself a core, a tyre
+   and a pin; an omni wheel is the same with square-on rollers; a traction
+   wheel can be a hub inside a tread. No single part of such a wheel is wheel
+   shaped, and none needs to be named like one ("OR", "IR", "RollerCore",
+   "Part 7"). So a wheel is also any group of parts that together make a
+   wheel-sized disc:
+     - first, each of the CAD's own sub-assemblies (every exporter keeps
+       them: a wheel is placed as one assembly occurrence, however many
+       parts are inside it)
+     - and, for a file with the assemblies flattened away, wheel parts
+       (rollers, tyres, plates) packed round one centre.
+   Each keeps its rollers, the long thin parts out at the rim. Their angle to
+   the axle says mecanum (about 45 degrees) or omni (square on), and the
+   roller on the floor says which hand a mecanum wheel is: that's read off
+   the CAD itself, where names were the only evidence before. */
+const DT_NOT_IN_WHEEL=/^(motor|servo|electronics|belt)$/;
+const DT_NOT_A_WHEEL=/fly ?wheel|spool|encoder|odometry|dead ?wheel|pulley|sprocket/i;
+function dtWheelOfParts(parts,name){
+  if(parts.length<3||parts.length>160) return null;
+  // bearings, hubs and spacers live inside wheels; motors, servos, flywheels and odometry pods don't
+  if(parts.some(s=>DT_NOT_IN_WHEEL.test(String(s.kind||""))||DT_NOT_A_WHEEL.test(String(s.name||"")))) return null;
+  const pts=[]; for(const s of parts) for(const p of s.pts) pts.push(p);
+  if(pts.length<12) return null;
+  const g=dtWheelGeom(pts);
+  // 48-160 mm across, round, and a wheel's width: not a plate, not a shaft or a stack of intake wheels
+  if(!(g.round>=0.85&&g.r>=0.024&&g.r<=0.08&&g.width>=0.2*g.r&&g.width<=1.3*g.r)) return null;
+  const rollers=[];
+  for(const s of parts){
+    if(s.pts.length<6) continue;
+    const pr=dtPrincipal(s.pts);
+    if(!(pr.val[0]>1.8*pr.val[1])) continue;                     // longer than it is round (a barrel roller is about 2:1)
+    const d=[pr.c[0]-g.c[0],pr.c[1]-g.c[1],pr.c[2]-g.c[2]], t=dtDot(d,g.axis);
+    if(Math.hypot(d[0]-t*g.axis[0],d[1]-t*g.axis[1],d[2]-t*g.axis[2])<0.45*g.r) continue;   // out at the rim
+    rollers.push({c:pr.c, ax:pr.vec[0], tilt:Math.abs(dtDot(pr.vec[0],g.axis))});
+  }
+  return {s:{name:name||"wheel ("+parts.length+" parts)", part:null}, g:Object.assign({},g,{grown:parts.length}), rollers};
+}
+const DT_WHEELPART=/roller|tread|tire|tyre|wheel|\bor\b|\bir\b|side ?plate|slant|hub/i;
+function dtCompositeWheels(solids){
+  const out=[], groups=new Map();
+  for(const s of solids||[]){
+    if(!s||!s.pts||!s.asm||!s.asm.length) continue;
+    let key="";
+    for(const p of s.asm){ key+="/"+p.k; let G=groups.get(key); if(!G){ G={name:p.n, parts:[]}; groups.set(key,G); } G.parts.push(s); }
+  }
+  for(const G of groups.values()){ const w=dtWheelOfParts(G.parts,G.name); if(w) out.push(w); }
+  if(out.length<2){
+    // flattened: wheel parts whose centres sit within a wheel's reach of each other, joined up
+    const bits=(solids||[]).filter(s=>s&&s.pts&&s.pts.length>=4&&(s.kind==="wheel"||DT_WHEELPART.test(String(s.name||"")))&&!DT_NOT_A_WHEEL.test(String(s.name||"")));
+    const cs=bits.map(s=>dtCentroid(s.pts)), par=bits.map((_,i)=>i), find=i=>{ while(par[i]!==i) i=par[i]=par[par[i]]; return i; };
+    for(let i=0;i<bits.length;i++) for(let j=i+1;j<bits.length;j++)
+      if(Math.hypot(cs[i][0]-cs[j][0],cs[i][1]-cs[j][1],cs[i][2]-cs[j][2])<0.05) par[find(i)]=find(j);
+    const cl=new Map(); bits.forEach((s,i)=>{ const r=find(i); if(!cl.has(r)) cl.set(r,[]); cl.get(r).push(s); });
+    for(const parts of cl.values()){ const w=dtWheelOfParts(parts,null); if(w) out.push(w); }
+  }
+  // a wheel found at two levels (the wheel, and a sub-assembly holding just it): keep one
+  return dtUniqueWheels(out,w=>w.g);
+}
+/* What a wheel's rollers say: "mecanum" (about 45 degrees to the axle), "omni"
+   (square on), or null when there are too few to tell. */
+function dtRollerKind(w){
+  const R=w.rollers||[]; if(R.length<4) return null;
+  const t=R.map(r=>r.tilt).sort((a,b)=>a-b), m=t[Math.floor(t.length/2)];
+  return m>0.45&&m<0.88?"mecanum":m<0.3?"omni":null;
+}
+/* A mecanum wheel's hand, from its roller on the floor. A mecanum wheel pushes
+   the robot along that roller's axis (the roller spins freely across it), so
+   ikMatrix's +1, whose wheel pushes along (1, -1), is a floor roller running
+   front-right to back-left; -1 the other way; 0 when there's no clear roller.
+   Checked on GearGurus 7832's goBILDA wheels, a robot that strafes: its
+   front-left floor roller runs front-right to back-left, the +1 of the
+   standard X pattern. (Seen from above, a wheel's TOP rollers run the other
+   way: that's the "X" teams look for.) */
+function dtRollerHand(w,F){
+  const R=w.rollers||[]; if(R.length<4) return 0;
+  let low=null; for(const r of R) if(!low||dtDot(r.c,F.up)<dtDot(low.c,F.up)) low=r;
+  const f=dtDot(low.ax,F.fwd), l=dtDot(low.ax,F.left);
+  if(Math.abs(f)<0.3||Math.abs(l)<0.3) return 0;
+  return f*l<0?1:-1;
+}
+
+/* Wheels made of many parts that stand like a drive base (dtBaseSet), or the one
+   wheel of a base with only one drawn whose drive motors place the rest. Anything
+   else round and many-parted (an intake's compliant wheels) isn't a drive wheel. */
+function dtDriveComposites(solids,up){
+  const comps=dtCompositeWheels(solids); if(!comps.length) return {wheels:[], up:null};
+  const lo=[Infinity,Infinity,Infinity], hi=[-Infinity,-Infinity,-Infinity];
+  for(const s of solids||[]) if(s&&s.pts) for(const p of s.pts) for(let k=0;k<3;k++){ if(p[k]<lo[k]) lo[k]=p[k]; if(p[k]>hi[k]) hi[k]=p[k]; }
+  // wheels with rollers (mecanum, omni) are drive wheels: they stand on their own floor, the
+  // bottom of the wheels, whatever else in the CAD hangs lower. Plain ones (an intake's compliant
+  // wheels look just like a hub in a tread) must be at the bottom of the whole robot.
+  const rolled=comps.filter(c=>dtRollerKind(c));
+  if(rolled.length>=2){
+    const wl=[Infinity,Infinity,Infinity], wh=[-Infinity,-Infinity,-Infinity];
+    for(const c of rolled) for(let k=0;k<3;k++){ wl[k]=Math.min(wl[k],c.g.c[k]-c.g.r); wh[k]=Math.max(wh[k],c.g.c[k]+c.g.r); }
+    const rs=dtBaseSet(rolled,wl,wh,up);
+    if(rs) return {wheels:rs.wheels, up:rs.up};
+  }
+  const set=dtBaseSet(comps,lo,hi,up);
+  if(set) return {wheels:set.wheels, up:set.up};
+  // the drawn wheel of a base drawn with one, where its four drive motors say where the rest go
+  for(const c of comps){ const M=dtBaseFromMotors(c.g,solids,up); if(M) return {wheels:[c], up:M.up, single:M}; }
+  // one wheel with rollers and no motors to go by: still a drive wheel (mirrored round the robot's middle)
+  if(rolled.length===1) return {wheels:rolled, up:null};
+  return {wheels:[], up:null};
+}
+/* One drive wheel drawn: where is the middle of the drive base? Not the middle
+   of the whole robot (an intake out one side moves that), but the middle of
+   its drive motors, which a CAD often has all four of before every wheel is
+   placed: motors at the wheel's axle height, one on the drawn wheel's own axle
+   line, and three more making a rectangle with it. up: the up axis, or null to
+   try both axes square to the axle. Returns {c0, up} or null. */
+function dtBaseFromMotors(w,solids,up){
+  const parts=(solids||[]).filter(s=>s&&s.pts&&s.pts.length>=4&&typeof dtIsMotorPart==="function"&&dtIsMotorPart(s));
+  if(parts.length<4) return null;
+  // motor parts into motors: a motor's screws, can and gearbox all sit within a few centimetres
+  const cs=parts.map(s=>dtCentroid(s.pts)), par=parts.map((_,i)=>i), find=i=>{ while(par[i]!==i) i=par[i]=par[par[i]]; return i; };
+  for(let i=0;i<parts.length;i++) for(let j=i+1;j<parts.length;j++)
+    if(Math.hypot(cs[i][0]-cs[j][0],cs[i][1]-cs[j][1],cs[i][2]-cs[j][2])<0.06) par[find(i)]=find(j);
+  const cl=new Map(); parts.forEach((s,i)=>{ const r=find(i); if(!cl.has(r)) cl.set(r,[]); cl.get(r).push(cs[i]); });
+  const motors=[...cl.values()].map(dtCentroid);
+  const a=w.axis, sq=Math.abs(a[0])<0.9?[1,0,0]:[0,1,0], p1=dtCross(a,sq), L1=Math.hypot(...p1), u1=p1.map(v=>v/L1), u2=dtCross(a,u1);
+  const sub=(p,q)=>[p[0]-q[0],p[1]-q[1],p[2]-q[2]], mid=(p,q)=>[(p[0]+q[0])/2,(p[1]+q[1])/2,(p[2]+q[2])/2];
+  let best=null;
+  for(const u of (up?[up]:[u1,u2])){
+    const level=motors.filter(m=>Math.abs(dtDot(sub(m,w.c),u))<0.045);
+    const own=level.find(m=>{ const d=sub(m,w.c), t=dtDot(d,a); return Math.hypot(d[0]-t*a[0],d[1]-t*a[1],d[2]-t*a[2])<0.03; });
+    if(!own||level.length<4) continue;
+    const others=level.filter(m=>m!==own);
+    for(let i=0;i<others.length;i++) for(let j=i+1;j<others.length;j++) for(let k=j+1;k<others.length;k++){
+      const Q=[own,others[i],others[j],others[k]];
+      // a rectangle's diagonals bisect each other: of the three ways to pair four corners, one pairs them so
+      let err=Infinity;
+      for(const [p,q,r,s] of [[0,1,2,3],[0,2,1,3],[0,3,1,2]]){ const e=Math.hypot(...sub(mid(Q[p],Q[q]),mid(Q[r],Q[s]))); if(e<err) err=e; }
+      const c0=dtCentroid(Q), off=sub(own,c0), across=Math.abs(dtDot(off,a)), along=Math.abs(dtDot(off,dtCross(u,a)));
+      if(err<0.03&&across>0.05&&along>0.05&&(!best||err<best.err)) best={err, c0, up:u};
+    }
+  }
+  return best;
+}
+/* The other three wheels of a base with one drawn: its mirror images through the
+   base's middle c0, rollers and all (a mirrored mecanum wheel is the other hand). */
+function dtMirrorWheel(w,c0,up){
+  const flat=v=>{ const h=dtDot(v,up), f=[v[0]-h*up[0],v[1]-h*up[1],v[2]-h*up[2]], L=Math.hypot(f[0],f[1],f[2])||1; return f.map(x=>x/L); };
+  const side=flat(w.axis), along=dtCross(up,side);
+  const refl=(p,n)=>{ const d=dtDot([p[0]-c0[0],p[1]-c0[1],p[2]-c0[2]],n); return [p[0]-2*d*n[0],p[1]-2*d*n[1],p[2]-2*d*n[2]]; };
+  const reflV=(v,n)=>{ const d=dtDot(v,n); return [v[0]-2*d*n[0],v[1]-2*d*n[1],v[2]-2*d*n[2]]; };
+  const off=[w.c[0]-c0[0],w.c[1]-c0[1],w.c[2]-c0[2]];
+  if(!(Math.abs(dtDot(off,side))>0.06&&Math.abs(dtDot(off,along))>0.06)) return null;
+  return [[side],[along],[side,along]].map(planes=>{
+    const m=Object.assign({},w,{mirrored:true, name:(w.name||"wheel")+" (mirrored)"});
+    let c=w.c.slice(), ax=w.axis.slice(), R=(w.rollers||[]).map(r=>({c:r.c.slice(), ax:r.ax.slice(), tilt:r.tilt}));
+    for(const n of planes){ c=refl(c,n); ax=reflV(ax,n); R=R.map(r=>({c:refl(r.c,n), ax:reflV(r.ax,n), tilt:r.tilt})); }
+    m.c=c; m.axis=ax; m.rollers=R; return m;
+  });
+}
+
 /* The same wheel found twice (a hub and its tread both named as wheels):
    keep the bigger. */
 function dtUniqueWheels(list,get){
@@ -194,6 +353,14 @@ function dtShapeWheels(solids,up){
     cand.push({s,g});
   }
   if(cand.length<2||!Number.isFinite(lo[0])) return null;
+  return dtBaseSet(cand,lo,hi,up);
+}
+/* Of candidate wheels [{s, g}], the biggest set that stands like a drive base:
+   same size, axles level, bottoms on the robot's floor (lo, hi: the robot's
+   box), laid out symmetrically (dtSymmetricSet). up: an axis, or null to try
+   all six. Returns {up, wheels} or null. */
+function dtBaseSet(cand,lo,hi,up){
+  if(!cand||cand.length<2) return null;
   let best=null;
   for(const u of (up?[up]:DT_UPS)){
     let floor=Infinity;                              // the robot's lowest point along u
@@ -293,8 +460,27 @@ const dtDiagonal=(ws,hand)=>{
    mecanum base that geometry at this resolution cannot see, so: names
    first, then two part numbers split across the diagonals, then the
    standard X pattern — and the why list always says which was used. */
-function dtRollers(ws,why){
+function dtRollers(ws,why,F){
   const xPat=w=>(w.corner==="FL"||w.corner==="BR")?1:-1;
+  // the CAD's own rollers, where every wheel has them: the one touching the floor gives the hand
+  const geo=F?ws.map(w=>dtRollerHand(w,F)):[];
+  if(geo.length&&geo.every(h=>h!==0)){
+    // the standard X pattern exactly (FL and BR +1); the other diagonal pairing is the "O",
+    // which strafes but can't turn in place, and one hand per side can't strafe at all
+    const x=ws.every((w,i)=>geo[i]===xPat(w)), o=ws.every((w,i)=>geo[i]===-xPat(w));
+    // wheels placed by mirroring one drawn wheel are an assumption: if the drawn one is the
+    // other hand for its corner, the CAD is more likely wrong than the robot
+    if(!x&&ws.some(w=>w.mirrored)){
+      ws.forEach(w=>{ w.roller=xPat(w); });
+      why.push("The one mecanum wheel drawn is the other hand for its corner (read off its rollers), so the mirrored set would be an \"O\" base that can't turn in place. A real drive base is built in the standard X pattern, so that is used. Check that wheel in the CAD.");
+      return;
+    }
+    ws.forEach((w,i)=>{ w.roller=geo[i]; });
+    why.push("Roller handedness read off each wheel's own rollers in the CAD (the roller on the floor): "+(x?"the standard X pattern.":o?"an \"O\" pattern.":"not a standard pattern."));
+    if(o) why.push("In an \"O\" pattern every wheel pushes along a line through the middle of the robot, so it strafes but can't turn in place: each wheel is probably the other hand from the one it should be. Modelled as drawn.");
+    else if(!x) why.push("With these hands the real robot can't strafe properly: two wheels are probably on the wrong corners in the CAD. Modelled as drawn.");
+    return;
+  }
   const hand=ws.map(dtHandFromName);
   if(hand.every(h=>h!==0)){
     if(dtDiagonal(ws,hand)){
@@ -393,8 +579,15 @@ function driveFromCAD(cad,opts){
     if(!(g.r>0.012&&g.r<0.16) || g.round<0.75 || g.width>2.2*g.r){ odd++; continue; }
     ws.push(wheelOf(s,dtGrowWheel(g,solids)));
   }
+  const comp=dtDriveComposites(solids,F.up).wheels.map(c=>Object.assign(wheelOf(c.s,c.g),{rollers:c.rollers, composite:true}));
+  if(comp.length){
+    const same=(a,b)=>Math.hypot(a.c[0]-b.c[0],a.c[1]-b.c[1],a.c[2]-b.c[2])<Math.max(0.012,0.4*Math.min(a.r,b.r))&&Math.abs(dtDot(a.axis,b.axis))>0.9;
+    ws=comp.concat(ws.filter(w=>!comp.some(c=>same(c,w))));
+    why.push(comp.length+" wheel"+(comp.length===1?" is":"s are")+" made of several parts together (a hub with rollers, a tread round a hub), found as "+
+      (solids.some(s=>s.asm)?"the CAD's own wheel assemblies":"wheel parts packed round one centre")+".");
+  }
   ws=dtUniqueWheels(ws,w=>w);
-  const grown=ws.filter(w=>w.grown);
+  const grown=ws.filter(w=>w.grown&&!w.composite);
   if(grown.length) why.push(grown.length+" wheel"+(grown.length===1?" is":"s are")+" built from several parts (a hub with rollers or a tread round it); each was measured to its outer edge, "+
     (Math.max.apply(null,grown.map(w=>w.r))*2000).toFixed(0)+" mm across, not the hub's size.");
   if(odd) why.push(odd+" wheel-named part(s) are the wrong shape for a wheel (too small, too big, not round, or longer than they are wide) and were dropped.");
@@ -404,7 +597,23 @@ function driveFromCAD(cad,opts){
     ws=byShape.wheels.map(c=>wheelOf(c.s,c.g));
     why.push("No part is named like a drive wheel, so the wheels were found by shape: "+ws.length+" round parts of one size, axles level, sitting on the robot's floor in a symmetric drive-base layout.");
   }
-  if(!cand.length&&!byShape) return nothing("None of the "+solids.length+" parts in the CAD is classified as a wheel or named like one, and no set of round parts on the floor is laid out like a drive base.");
+  if(!cand.length&&!byShape&&!comp.length) return nothing("None of the "+solids.length+" parts in the CAD is classified as a wheel or named like one, and no set of round parts on the floor is laid out like a drive base.");
+  // One real drive wheel drawn and the rest left out (common while a robot is being designed):
+  // FTC drive bases are symmetric, so the other three are its mirror images through the
+  // middle of the robot, rollers and all (a mirrored mecanum wheel is the other hand).
+  if(ws.length===1&&(ws[0].composite||dtRollerKind(ws[0]))){
+    const w=ws[0], M=dtBaseFromMotors(w,solids,F.up);
+    let c0=M&&M.c0;
+    if(!c0){ const lo=[Infinity,Infinity,Infinity], hi=[-Infinity,-Infinity,-Infinity];
+      for(const sd of solids) for(const q of sd.pts) for(let k=0;k<3;k++){ if(q[k]<lo[k]) lo[k]=q[k]; if(q[k]>hi[k]) hi[k]=q[k]; }
+      c0=[0,1,2].map(k=>(lo[k]+hi[k])/2); }
+    const copies=dtMirrorWheel(w,c0,F.up);
+    if(copies){
+      ws=[w].concat(copies);
+      why.push("Only one drive wheel is drawn in the CAD (\""+w.name+"\"). FTC drive bases are symmetric, so the other three are placed as its mirror images through the middle of "+
+        (M?"the four drive motors, which are all in the CAD.":"the robot (no drive motors to place them by).")+" Draw all four for an exact drive base.");
+    }
+  }
   if(ws.length<2) return nothing("Only "+ws.length+" wheel-shaped solid"+(ws.length===1?"":"s")+" in the CAD; a drive base needs at least two.");
 
   // Drive wheels are the ones standing on the tile. Judge by each wheel's
@@ -450,8 +659,16 @@ function driveFromCAD(cad,opts){
   const omniRuledOut=nOmni>=half && parallel;
   if(omniRuledOut) why.push(nOmni+" of "+ws.length+" wheel parts are named omni, but every axle is parallel, which no holonomic omni layout has; the omnis are read as low-scrub wheels on a "+(ws.length>=6?ws.length+"-wheel ":"")+"tank base.");
 
+  // what the rollers themselves say (wheels whose parts include them)
+  const rk=ws.map(dtRollerKind), rMec=rk.filter(k=>k==="mecanum").length, rOmni=rk.filter(k=>k==="omni").length;
+
   let kind="unknown", conf=0;
-  if(nSw>=half){ kind="swerve"; conf=DT_CONF.name; why.push(nSw+" of "+ws.length+" wheel parts are named as swerve modules."); }
+  if(rMec>=half && ws.length>=3 && rMec>=rOmni){ kind="mecanum"; conf=0.94; why.push(rMec+" of "+ws.length+" wheels have their rollers at about 45 degrees to the axle, measured on the CAD: mecanum wheels."); }
+  else if(rOmni>=half && ws.length>=3 && !parallel){
+    kind=diag45&&ws.length===4?"x":"omni"; conf=0.92;
+    why.push(rOmni+" of "+ws.length+" wheels have rollers square to the axle, measured on the CAD: omni wheels, "+(kind==="x"?"at 45 degrees to the chassis, so an X-drive.":"so a holonomic omni base."));
+  }
+  else if(nSw>=half){ kind="swerve"; conf=DT_CONF.name; why.push(nSw+" of "+ws.length+" wheel parts are named as swerve modules."); }
   else if(nMec>=half && ws.length>=3){ kind="mecanum"; conf=DT_CONF.name; why.push(nMec+" of "+ws.length+" wheel parts are named mecanum."); }
   else if(nOmni>=half && !omniRuledOut){
     kind=diag45&&ws.length===4?"x":"omni"; conf=DT_CONF.nameOmni;
@@ -478,7 +695,7 @@ function driveFromCAD(cad,opts){
   }
 
   if(kind==="mecanum"){
-    if(square) dtRollers(ws,why);
+    if(square) dtRollers(ws,why,F);
     else why.push("The mecanum wheels are not two-and-two at the corners, so the roller handedness cannot be placed; they are modelled as plain wheels until the layout is corrected.");
   }
   dtOrient(ws,kind);
@@ -494,7 +711,7 @@ function driveFromCAD(cad,opts){
   return {kind, confidence:conf, why, wheels, track, base, ik:ikMatrix(kind,wheels)};
 }
 
-const dtPublic=w=>({name:w.name, part:w.part, x:w.x, y:w.y, z:w.z, r:w.r, c:w.c.slice(), width:w.width,
+const dtPublic=w=>({name:w.name, part:w.part, mirrored:!!w.mirrored, x:w.x, y:w.y, z:w.z, r:w.r, c:w.c.slice(), width:w.width,
                     axis:w.axis.slice(), alpha:w.alpha, roller:w.roller, steer:!!w.steer, corner:w.corner,
                     mount:w.mount, mountHow:w.mountHow, shaft:w.shaft?w.shaft.slice():null});
 

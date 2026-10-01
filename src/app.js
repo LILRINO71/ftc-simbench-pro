@@ -1666,7 +1666,7 @@ function renderRobotCheck(){
   const put=h=>boxes.forEach(b=>{ b.innerHTML=(b.id==="rcChecks"?rcHead():"")+h; });
   const rcHead=()=>`<div class="rc-title"><b>Robot check</b><span class="pill ${RC?(RC.ready?(RC.warn?"warnp":"ok"):"bad"):""}">${RC?(RC.ready?(RC.warn?RC.warn+" to confirm":"ready"):RC.need+" to answer"):"—"}</span></div>`;
   if(!CAD||!CODE){ RC=null; put(`<p class="hint">Load a robot and an OpMode to check them together.</p>`); if(pill){ pill.textContent="—"; pill.className="pill"; } return; }
-  try{ RC=checkRobot(CAD,CODE,MAP,{isCommanded:n=>isCommanded(CODE,n)}); }
+  try{ RC=checkRobot(CAD,CODE,MAP,{isCommanded:n=>isCommanded(CODE,n), front:OPTS.front}); }
   catch(e){ RC=null; put(`<p class="hint">The robot check stopped: ${esc(e.message)}</p>`); return; }
   pill.textContent=RC.ready?(RC.warn?RC.warn+" to confirm":"ready"):RC.need+" to answer";
   pill.className="pill "+(RC.ready?(RC.warn?"warnp":"ok"):"bad");

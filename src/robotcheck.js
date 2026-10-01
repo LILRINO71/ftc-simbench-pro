@@ -174,11 +174,23 @@ const {checkRobot}=(function(){
     }
 
     // the drivetrain
-    let wheels=0; try{ wheels=(driveFromCAD(cad,{}).wheels||[]).length; }catch(e){}
+    let D=null; try{ D=driveFromCAD(cad,{front:opts.front}); }catch(e){}
+    const wheels=D?(D.wheels||[]).length:0;
     if(drives.length&&!wheels) put({key:"drive", sev:"fail", text:"Your code drives "+drives.length+" wheel motors ("+drives.map(d=>d.name).join(", ")+"), but the CAD has no wheels on the floor."});
     else if(drives.length&&wheels&&drives.length!==wheels&&!(drives.length===2&&wheels>=4))
       put({key:"drive", sev:"warn", text:"Your code has "+drives.length+" drive motors and the CAD "+wheels+" drive wheels. Check the drivetrain."});
     else if(drives.length) put({key:"drive", sev:"ok", text:drives.length+" drive motors and "+wheels+" wheels."});
+    // what the drivetrain finder had to assume about the CAD, said where the team looks
+    if(D&&wheels&&(drives.length||D.wheels.some(w=>w.mirrored))){
+      const said=re=>(D.why||[]).some(t=>re.test(t));
+      if(D.wheels.some(w=>w.mirrored)) put({key:"drive:mirrored", sev:"warn", ask:"look",
+        text:"Only one drive wheel is drawn in the CAD; the other three are placed as its mirror images"+(said(/four drive motors/)?", from where the four drive motors are":"")+". Draw all four for an exact drive base."});
+      if(said(/Check that wheel in the CAD/)) put({key:"drive:hand", sev:"warn", ask:"look",
+        text:"The mecanum wheel drawn is the other hand for its corner, read off its rollers: built that way, the robot couldn't turn in place. The standard X pattern is used; check that wheel in the CAD."});
+      else if(said(/"O" pattern|can't strafe properly/)) put({key:"drive:pattern", sev:"warn", ask:"look",
+        text:"The mecanum wheels' rollers aren't in the standard X pattern ("+((D.why||[]).find(t=>/"O" pattern|can't strafe properly/.test(t))||"").replace(/^.*?: /,"").slice(0,120)+"). Modelled as drawn: check the wheels' corners in the CAD."});
+      if(D.kind==="unknown") put({key:"drive:kind", sev:"warn", ask:"look", text:"The CAD's "+wheels+" wheels don't make a drivetrain this bench knows; it drives on what your code says."});
+    }
 
     // swing each driven joint a little each way: its parts must not go through the frame both ways
     if(opts.swing!==false) for(const it of swingChecks(S,mechs,byId,driven,opts,code,devs)) put(it);
