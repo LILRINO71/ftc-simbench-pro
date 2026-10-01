@@ -131,6 +131,7 @@ const View={
   fv(p){ return new THREE.Vector3(p[0]*IN, p[2]*IN, -p[1]*IN); },
 
   load(cad){
+    if(this.onLoad) this.onLoad();
     // another robot: the last one's exact surfaces go, GPU buffers and all, or a
     // hide click would redraw the old robot over this one
     if(this.exact&&this.exact.cad!==cad){ this.exact=null; this.exactG=[]; this.dropShapes(); this.shapeRes=null; this.spinWheels=[]; this.instHolder=null; }
@@ -178,6 +179,7 @@ const View={
      the exact meshes too. Each mesh rides the mechanism of the part it came
      from; a group with no exact geometry keeps its hull. */
   setExact(cad,res){
+    if(this.onLoad) this.onLoad();
     this.exact=res&&res.meshes&&res.meshes.length?{cad,res}:null;
     if(this.exact&&this.cad===cad) this.applyExact();
     return this.exact?this.exact.res.meshes.length:0;
@@ -289,7 +291,7 @@ const View={
       let e=b.get(key); if(!e){ e={m, g, kind, wk, js:[]}; b.set(key,e); }
       e.js.push(j);
     });
-    const got=new Set();
+    const got=new Set(), edgeBins=new Map();
     this.instHolder=new Map();                       // copy -> where it lives, for highlights
     for(const b of bins.values()) for(const e of b.values()){
       const h=holder(e.g,e.wk), parent=h.parent; if(!parent) continue;
@@ -303,12 +305,21 @@ const View={
       inst.frustumCulled=false; inst.castShadow=true; inst.receiveShadow=true;
       inst.userData.js=e.js;
       parent.add(inst); this.exactG.push(inst); got.add(e.g);
-      if(S.eg) for(const j of e.js){
-        const L=new THREE.LineSegments(S.eg,this.edgeMat()); L.matrixAutoUpdate=false; L.matrix.copy(place(j));
-        L.userData.edges=true; L.userData.j=j; L.visible=this.edgesOn!==false; parent.add(L); this.exactG.push(L);
-      }
+      if(S.eg){ let L=edgeBins.get(parent); if(!L){ L=[]; edgeBins.set(parent,L); }
+        for(const j of e.js) L.push({a:S.eg.attributes.position.array, m:place(j).clone()}); }
     }
-    for(const g in this.hullOf) this.hullOf[g].visible=!got.has(g);
+    // every copy's edges in one set of lines per group (one draw, where one per copy was ~800)
+    for(const [parent,L] of edgeBins){
+      let n=0; for(const x of L) n+=x.a.length;
+      const out=new Float32Array(n); let o=0;
+      for(const {a,m} of L){ const E=m.elements;
+        for(let i=0;i<a.length;i+=3){ const x=a[i], y=a[i+1], z=a[i+2];
+          out[o++]=E[0]*x+E[4]*y+E[8]*z+E[12]; out[o++]=E[1]*x+E[5]*y+E[9]*z+E[13]; out[o++]=E[2]*x+E[6]*y+E[10]*z+E[14]; } }
+      const geo=new THREE.BufferGeometry(); geo.setAttribute("position",new THREE.BufferAttribute(out,3));
+      const Ls=new THREE.LineSegments(geo,this.edgeMat()); Ls.userData.edges=true; Ls.visible=this.edgesOn!==false; Ls.frustumCulled=false;
+      parent.add(Ls); this.exactG.push(Ls);
+    }
+    this.hullBase={}; for(const g in this.hullOf){ this.hullBase[g]=!got.has(g); this.hullOf[g].visible=this.hullBase[g]&&!this.useLite; }
   },
   applyExact(){
     for(const o of this.exactG||[]){ if(o.parent) o.parent.remove(o); this.dispose(o); }
@@ -317,7 +328,7 @@ const View={
     const asg=this.exactAsg=tessAssign(cad,res,this.turretScale);
     if(res.perShape){
       if(this.shapeRes!==res){ this.dropShapes(); this.shapeRes=res; }
-      this.applyInstanced(cad,res,asg,hidden); return;
+      this.applyInstanced(cad,res,asg,hidden); this.scheduleLite(); return;
     }
     const list=tessBuckets(cad,res,asg,hidden);
     const c=this.c, got=new Set();
@@ -348,10 +359,145 @@ const View={
       const lines=new THREE.LineSegments(geo,this.edgeMat()); lines.userData.edges=true; lines.visible=this.edgesOn!==false;
       parent.add(lines); this.exactG.push(lines);
     }
-    for(const g in this.hullOf) this.hullOf[g].visible=!got.has(g);
+    this.hullBase={}; for(const g in this.hullOf){ this.hullBase[g]=!got.has(g); this.hullOf[g].visible=this.hullBase[g]&&!this.useLite; }
+    this.scheduleLite();
   },
   edgeMat(){ if(!this._edgeMat){ this._edgeMat=new THREE.LineBasicMaterial({color:0x1b1e22, transparent:true, opacity:0.85}); this._edgeMat.userData.shared=true; } return this._edgeMat; },
-  showEdges(on){ this.edgesOn=on; this.scene.traverse(o=>{ if(o.userData&&o.userData.edges) o.visible=on; }); },
+  showEdges(on){ this.edgesOn=on; this.scene.traverse(o=>{ if(o.userData&&o.userData.edges) o.visible=on; }); this.applyQuality(); },
+
+  /* ---------------- the light copy (src/robotlite.js) ----------------
+     Built from what this view draws, a moment after the robot's surfaces
+     arrive or it's rebuilt, in the same segments: the chassis (in the
+     chassis group's frame) and each mechanism (in its own group's frame).
+     It casts the robot's shadow (3.4 million triangles drawn twice a frame
+     was most of the lag), draws the robot in the driver's view and on a slow
+     computer, and is what an online match sends the other teams. */
+  scheduleLite(){ clearTimeout(this._liteT); this._liteT=setTimeout(()=>this.buildLite(),600); },
+  segRoots(){
+    const out=[{id:"chassis", root:this.chassisG}];
+    for(const m of (this.cad&&this.cad.mechs)||[]) if(m._g&&this.groupAt&&this.groupAt[m.id]) out.push({id:m.id, root:this.groupAt[m.id]});
+    return out;
+  },
+  liteInput(){
+    this.chassisG.updateMatrixWorld(true);
+    const links=new Set(), skip=new Set([this.footG,this.hitBox].filter(Boolean)), marks=new Set(this.markers||[]);
+    for(const m of this.cad.mechs) if(m._g) links.add(m._g);
+    const shapes=[], shapeOf=new Map(), parts=[], pal=[], palOf=new Map();
+    const palIdx=c=>{ const hex=c?c.getHex():0xb4b8be; let k=palOf.get(hex);
+      if(k===undefined){ k=pal.length<255?pal.length:0; if(k===pal.length) pal.push([(hex>>16)&255,(hex>>8)&255,hex&255]); palOf.set(hex,k); } return k; };
+    const inv=new THREE.Matrix4(), rel=new THREE.Matrix4(), I=new THREE.Matrix4(), M=new THREE.Matrix4();
+    const shapeFor=o=>{
+      const geo=o.geometry, mats=Array.isArray(o.material)?o.material:[o.material], key=geo.uuid+"|"+mats.map(m=>m.uuid).join(",");
+      if(shapeOf.has(key)) return shapeOf.get(key);
+      const P=geo.attributes.position, pos=P.array instanceof Float32Array&&P.itemSize===3&&!P.isInterleavedBufferAttribute?P.array:Float32Array.from({length:P.count*3},(_,i)=>P.getComponent?P.getComponent(Math.floor(i/3),i%3):0);
+      const idx=geo.index?geo.index.array:null, nt=(idx?idx.length:P.count)/3;
+      let tc=palIdx(mats[0]&&mats[0].color);
+      if(mats.length>1&&geo.groups.length){ tc=new Uint8Array(nt);
+        for(const g of geo.groups){ const k=palIdx(mats[g.materialIndex]&&mats[g.materialIndex].color); tc.fill(k,Math.floor(g.start/3),Math.min(nt,Math.floor((g.start+g.count)/3))); } }
+      const s=shapes.length; shapes.push({pos, idx, tc}); shapeOf.set(key,s); return s;
+    };
+    for(const {id,root} of this.segRoots()){
+      inv.copy(root.matrixWorld).invert();
+      const walk=o=>{
+        if(o!==root&&(links.has(o)||skip.has(o))) return;
+        if(!o.visible) return;
+        const mat=Array.isArray(o.material)?o.material[0]:o.material;
+        if(o.isMesh&&!o.userData.lite&&!marks.has(o)&&o.geometry&&o.geometry.attributes.position&&mat&&!(mat.transparent&&mat.opacity<0.6)){
+          const s=shapeFor(o); rel.multiplyMatrices(inv,o.matrixWorld);
+          if(o.isInstancedMesh) for(let i=0;i<o.count;i++){ o.getMatrixAt(i,I); M.multiplyMatrices(rel,I); parts.push({seg:id, shape:s, m:Float32Array.from(M.elements)}); }
+          else parts.push({seg:id, shape:s, m:Float32Array.from(rel.elements)});
+        }
+        for(const c of o.children) walk(c);
+      };
+      walk(root);
+    }
+    return {shapes, parts, pal};
+  },
+  buildLite(){
+    if(!this.cad||!this.chassisG||typeof liteBuild!=="function") return;
+    let L=null;
+    this.applyQuality(true);                             // read the robot as it really is, not its light copy
+    try{ const t0=performance.now(); L=liteBuild(this.liteInput(),{budget:70000}); this.liteMs=Math.round(performance.now()-t0); }
+    catch(e){ console.warn("bench: light copy",e); return; }
+    for(const m of this.liteMeshes||[]){ if(m.parent) m.parent.remove(m); m.geometry.dispose(); }
+    this.liteMeshes=[]; this.lite=L;
+    for(const s of L.segs){
+      const root=s.id==="chassis"?this.chassisG:this.groupAt[s.id]; if(!root) continue;
+      const m=new THREE.Mesh(this.liteGeo(s,L.pal),this.shadowMat()); m.userData.lite=true; m.castShadow=true; m.frustumCulled=false;
+      root.add(m); this.liteMeshes.push(m);
+    }
+    this.applyQuality();
+    if(this.onLite) this.onLite(L);
+  },
+  /* A light copy's segment as flat-shaded triangles in its palette colours. */
+  liteGeo(s,pal){
+    const nt=s.t.length/3, pos=new Float32Array(nt*9), col=new Float32Array(nt*9);
+    for(let f=0;f<nt;f++){ const c=pal[s.tc[f]]||pal[0];
+      for(let k=0;k<3;k++){ const v=s.t[3*f+k], o=9*f+3*k;
+        pos[o]=s.v[3*v]; pos[o+1]=s.v[3*v+1]; pos[o+2]=s.v[3*v+2];
+        col[o]=c[0]/255; col[o+1]=c[1]/255; col[o+2]=c[2]/255; } }
+    const g=new THREE.BufferGeometry();
+    g.setAttribute("position",new THREE.BufferAttribute(pos,3)); g.setAttribute("color",new THREE.BufferAttribute(col,3));
+    g.computeVertexNormals(); g.computeBoundingBox(); g.computeBoundingSphere();
+    return g;
+  },
+  liteMat(){ if(!this._liteMat){ const env=this.envMap(); this._liteMat=new THREE.MeshStandardMaterial({vertexColors:true, flatShading:true,
+      metalness:env?0.45:0.15, roughness:0.5, envMap:env||null, envMapIntensity:0.8}); this._liteMat.userData.shared=true; } return this._liteMat; },
+  /* drawn into the shadow map only */
+  shadowMat(){ if(!this._shadowMat){ this._shadowMat=new THREE.MeshBasicMaterial({colorWrite:false, depthWrite:false}); this._shadowMat.userData.shared=true; } return this._shadowMat; },
+  /* Which copy draws: the exact one up close, the light one in the driver's view
+     (where the robot is small on screen) or on a computer that can't keep up.
+     With a light copy, it casts the shadow either way. */
+  applyQuality(exactOnly){
+    const has=!!(this.liteMeshes&&this.liteMeshes.length);
+    const cad=typeof CadView!=="undefined"&&CadView.on;
+    const lite=has&&!exactOnly&&!cad&&(this.mode==="field"||this.lowGfx);
+    for(const g in this.hullOf||{}) this.hullOf[g].visible=(!this.hullBase||this.hullBase[g]!==false)&&!lite;
+    for(const o of this.exactG||[]){
+      if(o.userData&&o.userData.edges){ o.visible=!lite&&this.edgesOn!==false; continue; }
+      if(o.isMesh){ o.visible=!lite; o.castShadow=!has; o.receiveShadow=!has; }
+    }
+    for(const m of this.liteMeshes||[]){ m.material=lite?this.liteMat():this.shadowMat(); m.receiveShadow=lite; }
+    this.useLite=lite;
+  },
+  /* Where each mechanism is right now, relative to the chassis, in the light
+     copy's segment order: [x, y, z mm, quaternion x, y, z, w x 10^4] each. */
+  segJoints(){
+    const L=this.lite; if(!L||!this.chassisG) return null;
+    this.chassisG.updateMatrixWorld(true);
+    const inv=new THREE.Matrix4().copy(this.chassisG.matrixWorld).invert(), M=new THREE.Matrix4();
+    const p=new THREE.Vector3(), q=new THREE.Quaternion(), s=new THREE.Vector3(), out=[];
+    for(const seg of L.segs){
+      if(seg.id==="chassis") continue;
+      const root=this.groupAt[seg.id]; if(!root){ out.push(0,0,0,0,0,0,10000); continue; }
+      M.multiplyMatrices(inv,root.matrixWorld); M.decompose(p,q,s);
+      out.push(Math.round(p.x*1000),Math.round(p.y*1000),Math.round(p.z*1000),Math.round(q.x*1e4),Math.round(q.y*1e4),Math.round(q.z*1e4),Math.round(q.w*1e4));
+    }
+    return out;
+  },
+  /* Another team's robot from its light copy: the chassis, and each mechanism
+     placed where their computer last said, with their team over it. */
+  buildRemote(p,model){
+    const g=new THREE.Group(), segs=[]; let top=0.3;
+    for(const s of model.segs){
+      const G=new THREE.Group(), geo=this.liteGeo(s,model.pal), m=new THREE.Mesh(geo,this.liteMat());
+      m.castShadow=true; m.receiveShadow=true; G.add(m); g.add(G);
+      if(s.id==="chassis") top=Math.max(top,geo.boundingBox.max.y); else { G.visible=false; segs.push({G, init:false}); }
+    }
+    const tag=this.nameTag(p.name,p.al); tag.position.y=top+0.16; g.add(tag);
+    g.userData.segs=segs; g.userData.remote=true;
+    return g;
+  },
+  nameTag(text,al){
+    const cv=document.createElement("canvas"); cv.width=512; cv.height=112;
+    const c=cv.getContext("2d"); c.fillStyle=al==="red"?"rgba(196,52,44,.92)":"rgba(40,96,200,.92)";
+    const r=40; c.beginPath(); c.moveTo(r,8); c.arcTo(504,8,504,104,r); c.arcTo(504,104,8,104,r); c.arcTo(8,104,8,8,r); c.arcTo(8,8,504,8,r); c.fill();
+    fitFont(c,text,440,60,24,"'Instrument Sans', Arial, sans-serif");
+    c.fillStyle="#fff"; c.textAlign="center"; c.textBaseline="middle"; c.fillText(text,256,60);
+    const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(cv), depthWrite:false}));
+    sp.scale.set(0.46,0.1,1); sp.renderOrder=6;
+    return sp;
+  },
   /* The robot's own parts, grouped by the mechanism that moves them. */
   buildRobot(cad){
     const bb=cad.bbox, size=this.size, M=cad.mechs;
@@ -486,8 +632,8 @@ const View={
     for(const r of rigRoots(M)) buildLink(r,this.liftG);
 
     this.groupCounts={chassis:groups.chassis.length};
-    this.exactG=[];
-    if(this.exact&&this.exact.cad===cad) this.applyExact();
+    this.exactG=[]; this.liteMeshes=[]; this.lite=null; this.hullBase=null; this.useLite=false;
+    if(this.exact&&this.exact.cad===cad) this.applyExact(); else this.scheduleLite();
     M.forEach(m=>this.groupCounts[m.id]=(groups[m.id]||[]).length);
   },
 
@@ -645,10 +791,27 @@ const View={
     const key=kind+"|"+c;
     this._ballGeo=this._ballGeo||{}; this._ballMat=this._ballMat||{};
     if(!this._ballGeo[kind]){ this._ballGeo[kind]=new THREE.SphereGeometry(r,18,12); this._ballGeo[kind].userData.shared=true; }
-    if(!this._ballMat[key]){ this._ballMat[key]=this.mat(c,{roughness:0.5}); this._ballMat[key].userData.shared=true; }
+    if(!this._ballMat[key]){ this._ballMat[key]=this.mat(c,{roughness:0.5, map:this.ballTex(c)}); this._ballMat[key].userData.shared=true; }
     const m=new THREE.Mesh(this._ballGeo[kind],this._ballMat[key]);
     m.castShadow=true; m.userData.ball=true;
     return m;
+  },
+  /* POLLEN and NECTAR are 26-hole pickleball shells: rows of dark holes on the
+     colour, so a ball that rolls or spins visibly does. */
+  ballTex(hex){
+    this._ballTex=this._ballTex||{};
+    if(this._ballTex[hex]) return this._ballTex[hex];
+    const cv=document.createElement("canvas"); cv.width=128; cv.height=64;
+    const c=cv.getContext("2d");
+    c.fillStyle="#ffffff"; c.fillRect(0,0,128,64);
+    c.fillStyle="rgba(40,36,30,.78)";
+    // 26 holes: one at each pole, and four rings of six, each ring turned half a step from the last
+    c.fillRect(0,0,128,4); c.fillRect(0,60,128,4);
+    [54,18,-18,-54].forEach((lat,i)=>{ const y=32-lat/90*32, w=4/Math.cos(lat*Math.PI/180);
+      for(let k=0;k<6;k++){ const x=((k+(i%2)*0.5)/6)*128;
+        for(const xx of [x,x-128,x+128]){ c.beginPath(); c.ellipse(xx,y,w,3.6,0,0,7); c.fill(); } } });
+    const t=new THREE.CanvasTexture(cv); t.userData={shared:true};
+    return this._ballTex[hex]=t;
   },
   /* Free what an object owns; geometry and materials shared between
      objects (balls, robot materials) stay. */
@@ -920,6 +1083,7 @@ const View={
         const from=al==="red"?was[0]:was[1];
         const arm=Field.data.field.hive.armDeg*Math.PI/180;
         this.tipAnim={al, t0:now, angle:2*arm*Math.sign(-from)};
+        const hx=(Field.data.field.hive.hiveX||{})[al]; this.tipAt={t:now, x:(hx!=null?hx:(al==="red"?-12.75:12.75))*IN, y:from*35*IN};
         this.shownHive=key; this.shownCells=-2;        // rebuild after the swing
         // what was in the CELL spills as it goes down
         for(const g of this.hiveG[al].children[0].children) if(g.userData.ball) g.visible=false;
@@ -929,15 +1093,76 @@ const View={
       }
     }
     // balls in flight, and misses lying on the tiles
-    const want=Shots.flying.concat(Shots.landed, typeof Match!=="undefined"&&Match.on?Match.flying:[]);
+    const fl=Shots.flying.concat(typeof Match!=="undefined"&&Match.on?Match.flying:[]), want=fl.concat(Shots.landed);
+    this.flightFx(fl,now);
     this.updateMatch();
     while(this.ballPool.length>want.length){ const m=this.ballPool.pop(); this.dynG.remove(m); }
     for(let i=0;i<want.length;i++){
       const b=want[i], key2=b.kind+"|"+(b.color||"");
       let m=this.ballPool[i];
       if(!m||m.userData.key!==key2){ if(m) this.dynG.remove(m); m=this.ball(b.kind,b.color); m.userData.key=key2; this.ballPool[i]=m; this.dynG.add(m); }
-      m.position.copy(this.fv(b.pos));
+      const p=this.fv(b.pos);
+      // in flight it spins (backspin off the flywheel); on the tiles it lies still
+      if(i<fl.length&&m.userData.lp){ const d=p.distanceTo(m.userData.lp); if(d>1e-4) m.rotateZ(d/0.036); }
+      m.userData.lp=p; m.position.copy(p);
     }
+    this.trails(fl);
+    this.stepFx(now);
+    // a ball into an up-CELL: a flash at its mouth
+    const cells={red:Field.cells.red.length, blue:Field.cells.blue.length};
+    if(this.cellsSeen) for(const al of ["red","blue"]) if(cells[al]>this.cellsSeen[al]){
+      try{ const m=Field.model().mouthCentroid[al]; this.fx("flash",this.fv([m[0],m[1],m[2]||0]),al==="red"?0xff7a5c:0x6aa8ff); }catch(e){}
+    }
+    this.cellsSeen=cells;
+  },
+  /* Each ball once as it leaves (a puff at the shooter, a kick to the robot
+     that fired it) and once as it lands (where a miss starts bouncing from). */
+  flightFx(fl,now){
+    this.seenFl=this.seenFl||new WeakSet(); this.liveFl=this.liveFl||new Set(); this.recentEnds=this.recentEnds||[];
+    const cur=new Set(fl);
+    for(const f of fl){
+      if(this.seenFl.has(f)) continue;
+      this.seenFl.add(f);
+      const p0=f.path&&f.path[0]; if(!p0) continue;
+      this.fx("puff",this.fv(p0),0xffffff);
+      const x=p0[0]*IN, y=p0[1]*IN;
+      for(const id in this.botG||{}){ const g=this.botG[id]; if(Math.hypot(g.position.x-x,-g.position.z-y)<0.5) g.userData.kick=1; }
+    }
+    for(const f of this.liveFl) if(!cur.has(f)&&f.pos) this.recentEnds.push({x:f.pos[0]*IN, y:f.pos[1]*IN, z:f.pos[2]*IN, t:now});
+    this.liveFl=cur;
+    this.recentEnds=this.recentEnds.filter(e=>now-e.t<700);
+  },
+  /* A short fading trail behind every ball in the air, from its own path. */
+  trails(fl){
+    this.trailG=this.trailG||[];
+    const n=fl.length*4;
+    while(this.trailG.length<n){ const m=new THREE.Mesh(this.fxGeo("dot"),new THREE.MeshBasicMaterial({color:0xffffff, transparent:true, depthWrite:false})); this.dynG.add(m); this.trailG.push(m); }
+    this.trailG.forEach((m,i)=>{
+      const f=fl[Math.floor(i/4)], k=i%4+1; m.visible=!!f; if(!f) return;
+      const step=f.step||SHOT_STEP_S, q=Math.max(0,Math.min(f.path.length-1,(f.t-0.03*k)/step)), a=f.path[Math.floor(q)], c=f.path[Math.min(f.path.length-1,Math.floor(q)+1)], u=q-Math.floor(q);
+      m.position.copy(this.fv([a[0]+(c[0]-a[0])*u, a[1]+(c[1]-a[1])*u, a[2]+(c[2]-a[2])*u]));
+      const sc=(f.kind==="nectar"?1.81:1.4)*IN*(1-k*0.17); m.scale.set(sc,sc,sc);
+      m.material.color.setHex(f.kind==="nectar"?(f.color==="blue"?0x6aa8ff:0xff7a5c):0xffe27a); m.material.opacity=0.42-k*0.09;
+    });
+  },
+  /* Short effects: a puff where a ball leaves, a flash where one goes in. */
+  fxGeo(k){ this._fxGeo=this._fxGeo||{};
+    if(!this._fxGeo[k]){ this._fxGeo[k]=k==="ring"?new THREE.RingGeometry(0.7,1,32):new THREE.SphereGeometry(1,12,8); this._fxGeo[k].userData.shared=true; }
+    return this._fxGeo[k]; },
+  fx(kind,pos,color){
+    this.fxs=this.fxs||[];
+    if(this.fxs.length>40) return;
+    const m=new THREE.Mesh(this.fxGeo(kind==="flash"?"ring":"dot"),new THREE.MeshBasicMaterial({color, transparent:true, opacity:0.7, depthWrite:false, side:THREE.DoubleSide}));
+    m.position.copy(pos); if(kind==="flash") m.lookAt(this.cam?this.cam.position:new THREE.Vector3(0,5,0));
+    this.dynG.add(m); this.fxs.push({m, kind, t0:performance.now(), dur:kind==="flash"?420:300});
+  },
+  stepFx(now){
+    for(const e of this.fxs||[]){
+      const k=Math.min(1,(now-e.t0)/e.dur), s=e.kind==="flash"?0.05+0.22*k:0.025+0.09*k;
+      e.m.scale.set(s,s,s); e.m.material.opacity=0.7*(1-k);
+      if(k>=1){ this.dynG.remove(e.m); e.m.material.dispose(); e.done=true; }
+    }
+    if(this.fxs) this.fxs=this.fxs.filter(e=>!e.done);
   },
 
   /* ---------------- the rest of the match (src/match.js) ----------------
@@ -952,32 +1177,48 @@ const View={
       this.fieldG.traverse(o=>{ if(o.userData&&o.userData.staged) o.visible=!live; });
       if(this.matchG){ this.world.remove(this.matchG); this.dispose(this.matchG); this.matchG=null; }
       if(live){ this.matchG=new THREE.Group(); this.world.add(this.matchG);
-        this.botG={}; this.humanG={}; this.floorBalls=new Map(); this.flowerKey=[]; this.flowerG=[]; this.markG=[]; }
+        this.botG={}; this.humanG={}; this.floorBalls=new Map(); this.flowerKey=[]; this.flowerG=[]; this.markG=[]; this.picked=[]; this.floorInit=false; }
     }
     if(!live) return;
-    const G=this.matchG;
+    const G=this.matchG, now=performance.now(), dt=Math.min(0.1,(now-(this.mt||now))/1000); this.mt=now;
     // robots
     const seen=new Set();
     for(const b of Match.bots){
       seen.add(b.id);
       let g=this.botG[b.id];
       if(!g){ g=this.botG[b.id]=this.buildBot(b); G.add(g); }
-      g.position.set(b.x,0,-b.y); g.rotation.y=b.h;
-      // what it's holding sits on top
+      this.moveBot(g,b.x,b.y,b.h,dt);
+      const U=g.userData;
+      // the intake turns while something is in it, the flywheel while it holds something to shoot
+      const eating=Match.floor.some(e=>Match.inIntake(b,e))||this.picked.some(p=>p.b===b);
+      U.roll.rotateY((eating?-26:0)*dt);
+      U.fly.rotateY((b.hold.length?-60:0)*dt);
+      // what it's holding sits in the hopper on top
       const key=b.hold.map(e=>e.kind[0]+(e.color||"")).join(",");
-      if(g.userData.holdKey!==key){
-        g.userData.holdKey=key;
-        for(const m of g.userData.held) g.remove(m);
-        g.userData.held=b.hold.map((e,i)=>{ const m=this.ball(e.kind,e.color); m.position.set(-0.06+i*0.075-0.1,0.34,(i%2?0.05:-0.05)); g.add(m); return m; });
+      if(U.holdKey!==key){
+        U.holdKey=key;
+        for(const m of U.held) g.remove(m);
+        U.held=b.hold.map((e,i)=>{ const m=this.ball(e.kind,e.color); m.position.set(-0.06+i*0.075-0.1,0.34,(i%2?0.05:-0.05)); g.add(m); return m; });
       }
     }
-    // online: the other drivers' robots, their size, their team on the bumpers
+    // online: the other drivers' robots. Their own CAD once its light copy is here, a stand-in till then
     for(const p of Match.players){
-      const id="pl:"+p.id, key=[p.al,p.hx.toFixed(3),p.hy.toFixed(3),p.name].join("|"); seen.add(id);
+      const model=typeof Online!=="undefined"?Online.modelFor(p.id):null;
+      const id="pl:"+p.id, key=(model?"m:"+Online.modelOf[p.id]:"b:"+[p.hx.toFixed(3),p.hy.toFixed(3)].join(","))+"|"+p.al+"|"+p.name; seen.add(id);
       let g=this.botG[id];
       if(g&&g.userData.key!==key){ G.remove(g); this.dispose(g); g=null; }
-      if(!g){ g=this.botG[id]=this.buildBot({id, al:p.al, hx:p.hx, hy:p.hy, label:p.name}); g.userData.key=key; G.add(g); }
-      g.position.set(p.x,0,-p.y); g.rotation.y=p.h;
+      if(!g){ g=this.botG[id]=model?this.buildRemote(p,model):this.buildBot({id, al:p.al, hx:p.hx, hy:p.hy, label:p.name}); g.userData.key=key; G.add(g); }
+      if(model){
+        g.position.set(p.cx,0,-p.cy); g.rotation.y=p.h;
+        const S=g.userData.segs, J=p.j, k=1-Math.exp(-dt*18), mh=Online.modelOf[p.id]||"";
+        const P=this._tp||(this._tp=new THREE.Vector3()), Q=this._tq||(this._tq=new THREE.Quaternion());
+        // only places meant for this copy: right after a team rebuilds its robot, the old copy waits for the new one
+        if(J&&J.length===S.length*7&&p.jm&&mh.slice(0,8)===p.jm) S.forEach((s,i)=>{
+          const o=i*7; P.set(J[o]/1000,J[o+1]/1000,J[o+2]/1000); Q.set(J[o+3]/1e4,J[o+4]/1e4,J[o+5]/1e4,J[o+6]/1e4).normalize();
+          if(!s.init){ s.G.position.copy(P); s.G.quaternion.copy(Q); s.init=true; s.G.visible=true; }
+          else{ s.G.position.lerp(P,k); s.G.quaternion.slerp(Q,k); }
+        });
+      }else this.moveBot(g,p.x,p.y,p.h,dt);
     }
     for(const id in this.botG) if(!seen.has(id)){ G.remove(this.botG[id]); this.dispose(this.botG[id]); delete this.botG[id]; }
     // human players, each with the NECTAR tray still to enter; seen through from the
@@ -1000,15 +1241,17 @@ const View={
           ball.position.lerpVectors(from,to,u); ball.position.y+=Math.sin(Math.PI*u)*0.45; }
       }
     }
-    // loose elements on the tiles
+    // loose elements on the tiles: they arrive bouncing, roll where they're knocked, and get taken in
     const alive=new Set();
     for(const e of Match.floor){
       alive.add(e.id);
       let m=this.floorBalls.get(e.id);
-      if(!m){ m=this.ball(e.kind,e.color); this.floorBalls.set(e.id,m); G.add(m); }
-      m.position.set(e.x,(e.kind==="nectar"?1.81:1.4)*IN,-e.y);
+      if(!m){ m=this.ball(e.kind,e.color); this.floorBalls.set(e.id,m); G.add(m); this.floorEnter(m,e,now); }
+      this.floorMove(m,e,dt);
     }
-    for(const [id,m] of this.floorBalls) if(!alive.has(id)){ G.remove(m); this.floorBalls.delete(id); }
+    for(const [id,m] of this.floorBalls) if(!alive.has(id)){ this.floorBalls.delete(id); this.floorLeave(m,G); }
+    this.floorInit=true;
+    this.pickups(G,dt);
     // the alliance's marks on the field (src/net.js): a ring that pulses where a partner pointed
     const marks=typeof Online!=="undefined"&&Online.state==="playing"?Online.liveMarks():[];
     if(!this.markG){ this.markG=[]; }
@@ -1016,7 +1259,7 @@ const View={
       const m=new THREE.Mesh(new THREE.RingGeometry(0.16,0.2,40),new THREE.MeshBasicMaterial({color:0xffffff, transparent:true, opacity:0.9, side:THREE.DoubleSide, depthWrite:false}));
       m.rotation.x=-Math.PI/2; G.add(m); this.markG.push(m);
     }
-    const tt=performance.now()/1000;
+    const tt=now/1000;
     this.markG.forEach((m,i)=>{ const k=marks[i]; m.visible=!!k; if(!k) return;
       m.material.color.setHex(k.what==="shoot"?0xf0b54a:k.what==="defend"?0x6fd3e0:0xffffff);
       m.position.set(k.x,0.012,-k.y); const s=1+0.18*Math.sin(tt*5); m.scale.set(s,s,s); });
@@ -1032,6 +1275,60 @@ const View={
         const m=this.ball(e.kind,e.color); m.position.set(f.x,z*IN,-f.y); g.add(m); }
     });
   },
+  /* A stand-in robot to where it is: its wheels roll the distance it went, and it
+     rocks back a little when it fires. */
+  moveBot(g,x,y,h,dt){
+    const U=g.userData, px=U.px==null?x:U.px, py=U.py==null?y:U.py; U.px=x; U.py=y;
+    const fwd=(x-px)*Math.cos(h)+(y-py)*Math.sin(h);
+    for(const w of U.wheels||[]) w.rotateY(-fwd/0.048);
+    U.kick=Math.max(0,(U.kick||0)-dt*7);
+    const back=0.018*Math.sin(Math.min(1,U.kick)*Math.PI);
+    g.position.set(x-Math.cos(h)*back,0,-(y-Math.sin(h)*back)); g.rotation.y=h;
+  },
+  /* A new element on the tiles comes from somewhere: the end of a missed shot
+     (it bounces on from there), a CELL that just tipped (it falls out), or a hand
+     or a bumper (a small hop). The match's first elements are simply there. */
+  floorEnter(m,e,now){
+    const r=(e.kind==="nectar"?1.81:1.4)*IN, U=m.userData;
+    U.cur={x:e.x, y:e.y};
+    if(!this.floorInit) return;
+    const end=(this.recentEnds||[]).filter(q=>Math.hypot(q.x-e.x,q.y-e.y)<0.8).pop();
+    if(end){ end.t=-1e9; U.cur={x:end.x, y:end.y}; U.bounce={z:Math.max(r,end.z), vz:-2.2}; return; }
+    const T=this.tipAt;
+    if(T&&now-T.t<1200&&Math.hypot(e.x-T.x,e.y-T.y)<1.3){ U.cur={x:T.x+(e.x-T.x)*0.35, y:T.y+(e.y-T.y)*0.35}; U.bounce={z:1.05, vz:0.4}; return; }
+    U.bounce={z:r+0.1, vz:0.8};
+  },
+  floorMove(m,e,dt){
+    const r=(e.kind==="nectar"?1.81:1.4)*IN, U=m.userData, B=U.bounce, c=U.cur||(U.cur={x:e.x, y:e.y});
+    let z=r;
+    if(B){ B.vz-=9.8*dt; B.z+=B.vz*dt;
+      if(B.z<=r){ B.z=r; if(Math.abs(B.vz)<0.5) U.bounce=null; else B.vz=-B.vz*0.42; }
+      z=B.z; }
+    const k=1-Math.exp(-dt*(B?3.5:9)), nx=c.x+(e.x-c.x)*k, ny=c.y+(e.y-c.y)*k, dx=nx-c.x, dy=ny-c.y, d=Math.hypot(dx,dy);
+    // rolling: about the axis across the way it goes, its distance over its radius
+    if(d>1e-5) m.rotateOnWorldAxis(new THREE.Vector3(-dy,0,-dx).normalize(),d/r);
+    c.x=nx; c.y=ny;
+    m.position.set(nx,z,-ny);
+  },
+  /* An element gone from the tiles next to an AI robot's intake was taken in:
+     it rolls into the robot. Otherwise it simply goes. */
+  floorLeave(m,G){
+    const c=m.userData.cur||{x:m.position.x, y:-m.position.z};
+    let best=null, bd=0.45;
+    for(const b of Match.bots){ const d=Math.hypot(c.x-(b.x+Math.cos(b.h)*MATCH_BOT.hx), c.y-(b.y+Math.sin(b.h)*MATCH_BOT.hx)); if(d<bd){ bd=d; best=b; } }
+    if(!best){ G.remove(m); return; }
+    this.picked.push({m, b:best, t:0, x:c.x, y:c.y, z:m.position.y});
+  },
+  pickups(G,dt){
+    for(const p of this.picked){
+      p.t+=dt; const k=Math.min(1,p.t/0.3), e=k*k, b=p.b, fx=b.x+Math.cos(b.h)*MATCH_BOT.hx*0.4, fy=b.y+Math.sin(b.h)*MATCH_BOT.hx*0.4;
+      const x=p.x+(fx-p.x)*e, y=p.y+(fy-p.y)*e;
+      p.m.position.set(x,p.z+(0.2-p.z)*e,-y); p.m.rotateZ(dt*30);
+      const s=1-0.45*e; p.m.scale.set(s,s,s);
+      if(k>=1){ G.remove(p.m); p.done=true; }
+    }
+    this.picked=this.picked.filter(p=>!p.done);
+  },
   /* A generic FTC robot: a drive base in bumpers of its alliance colour, a
      tower with a hooded shooter at the back, an intake roller at the front. */
   buildBot(b){
@@ -1043,9 +1340,13 @@ const View={
     bx(L-0.06,0.05,W-0.06,0,0.07,0,dark);                                  // chassis plate
     bx(L,0.07,0.035,0,0.06,W/2-0.0175,bump); bx(L,0.07,0.035,0,0.06,-W/2+0.0175,bump);   // bumpers
     bx(0.035,0.07,W-0.07,L/2-0.0175,0.06,0,bump); bx(0.035,0.07,W-0.07,-L/2+0.0175,0.06,0,bump);
+    const wheels=[], spokes=this.mat(0x9aa3ad,{metalness:0.5,roughness:0.4});
     for(const [x,z] of [[1,1],[1,-1],[-1,1],[-1,-1]]){
       const wh=new THREE.Mesh(new THREE.CylinderGeometry(0.048,0.048,0.035,16),black);
       wh.rotation.x=Math.PI/2; wh.position.set(x*(L/2-0.07),0.048,z*(W/2-0.06)); g.add(wh);
+      // a hub bar across the wheel, so a turn shows
+      const hub=new THREE.Mesh(new THREE.BoxGeometry(0.07,0.037,0.012),spokes); wh.add(hub);
+      wheels.push(wh);
     }
     bx(0.03,0.30,0.03,-0.13,0.24,0.11,alu); bx(0.03,0.30,0.03,-0.13,0.24,-0.11,alu);       // tower
     const hood=bx(0.16,0.012,0.2,-0.08,0.40,0,alu); hood.rotation.z=0.5;
@@ -1056,13 +1357,16 @@ const View={
     // "AI" on the bumpers, so nobody mistakes it for the team's robot
     const cv=document.createElement("canvas"); cv.width=256; cv.height=64;
     const c2=cv.getContext("2d"), text=b.label||"AI "+b.id.slice(2);
-    let px=44; c2.font="700 "+px+"px 'Barlow Semi Condensed', Arial, sans-serif";
-    while(px>18&&c2.measureText(text).width>240){ px-=2; c2.font="700 "+px+"px 'Barlow Semi Condensed', Arial, sans-serif"; }
+    fitFont(c2,text,240,44,18,"'Barlow Semi Condensed', Arial, sans-serif");
     c2.fillStyle="#fff"; c2.textAlign="center"; c2.textBaseline="middle"; c2.fillText(text,128,34);
     const lab=new THREE.Mesh(new THREE.PlaneGeometry(0.2,0.05),new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(cv),transparent:true}));
     lab.position.set(0,0.06,W/2+0.001); g.add(lab);
     const lab2=lab.clone(); lab2.position.set(0,0.06,-W/2-0.001); lab2.rotation.y=Math.PI; g.add(lab2);
-    g.userData.held=[]; g.userData.holdKey=null;
+    // a stripe on the flywheel and the roller, so they're seen to spin
+    const stripe=this.mat(0xe8c547,{roughness:0.6});
+    const fs=new THREE.Mesh(new THREE.BoxGeometry(0.096,0.052,0.012),stripe); fly.add(fs);
+    const rs=new THREE.Mesh(new THREE.BoxGeometry(0.062,W-0.09,0.008),stripe); roll.add(rs);
+    g.userData.held=[]; g.userData.holdKey=null; g.userData.wheels=wheels; g.userData.roll=roll; g.userData.fly=fly;
     return g;
   },
   /* A HUMAN PLAYER behind the alliance wall, beside the LOADING ZONE, with the NECTAR tray. */
@@ -1091,7 +1395,7 @@ const View={
   },
 
   setView(v){
-    this.mode=v;
+    this.mode=v; this.applyQuality();
     if(v==="field"){
       // from behind the alliance's own wall, where the drivers stand
       this.theta=this.alliance==="blue"?0:Math.PI; this.phi=0.82; this.rad=(this.fieldSize||3.58)*1.5; return;
@@ -1119,6 +1423,11 @@ const View={
     this.ren.render(this.scene,this.cam);
   }
 };
+/* The biggest bold font, from px down to min, that fits text in maxW on canvas context c. */
+function fitFont(c,text,maxW,px,min,family){
+  c.font="700 "+px+"px "+family;
+  while(px>min&&c.measureText(text).width>maxW){ px-=2; c.font="700 "+px+"px "+family; }
+}
 function deviceOn(mechId){
   for(const n in MAP) if(MAP[n]===mechId && Sim.dev[n]) return n;
   return null;

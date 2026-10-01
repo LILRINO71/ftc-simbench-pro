@@ -1122,7 +1122,7 @@ function shotTick(now){
   if(key!==ShotUI.key){ ShotUI.key=key; ShotUI.still=now; ShotUI.dirty=true; ShotUI.full=false; }
   let fresh=false;
   if(ShotUI.dirty&&now-ShotUI.t>=250){ shotEvaluate("coarse"); ShotUI.t=now; ShotUI.dirty=false; fresh=true; }
-  else if(!ShotUI.dirty&&!ShotUI.full&&now-ShotUI.still>=700){ shotEvaluate("full"); ShotUI.full=true; fresh=true; }
+  else if(!ShotUI.dirty&&!ShotUI.full&&now-ShotUI.still>=700&&(paneVisible("shot")||Shots.cfg.shooter)){ shotEvaluate("full"); ShotUI.full=true; fresh=true; }
   // what would happen if the robot fired right now: the shot on aim, and the
   // share of real, scattered shots that go in — with the robot's motion in both
   ShotUI.preview=null;
@@ -2100,6 +2100,9 @@ const NetUI={
     $("#onpReady").addEventListener("click",e=>{ const b=e.target.closest("button[data-ready]"); if(b) Online.setReady(b.dataset.ready==="1",this.kind()); });
     $("#onpList").addEventListener("click",e=>{ const b=e.target.closest("button[data-code]"); if(b) this.joinCode(b.dataset.code,b.dataset.hid); });
     Online.onChange((what,data)=>this.on(what,data));
+    View.onLite=L=>this.modelReady(L); if(View.lite) this.modelReady(View.lite);
+    Online.jointsOf=()=>View.lite&&View.lite===this.packed?View.segJoints():null;
+    View.onLoad=()=>Perf.quiet();
     // an invite link opened in a tab that already has SimBench open only changes the fragment
     addEventListener("hashchange",()=>{ if(/^#join=/i.test(location.hash)) this.invited(location.hash.slice(6)); });
   },
@@ -2166,6 +2169,15 @@ const NetUI={
     const url=location.origin+location.pathname+"#join="+Online.code;
     const done=()=>{ const b=$("#onpCopy"); b.textContent="Copied"; setTimeout(()=>{ b.textContent="Copy invite link"; },1500); };
     try{ navigator.clipboard.writeText(url).then(done,()=>prompt("The invite link:",url)); }catch(e){ prompt("The invite link:",url); }
+  },
+  /* This robot's light copy, packed for the other teams (they each fetch it once). */
+  async modelReady(L){
+    try{
+      const gz=await netGzip(liteEncode(L)), h=await netHash(gz);
+      if(gz.byteLength>NET_MODEL_MAX) return;
+      Online.setModel(gz,h,L); this.packed=L; this.modelInfo={tris:L.tris, kb:Math.round(gz.byteLength/1024)};
+      this.render();
+    }catch(e){ console.warn("bench: packing the robot",e); }
   },
   opChanged(){ const me=Online.me(); if(me&&Online.state==="room"&&me.ready) Online.setReady(true,this.kind()); else this.render(); },
 
@@ -2247,7 +2259,8 @@ const NetUI={
     if(st==="joining"){ setHTML($("#onpSlots"),`<p class="onp-watch">Asking the host's browser to let you in…</p>`); $("#onpReady").innerHTML=""; $("#onpHostCtl").hidden=true; $("#onpWatch").textContent=""; return; }
     const cards=NET_SLOTS.map(s=>{
       const id=Online.holder(s), p=id&&Online.players[id], al=netAl(s), mine=id===Online.self;
-      const who=p?`<b>${esc(p.name)}${mine?" (you)":""}</b><span class="st${p.ready?" ok":""}">${p.ready?"ready":"getting ready"}${p.host?" · host":""}</span>`:
+      const bot=mine?(Online.model?"":" · packing robot…"):(Online.modelFor(id)?" · robot here":" · robot coming");
+      const who=p?`<b>${esc(p.name)}${mine?" (you)":""}</b><span class="st${p.ready?" ok":""}">${p.ready?"ready":"getting ready"}${p.host?" · host":""}${bot}</span>`:
         `<b class="ai">AI robot</b>`;
       const act=!p&&me?`<button class="btn-sm" type="button" data-slot="${s}">Take this place</button>`:mine?`<button class="btn-sm" type="button" data-slot="none">Just watch</button>`:"";
       return `<div class="onp-slot ${al}${mine?" me":""}"><small>${al.toUpperCase()} ${s.slice(-1)}</small>${who}${act}</div>`;
@@ -2346,16 +2359,37 @@ const NetUI={
 /* ============================================================
    MAIN LOOP
    ============================================================ */
-let last=performance.now(), acc=0, slowAcc=0, loopErr=null, frameAt=0;
+let last=performance.now(), acc=0, slowAcc=0, loopErr=null, frameAt=0, slowN=0;
+/* Keeping up: when frames come slower than ~38 a second for two seconds, draw
+   fewer pixels; at the fewest, draw the robot's light copy (src/robotlite.js).
+   Pixels come back when there's room again. */
+const Perf={ema:16.7, t:0, pr:Math.min(devicePixelRatio||1,2), downAt:-1e9, quietTo:0, recovered:false,
+  /* loading a robot (parsing, meshing) makes slow frames that say nothing about drawing */
+  quiet(ms){ this.quietTo=Math.max(this.quietTo,performance.now()+(ms||15000)); this.ema=16.7; },
+  frame(fd,now){
+    if(!(fd>0&&fd<250)||now<this.quietTo) return;
+    this.ema+=(fd-this.ema)*0.05;
+    if(now-this.t<2000) return; this.t=now;
+    const cap=Math.min(devicePixelRatio||1,2), min=Math.min(cap,0.75);
+    if(this.ema>26){
+      if(this.pr>min+0.01){ this.pr=Math.max(min,this.pr-0.25); this.set(); this.downAt=now; }
+      else if(!View.lowGfx){ View.lowGfx=true; View.applyQuality(); }
+    }else if(this.ema<18.5&&now-this.downAt>20000){
+      // room to spare: the full robot back once (a computer that can't keep up goes back to light for good)
+      if(View.lowGfx&&!this.recovered){ View.lowGfx=false; this.recovered=true; this.downAt=now; View.applyQuality(); }
+      else if(this.pr<cap-0.01){ this.pr=Math.min(cap,this.pr+0.25); this.set(); }
+    }
+  },
+  set(){ if(View.ren){ View.ren.setPixelRatio(this.pr); View.resize(); } }
+};
 function guarded(fn){ try{ fn(); }catch(e){ if(!loopErr){ loopErr=e; console.error("bench:",e); } } }
 function frame(now){
-  frameAt=performance.now();
+  Perf.frame(now-frameAt,now); frameAt=performance.now();
   const dt=Math.min(0.1,(now-last)/1000); last=now;
   guarded(()=>{
     Pads.poll();
-    acc+=dt; let n=0;
-    while(acc>=0.02&&n++<8){ Sim.tick(0.02); Online.step(0.02,Sim); acc-=0.02; }
-    if(acc>0.5) acc=0;
+    acc+=dt;
+    stepFixed(8);
     NetUI.tick();
     View.update(); View.render(); updateGauges(); Pads.mirror();
   });
@@ -2377,21 +2411,35 @@ function frame(now){
     const lp=$("#loopPill");
     lp.textContent=Sim.phase==="running"?Sim.t.toFixed(1)+" s · 50 Hz":Sim.phase; lp.className="pill"+(Sim.phase==="running"?" live":"");
     $$(".bindrow").forEach(r=>r.classList.toggle("active",!!Sim.pad[activePad][r.dataset.btn]));
-    MathTab.tick(); Status.render(); NetUI.slow();
+    MathTab.tick(); if(slowN++%5===0) Status.render(); NetUI.slow();
   }); }
   requestAnimationFrame(frame);
 }
-// a hidden or covered window gets no animation frames (even one that says it's visible), but an
-// online match, a host's above all, has to go on: step it from a timer while the frames are gone
-setInterval(()=>{
+// A hidden or covered window gets no animation frames (even one that says it's
+// visible), and its page timers run once a second; an online match, a host's
+// above all, has to go on at full rate. So it steps from a worker's timer while
+// the frames are gone: a worker's timers aren't slowed that way. The mechanisms
+// the others see are posed ten times a second meanwhile.
+let bgViewT=0;
+/* The sim and the online match in fixed 20 ms steps, as many as are due (at most max). */
+function stepFixed(max){
+  let n=0; while(acc>=0.02&&n++<max){ Sim.tick(0.02); Online.step(0.02,Sim); acc-=0.02; }
+  if(acc>0.5) acc=0;
+}
+function backgroundStep(){
   if(Online.state==="off"||performance.now()-frameAt<300) return;
   guarded(()=>{
     const now=performance.now(); acc+=Math.min(2,(now-last)/1000); last=now;
-    let n=0; while(acc>=0.02&&n++<100){ Sim.tick(0.02); Online.step(0.02,Sim); acc-=0.02; }
-    if(acc>0.5) acc=0;
+    stepFixed(100);
+    if(now-bgViewT>100){ bgViewT=now; View.update(); }
     NetUI.tick();
   });
-},200);
+}
+(()=>{
+  try{ const w=new Worker(URL.createObjectURL(new Blob(["setInterval(function(){postMessage(0)},20)"],{type:"text/javascript"})));
+    w.onmessage=backgroundStep; return; }catch(e){}
+  setInterval(backgroundStep,200);
+})();
 
 /* ============================================================
    PRO — one status light, the walkthrough, .ftcsim workspaces,

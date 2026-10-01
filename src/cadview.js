@@ -45,7 +45,7 @@ const CadView={
     if(!View.cad) return;
     if(!this.cam) this.init();
     this.on=true;
-    const V=View;
+    const V=View; V.applyQuality();
     this.saved={bg:V.scene.background, hemi:V.hemi?V.hemi.intensity:null, sun:V.sun?V.sun.intensity:null, shadow:V.sun?V.sun.castShadow:null};
     V.scene.background=this.bg;
     if(V.hemi){ V.hemi.intensity=0.62; }
@@ -59,7 +59,7 @@ const CadView={
   exit(){
     if(!this.on) return;
     this.on=false;
-    const V=View, s=this.saved||{};
+    const V=View, s=this.saved||{}; V.applyQuality();
     V.scene.background=s.bg||null;
     if(V.hemi&&s.hemi!=null) V.hemi.intensity=s.hemi;
     if(V.sun&&s.sun!=null){ V.sun.intensity=s.sun; V.sun.castShadow=s.shadow; }
