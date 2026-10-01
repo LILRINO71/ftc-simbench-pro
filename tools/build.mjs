@@ -18,11 +18,13 @@ const rd = (...p) => fs.readFileSync(path.join(ROOT, ...p), 'utf8');
 const pkg = JSON.parse(rd('package.json'));
 
 export const DOMAIN = 'app.ftc-simbench.com';
+// where the app really lives: link previews (Discord, iMessage, Slack) point here
+export const SITE = 'https://ftc-simbench-pro.pages.dev';
 
 // Concatenation order matters: later files use functions and constants the
 // earlier ones define. The engine never touches the DOM; only view3d and app do.
 export const ORDER = ['hardware', 'samples', 'step', 'hull', 'inertia', 'expr', 'java', 'roadrunner', 'mapping', 'robotconfig',
-  'compare', 'analyze', 'drivetrain', 'frame', 'mates', 'onshapelink', 'jointspec', 'autorig-lib', 'autorig', 'robotcheck', 'dynamics', 'field', 'shots', 'match', 'net', 'controllers', 'session', 'mathdoc',
+  'compare', 'analyze', 'drivetrain', 'frame', 'mates', 'onshapelink', 'jointspec', 'autorig-lib', 'autorig', 'robotcheck', 'dynamics', 'field', 'shots', 'match', 'robotlite', 'net', 'controllers', 'session', 'mathdoc',
   'gitimport', 'onboarding', 'sim', 'tessellate', 'view3d', 'cadview', 'app'];
 
 const argv = process.argv.slice(2);
@@ -54,6 +56,8 @@ const shotData = { field: JSON.parse(rd(SHOT, 'data', 'field.json')), motors: JS
 let shotJs = `window.SHOT_DATA = ${JSON.stringify(shotData)};\n${rd(SHOT, 'engine.js')}`;
 if (MIN) shotJs = minifyJS(shotJs);
 
+// what a shared link says under its title
+const SHARE = 'Load your team\'s CAD and Java OpModes and drive them on the 2026-27 BIOBUZZ field: real physics, AI alliance partners, and online matches with other teams. Free, in the browser.';
 const DESC = 'Drop in a STEP assembly and a Java OpMode. FTC SimBench Pro resolves the kinematics, works out the robot’s real mass and traction, runs the code at 50 Hz, and shows you the math behind it.';
 
 const fragment = [
@@ -83,13 +87,22 @@ const favicon = 'data:image/svg+xml,' + encodeURIComponent(
 const page = `<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n` +
   `<meta name="viewport" content="width=device-width, initial-scale=1">\n` +
   `<meta name="color-scheme" content="dark light">\n` +
-  `<meta property="og:title" content="FTC SimBench Pro">\n` +
-  `<meta property="og:description" content="${DESC}">\n` +
-  `<meta property="og:url" content="https://${DOMAIN}/">\n` +
+  `<meta name="theme-color" content="#0F1012">\n` +
+  `<meta property="og:type" content="website">\n` +
+  `<meta property="og:site_name" content="FTC SimBench Pro">\n` +
+  `<meta property="og:title" content="FTC SimBench Pro: drive your real robot before it's built">\n` +
+  `<meta property="og:description" content="${SHARE}">\n` +
+  `<meta property="og:url" content="${SITE}/">\n` +
+  `<meta property="og:image" content="${SITE}/og.png">\n` +
+  `<meta property="og:image:width" content="1440">\n<meta property="og:image:height" content="900">\n` +
+  `<meta property="og:image:alt" content="A team's own FTC robot, from its Onshape CAD, running its own TeleOp on the BIOBUZZ field">\n` +
+  `<meta name="twitter:card" content="summary_large_image">\n` +
   `<link rel="icon" href="${favicon}">\n` +
   `</head>\n<body>\n${fragment}\n</body>\n</html>\n`;
 fs.writeFileSync(path.join(DIST, 'index.html'), page, 'utf8');
 fs.writeFileSync(path.join(DIST, 'CNAME'), DOMAIN + '\n', 'utf8');
+// the picture a shared link shows (og:image)
+fs.copyFileSync(path.join(ROOT, 'docs', 'into-the-deep.png'), path.join(DIST, 'og.png'));
 fs.writeFileSync(path.join(DIST, '.nojekyll'), '', 'utf8');
 // a real STEP robot the CAD view can open with one click, served beside the app
 fs.mkdirSync(path.join(DIST, 'demo'), { recursive: true });
