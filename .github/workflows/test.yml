@@ -14,5 +14,9 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      # the real 773-part robot is parsed and cloned per test; two such files at once
+      # outgrow Node's default heap on the runner (it has 16 GB)
       - run: npm test
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
       - run: npm run build:ship
