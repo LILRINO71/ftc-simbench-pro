@@ -284,3 +284,36 @@ test('vm: a drive left in STOP_AND_RESET_ENCODER is called out (the SDK keeps it
   const f = F.find((x) => x.key === 'mode:reset');
   assert.ok(f && f.sev === 'fail' && /RUN_WITHOUT_ENCODER/.test(f.fix), 'the fix is named');
 });
+
+test('vm: a drive that turns with the triggers, and an extension that half-follows the stick, gives four wheels on the right sides', () => {
+  const robot = ROBOT_DIR(['lf', 'lb']).replace('public void drive(', 'public DcMotorEx ext; public void drive(');
+  const main = `package org.firstinspires.ftc.teamcode;
+import org.firstinspires.ftc.teamcode.hw.Robot;
+import com.qualcomm.robotcore.hardware.*;
+import com.qualcomm.robotcore.eventloop.opmode.*;
+@TeleOp(name="Trig") public class Trig extends LinearOpMode { public void runOpMode() { Robot r = new Robot(hardwareMap);
+  DcMotorEx ext = hardwareMap.get(DcMotorEx.class, "extension"); waitForStart();
+  while (opModeIsActive()) { r.drive(-gamepad1.left_stick_y, gamepad1.left_stick_x, gamepad1.right_trigger - gamepad1.left_trigger);
+    ext.setPower(0.4 * -gamepad1.left_stick_y); } } }`;
+  const an = E.jvAnalyze(E.jvCompile(main, [{ file: 'Robot.java', src: robot }]), false);
+  const w = an.drive.wheels.map((x) => x.dev + ':' + (x.left ? 'L' : x.right ? 'R' : '?')).sort();
+  assert.deepEqual(w, ['leftBack:L', 'leftFront:L', 'rightBack:R', 'rightFront:R']);
+});
+
+test('vm: the Pinpoint\'s Road Runner bridge gives Road Runner poses (field-centric code reads a real heading)', () => {
+  const main = `package org.firstinspires.ftc.teamcode;
+import com.qualcomm.hardware.gobilda.GoBildaPinpointDriver; import com.acmerobotics.roadrunner.*;
+import com.qualcomm.robotcore.hardware.*; import com.qualcomm.robotcore.eventloop.opmode.*;
+@TeleOp(name="Pin") public class Pin extends LinearOpMode { public void runOpMode() {
+  GoBildaPinpointDriver pin = hardwareMap.get(GoBildaPinpointDriver.class, "pinpoint");
+  DcMotor m = hardwareMap.get(DcMotor.class, "m");
+  pin.setPositionRR(new Pose2d(10, 20, Math.PI / 2)); waitForStart();
+  while (opModeIsActive()) { Pose2d p = pin.getPositionRR(); PoseVelocity2d v = pin.getVelocityRR();
+    telemetry.addData("pose", p.position.x + "," + p.position.y + "," + p.heading.toDouble()); telemetry.addData("w", v.angVel); telemetry.update();
+    m.setPower(p.heading.toDouble()); } } }`;
+  const an = E.jvAnalyze(E.jvCompile(main, []), false);
+  assert.deepEqual(an.stubs.filter((s) => /RR|toDouble/.test(s[0])), []);
+  const pose = an.telemetry.find((l) => /^pose/.test(l));
+  const [x, y, h] = pose.split(' : ')[1].split(',').map(Number);
+  assert.ok(Math.abs(x - 10) < 1e-6 && Math.abs(y - 20) < 1e-6 && Math.abs(h - Math.PI / 2) < 1e-6, pose);
+});

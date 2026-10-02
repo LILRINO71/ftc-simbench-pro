@@ -204,7 +204,7 @@ function jvProbeRun(comp,pad1,pad2,ticks){
   for(const [n,s] of H.devs) motors[n]={cmd:s.cmd, reversed:!!s.reversed, kind:s.kind, type:s.type, target:s.target, mode:s.mode};
   return {P,H,motors};
 }
-const JV_STICKS={F:{left_stick_y:-1},S:{left_stick_x:1},T:{right_stick_x:1},R:{right_stick_y:-1},L2:{left_trigger:1}};
+const JV_STICKS={F:{left_stick_y:-1},S:{left_stick_x:1},T:{right_stick_x:1},R:{right_stick_y:-1},L2:{left_trigger:1},R2:{right_trigger:1}};
 /* What the OpMode does with the robot, found by running it. */
 function jvAnalyze(comp,isAuto){
   const out={ok:false,devices:[],drive:null,error:null,stubs:[],mech:{},commanded:[],ranges:{},telemetry:[]};
@@ -242,9 +242,17 @@ function jvAnalyze(comp,isAuto){
 function jvDriveFrom(runs,devs){
   const motors=devs.filter(d=>d.kind==="motor").map(d=>d.name);
   const val=(k,n)=>{ const m=runs[k]&&runs[k].motors[n]; if(!m) return 0; return (m.cmd||0)*(m.reversed?-1:1); };
-  const d=(k,n)=>val(k,n)-val("N",n);
+  const d0=(k,n)=>val(k,n)-val("N",n);
   const EPS=0.05;
-  const cand=motors.filter(n=>Math.abs(d("F",n))>EPS||Math.abs(d("T",n))>EPS||Math.abs(d("S",n))>EPS||Math.abs(d("R",n))>EPS);
+  // the turn: the right stick's x, or (when it moves no motor) the right trigger,
+  // as teams who turn with the triggers (right_trigger - left_trigger) have it
+  const turnKey=motors.some(n=>Math.abs(d0("T",n))>EPS)||!runs.R2?"T":"R2";
+  const d=(k,n)=>d0(k==="T"?turnKey:k,n);
+  let cand=motors.filter(n=>Math.abs(d("F",n))>EPS||Math.abs(d("T",n))>EPS||Math.abs(d("S",n))>EPS||Math.abs(d("R",n))>EPS);
+  // the wheels all get about the same power from a full stick; a lift or an
+  // extension that also follows it a little (a PID, a feed-forward) gets much less
+  const top=Math.max(0,...cand.map(n=>Math.abs(d("F",n))));
+  if(top>EPS) cand=cand.filter(n=>Math.abs(d("F",n))>=0.5*top||Math.abs(d("R",n))>EPS);
   if(cand.length<2) return null;
   // tank: stick up moves one side only, the right stick's y moves the other
   const fOnly=cand.filter(n=>Math.abs(d("F",n))>EPS), rOnly=cand.filter(n=>Math.abs(d("R",n))>EPS&&Math.abs(d("F",n))<=EPS);
@@ -269,6 +277,10 @@ function jvDriveFrom(runs,devs){
     if(!sigma) continue;                                  // not driven by "stick up": not a wheel
     wheels.push({dev:n,left,right,front,back,sense:sigma});
   }
+  // every drive wheel answers the turn stick; a lift or an extension that also
+  // follows "stick up" doesn't (when at least two motors do turn the robot)
+  if(!tank&&wheels.filter(w=>Math.abs(d("T",w.dev))>EPS).length>=2)
+    for(let i=wheels.length-1;i>=0;i--) if(Math.abs(d("T",wheels[i].dev))<=EPS) wheels.splice(i,1);
   if(wheels.length<2) return null;
   const hasSide=wheels.some(w=>w.left)&&wheels.some(w=>w.right);
   const strafes=wheels.some(w=>Math.abs(d("S",w.dev))>EPS);

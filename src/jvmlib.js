@@ -299,10 +299,19 @@ function jvOdo(vm,o){
   const h=z.oh+lh;
   return {x:z.ox+C*lx-S*ly, y:z.oy+S*lx+C*ly, h:Math.atan2(Math.sin(h),Math.cos(h)), raw:h};
 }
+/* a Road Runner 1.0 object (the prelude's own class) from a native */
+function* jvRR(vm,cls,args){ const c=vm.classes.get("com.acmerobotics.roadrunner."+cls); if(!c) return vm.opaqueVal(cls); return yield* vm.construct(c,args); }
 function jvOdoSet(vm,o,x,y,h){ const p=vm.host?vm.host.pose():{x:0,y:0,h:0}; o.n.org={x:p.x,y:p.y,h:p.h,ox:x,oy:y,oh:h}; }
 const jvLen=(m,unit)=>{ const u=jvEn(unit); return u==="INCH"?m/0.0254:u==="CM"?m*100:u==="METER"?m:m*1000; };
 const jvFromLen=(v,unit)=>{ const u=jvEn(unit); return u==="INCH"?v*0.0254:u==="CM"?v/100:u==="METER"?v:v/1000; };
 const JV_PINPOINT_M={
+  // the Road Runner bridge (GoBildaPinpointDriverRR, and the quickstart's PinpointDrive):
+  // RR's own Pose2d / PoseVelocity2d, in inches and radians
+  *getPositionRR(vm,o){ const q=jvOdo(vm,o); return yield* jvRR(vm,"Pose2d",[q.x/0.0254,q.y/0.0254,q.h]); },
+  *getVelocityRR(vm,o){ const v=vm.host&&vm.host.vel?vm.host.vel():{x:0,y:0}, w=vm.host&&vm.host.omega?vm.host.omega():0;
+    return yield* jvRR(vm,"PoseVelocity2d",[yield* jvRR(vm,"Vector2d",[v.x/0.0254,v.y/0.0254]),w]); },
+  setPositionRR(vm,o,a){ const P=a[0], f=P&&P.f; if(!f) return; const pos=f.position&&f.position.f, hd=f.heading&&f.heading.f;
+    jvOdoSet(vm,o,jvNum(pos&&pos.x)*0.0254,jvNum(pos&&pos.y)*0.0254,hd?Math.atan2(jvNum(hd.imag),jvNum(hd.real)):0); },
   update(){}, resetPosAndIMU(vm,o){ jvOdoSet(vm,o,0,0,0); }, recalibrateIMU(){}, resetPosition(vm,o){ jvOdoSet(vm,o,0,0,0); },
   getPosition(vm,o){ const q=jvOdo(vm,o); return vm.mk(JV_NAV+"Pose2D",{x:q.x,y:q.y,heading:q.h,distanceUnit:vm.enumConst(JV_NAV+"DistanceUnit","METER"),headingUnit:vm.enumConst(JV_NAV+"AngleUnit","RADIANS")}); },
   setPosition(vm,o,a){ const P=a[0]; if(!P||!P.f) return; const du=jvEn(P.f.distanceUnit)||"MM", hu=jvEn(P.f.headingUnit)||"RADIANS";
