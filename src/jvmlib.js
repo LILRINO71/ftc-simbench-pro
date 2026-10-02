@@ -403,7 +403,7 @@ function jvNatives(){
     exit(){}, gc(){}, getProperty(){ return null; }, lineSeparator(){ return "\n"; }, identityHashCode(vm,a){ return jvIsObj(a[0])?jvHash(a[0]):0; }},
     sget(vm,name){ if(name==="out"||name==="err") return vm.mk("java.io.PrintStream"); }});
   // System.out: to the host's log when it keeps one (a console), else nowhere
-  const say=function*(vm,a){ if(!(vm.host&&vm.host.log)&&!globalThis.JV_DEBUG) return; const t=a.length?yield* vm.str(a[0]):"";
+  const say=function*(vm,a){ if(!(vm.host&&vm.host.log)&&!globalThis.JV_DEBUG) return; const t=a.length?yield* vm.str(a[0],vm.argKind(0)):"";
     if(vm.host&&vm.host.log) vm.host.log(t); else console.log("[java] "+t); };
   d("java.io.PrintStream",{m:{*println(vm,o,a){ yield* say(vm,a); }, *print(vm,o,a){ yield* say(vm,a); }, printf(){}, format(){}, flush(){}}});
   d("java.lang.Thread",{ctor(vm,o,a){ o.n={run:a[0]||null}; },
@@ -422,11 +422,11 @@ function jvNatives(){
   d("java.lang.Boolean",{sf:{TRUE:true,FALSE:false},s:{parseBoolean(vm,a){ return String(a[0]).toLowerCase()==="true"; }, valueOf(vm,a){ return typeof a[0]==="string"?a[0].toLowerCase()==="true":!!a[0]; }, toString(vm,a){ return String(!!a[0]); }, compare(vm,a){ return (a[0]?1:0)-(a[1]?1:0); }, logicalAnd(vm,a){ return a[0]&&a[1]; }, logicalOr(vm,a){ return a[0]||a[1]; }, logicalXor(vm,a){ return a[0]!==a[1]; }}});
   d("java.lang.Character",{s:{isDigit(vm,a){ return a[0]>=48&&a[0]<=57; }, isLetter(vm,a){ return /[A-Za-z]/.test(String.fromCharCode(a[0])); }, isWhitespace(vm,a){ return /\s/.test(String.fromCharCode(a[0])); },
     toUpperCase(vm,a){ return String.fromCharCode(a[0]).toUpperCase().charCodeAt(0); }, toLowerCase(vm,a){ return String.fromCharCode(a[0]).toLowerCase().charCodeAt(0); }, getNumericValue(vm,a){ return a[0]-48; }, valueOf(vm,a){ return a[0]; }, toString(vm,a){ return String.fromCharCode(a[0]); }, isUpperCase(vm,a){ return a[0]>=65&&a[0]<=90; }}});
-  d("java.lang.String",{s:{format(vm,a){ return jvFormat(a[0],a.slice(1)); }, *valueOf(vm,a){ return yield* vm.str(a[0],typeof a[0]==="number"&&Number.isInteger(a[0])?"i":null); },
+  d("java.lang.String",{s:{format(vm,a){ return jvFormat(a[0],a.slice(1)); }, *valueOf(vm,a){ const k=vm.argKind(0); return yield* vm.str(a[0],k||(typeof a[0]==="number"&&Number.isInteger(a[0])?"i":null)); },
     *join(vm,a){ const sep=a[0]; const items=a.length===2&&a[1]&&a[1].n&&a[1].n.items?a[1].n.items:(a.length===2&&Array.isArray(a[1])?a[1]:a.slice(1)); const out=[]; for(const x of items) out.push(yield* vm.str(x)); return out.join(sep); },
     copyValueOf(vm,a){ return a[0].map(c=>String.fromCharCode(c)).join(""); }}, ctor(){}});
   d("java.lang.StringBuilder",{ctor(vm,o,a){ o.n={s:typeof a[0]==="string"?a[0]:""}; },
-    m:{*append(vm,o,a){ o.n.s+=yield* vm.str(a[0]); return o; }, toString(vm,o){ return o.n.s; }, length(vm,o){ return o.n.s.length; },
+    m:{*append(vm,o,a){ o.n.s+=yield* vm.str(a[0],vm.argKind(0)); return o; }, toString(vm,o){ return o.n.s; }, length(vm,o){ return o.n.s.length; },
       setLength(vm,o,a){ o.n.s=o.n.s.slice(0,a[0]); }, *insert(vm,o,a){ o.n.s=o.n.s.slice(0,a[0])+(yield* vm.str(a[1]))+o.n.s.slice(a[0]); return o; },
       reverse(vm,o){ o.n.s=o.n.s.split("").reverse().join(""); return o; }, deleteCharAt(vm,o,a){ o.n.s=o.n.s.slice(0,a[0])+o.n.s.slice(a[0]+1); return o; },
       charAt(vm,o,a){ return o.n.s.charCodeAt(a[0]); }, isEmpty(vm,o){ return !o.n.s.length; }}});
