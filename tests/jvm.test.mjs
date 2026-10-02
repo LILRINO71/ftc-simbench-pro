@@ -258,3 +258,29 @@ test('mapping: two motors named alike share a lift; two servos named alike stay 
   assert.equal(m.liftLeft, 'Lift'); assert.equal(m.liftRight, 'Lift');
   assert.equal([m.armL, m.armR].filter((x) => x === 'Arm').length, 1);
 });
+
+test('vm: DcMotor.Direction and DcMotorEx.Direction are DcMotorSimple.Direction (the SDK interface tree)', () => {
+  const senses = (how) => {
+    const robot = ROBOT_DIR(['lf', 'lb']).replace(/DcMotorSimple\.Direction/g, how);
+    const comp = E.jvCompile(MAIN_DIR, [{ file: 'Robot.java', src: robot }]);
+    const an = E.jvAnalyze(comp, false);
+    assert.deepEqual(an.stubs.filter((s) => /Direction/.test(s[0])), [], how + ' resolves');
+    return an.drive.wheels.map((w) => w.dev + ':' + w.sense).join(' ');
+  };
+  const want = senses('DcMotorSimple.Direction');
+  assert.equal(senses('DcMotor.Direction'), want);
+  assert.equal(senses('DcMotorEx.Direction'), want);
+});
+
+test('vm: a drive left in STOP_AND_RESET_ENCODER is called out (the SDK keeps it still)', async () => {
+  const { buildRobot } = await import('../tools/stepgen.mjs');
+  const cad = E.parseSTEP(buildRobot('mecanum-zup').text);
+  const robot = ROBOT_DIR(['lf', 'lb']).replace('spare.setDirection(DcMotorSimple.Direction.REVERSE);',
+    'spare.setDirection(DcMotorSimple.Direction.REVERSE); lf.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER); rf.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);');
+  const code = E.parseJava(MAIN_DIR, { libs: [{ file: 'Robot.java', src: robot }] });
+  assert.equal(code.engine, 'vm');
+  assert.deepEqual(code.vm.an.heldByReset.sort(), ['leftFront', 'rightFront']);
+  const F = E.analyze(code, cad, {}, {});
+  const f = F.find((x) => x.key === 'mode:reset');
+  assert.ok(f && f.sev === 'fail' && /RUN_WITHOUT_ENCODER/.test(f.fix), 'the fix is named');
+});

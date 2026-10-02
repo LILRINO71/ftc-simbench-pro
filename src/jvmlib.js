@@ -155,6 +155,9 @@ const JV_TEL_M={
 
 /* ---- hardware devices, wired to the sim through vm.host ---- */
 /* the kind of device a hardwareMap.get(X.class, …) asks for, by X's simple name */
+/* the SDK's own interface tree: DcMotor.Direction is DcMotorSimple.Direction,
+   DcMotorEx.RunMode is DcMotor.RunMode (nested types come down through these) */
+const JV_HW_EXTENDS={DcMotor:["DcMotorSimple"], DcMotorEx:["DcMotor"], CRServo:["DcMotorSimple"], ServoImplEx:["Servo","PwmControl"]};
 const JV_DEV_KIND={DcMotor:"motor",DcMotorEx:"motor",DcMotorImplEx:"motor",DcMotorImpl:"motor",DcMotorSimple:"motor",DcMotorControllerEx:null,
   Servo:"servo",ServoImplEx:"servo",ServoImpl:"servo",ServoEx:"servo",CRServo:"crservo",CRServoImplEx:"crservo",CRServoImpl:"crservo",
   IMU:"imu",BHI260IMU:"imu",BNO055IMUNew:"imu",BNO055IMU:"bno",BNO055IMUImpl:"bno",AdafruitBNO055IMU:"bno",LynxEmbeddedIMU:"bno",NavxMicroNavigationSensor:"imu",
@@ -532,7 +535,7 @@ function jvNatives(){
   // devices
   d(JV_HW+"HardwareDevice",{kind:"interface"});
   ["DcMotorSimple","DcMotor","DcMotorEx","Servo","ServoImplEx","CRServo","DistanceSensor","ColorSensor","NormalizedColorSensor","TouchSensor","DigitalChannel","AnalogInput","VoltageSensor","PwmControl","LED"]
-    .forEach(n=>{ if(!N[JV_HW+n]) d(JV_HW+n,{kind:"interface",ifs:[JV_HW+"HardwareDevice"]}); });
+    .forEach(n=>{ if(!N[JV_HW+n]) d(JV_HW+n,{kind:"interface",ifs:[JV_HW+"HardwareDevice"].concat((JV_HW_EXTENDS[n]||[]).map(x=>JV_HW+x))}); });
   en(JV_HW+"DcMotorSimple.Direction",["FORWARD","REVERSE"],JV_HW+"DcMotorSimple",{m:{inverted(vm,o){ return vm.enumConst(JV_HW+"DcMotorSimple.Direction",o.__en==="FORWARD"?"REVERSE":"FORWARD"); }}});
   en(JV_HW+"DcMotor.RunMode",["RUN_WITHOUT_ENCODER","RUN_USING_ENCODER","RUN_TO_POSITION","STOP_AND_RESET_ENCODER","RESET_ENCODERS","RUN_USING_ENCODERS","RUN_WITHOUT_ENCODERS"],JV_HW+"DcMotor");
   en(JV_HW+"DcMotor.ZeroPowerBehavior",["UNKNOWN","BRAKE","FLOAT"],JV_HW+"DcMotor");

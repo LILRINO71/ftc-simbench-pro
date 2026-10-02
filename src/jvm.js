@@ -679,10 +679,12 @@ JVM.prototype.findType0=function(name,ctx){
 };
 JVM.prototype.libLike=function(name){ return /^(com|org|java|javax|android|androidx|dev|io|net|edu|kotlin)\./.test(name); };
 JVM.prototype.nestedOf=function(c,name){
-  for(let k=c, g=0; k&&g<20; k=this.supOf(k), g++){
+  // up the whole tree, supers and interfaces (an interface's interfaces too):
+  // DcMotorEx.Direction is declared on DcMotorSimple, two interfaces up
+  const st=[c], seen=new Set();
+  while(st.length&&seen.size<60){ const k=st.shift(); if(!k||seen.has(k)) continue; seen.add(k);
     if(k.nested&&k.nested.has(name)) return k.nested.get(name);
-    for(const f of this.ifsOf(k)) if(f.nested&&f.nested.has(name)) return f.nested.get(name);
-  }
+    st.push(this.supOf(k)); for(const f of this.ifsOf(k)) st.push(f); }
   return null;
 };
 JVM.prototype.supOf=function(c){

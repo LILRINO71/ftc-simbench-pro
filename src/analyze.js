@@ -26,6 +26,12 @@ function analyze(code,cad,map,opts){
   else if(!code.hasWait&&code.kind==="TeleOp"&&!/void\s+loop\s*\(/.test(code.src||"")) add("struct:wait","fail","Missing waitForStart()",
     "A LinearOpMode that never calls <code>waitForStart()</code> runs its loop during init and is stopped by the SDK.",null,
     "Call <code>waitForStart();</code> before the main loop.");
+  // a motor told to move while it is still in STOP_AND_RESET_ENCODER doesn't move
+  const held=code.vm&&code.vm.an&&code.vm.an.heldByReset||[];
+  if(held.length) add("mode:reset","fail",(held.length===1?"<code>"+held[0]+"</code> is":held.length+" motors are")+" left in <code>STOP_AND_RESET_ENCODER</code>, so setPower does nothing",
+    "Your code sets power on "+held.map(n=>"<code>"+n+"</code>").join(", ")+" while "+(held.length===1?"it is":"they are")+" still in <code>STOP_AND_RESET_ENCODER</code>. "+
+    "In that mode the SDK removes power from the motor, so it stays still, here and on your robot.",
+    null,"After resetting, switch the mode back: <code>setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER)</code> (or <code>RUN_USING_ENCODER</code>).");
   if(!code.devices.length) add("struct:dev","warn","No hardware devices found",
     "No <code>hardwareMap</code> lookups were recognized, so there is nothing to simulate.",null,
     "The parser understands <code>hardwareMap.get(Type.class, \"name\")</code> and <code>hardwareMap.servo.get(\"name\")</code>.");
@@ -214,7 +220,8 @@ headroom  ${ratio.toFixed(2)}×${ratio<1?"  ◄ SHORT":""}`;
     else
       add("drive:ok","pass",dt.style==="mecanum"?"Mecanum drive reads correctly":"Tank drive reads correctly",
         "<b>"+dt.wheels.length+"</b> motors mixing stick axes. Drive it with the left stick in the panel below and watch the base move.",
-        dt.wheels.map(w=>(w.dev+"              ").slice(0,15)+w.stmt.expr).join("\n"),null);
+        // the line reader's wheels carry the statement that feeds them; the VM's, what running the code measured
+        dt.wheels.map(w=>(w.dev+"              ").slice(0,15)+(w.stmt?w.stmt.expr:(w.left?"left":w.right?"right":"")+(w.front?" front":w.back?" back":"")+", stick up gives "+(w.sense>0?"+":"\u2212")+" power")).join("\n"),null);
     const allExpr=[];
     (function walk(l){ for(const st of l){
       if(st.kind==="if"){ walk(st.then); if(st.else) walk(st.else); }

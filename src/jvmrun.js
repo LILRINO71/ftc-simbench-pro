@@ -228,6 +228,11 @@ function jvAnalyze(comp,isAuto){
   out.commanded=Array.from(cmdOf.keys());
   for(const [n,l] of cmdOf){ const p=l.filter(x=>x[0]==="setPosition").map(x=>x[1]); if(p.length) out.ranges[n]={lo:Math.min(...p),hi:Math.max(...p),n:p.length}; }
   if(!isAuto) out.drive=jvDriveFrom(runs,devs);
+  // given power while still in STOP_AND_RESET_ENCODER: on the robot that motor
+  // stays off (the SDK removes power in that mode until another mode is set)
+  out.heldByReset=[];
+  for(const k in runs) for(const [n,m] of Object.entries(runs[k].motors))
+    if(m.mode==="reset"&&m.cmd&&out.heldByReset.indexOf(n)<0) out.heldByReset.push(n);
   return out;
 }
 /* The drive base, read off what the motors do when the sticks move.
@@ -356,11 +361,18 @@ function jvMaybe(out,raw,opts){
   if(out.rr&&want!=="vm") return out;               // a Road Runner auto: src/roadrunner.js follows its trajectories
   let legacyFull=false, cov=null;
   try{ cov=coverage(out); legacyFull=out.devices.length>0&&(out.hasLoop||(out.auto&&out.auto.length>0))&&cov.skipped.length===0; }catch(e){}
-  if(legacyFull&&want!=="vm") return out;
+  if(legacyFull&&want!=="vm"){
+    // the line reader follows every line, but it places wheels by their names, and
+    // a team's config names don't always match where the motors sit. Running the
+    // code says which side and end each wheel is really on (src/mapping.js uses it).
+    try{ const r0=jvCodeFor(raw,(opts&&opts.libs)||[],false), an0=r0&&r0.an;
+      if(an0&&!an0.error&&an0.drive&&an0.drive.ok) out.vmDrive=an0.drive; }catch(e){}
+    return out;
+  }
   const isAuto=out.kind==="Autonomous"||(!out.hasLoop&&out.auto&&out.auto.length>0&&!/@TeleOp/.test(raw));
   const r=jvCodeFor(raw,(opts&&opts.libs)||[],isAuto);
   const an=r.an;
-  if(!r.ok||!an||!an.devices.length||(an.devices.length<out.devices.length&&want!=="vm")){ out.vmTried={err:r.err||"found no hardware"}; return out; }
+  if(!r.ok||!an||!an.devices.length||(an.devices.length<out.devices.length&&want!=="vm")){ out.vmTried={err:r.err||(an&&an.error?an.error.cls+": "+an.error.msg:"found no hardware")}; return out; }
   const legacy=out;
   const v=Object.assign({},out,{
     // the line reader's constants, statements and fields stay as a static view of

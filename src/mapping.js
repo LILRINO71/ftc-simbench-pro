@@ -167,7 +167,11 @@ function detectDrivetrain(code){
     }};
     scan(code.stmts); scan(code.auto);
     if(!expr) continue;
-    wheels.push(Object.assign({dev:mo.name, stmt:expr}, wheelCorner(mo.name)));
+    // the side and end: from running the code when that worked (src/jvmrun.js
+    // vmDrive), since config names don't always match where a motor sits; else the name
+    const vw=code.vmDrive&&code.vmDrive.wheels.find(w=>w.dev===mo.name||(mo.cfg&&w.dev===mo.cfg));
+    const at=vw&&(vw.left||vw.right)?{left:!!vw.left,right:!!vw.right,front:!!vw.front,back:!!vw.back}:wheelCorner(mo.name);
+    wheels.push(Object.assign({dev:mo.name, stmt:expr}, at));
   }
   if(wheels.length<2) return null;
   const hasSide=wheels.some(w=>w.left)&&wheels.some(w=>w.right);
