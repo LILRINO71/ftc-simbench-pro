@@ -16,6 +16,7 @@ let IGNORED={};
 try{ IGNORED=JSON.parse(store.get("ftcbench.ignored","{}"))||{}; }catch(e){ IGNORED={}; }
 function saveIgnored(){ store.set("ftcbench.ignored",JSON.stringify(IGNORED)); }
 let LIBRARY=[], CURRENT_ID=null;
+let USER_CHOSE=false;          // the user picked or edited an OpMode since the page opened (loadDefaultRobot leaves it be)
 let ROBOT_CFG_NAME=null;
 let CONFIG_OVR={};                 // live-edited config variables, like FTC Dashboard
 let RIG_DEVICES={};                // device → mechanism, remembered across OpModes
@@ -167,7 +168,7 @@ function renderOpList(){
     USER_HELPERS=USER_HELPERS.filter(h=>h.file!==b.dataset.helperrm); saveHelpers(); reparseAll();
   }));
   $$(".oplist [data-op]").forEach(r=>{
-    const go=()=>{ if(r.dataset.op!==CURRENT_ID) selectOpMode(r.dataset.op); };
+    const go=()=>{ if(r.dataset.op!==CURRENT_ID){ USER_CHOSE=true; selectOpMode(r.dataset.op); } };
     r.addEventListener("click",e=>{ if(!e.target.closest("[data-oprm]")) go(); });
     r.addEventListener("keydown",e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); go(); } });
   });
@@ -230,7 +231,7 @@ function addOpModeFromText(file,text){
   const e=existing||{id:"u"+Date.now().toString(36)+Math.random().toString(36).slice(2,6), file, builtin:false};
   e.source=text; parseEntry(e);
   if(!existing) LIBRARY.push(e);
-  saveLibrary(); selectOpMode(e.id);
+  USER_CHOSE=true; saveLibrary(); selectOpMode(e.id);
 }
 
 /* ============================================================
@@ -1360,6 +1361,8 @@ function parseAndLoad(done){
   if(!LAST_STEP) return;
   if(LAST_STEP.onshape){ loadOnshapeRobot(LAST_STEP.onshape,true).then(()=>{ if(done&&CAD) done(CAD); }); return; }
   if(LAST_STEP.urdfZip) return;                  // the zip's bytes went to the worker; it is placed once
+  // a workspace keeps the robot it was saved with, not its CAD: there's nothing to read again
+  if(LAST_STEP.session){ $("#cadStatus").textContent=LAST_STEP.name+" came from a workspace, so it can't be re-read. Drop its STEP to change how it's read."; if(done&&CAD) done(CAD); return; }
   const {name,text}=LAST_STEP, mb=(text.length/1048576).toFixed(1);
   SetupUI.beforeParse(name);
   $("#cadStatus").textContent="parsing "+mb+" MB …";
@@ -1430,6 +1433,8 @@ async function loadDefaultRobot(){
     R.spec=spec; JOINTS.spec=spec; JOINTS.name=R.joints; JOINTS.step=R.step;
     LAST_STEP={name:R.step, text, label:R.label};
     parseAndLoad(()=>{
+      // picked or edited one while the robot came in (or linked to one): theirs stays, running or not
+      if(USER_CHOSE) return;
       // the team's own TeleOp, unless one of the user's OpModes was open
       const saved=store.get("ftcbench.current",null), mine=entry(saved);
       selectOpMode(mine&&(!mine.builtin||mine.team)?saved:R.opmodes[0].id);
@@ -2135,7 +2140,7 @@ const Editor={
   skip:{},
   init(){
     this.ta=$("#srcbox"); this.hl=$("#edHl"); this.gut=$("#edGutter");
-    this.ta.addEventListener("input",()=>{ clearTimeout(this.tm); this.tm=setTimeout(()=>this.refresh(),110); });
+    this.ta.addEventListener("input",()=>{ USER_CHOSE=true; clearTimeout(this.tm); this.tm=setTimeout(()=>this.refresh(),110); });
     this.ta.addEventListener("scroll",()=>this.sync());
     this.ta.addEventListener("keydown",e=>{
       if(e.key==="Tab"&&!e.shiftKey&&!e.ctrlKey&&!e.altKey&&!e.metaKey){
@@ -2686,6 +2691,9 @@ const Session={
       if(s.cad){
         const cad=s.cad; cad.name=cad.name||fileName;
         classifyMechs(cad.mechs);
+        LAST_STEP={name:cad.name, text:"", session:true, label:cad.name+" · from workspace"};
+        JOINTS.spec=JOINTS.report=JOINTS.devices=null; JOINTS.name=JOINTS.step=null;
+        MATES.asm=MATES.features=MATES.name=MATES.report=null;
         loadCAD(cad,(cad.name||fileName)+" · from workspace","ok");
       }
       // the file name if the workspace kept one, else what the OpMode calls itself
@@ -2928,7 +2936,7 @@ function boot(){
   $("#btnInit").addEventListener("click",dsInit);
   $("#btnStart").addEventListener("click",dsStart);
   $("#btnStop").addEventListener("click",dsStop);
-  $("#opSelect").addEventListener("change",e=>selectOpMode(e.target.value));
+  $("#opSelect").addEventListener("change",e=>{ USER_CHOSE=true; selectOpMode(e.target.value); });
   $("#practice").checked=store.get("ftcbench.practice","0")==="1";
   $("#matchOn").checked=store.get("ftcbench.match","1")==="1";
   const mb=$("#matchBtn"), mm=$("#matchMenu"), matchDot=()=>mb.classList.toggle("on",$("#matchOn").checked);
@@ -3014,7 +3022,7 @@ function boot(){
      — for demo links in a README, or sharing "look at this" with a teammate. */
   try{
     const q=new URLSearchParams(location.search);
-    if(q.get("opmode")&&entry(q.get("opmode"))) selectOpMode(q.get("opmode"));
+    if(q.get("opmode")&&entry(q.get("opmode"))){ USER_CHOSE=true; selectOpMode(q.get("opmode")); }
     // ?pose=-40,-30,29 — a spot on the field in inches and a heading in degrees
     const ps=(q.get("pose")||"").split(",").filter(s=>s!=="").map(Number);
     if(ps.length>=2&&ps.every(isFinite)){
