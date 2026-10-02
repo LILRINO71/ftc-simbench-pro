@@ -72,11 +72,14 @@ export const LAYOUTS = {
   mecanum: { fwd: { left_stick_y: -1 }, strafe: { left_stick_x: 1 }, turn: { right_stick_x: 1 } },
   pov: { fwd: { left_stick_y: -1 }, turn: { right_stick_x: 1 } },                           // left stick y drives, right stick x turns
   arcade: { fwd: { left_stick_y: -1 }, turn: { left_stick_x: 1 } },                         // one stick
+  mecanumTrig: { fwd: { left_stick_y: -1 }, strafe: { left_stick_x: 1 }, turn: { right_trigger: 1 } }, // the triggers turn (right - left)
   tank: { fwd: { left_stick_y: -1, right_stick_y: -1 }, turn: { left_stick_y: -1, right_stick_y: 1 } },
 };
 export function layoutOf(controls) {
   const has = (c) => controls.includes('1:' + c) || controls.includes('0:' + c);
   if (has('left_stick_x') && has('left_stick_y') && has('right_stick_x')) return 'mecanum';
+  // no right stick x for turning, but both triggers: right_trigger - left_trigger turns
+  if (has('left_stick_x') && has('left_stick_y') && has('left_trigger') && has('right_trigger') && !has('right_stick_x')) return 'mecanumTrig';
   if (has('left_stick_y') && has('right_stick_y') && !has('left_stick_x') && !has('right_stick_x')) return 'tank';
   if (has('left_stick_y') && has('right_stick_x')) return 'pov';
   if (has('left_stick_y') && has('left_stick_x')) return 'arcade';
@@ -585,7 +588,7 @@ function report(R, A) {
     const ref = R.code.teams.filter((t) => t.group === 'reference');
     p(`A. CODE: each team's main TeleOp on one standard robot (${STD_ROBOT}: goBILDA 4-wheel mecanum), all its other .java files as helpers`);
     p(`   probes: gamepad1 held 1 s from a fresh START. F = left stick up goes >0.3 m forward (sideways <25 %, <15 deg); S = left stick right goes >0.2 m right;`);
-    p(`   T = right stick right turns >20 deg clockwise in place (<0.1 m). lay = stick layout read off the code: mec(anum) as above; pov/arc(ade)/tnk drive and turn`);
+    p(`   T = right stick right turns >20 deg clockwise in place (<0.1 m). lay = stick layout read off the code: mec(anum) as above, trg = mecanum turning with the triggers; pov/arc(ade)/tnk drive and turn`);
     p(`   with their own sticks and can't strafe (S "-"). Each probe runs twice: on the robot as built (its CAD's motor mounting, left side reversed), and on`);
     p(`   the same robot with each drive motor mounted the way the code's own setDirection calls say (positive power rolls every wheel forward). drv upper case:`);
     p(`   right as built; lower case: right only with the code's mounting (it reverses the other side, say), which also counts as driving correctly. The numbers`);
@@ -598,7 +601,7 @@ function report(R, A) {
       if (r.err && !r.drive) { p(`${pad(t.id, 14)}${pad(r.file.split('/').pop(), 28)}ERROR ${r.err}`); return; }
       const d = r.drive, v = shown(d), dt = r.simDrivetrain || (r.drivetrain && r.drivetrain.wheels) || [];
       const all = t.all ? `${t.all.correct}/${t.all.atAll}/${t.all.mech} of ${t.all.n}` : '';
-      p(`${pad(t.id, 14)}${pad(r.file.split('/').pop(), 28)}${lpad((r.devices || []).length, 4)}${lpad((r.devices || []).filter(isAct).length, 4)} ${pad(dt.length ? dt.length + ': ' + dt.join('/') : '-', 25)} ${pad({ mecanum: 'mec', pov: 'pov', arcade: 'arc', tank: 'tnk' }[r.layout] || '', 4)}` +
+      p(`${pad(t.id, 14)}${pad(r.file.split('/').pop(), 28)}${lpad((r.devices || []).length, 4)}${lpad((r.devices || []).filter(isAct).length, 4)} ${pad(dt.length ? dt.length + ': ' + dt.join('/') : '-', 25)} ${pad({ mecanum: 'mec', mecanumTrig: 'trg', pov: 'pov', arcade: 'arc', tank: 'tnk' }[r.layout] || '', 4)}` +
         `${lpad(f2(v.fwd.fwd), 7)}${lpad(v.strafe ? f2(v.strafe.right) : 'n/a', 7)}${lpad(v.turn.cw, 8)} ${pad(flags(d), 4)}${lpad((r.mech.probes || []).length, 4)}${lpad(r.mech.controlsMoving || 0, 4)}${lpad((r.mech.devicesMoved || []).length, 5)} ` +
         `${lpad(r.coverage && r.coverage.total != null ? r.coverage.understood + '/' + r.coverage.total : '-', 9)} ${pad(all, 14)}`);
     };
