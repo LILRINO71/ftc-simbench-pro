@@ -264,12 +264,18 @@ const JV_CRSERVO_M={
   resetDeviceConfigurationForOpMode(){}, close(){},
 };
 /* heading the way an IMU reports it: since it came up or was last reset, -pi..pi */
-function jvYaw(vm,o){ const h=(vm.host?vm.host.heading():0)-(o.n.zero||0); return Math.atan2(Math.sin(h),Math.cos(h)); }
+/* A real hub IMU is never perfectly still: its yaw wanders by a few hundredths of
+   a degree. Code can depend on that (a heading hold that only acts when the
+   heading differs from its target never acts on a perfect gyro), so the yaw
+   here has the same small noise, deterministic so runs repeat. */
+function jvYaw(vm,o){ const h=(vm.host?vm.host.heading():0)-(o.n.zero||0), k=vm.imuReads=(vm.imuReads||0)+1;   // every read, any IMU object
+  const noise=3e-4*Math.sin(k*2.39996+0.5);                       // ±0.017°
+  return Math.atan2(Math.sin(h+noise),Math.cos(h+noise)); }
 const jvAng=(rad,unit)=>jvEn(unit)==="RADIANS"?rad:rad*180/Math.PI;
 const JV_IMU_M={
   initialize(){ return true; },
   resetYaw(vm,o){ o.n.zero=vm.host?vm.host.heading():0; },
-  getRobotYawPitchRollAngles(vm,o){ return vm.mk(JV_NAV+"YawPitchRollAngles",null,{yaw:jvYaw(vm,o),pitch:0,roll:0}); },
+  getRobotYawPitchRollAngles(vm,o){ return vm.mk(JV_NAV+"YawPitchRollAngles",{yaw:jvYaw(vm,o),pitch:0,roll:0}); },   // the prelude class reads its fields
   getRobotOrientation(vm,o,a){ const u=a[2]; return vm.mk(JV_NAV+"Orientation",{firstAngle:jvAng(jvYaw(vm,o),u),secondAngle:0,thirdAngle:0,angleUnit:u||null,axesReference:a[0]||null,axesOrder:a[1]||null}); },
   getRobotAngularVelocity(vm,o,a){ const w=vm.host&&vm.host.omega?vm.host.omega():0; return vm.mk(JV_NAV+"AngularVelocity",{zRotationRate:jvAng(w,a[0]),xRotationRate:0,yRotationRate:0,unit:a[0]||null}); },
   getRobotOrientationAsQuaternion(vm){ return vm.opaqueVal("Quaternion"); },
@@ -397,7 +403,10 @@ function jvNatives(){
     arraycopy(vm,a){ for(let k=0;k<a[4];k++) a[2][a[3]+k]=a[0][a[1]+k]; },
     exit(){}, gc(){}, getProperty(){ return null; }, lineSeparator(){ return "\n"; }, identityHashCode(vm,a){ return jvIsObj(a[0])?jvHash(a[0]):0; }},
     sget(vm,name){ if(name==="out"||name==="err") return vm.mk("java.io.PrintStream"); }});
-  d("java.io.PrintStream",{m:{println(){}, print(){}, printf(){}, format(){}, flush(){}}});
+  // System.out: to the host's log when it keeps one (a console), else nowhere
+  const say=function*(vm,a){ if(!(vm.host&&vm.host.log)&&!globalThis.JV_DEBUG) return; const t=a.length?yield* vm.str(a[0]):"";
+    if(vm.host&&vm.host.log) vm.host.log(t); else console.log("[java] "+t); };
+  d("java.io.PrintStream",{m:{*println(vm,o,a){ yield* say(vm,a); }, *print(vm,o,a){ yield* say(vm,a); }, printf(){}, format(){}, flush(){}}});
   d("java.lang.Thread",{ctor(vm,o,a){ o.n={run:a[0]||null}; },
     s:{sleep(vm,a){ return {__block:{sleep:jvArg(a[0])}}; }, currentThread(vm){ return vm.mk("java.lang.Thread",null,{main:true}); }, interrupted(){ return false; }, yield(vm){ return {__block:{gate:true}}; }, onSpinWait(){}},
     m:{*start(vm,o){ const self=o; const run=o.n.run;

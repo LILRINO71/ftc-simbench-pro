@@ -199,7 +199,12 @@ function jvProbeRun(comp,pad1,pad2,ticks){
   for(let k=0;k<3&&!P.done;k++){ H.clock+=0.02; P.tick(); }        // a few INIT ticks, like a driver waiting
   H.pads={1:Object.assign({},pad1||{}),2:Object.assign({},pad2||{})};
   P.start();
-  for(let k=0;k<(ticks||6);k++){ H.clock+=0.02; H.t+=0.02; P.tick(); for(const [,s] of H.devs) s.ticks+=(s.cmd||0)*8; }
+  const tick=()=>{ H.clock+=0.02; H.t+=0.02; P.tick(); for(const [,s] of H.devs) s.ticks+=(s.cmd||0)*8; };
+  for(let k=0;k<(ticks||6);k++) tick();
+  // code that sets up its hardware after START (a busy-wait on isStarted(), then
+  // init) needs longer before the sticks reach a motor: keep going while nothing
+  // has power yet, up to a little over a second
+  for(let k=ticks||6;k<60&&!P.done&&!P.error&&pad1&&Object.keys(pad1).length&&![...H.devs.values()].some(s=>s.kind==="motor"&&s.cmd);k++) tick();
   const motors={};
   for(const [n,s] of H.devs) motors[n]={cmd:s.cmd, reversed:!!s.reversed, kind:s.kind, type:s.type, target:s.target, mode:s.mode};
   return {P,H,motors};
@@ -246,7 +251,10 @@ function jvDriveFrom(runs,devs){
   const EPS=0.05;
   // the turn: the right stick's x, or (when it moves no motor) the right trigger,
   // as teams who turn with the triggers (right_trigger - left_trigger) have it
-  const turnKey=motors.some(n=>Math.abs(d0("T",n))>EPS)||!runs.R2?"T":"R2";
+  // and when neither turns a motor, the left stick's x (an arcade drive: one stick
+  // drives and turns, nothing strafes)
+  const moves=k=>runs[k]&&motors.some(n=>Math.abs(d0(k,n))>EPS);
+  const turnKey=moves("T")?"T":moves("R2")?"R2":"S";
   const d=(k,n)=>d0(k==="T"?turnKey:k,n);
   let cand=motors.filter(n=>Math.abs(d("F",n))>EPS||Math.abs(d("T",n))>EPS||Math.abs(d("S",n))>EPS||Math.abs(d("R",n))>EPS);
   // the wheels all get about the same power from a full stick; a lift or an
@@ -260,7 +268,7 @@ function jvDriveFrom(runs,devs){
   const wheels=[];
   for(const n of cand){
     let left=false,right=false,front=false,back=false,sigma=0;
-    const f=d("F",n), t=d("T",n), s=d("S",n), r=d("R",n);
+    const f=d("F",n), t=d("T",n), s=turnKey==="S"?0:d("S",n), r=d("R",n);   // arcade: the left x turns, nothing strafes
     if(tank){ if(Math.abs(f)>EPS){ left=true; sigma=Math.sign(f); } else { right=true; sigma=Math.sign(r); } }
     else{
       sigma=Math.abs(f)>EPS?Math.sign(f):0;
@@ -283,7 +291,7 @@ function jvDriveFrom(runs,devs){
     for(let i=wheels.length-1;i>=0;i--) if(Math.abs(d("T",wheels[i].dev))<=EPS) wheels.splice(i,1);
   if(wheels.length<2) return null;
   const hasSide=wheels.some(w=>w.left)&&wheels.some(w=>w.right);
-  const strafes=wheels.some(w=>Math.abs(d("S",w.dev))>EPS);
+  const strafes=turnKey!=="S"&&wheels.some(w=>Math.abs(d("S",w.dev))>EPS);
   return {wheels,style:!tank&&strafes&&wheels.length>=4?"mecanum":"tank",ok:hasSide,fromCode:true};
 }
 

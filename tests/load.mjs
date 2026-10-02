@@ -19,7 +19,7 @@ const EXPORTS = [
   'SAMPLE_JAVA', 'DRIVE_JAVA', 'SAMPLE_CAD', 'synthGeometry',
   'splitStepRecords', 'parseSTEP', 'classifyMechs', 'recomputeChain', 'rigCarries', 'rigRoots', 'mlabel',
   'JOINT_KINDS', 'leverOf', 'holdTorque', 'armAngleDeg',
-  'jvParse', 'jvLex', 'JVM', 'JvProgram', 'jvCompile', 'jvAnalyze', 'jvProbeRun', 'jvCodeFor', 'jvMaybe', 'jvPrelude',
+  'jvParse', 'jvLex', 'JVM', 'JvProgram', 'jvCompile', 'jvAnalyze', 'jvProbeRun', 'jvProbeHost', 'jvCodeFor', 'jvMaybe', 'jvPrelude',
   'parseExpr', 'evalNode', 'parseJava', 'deriveBindings', 'travelRange', 'isCommanded',
   'Match', 'MATCH_SKILL', 'MATCH_PTS', 'segCrossesBox', 'boxPush', 'Online', 'netLoopback', 'netGzip', 'netGunzip', 'netHash', 'netSample', 'netAB', 'netKeep', 'dtWheelGeom', 'dtCompositeWheels', 'dtRollerHand', 'dtFrame', 'dtBaseSet', 'dtSymmetricSet', 'dtDriveComposites', 'driveFromSpec', 'liteCluster', 'liteBuild', 'liteEncode', 'liteDecode', 'LITE_FORMAT', 'netCode', 'netSlotPose', 'netSlotY', 'netEl', 'netEls', 'NET_SLOTS', 'NET_PROTO', 'autoMap', 'wheelCorner', 'detectDrivetrain', 'analyze', 'checkRobot', 'setupAuto', 'isDriveDevice', 'isCommanded', 'Sim', 'driveProbe', 'driveVerdict',
   'AUTO_JAVA', 'coverage', 'lineAt', 'collectStaticFields',

@@ -317,3 +317,30 @@ import com.qualcomm.robotcore.hardware.*; import com.qualcomm.robotcore.eventloo
   const [x, y, h] = pose.split(' : ')[1].split(',').map(Number);
   assert.ok(Math.abs(x - 10) < 1e-6 && Math.abs(y - 20) < 1e-6 && Math.abs(h - Math.PI / 2) < 1e-6, pose);
 });
+
+test('vm: the IMU reports the robot\'s heading (getRobotYawPitchRollAngles), with a real gyro\'s small noise', () => {
+  const src = `package x; import com.qualcomm.robotcore.hardware.*; import com.qualcomm.robotcore.eventloop.opmode.*; import org.firstinspires.ftc.robotcore.external.navigation.*;
+@TeleOp public class D extends LinearOpMode { public void runOpMode(){ IMU imu = hardwareMap.get(IMU.class, "imu"); waitForStart();
+  while (opModeIsActive()) { telemetry.addData("yaw", imu.getRobotYawPitchRollAngles().getYaw(AngleUnit.DEGREES)); telemetry.update(); } } }`;
+  const H = E.jvProbeHost(), P = new E.JvProgram(E.jvCompile(src, []), H.host);
+  P.init(); P.settle(8); P.start();
+  H.h = 0.5; for (let k = 0; k < 3; k++) { H.clock += 0.02; P.tick(); }
+  const yaw = +H.tel.find((l) => /^yaw/.test(l)).split(' : ')[1];
+  assert.ok(Math.abs(yaw - 0.5 * 180 / Math.PI) < 0.05, 'reads the heading: ' + yaw);
+  assert.notEqual(yaw, 0.5 * 180 / Math.PI, 'not a perfect gyro');
+});
+
+test('vm: a heading hold that only acts when off its target still drives (a real gyro is never exactly on it)', () => {
+  const robot = ROBOT_DIR(['lf', 'lb']);
+  const main = `package org.firstinspires.ftc.teamcode;
+import org.firstinspires.ftc.teamcode.hw.Robot;
+import com.qualcomm.robotcore.hardware.*; import com.qualcomm.robotcore.eventloop.opmode.*; import org.firstinspires.ftc.robotcore.external.navigation.*;
+@TeleOp(name="Hold") public class Hold extends LinearOpMode { public void runOpMode() { Robot r = new Robot(hardwareMap);
+  IMU a = hardwareMap.get(IMU.class, "imu"), b = hardwareMap.get(IMU.class, "imu"); double target = 0; waitForStart();
+  while (opModeIsActive()) { if (Math.abs(gamepad1.right_stick_x) < 0.05) { target = a.getRobotYawPitchRollAngles().getYaw(AngleUnit.DEGREES);
+      double err = target - b.getRobotYawPitchRollAngles().getYaw(AngleUnit.DEGREES);
+      if (err > 0) r.drive(-gamepad1.left_stick_y, gamepad1.left_stick_x, 0.01); if (err < 0) r.drive(-gamepad1.left_stick_y, gamepad1.left_stick_x, -0.01); }
+    else r.drive(-gamepad1.left_stick_y, gamepad1.left_stick_x, gamepad1.right_stick_x); } } }`;
+  const an = E.jvAnalyze(E.jvCompile(main, [{ file: 'Robot.java', src: robot }]), false);
+  assert.ok(an.drive && an.drive.wheels.length === 4, 'stick up drives: ' + JSON.stringify(an.drive));
+});
