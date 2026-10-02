@@ -62,8 +62,16 @@ function onshapeRead(host, ref, opt){
       if(e.status===400||e.status===404) throw fail("this isn't an assembly",e.status); throw e; }),
     get(base+"/features").catch(function(){ return null; })])
   .then(function(r){
-    var asm=r[0], features=r[1];
+    var asm=r[0], features=r[1], featuresBy={}, noLimits=0;
     if(!asm||!asm.rootAssembly) throw fail("this isn't an assembly");
+    /* that call lists the root's own features: each subassembly's mate
+       limits come from its own definition, keyed the way subAssemblies is */
+    var subs=(asm.subAssemblies||[]).filter(function(d){ return d.documentMicroversion&&(d.features||[]).some(function(f){ return f&&f.featureType==="mate"; }); });
+    var subLimits=function(){ return Promise.all(subs.map(function(d){
+      var cfg=d.fullConfiguration||d.configuration||"default", key=[d.documentId||"",d.elementId||"",cfg].join("|");
+      return get(host+"/api/assemblies/d/"+d.documentId+"/m/"+d.documentMicroversion+"/e/"+d.elementId+"/features?configuration="+encodeURIComponent(cfg)+(d.documentId!==ref.did?"&linkDocumentId="+ref.did:""))
+        .then(function(f){ featuresBy[key]=f; },function(e){ if(e&&e.status===401) throw e; noLimits++; });
+    })); };
     var jobs=[], seen={};
     [asm.rootAssembly].concat(asm.subAssemblies||[]).forEach(function(a){ (a.instances||[]).forEach(function(i){
       if(i.type!=="Part"||i.suppressed) return;
@@ -81,7 +89,7 @@ function onshapeRead(host, ref, opt){
       ]).then(function(t){ geom[j.key]={parts:compact(t[0]),mass:mass(t[1])}; },function(e){ if(e&&e.status===401) throw e; geom[j.key]=null; })
         .then(function(){ done++; say("Reading part shapes: "+done+" of "+jobs.length+" part studios …",done,jobs.length); return one(); });
     };
-    return Promise.all([one(),one(),one(),one()]).then(function(){ return {asm:asm, features:features, geom:geom}; });
+    return Promise.all([one(),one(),one(),one(),subLimits()]).then(function(){ return {asm:asm, features:features, featuresBy:featuresBy, geom:geom, noLimits:noLimits+(features?0:1)}; });
   });
 }
 /* An Onshape document address: its host and the assembly it points at, or null. */
@@ -118,7 +126,7 @@ function onshapeGrab(SB, read){
   window.addEventListener("message",function(e){ if(e.origin===sbOrigin&&e.data&&e.data.type==="simbench-ready"){ ready=true; send(); } });
   read(host, ref, {cred:"include", say:say})
   .then(function(r){
-    payload={format:"ftc-simbench.onshape", v:2, name:name, url:location.href, asm:r.asm, features:r.features, geom:r.geom};
+    payload={format:"ftc-simbench.onshape", v:2, name:name, url:location.href, asm:r.asm, features:r.features, featuresBy:r.featuresBy, noLimits:r.noLimits, geom:r.geom};
     if(!w||w.closed){ save(); return; }
     send();
     /* the SimBench tab never said it was ready: the file instead */
@@ -155,7 +163,7 @@ async function onshapeFromLink(href, say){
   let name="";
   try{ const r=await fetch(host+"/api/documents/"+ref.did,{credentials:"same-origin",headers:{Accept:"application/json"}}); if(r.ok) name=String((await r.json()).name||""); }catch(e){}
   const r=await onshapeRead(host, ref, {cred:"same-origin", say, denied});
-  return {format:ONSHAPE_FORMAT, v:2, name:name||"Onshape assembly", url:String(href).trim(), asm:r.asm, features:r.features, geom:r.geom};
+  return {format:ONSHAPE_FORMAT, v:2, name:name||"Onshape assembly", url:String(href).trim(), asm:r.asm, features:r.features, featuresBy:r.featuresBy, noLimits:r.noLimits, geom:r.geom};
 }
 
 /* ---- the SimBench side: the #onshape= fragment, back into the two JSON documents ---- */
@@ -187,7 +195,14 @@ async function readOnshapeHash(h){
 function checkOnshapePayload(p){
   if(!p||typeof p!=="object"||p.format!==ONSHAPE_FORMAT) throw new Error("it isn't mates from the SimBench bookmark");
   if(!p.asm||typeof p.asm!=="object"||!p.asm.rootAssembly||typeof p.asm.rootAssembly!=="object") throw new Error("it has no assembly definition");
-  const f=p.features, features=f&&(Array.isArray(f)||(typeof f==="object"&&Array.isArray(f.features)))?f:null;
+  const isFeat=f=>!!f&&(Array.isArray(f)||(typeof f==="object"&&Array.isArray(f.features)));
+  const features=isFeat(p.features)?p.features:null;
+  // each subassembly's features, by its definition key
+  let featuresBy=null;
+  if(p.featuresBy&&typeof p.featuresBy==="object"&&!Array.isArray(p.featuresBy)){
+    featuresBy={};
+    for(const k of Object.keys(p.featuresBy).slice(0,2000)) if(isFeat(p.featuresBy[k])) featuresBy[String(k).slice(0,200)]=p.featuresBy[k];
+  }
   const str=v=>typeof v==="string"?v.slice(0,200):"";
   const url=/^https:\/\/([a-z0-9-]+\.)*onshape\.com\//i.test(str(p.url))?str(p.url):"";
   // the shapes: part studio key -> {parts: id -> {name, tri (numbers), color}, mass}
@@ -207,5 +222,6 @@ function checkOnshapePayload(p){
       geom[k]={parts, mass:g.mass&&typeof g.mass==="object"?g.mass:{}};
     }
   }
-  return {name:str(p.name).trim()||"Onshape assembly", url, asm:p.asm, features, geom};
+  const noLimits=Number.isFinite(+p.noLimits)?Math.max(0,Math.min(1e4,Math.round(+p.noLimits))):0;
+  return {name:str(p.name).trim()||"Onshape assembly", url, asm:p.asm, features, featuresBy, noLimits, geom};
 }
