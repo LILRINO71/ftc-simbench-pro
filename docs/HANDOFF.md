@@ -150,14 +150,26 @@ and from 21 to 8 with the ITD code.
 
 ## Not done, in order
 
-1. **Switch on Sign in with Onshape and test it live.** Register the OAuth
-   app and set the two secrets (`DEPLOY.md`), then try it on a school
-   Chromebook with the team's own robot. Check that a second Onshape account
-   can authorize the app before it has a public store entry. The reader is
-   checked against Onshape's OpenAPI spec and a generated payload, never a
-   real assembly (a cloud container can't sign in to Onshape). Still open from the research: the real call count and
-   payload size, how Onshape counts session-cookie calls against its quota,
-   and whether linked (COTS) parts come with their colours.
+1. **Test Sign in with Onshape live.** It's switched on for
+   ftc-simbench-pro.pages.dev: the owner registered the OAuth app on the
+   school's Onshape (puhsd.onshape.com) and set the two secrets. Try it on a
+   school Chromebook with the team's own robot, and with an Onshape account
+   from another school. The reader is checked against Onshape's OpenAPI spec
+   and generated payloads, never a real assembly (a cloud container can't
+   sign in to Onshape). Whether linked (COTS) parts come with their colours
+   is still open.
+   - **Onshape's yearly API limit applies.** Calls through a private OAuth
+     app count against the app owner's account: 2,500 a year for a free or
+     EDU user, 10,000 for an EDU enterprise
+     ([limits](https://onshape-public.github.io/docs/auth/limits/)). One
+     robot is about 2 calls per part studio plus 3, so the site runs out
+     after a few dozen to a couple of hundred robots a year, and Onshape
+     answers 402. Calls made with the team's own browser session don't
+     count, and neither do apps public in Onshape's App Store. The fix,
+     when it's needed: show a clear message on 402, and add a copy-and-paste
+     way that needs no app (export the STEP; open the assembly definition
+     link, `onshapeApiLinks` in `src/mates.js`, in a signed-in tab; copy its
+     text into SimBench, which already applies those mates to the STEP).
 2. **Test online on two real computers.** The relays and the loader are
    fixed and tested with the library faked; a cloud container's proxy carries
    no WebSockets, so no live match ran here. A TURN relay would still be
@@ -181,8 +193,42 @@ and from 21 to 8 with the ITD code.
    joints and device bindings. See section 4 of the report.
 6. **Device to joint from the Control Hub config XML**, the first rung of
    the report's matching ladder. Not started.
+7. **Left from the bug hunt** (October 2026; everything else it found is fixed,
+   with a test each):
+   - **A REVERSE servo on the line reader** isn't flipped (the VM flips it).
+     The default robot's `joints.json` (`crank R` on the reversed `linkR`)
+     was tuned to the line reader as it is, so decide the servo frame first
+     (keep `s.cmd` in the code's frame and flip at the joint, as motors do),
+     then re-check that spec. Fixing only the sim broke
+     `tests/into-the-deep.test.mjs` and `tests/roadrunner.test.mjs`.
+   - **Java values the VM still gets wrong:** a `double` with no fraction
+     prints without ".0" in telemetry (`getPower()` shows "1"); an element
+     of a `List<Integer>` divides as a double; overloads are picked by the
+     runtime value (`ov(1.0)` can run `ov(int)`); no 32-bit int overflow;
+     `new String("x")`.
+   - **Cylindrical mates' limits**: which of Onshape's limit parameters is
+     the slide and which the turn isn't confirmed; the bench simulates a
+     cylindrical as its turn.
 
 ## Fixed along the way (worth knowing)
+
+- **The October 2026 bug hunt** (four reviewers, then fixes with a test
+  each):
+  - script in a joint or device name ran on the page (findings are now
+    escaped at the source);
+  - Java `==` returned null instead of false;
+  - an int method's result divided as a double;
+  - VM autos never moved, and drive encoders counted free speed, so encoder
+    autos drove short;
+  - getYaw(DEGREES) read radians on the line reader;
+  - a fixed drivetrain subassembly made a wheel the chassis;
+  - mate limits were measured from the wrong place and never read from
+    subassemblies;
+  - a Core Hex counted 2016 ticks a turn instead of 288;
+  - resetRuntime() reset the match clock;
+  - several screen bugs at phone width, keys, and a stale label.
+
+  The commits since 1016c18 say what each one was and how it's tested.
 
 - **VM state shared through the parse cache.** Parsed units are cached by
   source, so two programs sharing an OpMode file share its AST. The VM used
