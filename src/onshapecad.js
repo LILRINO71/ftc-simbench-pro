@@ -148,8 +148,9 @@ function cadFromOnshape(p,opts){
   const cad={name:p.name||"Onshape robot", units:"METRE", points:P, pointCount:P.length, solids, bbox:{min:mn,max:mx}, parts, mechs:[], placements:[], frame, occs:[],
     source:"onshape", onshape:{url:p.url||null, parts:nOcc, withShape:solids.length, kg:kgParts?kgSum:null, kgParts}};
   if(kgParts) why.push("Mass from Onshape's materials: "+kgSum.toFixed(2)+" kg over "+kgParts+" of "+solids.length+" parts.");
+  if(p.noLimits) why.push(p.noLimits+" list(s) of mate limits couldn't be read from Onshape, so some joints may have no stops. Try again to read them.");
   // the joints: the mates, onto parts that are Onshape's own, so all of them match
-  const rep=applyOnshapeMates(cad,A,{features:p.features||null});
+  const rep=applyOnshapeMates(cad,A,{features:p.features||null, featuresBy:p.featuresBy||null});
   cad.onshape.report=rep; cad.onshape.why=why.concat(rep.why||[]);
   return cad;
 }

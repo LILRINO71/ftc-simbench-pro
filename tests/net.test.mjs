@@ -125,7 +125,7 @@ test('online: each sees the other\'s robot where it is, and the AI robots and th
   const past = [];
   run(hub, [H, G], 6, (pc) => {
     if (pc === G) { pc.sim.chassis.y += 0.6 * 0.02; pc.sim.vel = { x: 0, y: 0.6 }; }
-    else past.push({ t: H.clock.t, bots: H.M.bots.map((b) => ({ x: b.x, y: b.y })) });
+    else past.push({ t: H.clock.t, bots: H.M.bots.map((b) => ({ x: b.x, y: b.y })), floor: H.M.floor.map((e) => e.id).sort().join() });
   });
   const hp = G.M.players.find((p) => p.id === 'host'), gp = H.M.players.find((p) => p.id === 'guest');
   assert.ok(hp && gp, 'each has the other');
@@ -139,7 +139,10 @@ test('online: each sees the other\'s robot where it is, and the AI robots and th
   });
   assert.deepEqual(G.F.hive, H.F.hive);
   assert.deepEqual(G.F.tips, H.F.tips);
-  assert.deepEqual(G.M.floor.map((e) => e.id).sort(), H.M.floor.map((e) => e.id).sort());
+  // the floor too, as the host had it a moment ago: an AI robot can pick an element up
+  // inside the tenth of a second the guest is behind
+  const gf = G.M.floor.map((e) => e.id).sort().join();
+  assert.ok(past.filter((p) => p.t >= H.clock.t - 300).some((p) => p.floor === gf), 'the guest\'s floor is one the host had in the last 0.3 s: ' + gf);
   assert.deepEqual(G.O.score, H.O.scoreOut(H.M.score(H.sim)));
 });
 

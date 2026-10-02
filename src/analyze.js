@@ -1,9 +1,20 @@
 /* ============================================================
    6.  ANALYSIS
    ============================================================ */
+/* A finding's text is shown as HTML, and much of it comes from the team's
+   files: device names from the Java, joint and part names from the CAD or
+   Onshape. Escape all of it, then let back only the plain formatting the
+   findings use (<b>, <code>, <i>, <br>) and a few entities, which always
+   show as text. */
+function findingHTML(s){
+  if(s==null) return s;
+  return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))
+    .replace(/&lt;(\/?)(b|code|i)&gt;/g,"<$1$2>").replace(/&lt;br\s*\/?&gt;/g,"<br>")
+    .replace(/&amp;(mdash|ndash|lt|gt|amp|quot|nbsp);/g,"&$1;");
+}
 function analyze(code,cad,map,opts){
   const F=[];
-  const add=(key,sev,title,body,math,fix)=>F.push({key,sev,title,body,math,fix});
+  const add=(key,sev,title,body,math,fix)=>F.push({key,sev,title:findingHTML(title),body:findingHTML(body),math,fix:findingHTML(fix)});
   const mechOf = n => cad.mechs.filter(m=>m.id===map[n])[0] || null;
   const payload=opts.payloadKg, duty=opts.duty, trust=opts.trust;
   const SERVO_MASS=0.060, LINK_MASS=0.055;

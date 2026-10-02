@@ -16,6 +16,7 @@ let IGNORED={};
 try{ IGNORED=JSON.parse(store.get("ftcbench.ignored","{}"))||{}; }catch(e){ IGNORED={}; }
 function saveIgnored(){ store.set("ftcbench.ignored",JSON.stringify(IGNORED)); }
 let LIBRARY=[], CURRENT_ID=null;
+let USER_CHOSE=false;          // the user picked or edited an OpMode since the page opened (loadDefaultRobot leaves it be)
 let ROBOT_CFG_NAME=null;
 let CONFIG_OVR={};                 // live-edited config variables, like FTC Dashboard
 let RIG_DEVICES={};                // device → mechanism, remembered across OpModes
@@ -167,12 +168,13 @@ function renderOpList(){
     USER_HELPERS=USER_HELPERS.filter(h=>h.file!==b.dataset.helperrm); saveHelpers(); reparseAll();
   }));
   $$(".oplist [data-op]").forEach(r=>{
-    const go=()=>{ if(r.dataset.op!==CURRENT_ID) selectOpMode(r.dataset.op); };
+    const go=()=>{ if(r.dataset.op!==CURRENT_ID){ USER_CHOSE=true; selectOpMode(r.dataset.op); } };
     r.addEventListener("click",e=>{ if(!e.target.closest("[data-oprm]")) go(); });
     r.addEventListener("keydown",e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); go(); } });
   });
   $$(".oplist [data-oprm]").forEach(b=>b.addEventListener("click",()=>{
     const id=b.dataset.oprm;
+    if(Online.playing()&&id===CURRENT_ID){ NetUI.say("The OpMode can't change during an online match. Leave the match first.","warn"); return; }
     LIBRARY=LIBRARY.filter(e=>e.id!==id); saveLibrary();
     if(id===CURRENT_ID) selectOpMode(LIBRARY[0].id); else { renderOpList(); renderOpSelect(); renderCompareSelects(); }
   }));
@@ -198,8 +200,10 @@ function selectOpMode(id){
   CONFIG_OVR={};
   if(!e.code){
     CODE=null;
+    if(Sim.phase==="init"||Sim.phase==="running") Sim.stop();
+    Sim.phase="empty";
     $("#coverage").innerHTML=`<p class="cov-ok">Couldn't read this file: ${esc(e.error||"unknown error")}</p>`;
-    renderOpList(); renderOpSelect(); return;
+    renderOpList(); renderOpSelect(); updateDS(); buildGauges(); renderPad(); return;
   }
   CODE=e.code;
   // an auto written for another season's field would run into this one's HIVEs
@@ -208,7 +212,7 @@ function selectOpMode(id){
   analyzeAll();
   if(!Online.inMatch()) Field.reset();                            // selected and INIT'd: a fresh match
   Shots.reset();
-  Sim.load(CODE,CAD,MAP,withPose());
+  Sim.load(CODE,CAD,MAP,withPose()); Physics.sync();
   applyConfigOverrides(); Sim.init(); applyConfigOverrides();    // like a DS: selected and INIT'd, waiting for START
   resetMatch();
   Shots.adopt(CODE); ShotUI.dirty=true; renderShotSetup();
@@ -227,7 +231,7 @@ function addOpModeFromText(file,text){
   const e=existing||{id:"u"+Date.now().toString(36)+Math.random().toString(36).slice(2,6), file, builtin:false};
   e.source=text; parseEntry(e);
   if(!existing) LIBRARY.push(e);
-  saveLibrary(); selectOpMode(e.id);
+  USER_CHOSE=true; saveLibrary(); selectOpMode(e.id);
 }
 
 /* ============================================================
@@ -1324,7 +1328,7 @@ function analyzeAll(){
 function reloadSim(){
   if(!CODE||!CAD) return;
   const phase=Sim.phase;
-  Sim.load(CODE,CAD,MAP,withPose()); applyConfigOverrides();
+  Sim.load(CODE,CAD,MAP,withPose()); applyConfigOverrides(); Physics.sync();
   if(phase!=="stopped"){ Sim.init(); applyConfigOverrides(); resetMatch(); }
   if(phase==="running") Sim.start();
   buildGauges(); renderPad(); renderLegend3D(); updateDS();
@@ -1397,7 +1401,7 @@ function loadOnshapeRobot(p,reparse){
   LAST_STEP={name:p.name, text:"", onshape:p, label:p.name+" · from "+from};
   // a new robot drops the last one's joints; the same one re-read (a new up, a new centre) keeps them
   if(!reparse||JOINTS.step!==p.name){ JOINTS.spec=JOINTS.report=JOINTS.devices=null; JOINTS.name=JOINTS.step=null; }
-  MATES.asm=p.asm; MATES.features=p.features; MATES.name=p.name; MATES.url=p.url||null; MATES.fromLink=true; MATES.report=cad.onshape.report;
+  MATES.asm=p.asm; MATES.features=p.features; MATES.featuresBy=p.featuresBy||null; MATES.name=p.name; MATES.url=p.url||null; MATES.fromLink=true; MATES.report=cad.onshape.report;
   SetupUI.beforeParse&&SetupUI.beforeParse(p.name);
   loadCAD(cad, p.name+" · from "+from+" · "+cad.solids.length+" parts · "+cad.mechs.filter(m=>m.fromMate).length+" joints", "ok");
   recomputeChain(cad.mechs);
@@ -1406,7 +1410,7 @@ function loadOnshapeRobot(p,reparse){
   $("#mateStatus").textContent=p.name+" · whole robot from "+from+" · "+n+" joint"+(n===1?"":"s"); $("#mateDrop").className="drop ok";
   $("#mateNote").innerHTML=(cad.onshape.why||[]).map(w=>"<li>"+esc(w)+"</li>").join("");
   const pill=$("#matePill"); if(pill){ pill.textContent=n+" joint"+(n===1?"":"s"); pill.className="pill ok"; }
-  if(p.from!=="urdf") OnshapeHelp.done(p.name, cad.solids.length, cad.mechs.filter(m=>m.fromMate).length, cad.onshape&&cad.onshape.kg);
+  if(p.from!=="urdf"&&(!reparse||OnshapeHelp.mode==="busy")) OnshapeHelp.done(p.name, cad.solids.length, cad.mechs.filter(m=>m.fromMate).length, cad.onshape&&cad.onshape.kg);
   onshapeNote("<b>"+esc(p.name)+"</b> loaded "+(p.from==="urdf"?"from its URDF":"straight from Onshape")+": "+cad.solids.length+" parts with their colours"+
     (cad.onshape.kg?", "+cad.onshape.kg.toFixed(1)+" kg from your materials":"")+", and "+n+" joint"+(n===1?"":"s")+" from your "+(p.from==="urdf"?"joints":"mates")+". Load your code and press INIT.","ok");
   renderFrameNote&&renderFrameNote();
@@ -1427,6 +1431,7 @@ const OnshapeHelp={
     const ov=$("#osOverlay"); if(!ov) return;
     const mac=/Mac|iPhone|iPad/i.test((navigator.userAgentData&&navigator.userAgentData.platform)||navigator.platform||navigator.userAgent);
     for(const id of ["osKey1","osKey2","osKey3"]){ const k=$("#"+id); if(k) k.textContent=mac?"⌘ Cmd":"Ctrl"; }
+    for(const k of $$(".os-mod")) k.textContent=mac?"⌘ Cmd":"Ctrl";
     const phone=matchMedia("(pointer:coarse)").matches&&!matchMedia("(any-pointer:fine)").matches;
     $("#osPhone").hidden=!phone;
     const href=onshapeBookmarklet(location.origin+location.pathname);
@@ -1450,6 +1455,15 @@ const OnshapeHelp={
     $("#osDone").addEventListener("click",()=>this.close());
     $("#osShowSteps").addEventListener("click",()=>this.open());
     $("#osSeeRobot").addEventListener("click",()=>{ this.close(); const nav=$('.tabs[data-tabs="left"]'); if(nav) selectTab(nav,"robot"); });
+    // copy and paste: the STEP, the address, the pages of text
+    $("#osStepPick").addEventListener("click",()=>$("#cadFile").click());
+    $("#osPasteLink").value=store.get("ftcbench.onshapeLink","")||"";
+    $("#osPasteLink").addEventListener("input",()=>this.pasteLink());
+    $("#osPaste").addEventListener("input",()=>{ clearTimeout(this.pasteT); this.pasteT=setTimeout(()=>this.takePaste(),60); });
+    $("#osLimitLinks").addEventListener("click",e=>{ const a=e.target.closest("[data-lk]"); if(!a) return;
+      this.paste.pending=a.dataset.lk; this.say("osPasteTip","Now copy that page (Ctrl + A, Ctrl + C) and paste it in the box in step 3."); });
+    $("#osPasteSee").addEventListener("click",()=>{ this.close(); const nav=$('.tabs[data-tabs="left"]'); if(nav) selectTab(nav,"robot"); });
+    this.pasteLink();
     $("#osSignIn").addEventListener("click",()=>this.signIn());
     $("#osSignOut").addEventListener("click",()=>this.signOut());
     $("#osLinkForm").addEventListener("submit",e=>{ e.preventDefault(); this.fromLink(); });
@@ -1461,12 +1475,76 @@ const OnshapeHelp={
     this.chip();
   },
   view(guide){ $("#osGuide").hidden=!guide; $("#osProgress").hidden=guide; $("#osOverlay").hidden=false; },
-  open(){ this.mode="guide"; $("#osBmTip").hidden=true; this.view(true); const s=$(".os-sheet"); if(s) s.scrollTop=0; this.refresh(); },
+  open(){ this.mode="guide"; $("#osBmTip").hidden=true; this.view(true); const s=$(".os-sheet"); if(s) s.scrollTop=0; this.refresh();
+    // the STEP parses after the file picker closes: keep the steps' ticks current while open
+    clearInterval(this.pasteIv); this.pasteIv=setInterval(()=>{ if($("#osOverlay").hidden||this.mode!=="guide") clearInterval(this.pasteIv); else this.pasteState(); },700);
+    this.pasteState(); },
+  /* ---- copy and paste ---- */
+  paste:{asm:false, limits:[], pending:"", got:{}},
+  pasteLink(){
+    const href=$("#osPasteLink").value.trim(), L=onshapeApiLinks(href), a=$("#osOpenJoints");
+    this.say("osPasteLinkTip",href&&!L?"That isn't an Onshape assembly address. In Onshape, click your Assembly tab, then copy the whole address from the address bar.":"");
+    if(L){ a.href=L.def; a.setAttribute("aria-disabled","false"); store.set("ftcbench.onshapeLink",href); }
+    else{ a.removeAttribute("href"); a.setAttribute("aria-disabled","true"); }
+    if(this.paste.asm&&MATES.asm) this.renderLimits();
+    this.pasteState();
+  },
+  takePaste(){
+    const box=$("#osPaste"), text=box.value;
+    if(!text.trim()) return;
+    let r; try{ r=readOnshapePaste(text); }catch(e){ this.say("osPasteTip",e.message+"."); return; }
+    box.value="";
+    if(r.kind==="assembly"){
+      MATES.asm=r.json; MATES.features=null; MATES.featuresBy={}; MATES.name="your Onshape assembly";
+      MATES.url=$("#osPasteLink").value.trim()||null; MATES.fromLink=true; MATES.report=null;
+      JOINTS.spec=JOINTS.report=null;
+      this.paste={asm:true, limits:[], pending:"", got:{}};
+      this.renderLimits();
+      this.say("osPasteTip","✓ Got your joints: "+r.mates+" mate"+(r.mates===1?"":"s")+"."+(this.paste.limits.length?" Limits are next (step 4), or skip them.":""));
+    }else{
+      if(!this.paste.asm||!MATES.asm){ this.say("osPasteTip","That's a limits page. Paste your joints page first (the button in step 3)."); return; }
+      const k=this.paste.pending||"", link=this.paste.limits.find(x=>x.key===k);
+      if(k==="") MATES.features=r.json; else MATES.featuresBy[k]=r.json;
+      this.paste.got[k]=true; this.paste.pending="";
+      this.renderLimits();
+      this.say("osPasteTip","✓ Got the limits for "+(link?link.name:"the main assembly")+".");
+    }
+    this.applyPaste();
+  },
+  renderLimits(){
+    const L=this.paste.limits=onshapeLimitLinks(MATES.asm,$("#osPasteLink").value.trim());
+    const box=$("#osLimitLinks");
+    if(!this.paste.asm){ box.innerHTML='<span class="dim">These show up after step 3.</span>'; return; }
+    if(!L.length){ box.innerHTML='<span class="dim">Paste your assembly\'s address in step 2 to get these links.</span>'; return; }
+    box.innerHTML=L.map(x=>'<a class="btn-sm" target="_blank" rel="noopener" data-lk="'+esc(x.key)+'" href="'+esc(x.url)+'">Open ↗ '+esc(x.name)+'</a>'+
+      (this.paste.got[x.key]?'<span class="got">✓</span>':'')).join("");
+  },
+  /* the STEP of their own robot is in and the joints came: put the joints on it */
+  applyPaste(){
+    if(this.paste.asm&&MATES.asm&&ownRobot()&&LAST_STEP&&!LAST_STEP.onshape&&!LAST_STEP.session) applyMates();
+    this.pasteState();
+  },
+  pasteState(){
+    const step=ownRobot()&&LAST_STEP&&!LAST_STEP.onshape&&!LAST_STEP.session;
+    const ok=$("#osStepOk"); ok.hidden=!step; if(step) ok.textContent="✓ "+LAST_STEP.name;
+    $("#osPs1").classList.toggle("done",!!step);
+    $("#osPs2").classList.toggle("done",!!onshapeApiLinks($("#osPasteLink").value.trim()));
+    $("#osPs3").classList.toggle("done",this.paste.asm&&!!MATES.asm);
+    $("#osPs4").classList.toggle("done",Object.keys(this.paste.got).length>0);
+    const rep=MATES.report, show=!!(step&&this.paste.asm&&MATES.asm&&rep);
+    $("#osPasteResult").hidden=!show;
+    if(show){
+      const nl=Object.keys(this.paste.got).length;
+      $("#osPasteResultText").textContent="✓ "+LAST_STEP.name+": "+rep.joints+" joint"+(rep.joints===1?"":"s")+" from your mates, "+
+        rep.matched+" of "+rep.parts+" parts matched"+(nl?", limits from "+nl+" page"+(nl===1?"":"s"):"")+".";
+    }
+    else if(step&&this.paste.asm&&MATES.asm&&!rep){ const t=$("#mateStatus").textContent; if(/Couldn't|line up/.test(t)) this.say("osPasteTip",t); }
+  },
   /* whether this site can sign in to Onshape (it needs functions/onshape), and whether it has */
   async refresh(){
     const st=this.signin=await onshapeSignInState();
-    $("#osSignInWay").hidden=!st.ready; $("#osNoSignIn").hidden=st.ready;
-    if(!st.ready) $("#osBmWay").open=true;
+    // signing in is the quicker way where it's switched on (functions/onshape) and the account allows it
+    $("#osSignWay").hidden=!st.ready;
     $("#osSignIn").hidden=st.signedIn; $("#osSignedIn").hidden=!st.signedIn;
     $("#osStep1").classList.toggle("done",st.signedIn);
     return st;
@@ -1543,7 +1621,7 @@ const OnshapeHelp={
 };
 /* This tab was opened by the bookmark: say we're ready, then take the robot.
    A second click reuses this tab and only changes its #hash: wait again then. */
-let ONSHAPE_WAIT=null;
+let ONSHAPE_WAIT=null, ONSHAPE_PING=null;
 addEventListener("hashchange",()=>{ if(/^#onshape-wait/.test(location.hash)) waitForOnshape(); });
 function waitForOnshape(){
   try{ history.replaceState(null,"",location.pathname+location.search); }catch(e){}
@@ -1565,12 +1643,15 @@ function waitForOnshape(){
     // let the pop-up draw before the build takes the main thread
     setTimeout(()=>{ if(p.geom) loadOnshapeRobot(p); else { holdOnshape(p); OnshapeHelp.close(); } },30);
   });
-  const ping=()=>{ if(got) return; try{ if(window.opener) window.opener.postMessage({type:"simbench-ready"},"*"); }catch(e){} setTimeout(ping,600); };
+  clearTimeout(ONSHAPE_PING);
+  const ping=()=>{ if(got) return; try{ if(window.opener) window.opener.postMessage({type:"simbench-ready"},"*"); }catch(e){} ONSHAPE_PING=setTimeout(ping,600); };
   ping();
 }
 function parseAndLoad(done){
   if(!LAST_STEP) return;
   if(LAST_STEP.onshape){ loadOnshapeRobot(LAST_STEP.onshape,true); if(done&&CAD) done(CAD); return; }
+  // a workspace keeps the robot it was saved with, not its CAD: there's nothing to read again
+  if(LAST_STEP.session){ $("#cadStatus").textContent=LAST_STEP.name+" came from a workspace, so it can't be re-read. Drop its STEP to change how it's read."; if(done&&CAD) done(CAD); return; }
   const {name,text}=LAST_STEP, mb=(text.length/1048576).toFixed(1);
   SetupUI.beforeParse(name);
   $("#cadStatus").textContent="parsing "+mb+" MB …";
@@ -1632,6 +1713,8 @@ async function loadDefaultRobot(){
     R.spec=spec; JOINTS.spec=spec; JOINTS.name=R.joints; JOINTS.step=R.step;
     LAST_STEP={name:R.step, text, label:R.label};
     parseAndLoad(()=>{
+      // picked or edited one while the robot came in (or linked to one): theirs stays, running or not
+      if(USER_CHOSE) return;
       // the team's own TeleOp, unless one of the user's OpModes was open
       const saved=store.get("ftcbench.current",null), mine=entry(saved);
       selectOpMode(mine&&(!mine.builtin||mine.team)?saved:R.opmodes[0].id);
@@ -1696,7 +1779,7 @@ function takeRobotConfig(file){ readText(file,text=>setRobotConfig(text,file.nam
    The two JSON files come from Onshape's own API, opened in a tab that's
    signed in to Onshape: no keys, nothing sent anywhere but Onshape.
    ============================================================ */
-const MATES={asm:null, features:null, name:null, report:null, url:null};
+const MATES={asm:null, features:null, featuresBy:null, name:null, report:null, url:null};
 /* ---- mates from the "Send to SimBench" bookmark (src/onshapelink.js) ----
    They arrive in this page's #onshape= fragment. If the team already has
    their own robot open in another SimBench tab, that tab is offered them
@@ -1737,7 +1820,7 @@ async function takeOnshapeHash(){
    (parseAndLoad applies MATES by itself), never on the default robot. */
 function holdOnshape(p){
   if(p.geom&&loadOnshapeRobot(p)) return;
-  MATES.asm=p.asm; MATES.features=p.features; MATES.name=p.name; MATES.url=p.url||null; MATES.report=null; MATES.fromLink=true;
+  MATES.asm=p.asm; MATES.features=p.features; MATES.featuresBy=p.featuresBy||null; MATES.name=p.name; MATES.url=p.url||null; MATES.report=null; MATES.fromLink=true;
   JOINTS.spec=null; JOINTS.report=null; ONSHAPE_OFFER=null;
   if(ownRobot()) applyMates();
   else{
@@ -1784,7 +1867,7 @@ function applyMates(){
     st.textContent="Got "+MATES.name+". Load the STEP of the same assembly and the mates apply to it."; drop.className="drop"; return;
   }
   try{
-    const rep=applyOnshapeMates(CAD,MATES.asm,{features:MATES.features});
+    const rep=applyOnshapeMates(CAD,MATES.asm,{features:MATES.features, featuresBy:MATES.featuresBy||null});
     MATES.report=rep;
     recomputeChain(CAD.mechs);
     View.hiddenParts=View.hiddenParts||new Set();
@@ -2249,7 +2332,12 @@ const KEYMAP={KeyA:"a",KeyB:"b",KeyX:"x",KeyY:"y",KeyQ:"left_bumper",KeyE:"right
 const STICKKEYS={KeyI:["left_stick_y",-1],KeyK:["left_stick_y",1],KeyJ:["left_stick_x",-1],KeyL:["left_stick_x",1],
                  KeyU:["right_stick_x",-1],KeyO:["right_stick_x",1]};
 const KEY_PAD={};                   // which gamepad each held key went to
-const typing=e=>{ const t=e.target.tagName; return t==="TEXTAREA"||t==="INPUT"||t==="SELECT"||(e.target.dataset&&e.target.dataset.stick)||(e.target.getAttribute&&e.target.getAttribute("role")==="tab"); };
+const typing=e=>{ const el=e.target, t=el.tagName;
+  // a checkbox or a slider just clicked leaves the keys driving (a slider keeps its arrow keys)
+  if(t==="INPUT"){ const ty=(el.type||"text").toLowerCase();
+    if(ty==="range") return /^(Arrow|Home$|End$|Page)/.test(e.key||"");
+    return !/^(checkbox|radio|button|submit|reset|color|file)$/.test(ty); }
+  return t==="TEXTAREA"||t==="SELECT"||el.isContentEditable||(el.dataset&&el.dataset.stick)||(el.getAttribute&&el.getAttribute("role")==="tab"); };
 function knobTo(pad,axis,v){
   if(pad!==activePad) return;
   for(const k of STICKS){
@@ -2268,9 +2356,10 @@ function releaseKey(code){
 }
 addEventListener("keydown",e=>{
   if(typing(e)||e.ctrlKey||e.metaKey||e.altKey) return;
+  if(document.querySelector(".overlay:not([hidden])")) return;      // the tour, Onshape, GitHub pop-ups keep their keys
   if(e.code==="BracketLeft"||e.code==="BracketRight"){ const side=e.code==="BracketLeft"?"left":"right";
     setRail(side,$("#app").classList.contains(side+"-closed")); return; }
-  if(e.code==="KeyF"&&!e.repeat){ e.preventDefault(); shotFire(); return; }
+  if(e.code==="KeyF"&&!e.repeat){ if(CadView.on) return; e.preventDefault(); shotFire(); return; }
   const sk=STICKKEYS[e.code];
   if(sk){ e.preventDefault(); const p=padFor(CODE,sk[0],activePad); KEY_PAD[e.code]=p;
     Sim.pad[p][sk[0]]=sk[1]; knobTo(p,sk[0],sk[1]); return; }
@@ -2421,7 +2510,7 @@ const Editor={
   skip:{},
   init(){
     this.ta=$("#srcbox"); this.hl=$("#edHl"); this.gut=$("#edGutter");
-    this.ta.addEventListener("input",()=>{ clearTimeout(this.tm); this.tm=setTimeout(()=>this.refresh(),110); });
+    this.ta.addEventListener("input",()=>{ USER_CHOSE=true; clearTimeout(this.tm); this.tm=setTimeout(()=>this.refresh(),110); });
     this.ta.addEventListener("scroll",()=>this.sync());
     this.ta.addEventListener("keydown",e=>{
       if(e.key==="Tab"&&!e.shiftKey&&!e.ctrlKey&&!e.altKey&&!e.metaKey){
@@ -2971,6 +3060,9 @@ const Session={
       if(s.cad){
         const cad=s.cad; cad.name=cad.name||fileName;
         classifyMechs(cad.mechs);
+        LAST_STEP={name:cad.name, text:"", session:true, label:cad.name+" · from workspace"};
+        JOINTS.spec=JOINTS.report=JOINTS.devices=null; JOINTS.name=JOINTS.step=null;
+        MATES.asm=MATES.features=MATES.name=MATES.report=null;
         loadCAD(cad,(cad.name||fileName)+" · from workspace","ok");
       }
       // the file name if the workspace kept one, else what the OpMode calls itself
@@ -3213,7 +3305,7 @@ function proBoot(){
   $("#btnInit").addEventListener("click",dsInit);
   $("#btnStart").addEventListener("click",dsStart);
   $("#btnStop").addEventListener("click",dsStop);
-  $("#opSelect").addEventListener("change",e=>selectOpMode(e.target.value));
+  $("#opSelect").addEventListener("change",e=>{ USER_CHOSE=true; selectOpMode(e.target.value); });
   $("#practice").checked=store.get("ftcbench.practice","0")==="1";
   $("#matchOn").checked=store.get("ftcbench.match","1")==="1";
   const mb=$("#matchBtn"), mm=$("#matchMenu"), matchDot=()=>mb.classList.toggle("on",$("#matchOn").checked);
@@ -3309,7 +3401,7 @@ function proBoot(){
      — for demo links in a README, or sharing "look at this" with a teammate. */
   try{
     const q=new URLSearchParams(location.search);
-    if(q.get("opmode")&&entry(q.get("opmode"))) selectOpMode(q.get("opmode"));
+    if(q.get("opmode")&&entry(q.get("opmode"))){ USER_CHOSE=true; selectOpMode(q.get("opmode")); }
     // ?pose=-40,-30,29 — a spot on the field in inches and a heading in degrees
     const ps=(q.get("pose")||"").split(",").filter(s=>s!=="").map(Number);
     if(ps.length>=2&&ps.every(isFinite)){

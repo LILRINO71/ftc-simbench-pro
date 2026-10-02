@@ -15,7 +15,7 @@ const HW_PARTS = {
   // ---- REV ----
   "REV-41-1097":{fam:"REV Smart Robot Servo",kind:"servo",role:"Torque",stallNm:1.86,sec60:0.28,travelDeg:270},
   "REV-41-1291":{fam:"REV HD Hex Motor",kind:"motor",role:"Motor",stallNm:0.105,rpm:6000,ratio:1},
-  "REV-41-1300":{fam:"REV Core Hex Motor",kind:"motor",role:"Motor",stallNm:3.20,rpm:125,ratio:72}
+  "REV-41-1300":{fam:"REV Core Hex Motor",kind:"motor",role:"Motor",stallNm:3.20,rpm:125,ratio:72,tpr:288}   // 4 counts per motor rev, not 28
 };
 
 /* goBILDA Yellow Jacket planetary gearmotors: the trailing group of the part
@@ -133,3 +133,7 @@ function specDetect(dev, mech, trust){
   if(cadSpec) return Object.assign({src:"CAD"}, cadSpec);
   return Object.assign({src:"default"}, GENERIC.Servo);
 }
+
+/* Encoder counts per output revolution: 28 per motor rev through the gearbox,
+   unless the motor says otherwise (a Core Hex counts 288 per output rev) */
+function motorTpr(spec){ return spec&&spec.tpr>0?spec.tpr:28*((spec&&spec.ratio)||19.2); }

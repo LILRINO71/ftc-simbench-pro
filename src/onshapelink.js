@@ -62,8 +62,16 @@ function onshapeRead(host, ref, opt){
       if(e.status===400||e.status===404) throw fail("this isn't an assembly",e.status); throw e; }),
     get(base+"/features").catch(function(){ return null; })])
   .then(function(r){
-    var asm=r[0], features=r[1];
+    var asm=r[0], features=r[1], featuresBy={}, noLimits=0;
     if(!asm||!asm.rootAssembly) throw fail("this isn't an assembly");
+    /* that call lists the root's own features: each subassembly's mate
+       limits come from its own definition, keyed the way subAssemblies is */
+    var subs=(asm.subAssemblies||[]).filter(function(d){ return d.documentMicroversion&&(d.features||[]).some(function(f){ return f&&f.featureType==="mate"; }); });
+    var subLimits=function(){ return Promise.all(subs.map(function(d){
+      var cfg=d.fullConfiguration||d.configuration||"default", key=[d.documentId||"",d.elementId||"",cfg].join("|");
+      return get(host+"/api/assemblies/d/"+d.documentId+"/m/"+d.documentMicroversion+"/e/"+d.elementId+"/features?configuration="+encodeURIComponent(cfg)+(d.documentId!==ref.did?"&linkDocumentId="+ref.did:""))
+        .then(function(f){ featuresBy[key]=f; },function(e){ if(e&&e.status===401) throw e; noLimits++; });
+    })); };
     var jobs=[], seen={};
     [asm.rootAssembly].concat(asm.subAssemblies||[]).forEach(function(a){ (a.instances||[]).forEach(function(i){
       if(i.type!=="Part"||i.suppressed) return;
@@ -81,7 +89,7 @@ function onshapeRead(host, ref, opt){
       ]).then(function(t){ geom[j.key]={parts:compact(t[0]),mass:mass(t[1])}; },function(e){ if(e&&e.status===401) throw e; geom[j.key]=null; })
         .then(function(){ done++; say("Reading part shapes: "+done+" of "+jobs.length+" part studios …",done,jobs.length); return one(); });
     };
-    return Promise.all([one(),one(),one(),one()]).then(function(){ return {asm:asm, features:features, geom:geom}; });
+    return Promise.all([one(),one(),one(),one(),subLimits()]).then(function(){ return {asm:asm, features:features, featuresBy:featuresBy, geom:geom, noLimits:noLimits+(features?0:1)}; });
   });
 }
 /* An Onshape document address: its host and the assembly it points at, or null. */
@@ -118,7 +126,7 @@ function onshapeGrab(SB, read){
   window.addEventListener("message",function(e){ if(e.origin===sbOrigin&&e.data&&e.data.type==="simbench-ready"){ ready=true; send(); } });
   read(host, ref, {cred:"include", say:say})
   .then(function(r){
-    payload={format:"ftc-simbench.onshape", v:2, name:name, url:location.href, asm:r.asm, features:r.features, geom:r.geom};
+    payload={format:"ftc-simbench.onshape", v:2, name:name, url:location.href, asm:r.asm, features:r.features, featuresBy:r.featuresBy, noLimits:r.noLimits, geom:r.geom};
     if(!w||w.closed){ save(); return; }
     send();
     /* the SimBench tab never said it was ready: the file instead */
@@ -132,6 +140,58 @@ function onshapeGrab(SB, read){
 /* The bookmark's address, for a SimBench at sb (its own address). */
 function onshapeBookmarklet(sb){
   return "javascript:"+encodeURIComponent("("+onshapeGrab.toString()+")("+JSON.stringify(String(sb).replace(/#.*$/,""))+","+onshapeRead.toString()+");void 0");
+}
+
+/* ---- Copy and paste: no app, no bookmark, no sign-up ----
+   The team opens their assembly's own API page in a tab already signed in
+   to Onshape (school accounts included: an Enterprise opens it on its own
+   domain), copies the page's text and pastes it here. Those calls ride the
+   team's browser session, so they count against no API limit. The joints
+   then go onto the STEP the team exported from the same assembly. */
+
+/* What came from a paste: {kind:"assembly"|"features", json, mates}, or an
+   error that says what to do. A copied page may carry Chrome's
+   "Pretty-print" line or stray text around the JSON. */
+function readOnshapePaste(text){
+  const s=String(text||"").trim();
+  if(!s) throw new Error("nothing was pasted yet");
+  if(/^<(!doctype|html)|<body[\s>]/i.test(s)) throw new Error("that's a web page, not Onshape's page of text. Sign in to Onshape in this browser, open the link again, and copy that page");
+  const a=s.search(/[{[]/), b=Math.max(s.lastIndexOf("}"),s.lastIndexOf("]"));
+  if(a<0) throw new Error("that isn't the page of text from Onshape. On that page press Ctrl+A, then Ctrl+C, and paste here");
+  let j;
+  try{ if(b<a) throw 0; j=JSON.parse(s.slice(a,b+1)); }
+  catch(e){ throw new Error("only part of the page came through. On that page press Ctrl+A, then Ctrl+C, and paste again"); }
+  if(j&&typeof j==="object"&&j.rootAssembly&&typeof j.rootAssembly==="object"){
+    const isMate=f=>f&&f.featureType==="mate"&&!f.suppressed;
+    const mates=[j.rootAssembly].concat(Array.isArray(j.subAssemblies)?j.subAssemblies:[]).reduce((n,d)=>n+((d&&d.features)||[]).filter(isMate).length,0);
+    return {kind:"assembly", json:j, mates};
+  }
+  if(j&&(Array.isArray(j)||(typeof j==="object"&&Array.isArray(j.features)))) return {kind:"features", json:j};
+  if(j&&typeof j==="object"&&j.message&&j.status){
+    const st=+j.status;
+    throw new Error("Onshape said \""+String(j.message).slice(0,120)+"\" ("+st+"). "+
+      (st===401||st===403?"Sign in to Onshape in this browser with the account that can open the robot, then open the link again":
+       st===400||st===404?"The address has to come from your Assembly tab, not a Part Studio: copy it again":"Open the link again"));
+  }
+  throw new Error("that isn't your assembly's joints page. Use the Open your joints page button, then copy that page");
+}
+/* The pages to open for mate limits: the main assembly's, and each
+   subassembly's that has mates (that call only lists one element's own
+   features). key is what applyMateLimits files them under. */
+function onshapeLimitLinks(asm, href){
+  const ref=onshapeRef(href), L=onshapeApiLinks(href);
+  if(!ref||!L||!asm||!asm.rootAssembly) return [];
+  const out=[{key:"", name:"Main assembly", url:L.features}];
+  const names={};
+  for(const d of [asm.rootAssembly].concat(asm.subAssemblies||[])) for(const i of (d.instances||[]))
+    if(i&&i.type==="Assembly") names[[i.documentId||"",i.elementId||"",i.fullConfiguration||i.configuration||"default"].join("|")]=String(i.name||"").replace(/\s*<\d+>\s*$/,"");
+  for(const d of (asm.subAssemblies||[])){
+    if(!d||!d.documentMicroversion||!(d.features||[]).some(f=>f&&f.featureType==="mate"&&!f.suppressed)) continue;
+    const cfg=d.fullConfiguration||d.configuration||"default", key=[d.documentId||"",d.elementId||"",cfg].join("|");
+    if(out.some(o=>o.key===key)) continue;
+    out.push({key, name:names[key]||"Subassembly", url:ref.host+"/api/assemblies/d/"+d.documentId+"/m/"+d.documentMicroversion+"/e/"+d.elementId+"/features?configuration="+encodeURIComponent(cfg)+(d.documentId!==ref.did?"&linkDocumentId="+ref.did:"")});
+  }
+  return out;
 }
 
 /* ---- Sign in with Onshape (functions/onshape): works where bookmarks are blocked ---- */
@@ -155,7 +215,7 @@ async function onshapeFromLink(href, say){
   let name="";
   try{ const r=await fetch(host+"/api/documents/"+ref.did,{credentials:"same-origin",headers:{Accept:"application/json"}}); if(r.ok) name=String((await r.json()).name||""); }catch(e){}
   const r=await onshapeRead(host, ref, {cred:"same-origin", say, denied});
-  return {format:ONSHAPE_FORMAT, v:2, name:name||"Onshape assembly", url:String(href).trim(), asm:r.asm, features:r.features, geom:r.geom};
+  return {format:ONSHAPE_FORMAT, v:2, name:name||"Onshape assembly", url:String(href).trim(), asm:r.asm, features:r.features, featuresBy:r.featuresBy, noLimits:r.noLimits, geom:r.geom};
 }
 
 /* ---- the SimBench side: the #onshape= fragment, back into the two JSON documents ---- */
@@ -187,7 +247,14 @@ async function readOnshapeHash(h){
 function checkOnshapePayload(p){
   if(!p||typeof p!=="object"||p.format!==ONSHAPE_FORMAT) throw new Error("it isn't mates from the SimBench bookmark");
   if(!p.asm||typeof p.asm!=="object"||!p.asm.rootAssembly||typeof p.asm.rootAssembly!=="object") throw new Error("it has no assembly definition");
-  const f=p.features, features=f&&(Array.isArray(f)||(typeof f==="object"&&Array.isArray(f.features)))?f:null;
+  const isFeat=f=>!!f&&(Array.isArray(f)||(typeof f==="object"&&Array.isArray(f.features)));
+  const features=isFeat(p.features)?p.features:null;
+  // each subassembly's features, by its definition key
+  let featuresBy=null;
+  if(p.featuresBy&&typeof p.featuresBy==="object"&&!Array.isArray(p.featuresBy)){
+    featuresBy={};
+    for(const k of Object.keys(p.featuresBy).slice(0,2000)) if(isFeat(p.featuresBy[k])) featuresBy[String(k).slice(0,200)]=p.featuresBy[k];
+  }
   const str=v=>typeof v==="string"?v.slice(0,200):"";
   const url=/^https:\/\/([a-z0-9-]+\.)*onshape\.com\//i.test(str(p.url))?str(p.url):"";
   // the shapes: part studio key -> {parts: id -> {name, tri (numbers), color}, mass}
@@ -207,5 +274,6 @@ function checkOnshapePayload(p){
       geom[k]={parts, mass:g.mass&&typeof g.mass==="object"?g.mass:{}};
     }
   }
-  return {name:str(p.name).trim()||"Onshape assembly", url, asm:p.asm, features, geom};
+  const noLimits=Number.isFinite(+p.noLimits)?Math.max(0,Math.min(1e4,Math.round(+p.noLimits))):0;
+  return {name:str(p.name).trim()||"Onshape assembly", url, asm:p.asm, features, featuresBy, noLimits, geom};
 }

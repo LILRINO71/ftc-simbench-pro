@@ -67,6 +67,12 @@ accept that the bundle is readable (it is anyway — see below).
 
 ## Sign in with Onshape (do this once)
 
+Optional: SimBench's main way into Onshape (copy and paste, see the pop-up)
+needs no setup and works on school accounts. Sign in with Onshape is a
+faster extra for personal accounts. It doesn't work for a school's
+Enterprise account, and a private app only gets about 2,500 Onshape API
+calls a year, shared by everyone who uses it.
+
 School computers block the "Send to SimBench" bookmark: their admins list `javascript:` URLs as
 blocked, so clicking it does nothing and dragging it shows `about:blank#blocked`. **Sign in with
 Onshape** works there instead. The team signs in through Onshape's own page, pastes their

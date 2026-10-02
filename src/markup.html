@@ -541,9 +541,58 @@
 
       <div id="osGuide">
         <h2 id="osTitle">Get your robot from Onshape</h2>
-        <p class="os-lead">Every part, its colour and weight, and <b>every joint from your mates</b>, straight from your Onshape assembly. Nothing to export, and it works on school computers.</p>
+        <p class="os-lead">Every part with its colour, and <b>every joint from your mates</b>, from your own Onshape assembly. Works on school computers and school Onshape accounts: nothing to install, no sign-up.</p>
         <p class="os-warn" id="osPhone" hidden>This needs a computer: Chrome, Edge, Firefox, Safari or a Chromebook.</p>
 
+        <div id="osPasteWay">
+          <ol class="os-steps">
+            <li class="os-step" id="osPs1">
+              <span class="os-n">1</span>
+              <div class="os-body">
+                <h3>Export a STEP of your assembly</h3>
+                <p>In Onshape, right-click your <b>Assembly</b> tab along the bottom, choose <b>Export</b>, set Format to <b>STEP</b>, and click <b>Export</b>. Then choose the file it downloads.</p>
+                <div class="os-row">
+                  <button class="btn-sm primary os-big" type="button" id="osStepPick">Choose the STEP file</button>
+                  <span class="os-ok" id="osStepOk" hidden></span>
+                </div>
+              </div>
+            </li>
+            <li class="os-step" id="osPs2">
+              <span class="os-n">2</span>
+              <div class="os-body">
+                <h3>Paste your assembly's address</h3>
+                <p>On your Assembly tab in Onshape, click the address bar at the top and press <kbd class="os-mod">Ctrl</kbd> + <kbd>C</kbd>. Paste it here.</p>
+                <input class="os-input" type="url" id="osPasteLink" spellcheck="false" autocomplete="off" placeholder="https://…onshape.com/documents/…/e/…" aria-label="Your Onshape assembly's address">
+                <p class="os-tip" id="osPasteLinkTip" hidden></p>
+              </div>
+            </li>
+            <li class="os-step" id="osPs3">
+              <span class="os-n">3</span>
+              <div class="os-body">
+                <h3>Copy your joints from Onshape</h3>
+                <p><a class="btn-sm primary os-big os-link-btn" id="osOpenJoints" target="_blank" rel="noopener" aria-disabled="true">Open your joints page ↗</a></p>
+                <p>A page full of text opens, read with your own Onshape sign-in. Click it, press <kbd class="os-mod">Ctrl</kbd> + <kbd>A</kbd> then <kbd class="os-mod">Ctrl</kbd> + <kbd>C</kbd>, come back here, and paste:</p>
+                <textarea class="os-paste" id="osPaste" spellcheck="false" placeholder="Paste here (Ctrl + V)" aria-label="Paste the page from Onshape"></textarea>
+                <p class="os-tip" id="osPasteTip" hidden></p>
+              </div>
+            </li>
+            <li class="os-step" id="osPs4">
+              <span class="os-n">4</span>
+              <div class="os-body">
+                <h3>Joint limits <span class="dim">(optional)</span></h3>
+                <p>So slides and arms stop where your mate limits say. Open each page below, copy it the same way, and paste it in the same box.</p>
+                <div class="os-limits" id="osLimitLinks"><span class="dim">These show up after step 3.</span></div>
+              </div>
+            </li>
+          </ol>
+          <div class="os-result" id="osPasteResult" hidden>
+            <p class="os-prog" id="osPasteResultText"></p>
+            <button class="btn-sm primary os-big" type="button" id="osPasteSee">See my robot</button>
+          </div>
+        </div>
+
+        <details class="os-way" id="osSignWay" hidden><summary>Faster, if your Onshape account allows it: Sign in with Onshape</summary>
+          <p class="os-warn">School Onshape accounts usually can't sign in to outside apps. If Onshape shows an error, use the steps above.</p>
         <div id="osSignInWay">
           <ol class="os-steps">
             <li class="os-step" id="osStep1">
@@ -589,7 +638,7 @@
             </li>
           </ol>
         </div>
-        <p class="os-warn" id="osNoSignIn" hidden>Sign in with Onshape isn't switched on for this copy of SimBench. Use the bookmark below on a home computer, or export a STEP from Onshape and use <b>Open a file</b>.</p>
+        </details>
 
         <details class="os-way" id="osBmWay"><summary>Or use the bookmark (home computers only)</summary>
           <p class="os-warn">School computers block bookmarks that run code. If clicking it does nothing, or a tab says <code>about:blank#blocked</code>, use <b>Sign in with Onshape</b> above.</p>
@@ -660,6 +709,12 @@
 
         <details class="os-help"><summary>It didn't work?</summary>
           <dl>
+            <dt>The joints page asks me to sign in, or says I'm not allowed</dt>
+            <dd>Sign in to Onshape in this same browser first (your school account is fine), then click <b>Open your joints page</b> again. The robot has to be yours or shared with you.</dd>
+            <dt>It says only part of the page came through</dt>
+            <dd>Click once on the page of text, then press <kbd>Ctrl</kbd> + <kbd>A</kbd> and <kbd>Ctrl</kbd> + <kbd>C</kbd>, and paste again.</dd>
+            <dt>Some parts didn't match, or joints are missing</dt>
+            <dd>Export the STEP again from the same assembly, after your latest changes in Onshape, and choose it in step 1.</dd>
             <dt>The Onshape window didn't open</dt>
             <dd>Your browser blocked the pop-up. Click <b>Sign in with Onshape</b> again: this time it opens in this tab and brings you back here.</dd>
             <dt>Onshape asked me to sign in, then nothing happened</dt>
