@@ -150,26 +150,23 @@ and from 21 to 8 with the ITD code.
 
 ## Not done, in order
 
-1. **Test Sign in with Onshape live.** It's switched on for
-   ftc-simbench-pro.pages.dev: the owner registered the OAuth app on the
-   school's Onshape (puhsd.onshape.com) and set the two secrets. Try it on a
-   school Chromebook with the team's own robot, and with an Onshape account
-   from another school. The reader is checked against Onshape's OpenAPI spec
-   and generated payloads, never a real assembly (a cloud container can't
-   sign in to Onshape). Whether linked (COTS) parts come with their colours
-   is still open.
-   - **Onshape's yearly API limit applies.** Calls through a private OAuth
-     app count against the app owner's account: 2,500 a year for a free or
-     EDU user, 10,000 for an EDU enterprise
-     ([limits](https://onshape-public.github.io/docs/auth/limits/)). One
-     robot is about 2 calls per part studio plus 3, so the site runs out
-     after a few dozen to a couple of hundred robots a year, and Onshape
-     answers 402. Calls made with the team's own browser session don't
-     count, and neither do apps public in Onshape's App Store. The fix,
-     when it's needed: show a clear message on 402, and add a copy-and-paste
-     way that needs no app (export the STEP; open the assembly definition
-     link, `onshapeApiLinks` in `src/mates.js`, in a signed-in tab; copy its
-     text into SimBench, which already applies those mates to the STEP).
+1. **Test the copy-and-paste way on a real school account.** The Onshape
+   pop-up now leads with it: export a STEP, paste the assembly's address,
+   open the joints page (the assembly definition on the team's own Onshape
+   host, read with their browser session), copy it and paste it, and paste
+   the limits pages if wanted. It's tested on generated pages and in
+   headless Chromium, never on a real school assembly. Things to check:
+   that `puhsd.onshape.com/api/...` opens as text for a student, how big a
+   real robot's page is to paste, and whether linked (COTS) parts match.
+   - **Sign in with Onshape** stays in a fold. On the owner's school
+     account it failed: Onshape answered 400 "Invalid request", and its
+     general sign-in page couldn't reach the Enterprise account. Onshape's
+     docs say Enterprise users need a `company_id` on `/authorize`
+     ([OAuth](https://onshape-public.github.io/docs/auth/oauth/)); the
+     function doesn't send one. Private OAuth apps also count every call
+     against the owner: 2,500 a year for a free or EDU user
+     ([limits](https://onshape-public.github.io/docs/auth/limits/)). The
+     copy-and-paste way avoids both.
 2. **Test online on two real computers.** The relays and the loader are
    fixed and tested with the library faked; a cloud container's proxy carries
    no WebSockets, so no live match ran here. A TURN relay would still be
