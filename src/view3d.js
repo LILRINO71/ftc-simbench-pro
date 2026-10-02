@@ -50,14 +50,23 @@ const View={
     this.ren.setClearColor(0x000000,0);
     this.ren.shadowMap.enabled=true;
     this.ren.shadowMap.type=THREE.PCFSoftShadowMap;
+    // a camera's colour pipeline: light adds up in linear space, then a filmic curve
+    // keeps white parts in the sun from blowing out and the shadows from going black
+    this.ren.outputEncoding=THREE.sRGBEncoding;
+    this.ren.toneMapping=THREE.ACESFilmicToneMapping; this.ren.toneMappingExposure=1.0;
     el.appendChild(this.ren.domElement);
-    this.hemi=new THREE.HemisphereLight(0xfff3dc,0x1d1a15,0.72); this.scene.add(this.hemi);
-    const sun=new THREE.DirectionalLight(0xfff6e8,0.8); this.sun=sun;
+    this.hemi=new THREE.HemisphereLight(0xfff3dc,0x26221c,0.55); this.scene.add(this.hemi);
+    const sun=new THREE.DirectionalLight(0xfff1df,2.1); this.sun=sun;
     sun.position.set(-2.2,5.5,3.0); sun.castShadow=true;
     sun.shadow.mapSize.set(2048,2048);
-    const sc=sun.shadow.camera; sc.left=-3.2; sc.right=3.2; sc.top=3.2; sc.bottom=-3.2; sc.near=1; sc.far=14;
-    sun.shadow.bias=-0.0004; sun.shadow.normalBias=0.02;
+    // the shadow box follows the robot (render()): 2048 pixels over 3.6 m instead of
+    // the whole 6.4 m around the field, so the robot's own shadows come out crisp
+    const sc=sun.shadow.camera; sc.left=-1.8; sc.right=1.8; sc.top=1.8; sc.bottom=-1.8; sc.near=1; sc.far=14;
+    sun.shadow.bias=-0.0003; sun.shadow.normalBias=0.015; sun.shadow.radius=3;
+    this.sunOff=sun.position.clone();
     this.scene.add(sun); this.scene.add(sun.target);
+    // a cool fill from the other side: what the sun leaves in shade still shows its shape
+    const fill=new THREE.DirectionalLight(0xcfdcff,0.55); fill.position.set(2.6,2.4,-2.8); this.scene.add(fill); this.fill=fill;
     this.world=new THREE.Group(); this.scene.add(this.world);
     this.ray=new THREE.Raycaster();
     this.theta=-0.7; this.phi=1.15; this.rad=0.95; this.size=0.5;
@@ -778,6 +787,27 @@ const View={
     this.fieldSize=FIELD;
   },
   mat(c,o){ o=o||{}; return new THREE.MeshStandardMaterial(Object.assign({color:c, roughness:0.62, metalness:0.1},o)); },
+  /* The grey foam tiles, painted once: each tile a slightly different grey, the
+     foam's fine grain, and a soft dark seam where two tiles meet (drawn into the
+     texture, so it doesn't shimmer the way a thin line does) */
+  tileTexture(seams,H){
+    const N=2048, cv=document.createElement("canvas"); cv.width=cv.height=N;
+    const c=cv.getContext("2d"), k=N/(2*H), at=v=>(v+H)*k;
+    const cuts=[-H].concat(seams.slice().sort((a,b)=>a-b),[H]);
+    let seed=7; const rnd=()=>((seed=(seed*16807)%2147483647)/2147483647);
+    for(let i=0;i<cuts.length-1;i++) for(let j=0;j<cuts.length-1;j++){
+      const g=Math.round(70+rnd()*9); c.fillStyle=`rgb(${g},${g+1},${g+3})`;
+      c.fillRect(at(cuts[i]),at(cuts[j]),(cuts[i+1]-cuts[i])*k+1,(cuts[j+1]-cuts[j])*k+1); }
+    // the foam's grain
+    const img=c.getImageData(0,0,N,N), d=img.data;
+    for(let p=0;p<d.length;p+=4){ const n=(rnd()-0.5)*7; d[p]+=n; d[p+1]+=n; d[p+2]+=n; }
+    c.putImageData(img,0,0);
+    c.strokeStyle="rgba(18,19,22,0.55)"; c.lineWidth=Math.max(2,k*0.12);
+    for(const v of seams){ c.beginPath(); c.moveTo(at(v),0); c.lineTo(at(v),N); c.moveTo(0,at(v)); c.lineTo(N,at(v)); c.stroke(); }
+    const t=new THREE.CanvasTexture(cv); t.encoding=THREE.sRGBEncoding;
+    t.anisotropy=this.ren?Math.min(8,this.ren.capabilities.getMaxAnisotropy()):1;
+    return t;
+  },
   flat(c,op){ return new THREE.MeshBasicMaterial({color:c, transparent:op<1, opacity:op, depthWrite:op>=1,
     polygonOffset:true, polygonOffsetFactor:-2, polygonOffsetUnits:-2}); },
   box(g,center,size,mat,shadow){ // inches, field frame, size [x,y,z]
@@ -866,14 +896,13 @@ const View={
     this.label(g,"AUDIENCE",0,-H-12,0,34,"#8f8672");
 
     // foam tiles and their seams
-    const tiles=new THREE.Mesh(new THREE.PlaneGeometry(2*H*IN,2*H*IN),this.mat(FIELD_COL.tile,{roughness:0.96,metalness:0}));
+    const tiles=new THREE.Mesh(new THREE.PlaneGeometry(2*H*IN,2*H*IN),this.mat(0xffffff,{roughness:0.94,metalness:0,map:this.tileTexture(F.tileSeams||[],H)}));
     tiles.rotation.x=-Math.PI/2; tiles.receiveShadow=true; g.add(tiles);
     const sp=[], yS=0.001;
     for(const s of F.tileSeams||[]){
       sp.push(s*IN,yS,-H*IN, s*IN,yS,H*IN, -H*IN,yS,-s*IN, H*IN,yS,-s*IN);
     }
-    const sg=new THREE.BufferGeometry(); sg.setAttribute("position",new THREE.Float32BufferAttribute(sp,3));
-    g.add(new THREE.LineSegments(sg,new THREE.LineBasicMaterial({color:FIELD_COL.seam})));
+    void sp; void yS;                                   // the seams are painted into tileTexture()
 
     // perimeter: polycarbonate panels on aluminium, a post at every seam
     const poly=this.mat(FIELD_COL.poly,{transparent:true,opacity:0.13,roughness:0.15,depthWrite:false,side:THREE.DoubleSide});
@@ -1152,7 +1181,7 @@ const View={
       const step=f.step||SHOT_STEP_S, q=Math.max(0,Math.min(f.path.length-1,(f.t-0.03*k)/step)), a=f.path[Math.floor(q)], c=f.path[Math.min(f.path.length-1,Math.floor(q)+1)], u=q-Math.floor(q);
       m.position.copy(this.fv([a[0]+(c[0]-a[0])*u, a[1]+(c[1]-a[1])*u, a[2]+(c[2]-a[2])*u]));
       const sc=(f.kind==="nectar"?1.81:1.4)*IN*(1-k*0.17); m.scale.set(sc,sc,sc);
-      m.material.color.setHex(f.kind==="nectar"?(f.color==="blue"?0x6aa8ff:0xff7a5c):0xffe27a); m.material.opacity=0.42-k*0.09;
+      m.material.color.setHex(f.kind==="nectar"?(f.color==="blue"?0x6aa8ff:0xff7a5c):0xffe27a).convertSRGBToLinear(); m.material.opacity=0.42-k*0.09;
     });
   },
   /* Short effects: a puff where a ball leaves, a flash where one goes in. */
@@ -1271,7 +1300,7 @@ const View={
     }
     const tt=now/1000;
     this.markG.forEach((m,i)=>{ const k=marks[i]; m.visible=!!k; if(!k) return;
-      m.material.color.setHex(k.what==="shoot"?0xf0b54a:k.what==="defend"?0x6fd3e0:0xffffff);
+      m.material.color.setHex(k.what==="shoot"?0xf0b54a:k.what==="defend"?0x6fd3e0:0xffffff).convertSRGBToLinear();
       m.position.set(k.x,0.012,-k.y); const s=1+0.18*Math.sin(tt*5); m.scale.set(s,s,s); });
     // FLOWERs: the stack from the tile up
     Match.flowers.forEach((f,i)=>{
@@ -1430,9 +1459,30 @@ const View={
                           this.look.y+r*Math.cos(this.phi),
                           this.look.z+r*Math.sin(this.phi)*Math.sin(this.theta));
     this.cam.lookAt(this.look);
+    // colours were picked as they look on screen: make anything new linear, once
+    if(((this.linN=(this.linN||0)+1)%20)===1) linearize(this.scene);
+    // the sun's shadow box rides along with what the camera looks at
+    if(this.sun){ const L=this.look; this.sun.position.set(L.x+this.sunOff.x,this.sunOff.y,L.z+this.sunOff.z); this.sun.target.position.set(L.x,0,L.z); this.sun.target.updateMatrixWorld(); }
     this.ren.render(this.scene,this.cam);
   }
 };
+/* The renderer works in linear light and writes sRGB (View.init). Every colour
+   in this file, a part's colour from its CAD, and every canvas drawn for a label
+   were picked as they look on screen (sRGB): turn each into linear light once, so
+   the screen shows what was picked. Flags keep it to once per material/geometry. */
+const toLin=c=>c<=0.04045?c/12.92:Math.pow((c+0.055)/1.055,2.4);
+function linearize(root){
+  root.traverse(o=>{
+    const ms=o.material?(Array.isArray(o.material)?o.material:[o.material]):[];
+    for(const m of ms){ if(!m||m.userData.lin) continue; m.userData.lin=true;
+      if(m.color) m.color.convertSRGBToLinear();
+      if(m.emissive) m.emissive.convertSRGBToLinear();
+      if(m.map&&m.map.encoding!==THREE.sRGBEncoding){ m.map.encoding=THREE.sRGBEncoding; m.map.needsUpdate=true; }
+      m.needsUpdate=true; }
+    const g=o.geometry, col=g&&g.attributes&&g.attributes.color;
+    if(col&&!g.userData.lin){ g.userData.lin=true; const a=col.array; for(let i=0;i<a.length;i++) a[i]=toLin(a[i]); col.needsUpdate=true; }
+  });
+}
 /* The biggest bold font, from px down to min, that fits text in maxW on canvas context c. */
 function fitFont(c,text,maxW,px,min,family){
   c.font="700 "+px+"px "+family;
