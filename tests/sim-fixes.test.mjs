@@ -54,3 +54,141 @@ test('a VM TeleOp whose sticks drive nothing still has no drivetrain', () => {
   assert.ok(code.vm && code.hasLoop);
   assert.equal(E.detectDrivetrain(code), null, 'buttons, not sticks: the name rule is for autos only');
 });
+
+test('getYaw(AngleUnit.DEGREES) and getYaw() read degrees on the line reader, as on the robot', () => {
+  const java = `
+import com.qualcomm.robotcore.hardware.IMU;
+import com.qualcomm.robotcore.hardware.DcMotor;
+import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
+@Autonomous(name = "Turn90")
+public class Turn90 extends LinearOpMode {
+    DcMotor leftDrive, rightDrive;
+    IMU imu;
+    @Override
+    public void runOpMode() {
+        leftDrive = hardwareMap.get(DcMotor.class, "leftDrive");
+        rightDrive = hardwareMap.get(DcMotor.class, "rightDrive");
+        imu = hardwareMap.get(IMU.class, "imu");
+        leftDrive.setDirection(DcMotor.Direction.REVERSE);
+        waitForStart();
+        while (opModeIsActive() && imu.getRobotYawPitchRollAngles().getYaw(AngleUnit.DEGREES) < 90) {
+            leftDrive.setPower(-0.3);
+            rightDrive.setPower(0.3);
+        }
+        leftDrive.setPower(0);
+        rightDrive.setPower(0);
+    }
+}`;
+  const b = sampleBench(E, java);
+  assert.ok(!b.code.vm, 'the line reader');
+  E.Sim.reset(b.code, b.cad, b.map, { ...b.opts, physics: 'kinematic' });
+  run(E, 6);
+  const deg = E.Sim.chassis.h * 180 / Math.PI;
+  assert.ok(deg > 85 && deg < 110, 'stopped near 90 degrees, at ' + deg.toFixed(1));
+  assert.ok(Math.abs(E.Sim.dev.rightDrive.act) < 0.01, 'and stopped turning');
+  assert.equal(E.normalizeExpr('imu.getRobotYawPitchRollAngles().getYaw(AngleUnit.RADIANS)'), '__imuYaw');
+});
+
+const LIFT = `
+@TeleOp(name = "t")
+public class T extends LinearOpMode {
+    DcMotorEx lift;
+    @Override
+    public void runOpMode() {
+        lift = hardwareMap.get(DcMotorEx.class, "lift");
+        waitForStart();
+        while (opModeIsActive()) {
+            if (gamepad1.a) { lift.setPower(1); } else if (gamepad1.b) { lift.setPower(-1); } else { lift.setPower(0); }
+        }
+    }
+}`;
+test('a slide flipped with its direction button stops where the view draws it', () => {
+  for (const btn of ['a', 'b']) {
+    const b = sampleBench(E, LIFT);
+    const m = b.cad.mechs[0];
+    Object.assign(m, { kind: 'linear', axis: [0, 0, 1], limits: [0, 0.30], dir: -1, fromMate: { type: 'SLIDER' } });
+    b.map.lift = m.id;
+    E.Sim.reset(b.code, b.cad, b.map, b.opts);
+    E.Sim.pad = { 1: { [btn]: true }, 2: {} };
+    run(E, 3);
+    const q = E.mateJointQ(m, E.Sim.dev.lift, 0.5);
+    assert.ok(q >= -1e-6 && q <= 0.30 + 1e-6, `press ${btn}: the slide stays inside its stops, at ${q.toFixed(3)} m`);
+    if (btn === 'b') assert.ok(q > 0.29, 'with the direction flipped, b runs it to the top stop: ' + q.toFixed(3));
+  }
+});
+
+test('a REV Core Hex motor counts 288 per output turn', () => {
+  const java = `
+@TeleOp(name = "t")
+public class T extends LinearOpMode {
+    DcMotor arm;
+    @Override
+    public void runOpMode() {
+        arm = hardwareMap.get(DcMotor.class, "arm");
+        arm.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
+        arm.setTargetPosition(288);
+        arm.setMode(DcMotor.RunMode.RUN_TO_POSITION);
+        arm.setPower(0.5);
+        waitForStart();
+        while (opModeIsActive()) { telemetry.addData("p", arm.getCurrentPosition()); }
+    }
+}`;
+  const b = sampleBench(E, java);
+  b.cad.mechs.find((x) => x.id === b.map.arm).part = 'REV-41-1300';
+  E.Sim.reset(b.code, b.cad, b.map, b.opts);
+  run(E, 5);
+  const s = E.Sim.dev.arm;
+  assert.equal(s.tpr, 288);
+  assert.ok(Math.abs(s.revs - 1) < 0.05, 'one output turn for 288 counts, turned ' + s.revs.toFixed(3));
+  assert.equal(E.motorTpr({ ratio: 19.2 }), 28 * 19.2, 'goBILDA: 28 per motor turn through the gearbox');
+});
+
+test('resetRuntime() restarts the OpMode\'s runtime, not the match clock', () => {
+  const java = `
+import com.qualcomm.robotcore.eventloop.opmode.OpMode;
+import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
+import com.qualcomm.robotcore.hardware.Servo;
+@TeleOp(name = "Iter")
+public class Iter extends OpMode {
+    Servo claw;
+    @Override public void init() { claw = hardwareMap.get(Servo.class, "claw"); }
+    @Override public void start() { resetRuntime(); }
+    @Override public void loop() {
+        telemetry.addData("loop ms", getRuntime() * 1000);
+        resetRuntime();
+        claw.setPosition(gamepad1.a ? 1 : 0);
+    }
+}`;
+  const b = sampleBench(E, java);
+  E.Sim.reset(b.code, b.cad, b.map, b.opts);
+  run(E, 10);
+  assert.ok(E.Sim.t > 9.9, 'the match clock ran: ' + E.Sim.t.toFixed(2));
+});
+
+test('the drive check (driveProbe) never moves the live shots', () => {
+  const java = `
+@TeleOp(name = "t")
+public class T extends LinearOpMode {
+    DcMotor leftDrive, rightDrive;
+    @Override
+    public void runOpMode() {
+        leftDrive = hardwareMap.get(DcMotor.class, "leftDrive");
+        rightDrive = hardwareMap.get(DcMotor.class, "rightDrive");
+        leftDrive.setDirection(DcMotor.Direction.REVERSE);
+        waitForStart();
+        while (opModeIsActive()) {
+            leftDrive.setPower(-gamepad1.left_stick_y + gamepad1.right_stick_x);
+            rightDrive.setPower(-gamepad1.left_stick_y - gamepad1.right_stick_x);
+        }
+    }
+}`;
+  const b = sampleBench(E, java);
+  E.Sim.reset(b.code, b.cad, b.map, b.opts);
+  run(E, 0.2);
+  E.Shots.flying.push({ t: 0, dur: 5, path: [[0, 0, 0], [10, 10, 10]], pos: [0, 0, 0], kind: 'x', color: 'red', al: 'red', hit: false });
+  const t0 = E.Shots.t, f0 = E.Shots.flying.at(-1).t;
+  assert.ok(E.driveProbe(b.code, b.cad, b.map, b.opts), 'the probe ran');
+  assert.equal(E.Shots.t, t0, 'the shot clock');
+  assert.equal(E.Shots.flying.at(-1).t, f0, 'the shot in flight');
+  E.Shots.flying.pop();
+});

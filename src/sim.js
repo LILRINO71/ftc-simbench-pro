@@ -57,7 +57,7 @@ const Sim={
       cmd:isMotor?0:(mech&&Number.isFinite(mech.restPos)?mech.restPos:0.5),
       act:isMotor?0:(mech&&Number.isFinite(mech.restPos)?mech.restPos:0.5), revs:0, ticks:0, stalled:false,
       reversed:false, mode:"run", target:0,
-      tpr: 28*(spec.ratio||19.2),        // goBILDA: 28 counts per motor rev
+      tpr: motorTpr(spec),               // goBILDA: 28 counts per motor rev
       // the servo position the CAD was drawn at: a joint spec says; else the code's own
       restPos:(mech&&Number.isFinite(mech.restPos))?mech.restPos:(this.code&&!this.code.vm?restPosOf(this.code,d.name):0.5),
       sec60:spec.sec60||0.18, travelDeg:travelDegOf(spec)});
@@ -68,7 +68,8 @@ const Sim={
     return {
       dev(name,type,kind){ return self.dev[name]||self.makeDev({name,type,cfg:name,intent:"",declaredRole:null}); },
       pad(i){ return self.pad[i]||{}; },
-      now(){ return self.clock||0; }, runtime(){ return self.t; }, resetRuntime(){ self.t=0; },
+      // the OpMode's own runtime: resetRuntime() starts it again, never the match clock (Sim.t)
+      now(){ return self.clock||0; }, runtime(){ return self.t-(self.rt0||0); }, resetRuntime(){ self.rt0=self.t; },
       heading(){ return self.chassis.h; },
       omega(){ return self.dstate&&Number.isFinite(self.dstate.omega)?self.dstate.omega:0; },
       pose(){ return {x:self.chassis.x,y:self.chassis.y,h:self.chassis.h}; },
@@ -106,7 +107,7 @@ const Sim={
   start(){
     if(!this.code) return;
     if(this.phase==="loaded") this.init();
-    this.t=0; this.pc=0; this.sleepEnd=null; this.autoDone=false; this.pass=null; this.resumeAt=0;
+    this.t=0; this.rt0=0; this.pc=0; this.sleepEnd=null; this.autoDone=false; this.pass=null; this.resumeAt=0;
     for(const n in this.timers) this.timers[n]=0;
     if(this.rr) this.rr.start();
     this.phase="running";
@@ -202,7 +203,7 @@ const Sim={
         const s=self.t-self.timers[name];
         return unit==="milliseconds"?s*1000 : unit==="nanoseconds"?s*1e9 : s;
       },
-      runtime(){ return self.t; },
+      runtime(){ return self.t-(self.rt0||0); },
       active(){ return self.phase==="running"?1:0; },
       pad(ref){
         const r=splitPadRef(ref); if(!r) return 0;
@@ -325,7 +326,7 @@ const Sim={
     this.stepDevices(dt);
     this.updateCOM();
     this.driveChassis(dt);
-    Shots.tick(dt,this.chassis);
+    if(this===Sim) Shots.tick(dt,this.chassis);          // a probe's copy never moves the live shots
     // the rest of the match (src/match.js): only the live sim plays it, never a probe's copy
     // (online, src/net.js steps it instead, whatever this robot is doing)
     if(this===Sim&&this.phase==="running"&&typeof Match!=="undefined"&&Match.on&&!Match.net) Match.tick(dt,this);
@@ -373,7 +374,7 @@ const Sim={
         }
         // hard stops only where the travel is known: Onshape slider limits, or set by hand
         if(lin&&s.mech.limits){
-          const k=slideMPerTick(s), q=s.ticks*k, lo=s.mech.limits[0], hi=s.mech.limits[1];
+          const k=slideMPerTick(s)*(s.mech.dir||1), q=s.ticks*k, lo=s.mech.limits[0], hi=s.mech.limits[1];
           const qc=Math.max(Number.isFinite(lo)?lo:-Infinity, Math.min(Number.isFinite(hi)?hi:Infinity, q));
           if(qc!==q){ s.ticks=qc/k; s.revs=s.ticks/s.tpr; s.act=0; s.stalled=true; }
         }
