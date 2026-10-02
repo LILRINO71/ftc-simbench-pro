@@ -1390,8 +1390,8 @@ function loadOnshapeRobot(p,reparse){
   let cad;
   const from=p.from==="urdf"?"URDF":"Onshape";
   try{ cad=cadFromOnshape(p,{up:OPTS.up, shift:OPTS.shift}); }
-  catch(e){ onshapeNote("Your robot came from "+from+", but it couldn't be built: "+esc(e.message)+(p.from==="urdf"?".":". Try the bookmark again; if it keeps failing, export a STEP and drop it."),"bad");
-    if(p.from!=="urdf") OnshapeHelp.fail("Your robot arrived but couldn't be built: "+e.message+". Click the bookmark again; if it keeps failing, export a STEP from Onshape and use Open a file.");
+  catch(e){ onshapeNote("Your robot came from "+from+", but it couldn't be built: "+esc(e.message)+(p.from==="urdf"?".":". Try again; if it keeps failing, export a STEP and drop it."),"bad");
+    if(p.from!=="urdf") OnshapeHelp.fail("Your robot arrived but couldn't be built: "+e.message+". Try again; if it keeps failing, export a STEP from Onshape and use Open a file.");
     return false; }
   if(p.from==="urdf"){ cad.source="urdf"; if(p.notes&&p.notes.length) cad.onshape.why=p.notes.concat(cad.onshape.why||[]); }
   LAST_STEP={name:p.name, text:"", onshape:p, label:p.name+" · from "+from};
@@ -1415,16 +1415,18 @@ function loadOnshapeRobot(p,reparse){
   return true;
 }
 /* ============================================================
-   ONSHAPE, STEP BY STEP: the pop-up that sets up the "Send to SimBench"
-   bookmark and gets the robot, and the same pop-up showing progress when
-   the bookmark sends one (waitForOnshape).
+   ONSHAPE, STEP BY STEP: the pop-up that gets the robot. The main way is
+   Sign in with Onshape (functions/onshape) and a pasted assembly address,
+   which works on school computers; the "Send to SimBench" bookmark is the
+   fold below it, for browsers that still run bookmarklets. The same pop-up
+   shows the progress either way (waitForOnshape for the bookmark).
    ============================================================ */
 const OnshapeHelp={
-  mode:null,
+  mode:null, via:null, signin:{ready:false, signedIn:false},
   init(){
     const ov=$("#osOverlay"); if(!ov) return;
     const mac=/Mac|iPhone|iPad/i.test((navigator.userAgentData&&navigator.userAgentData.platform)||navigator.platform||navigator.userAgent);
-    for(const id of ["osKey1","osKey2"]){ const k=$("#"+id); if(k) k.textContent=mac?"⌘ Cmd":"Ctrl"; }
+    for(const id of ["osKey1","osKey2","osKey3"]){ const k=$("#"+id); if(k) k.textContent=mac?"⌘ Cmd":"Ctrl"; }
     const phone=matchMedia("(pointer:coarse)").matches&&!matchMedia("(any-pointer:fine)").matches;
     $("#osPhone").hidden=!phone;
     const href=onshapeBookmarklet(location.origin+location.pathname);
@@ -1448,12 +1450,65 @@ const OnshapeHelp={
     $("#osDone").addEventListener("click",()=>this.close());
     $("#osShowSteps").addEventListener("click",()=>this.open());
     $("#osSeeRobot").addEventListener("click",()=>{ this.close(); const nav=$('.tabs[data-tabs="left"]'); if(nav) selectTab(nav,"robot"); });
+    $("#osSignIn").addEventListener("click",()=>this.signIn());
+    $("#osSignOut").addEventListener("click",()=>this.signOut());
+    $("#osLinkForm").addEventListener("submit",e=>{ e.preventDefault(); this.fromLink(); });
+    $("#osLink").value=store.get("ftcbench.onshapeLink","")||"";
+    // the sign-in window says how it went (functions/onshape callback page)
+    addEventListener("message",e=>{ if(e.origin===location.origin&&e.data&&e.data.type==="simbench-onshape-signin") this.signedIn(!!e.data.ok,String(e.data.msg||"")); });
     ov.addEventListener("click",e=>{ if(e.target===ov&&this.mode!=="busy") this.close(); });
     addEventListener("keydown",e=>{ if(e.key==="Escape"&&!ov.hidden&&this.mode!=="busy") this.close(); });
     this.chip();
   },
   view(guide){ $("#osGuide").hidden=!guide; $("#osProgress").hidden=guide; $("#osOverlay").hidden=false; },
-  open(){ this.mode="guide"; $("#osBmTip").hidden=true; this.view(true); const s=$(".os-sheet"); if(s) s.scrollTop=0; },
+  open(){ this.mode="guide"; $("#osBmTip").hidden=true; this.view(true); const s=$(".os-sheet"); if(s) s.scrollTop=0; this.refresh(); },
+  /* whether this site can sign in to Onshape (it needs functions/onshape), and whether it has */
+  async refresh(){
+    const st=this.signin=await onshapeSignInState();
+    $("#osSignInWay").hidden=!st.ready; $("#osNoSignIn").hidden=st.ready;
+    if(!st.ready) $("#osBmWay").open=true;
+    $("#osSignIn").hidden=st.signedIn; $("#osSignedIn").hidden=!st.signedIn;
+    $("#osStep1").classList.toggle("done",st.signedIn);
+    return st;
+  },
+  say(id,t){ const p=$("#"+id); if(!p) return; p.textContent=t||""; p.hidden=!t; },
+  signIn(){
+    this.say("osSignTip","");
+    const w=window.open("onshape/login","sb_onshape_login","popup,width=560,height=760");
+    // no pop-up allowed: sign in in this tab; Onshape sends it back to #onshape-signed-in
+    if(!w){ location.href="onshape/login"; return; }
+    this.say("osSignTip","Finish in the Onshape window: sign in if it asks, then click Allow.");
+  },
+  async signedIn(ok,msg){
+    if(this.mode!=="guide") this.open();
+    const st=await this.refresh();
+    if(ok&&st.signedIn){ this.say("osSignTip",""); this.say("osLinkTip",$("#osLink").value?"Signed in. Click Get my robot.":"Signed in. Now steps 2 and 3."); if(!$("#osLink").value) $("#osLink").focus(); }
+    else this.say("osSignTip","Onshape sign-in didn't finish"+(msg?": "+msg:"")+". Click Sign in with Onshape to try again.");
+  },
+  async signOut(){
+    try{ await fetch("onshape/logout",{method:"POST",credentials:"same-origin"}); }catch(e){}
+    await this.refresh(); this.say("osLinkTip","");
+  },
+  /* step 3: the pasted address, read through the sign-in, the same robot the bookmark sends */
+  async fromLink(){
+    const href=$("#osLink").value.trim();
+    if(!onshapeRef(href)){ this.say("osLinkTip",href?"That isn't an Onshape assembly address. In Onshape, click your Assembly tab, then copy the whole address from the address bar.":"Paste your assembly's address first (step 2)."); return; }
+    if(!this.signin.signedIn&&!(await this.refresh()).signedIn){ this.say("osLinkTip","Sign in with Onshape first (step 1)."); return; }
+    store.set("ftcbench.onshapeLink",href); this.say("osLinkTip","");
+    this.via="link";
+    onshapeNote("Reading your robot from Onshape …");
+    this.progress("Reading the assembly …",null,null);
+    let p;
+    try{ p=checkOnshapePayload(await onshapeFromLink(href,(t,d,n)=>{ if(this.mode==="busy") this.progress(String(t),+d,+n); })); }
+    catch(e){
+      if(e&&e.status===401){ await this.refresh(); this.fail("Your Onshape sign-in has run out. Click Show the steps, then Sign in with Onshape and Get my robot again."); }
+      else this.fail("SimBench couldn't read your assembly: "+(e&&e.message||e)+".");
+      onshapeNote("Your robot didn't come from Onshape: "+esc(e&&e.message||String(e)),"bad");
+      return;
+    }
+    this.progress("Building your robot …",1,1);
+    setTimeout(()=>loadOnshapeRobot(p),30);
+  },
   close(){ $("#osOverlay").hidden=true; this.mode=null; },
   tip(t){ const p=$("#osBmTip"); if(!p) return; p.textContent=t; p.hidden=false; if($("#osOverlay").hidden) this.open(); },
   meter(cls,frac){ const m=$("#osMeter"), f=$("#osMeterFill"); m.className="os-meter"+(cls?" "+cls:""); f.style.width=frac==null?"":Math.round(Math.max(.06,Math.min(1,frac))*100)+"%"; },
@@ -1461,19 +1516,19 @@ const OnshapeHelp={
     this.mode="busy"; this.view(false);
     $("#osProgTitle").textContent="Getting your robot from Onshape";
     $("#osProgText").textContent=text;
-    $("#osProgHint").textContent="Keep your Onshape tab open until your robot appears.";
+    $("#osProgHint").textContent=this.via==="link"?"Reading through your Onshape sign-in. A big robot takes a minute or two.":"Keep your Onshape tab open until your robot appears.";
     $("#osSeeRobot").hidden=true; $("#osShowSteps").hidden=true;
     const known=Number.isFinite(done)&&Number.isFinite(total)&&total>0;
     this.meter(known?"":"busy",known?done/total:null);
     clearTimeout(this.timer);
     // the bookmark always answers (the robot, or an alert on the Onshape tab): if it goes quiet, say what to check
-    this.timer=setTimeout(()=>{ if(this.mode==="busy") this.fail("Nothing has come from Onshape for 3 minutes. Check your Onshape tab for a message, then click the bookmark again."); },180000);
+    if(this.via!=="link") this.timer=setTimeout(()=>{ if(this.mode==="busy") this.fail("Nothing has come from Onshape for 3 minutes. Check your Onshape tab for a message, then click the bookmark again."); },180000);
   },
   done(name,parts,joints,kg){
     clearTimeout(this.timer); this.mode="done"; this.view(false);
     $("#osProgTitle").textContent="✓ "+name+" is here";
     $("#osProgText").textContent=parts+" parts with their colours, "+joints+" joint"+(joints===1?"":"s")+" from your mates"+(kg?", "+kg.toFixed(1)+" kg":"")+".";
-    $("#osProgHint").textContent="You can close the Onshape tab. Next time, just click the bookmark again on your assembly.";
+    $("#osProgHint").textContent=this.via==="link"?"Changed the robot in Onshape? Open this again and click Get my robot.":"You can close the Onshape tab. Next time, just click the bookmark again on your assembly.";
     this.meter("ok",1); $("#osSeeRobot").hidden=false; $("#osShowSteps").hidden=true;
   },
   fail(msg){
@@ -1492,6 +1547,7 @@ let ONSHAPE_WAIT=null;
 addEventListener("hashchange",()=>{ if(/^#onshape-wait/.test(location.hash)) waitForOnshape(); });
 function waitForOnshape(){
   try{ history.replaceState(null,"",location.pathname+location.search); }catch(e){}
+  OnshapeHelp.via="bookmark";
   onshapeNote("Reading your robot from Onshape … keep the Onshape tab open.");
   OnshapeHelp.progress("Waiting for your Onshape tab …",null,null);
   if(ONSHAPE_WAIT) removeEventListener("message",ONSHAPE_WAIT);
@@ -3276,6 +3332,11 @@ function proBoot(){
     if(/^#join=/i.test(location.hash)) NetUI.invited(location.hash.slice(6));
     if(/^#onshape=/.test(location.hash)) takeOnshapeHash();
     else if(/^#onshape-wait/.test(location.hash)) waitForOnshape();
-    else if(new URLSearchParams(location.search).get("robot")!=="sample") loadDefaultRobot();
+    else{
+      // back from signing in to Onshape in this tab (no pop-up allowed): carry on at step 3
+      const back=/^#onshape-(signed-in|signin-failed)/.exec(location.hash);
+      if(back){ try{ history.replaceState(null,"",location.pathname+location.search); }catch(e){} OnshapeHelp.signedIn(back[1]==="signed-in",""); }
+      if(new URLSearchParams(location.search).get("robot")!=="sample") loadDefaultRobot();
+    }
   }catch(e){}
 })();

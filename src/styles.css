@@ -1046,6 +1046,21 @@ details.fine summary:hover{color:var(--accent-tx);}
 .os-help dl{margin:8px 0 0; font-size:13px; line-height:1.5;}
 .os-help dt{font-weight:700; color:var(--tx); margin-top:8px;}
 .os-help dd{margin:2px 0 0; color:var(--tx-2);}
+.os-row{display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin:8px 0 4px;}
+.btn-sm.os-big,.os-link .btn-sm.primary{background:var(--accent) !important; border-color:var(--accent) !important; color:var(--accent-ink) !important; font-weight:700; box-shadow:0 2px 0 rgba(0,0,0,.25);}
+.btn-sm.os-big{font-size:14.5px; padding:8px 16px; border-radius:9px;}
+.os-ok{font-size:13.5px; font-weight:700; color:var(--pass);}
+.linkish{background:none; border:0; padding:0 0 0 6px; font:inherit; font-size:12px; font-weight:500; color:var(--tx-3); text-decoration:underline; cursor:pointer;}
+.os-link{display:flex; gap:8px; margin:8px 0 4px;}
+.os-link input{flex:1; min-width:0; font:13px var(--mono); padding:7px 9px; border-radius:7px; border:1px solid var(--line); background:var(--panel); color:var(--tx);}
+.os-link input:focus{outline:2px solid var(--accent); outline-offset:1px;}
+.os-link .btn-sm{font-size:13.5px; padding:6px 14px;}
+.os-step.done .os-n{background:var(--pass);}
+.os-pic .p-addr.hi{stroke:var(--accent); stroke-width:2;}
+.os-way{margin-top:18px; border-top:1px solid var(--line-2); padding-top:10px;}
+.os-way summary{cursor:pointer; font-size:13.5px; color:var(--accent-tx); font-weight:600;}
+.os-steps.small{margin-top:10px;}
+.os-steps.small .os-n{background:var(--panel-2); color:var(--tx); border:1px solid var(--line);}
 .os-foot{display:flex; align-items:center; gap:10px; margin-top:16px; font-size:12px;}
 .os-meter{height:8px; border-radius:4px; background:var(--panel-2); border:1px solid var(--line-2); overflow:hidden; margin:14px 0 8px;}
 .os-meter i{display:block; height:100%; width:8%; background:var(--accent); transition:width .3s;}
@@ -1054,4 +1069,4 @@ details.fine summary:hover{color:var(--accent-tx);}
 .os-meter.ok i{background:var(--pass); width:100%;}
 .os-meter.bad i{background:var(--fail); width:100%;}
 .os-prog{font-size:14px; color:var(--tx); margin:4px 0;}
-@media (max-width:520px){.load-row{grid-template-columns:1fr;} .os-sheet{padding:18px 14px 12px;}}
+@media (max-width:520px){.load-row{grid-template-columns:1fr;} .os-sheet{padding:18px 14px 12px;} .os-link{flex-direction:column;}}

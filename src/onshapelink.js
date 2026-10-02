@@ -1,51 +1,37 @@
 /* ============================================================
-   ONSHAPE → SIMBENCH IN ONE CLICK
-   The exact joints are in the team's Onshape assembly (its mates). Getting
-   them used to mean opening two API pages signed in to Onshape, saving each
-   one and dropping both here. The "Send to SimBench" bookmark does the same
-   thing in one click: run on the team's own assembly tab, signed in as
-   them, it reads that assembly's definition and mate features from
-   Onshape's API (the same two pages), packs them, and opens SimBench with
-   them in the address's #fragment. A fragment never leaves the browser: no
-   server, ours or anyone's, sees the robot. Nothing needs an API key.
-   A very big assembly doesn't fit in an address; then it's saved as one
-   .onshape.json file to drop in instead.
+   ONSHAPE → SIMBENCH: THE WHOLE ROBOT, JOINTS AND ALL
+   The exact joints are in the team's Onshape assembly (its mates), and the
+   shapes, colours and mass are in its part studios. onshapeRead reads all
+   of it from Onshape's API, signed in as the team. Two ways to run it:
+   - Sign in with Onshape (onshapeFromLink): OAuth through
+     functions/onshape, then the team pastes the assembly's address. This
+     is the main way: school computers block bookmarklets.
+   - The "Send to SimBench" bookmark (onshapeGrab): run on the team's own
+     assembly tab with their Onshape session, it hands the robot to the
+     SimBench tab it opens by postMessage, or saves one .onshape.json file.
+   Either way it only reads, and nothing needs an API key.
    ============================================================ */
 const ONSHAPE_FORMAT="ftc-simbench.onshape";
 
-/* The bookmark itself: this function's source, run on an Onshape tab. It
-   uses nothing from SimBench, only the browser. SB is SimBench's address.
-   It reads the assembly (parts, placements, mates), its features (limits),
-   and, once per part studio the robot uses, that studio's tessellated
-   shapes with their colours and its mass properties: the whole robot, no
-   STEP. Then it hands all of it to the SimBench tab it opened, by
-   postMessage (no size limit, never through a server). */
-function onshapeGrab(SB){
-  var m=/^(.*)\/documents\/([0-9a-f]{24})\/(w|v|m)\/([0-9a-f]{24})\/e\/([0-9a-f]{24})/i.exec(location.href);
-  if(!m){ alert("Open your robot's assembly in Onshape (the assembly tab, not a Part Studio), then click the SimBench bookmark again."); return; }
-  var host=m[1], did=m[2], base=host+"/api/assemblies/d/"+did+"/"+m[3]+"/"+m[4]+"/e/"+m[5];
-  var name=String(document.title||"").replace(/\s*[|\-\u2013]\s*Onshape\s*$/i,"").trim()||"Onshape assembly";
-  var sbOrigin=new URL(SB).origin;
-  /* open the tab now, while the click still counts; it says it's ready, then gets the robot */
-  var w=window.open(SB+"#onshape-wait","ftcsimbench_onshape");
-  var ready=false, payload=null, sent=false, failed=false;
-  var say=function(t,d,n){ try{ if(w&&!w.closed) w.postMessage({type:"simbench-progress",text:t,done:d,total:n},sbOrigin); }catch(e){} };
-  var send=function(){ if(sent||!ready||!payload) return; sent=true; try{ w.postMessage(payload,sbOrigin); }catch(e){ sent=false; save(); } };
-  var save=function(){
-    /* no SimBench tab, or it never answered: one file to drop into SimBench instead */
-    var j=JSON.stringify(payload,function(k,v){ return v instanceof Float32Array?Array.from(v,function(x){ return Math.round(x*1e5)/1e5; }):v; });
-    var a=document.createElement("a");
-    a.href=URL.createObjectURL(new Blob([j],{type:"application/json"}));
-    a.download=name.replace(/[\\/:*?"<>|]+/g,"_")+".onshape.json";
-    document.body.appendChild(a); a.click(); a.remove();
-    alert("Saved \""+a.download+"\". Drop it into SimBench: it is the whole robot, joints and all.");
-  };
-  window.addEventListener("message",function(e){ if(e.origin===sbOrigin&&e.data&&e.data.type==="simbench-ready"){ ready=true; send(); } });
+/* Reading one assembly, the whole robot: its definition (parts, placements,
+   mates), its features (limits), and, once per part studio the robot uses,
+   that studio's tessellated shapes with their colours and its mass
+   properties. host is where "/api/..." lives: the Onshape tab's own origin
+   for the bookmark, or "<SimBench>/onshape" (functions/onshape) after Sign
+   in with Onshape. ref is {did, wvm, wvmid, eid} from the assembly's
+   address. It's self-contained (the bookmark carries its source), so it
+   uses nothing from SimBench. Resolves to {asm, features, geom}; a failed
+   call rejects with e.status set. */
+function onshapeRead(host, ref, opt){
+  opt=opt||{};
+  var cred=opt.cred||"include", say=opt.say||function(){};
+  var base=host+"/api/assemblies/d/"+ref.did+"/"+ref.wvm+"/"+ref.wvmid+"/e/"+ref.eid;
+  var fail=function(msg,status){ var e=new Error(msg); e.status=status; return e; };
   /* Onshape answers 429 (too many calls) or 503 when busy: wait as asked, up to 5 tries */
-  var get=function(u,n){ n=n||0; return fetch(u,{credentials:"include",headers:{Accept:"application/json"}}).then(function(r){
+  var get=function(u,n){ n=n||0; return fetch(u,{credentials:cred,headers:{Accept:"application/json"}}).then(function(r){
     if((r.status===429||r.status===503)&&n<5){ var s=+r.headers.get("Retry-After"); return new Promise(function(ok){ setTimeout(ok,(s>0?s*1000:1500*Math.pow(2,n))); }).then(function(){ return get(u,n+1); }); }
-    if(r.status===401||r.status===403) throw new Error("Onshape said you aren't allowed to read it ("+r.status+"): sign in to Onshape in this browser");
-    if(!r.ok) throw new Error("Onshape said "+r.status); return r.json(); }); };
+    if(r.status===401||r.status===403) throw fail(opt.denied||("Onshape said you aren't allowed to read it ("+r.status+"): sign in to Onshape in this browser"),r.status);
+    if(!r.ok) throw fail("Onshape said "+r.status,r.status); return r.json(); }); };
   /* a point as Onshape writes it: [x,y,z] or {x,y,z}, in metres */
   var P=function(p,k){ return Array.isArray(p)?+p[k]:p?+p["xyz"[k]]:NaN; };
   /* one part studio: each part's triangles (part studio frame, metres) and the colour that covers most of it */
@@ -70,10 +56,14 @@ function onshapeGrab(SB){
   };
   var mass=function(mp){ var out={}, B=mp&&mp.bodies; if(B) for(var id in B){ var x=B[id], kg=Array.isArray(x.mass)?x.mass[0]:x.mass; if(kg>0) out[id]={kg:kg,com:x.centroid?x.centroid.slice(0,3):null}; } return out; };
   say("Reading the assembly …");
-  Promise.all([get(base+"?includeMateFeatures=true&includeMateConnectors=true&includeNonSolids=false&excludeSuppressed=true"), get(base+"/features").catch(function(){ return null; })])
+  return Promise.all([
+    get(base+"?includeMateFeatures=true&includeMateConnectors=true&includeNonSolids=false&excludeSuppressed=true").catch(function(e){
+      // a Part Studio or a drawing has no assembly definition: Onshape answers 400 or 404
+      if(e.status===400||e.status===404) throw fail("this isn't an assembly",e.status); throw e; }),
+    get(base+"/features").catch(function(){ return null; })])
   .then(function(r){
     var asm=r[0], features=r[1];
-    if(!asm||!asm.rootAssembly) throw new Error("this tab isn't an assembly");
+    if(!asm||!asm.rootAssembly) throw fail("this isn't an assembly");
     var jobs=[], seen={};
     [asm.rootAssembly].concat(asm.subAssemblies||[]).forEach(function(a){ (a.instances||[]).forEach(function(i){
       if(i.type!=="Part"||i.suppressed) return;
@@ -84,20 +74,55 @@ function onshapeGrab(SB){
     var one=function(){
       if(at>=jobs.length) return Promise.resolve();
       var j=jobs[at++], i=j.i, ps=host+"/api/partstudios/d/"+i.documentId+"/"+j.ver+"/e/"+i.elementId;
-      var q="?configuration="+encodeURIComponent(i.configuration||"")+(i.documentId!==did?"&linkDocumentId="+did:"");
+      var q="?configuration="+encodeURIComponent(i.configuration||"")+(i.documentId!==ref.did?"&linkDocumentId="+ref.did:"");
       return Promise.all([
         get(ps+"/tessellatedfaces"+q+"&outputFaceAppearances=true&outputFacetNormals=false&chordTolerance=0.0015&angleTolerance=0.35"),
         get(ps+"/massproperties"+q+"&massAsGroup=false").catch(function(){ return null; })
-      ]).then(function(t){ geom[j.key]={parts:compact(t[0]),mass:mass(t[1])}; },function(){ geom[j.key]=null; })
+      ]).then(function(t){ geom[j.key]={parts:compact(t[0]),mass:mass(t[1])}; },function(e){ if(e&&e.status===401) throw e; geom[j.key]=null; })
         .then(function(){ done++; say("Reading part shapes: "+done+" of "+jobs.length+" part studios …",done,jobs.length); return one(); });
     };
-    return Promise.all([one(),one(),one(),one()]).then(function(){
-      payload={format:"ftc-simbench.onshape", v:2, name:name, url:location.href, asm:asm, features:features, geom:geom};
-      if(!w||w.closed){ save(); return; }
-      send();
-      /* the SimBench tab never said it was ready: the file instead */
-      setTimeout(function(){ if(!sent&&!failed){ failed=true; save(); } },30000);
-    });
+    return Promise.all([one(),one(),one(),one()]).then(function(){ return {asm:asm, features:features, geom:geom}; });
+  });
+}
+/* An Onshape document address: its host and the assembly it points at, or null. */
+function onshapeRef(href){
+  var m=/^(https:\/\/[a-z0-9-]+\.onshape\.com)\/documents\/([0-9a-f]{24})\/(w|v|m)\/([0-9a-f]{24})\/e\/([0-9a-f]{24})/i.exec(String(href||"").trim());
+  return m?{host:m[1], did:m[2], wvm:m[3].toLowerCase(), wvmid:m[4], eid:m[5]}:null;
+}
+
+/* The bookmark itself: this function's source, run on an Onshape tab with
+   onshapeRead's source as read. It uses nothing from SimBench, only the
+   browser. SB is SimBench's address. It reads the robot with the team's own
+   sign-in, then hands it to the SimBench tab it opened, by postMessage (no
+   size limit, never through a server). */
+function onshapeGrab(SB, read){
+  var m=/^(.*)\/documents\/([0-9a-f]{24})\/(w|v|m)\/([0-9a-f]{24})\/e\/([0-9a-f]{24})/i.exec(location.href);
+  if(!m){ alert("Open your robot's assembly in Onshape (the assembly tab, not a Part Studio), then click the SimBench bookmark again."); return; }
+  var host=m[1], ref={did:m[2], wvm:m[3], wvmid:m[4], eid:m[5]};
+  var name=String(document.title||"").replace(/\s*[|\-–]\s*Onshape\s*$/i,"").trim()||"Onshape assembly";
+  var sbOrigin=new URL(SB).origin;
+  /* open the tab now, while the click still counts; it says it's ready, then gets the robot */
+  var w=window.open(SB+"#onshape-wait","ftcsimbench_onshape");
+  var ready=false, payload=null, sent=false, failed=false;
+  var say=function(t,d,n){ try{ if(w&&!w.closed) w.postMessage({type:"simbench-progress",text:t,done:d,total:n},sbOrigin); }catch(e){} };
+  var send=function(){ if(sent||!ready||!payload) return; sent=true; try{ w.postMessage(payload,sbOrigin); }catch(e){ sent=false; save(); } };
+  var save=function(){
+    /* no SimBench tab, or it never answered: one file to drop into SimBench instead */
+    var j=JSON.stringify(payload,function(k,v){ return v instanceof Float32Array?Array.from(v,function(x){ return Math.round(x*1e5)/1e5; }):v; });
+    var a=document.createElement("a");
+    a.href=URL.createObjectURL(new Blob([j],{type:"application/json"}));
+    a.download=name.replace(/[\\/:*?"<>|]+/g,"_")+".onshape.json";
+    document.body.appendChild(a); a.click(); a.remove();
+    alert("Saved \""+a.download+"\". Drop it into SimBench: it is the whole robot, joints and all.");
+  };
+  window.addEventListener("message",function(e){ if(e.origin===sbOrigin&&e.data&&e.data.type==="simbench-ready"){ ready=true; send(); } });
+  read(host, ref, {cred:"include", say:say})
+  .then(function(r){
+    payload={format:"ftc-simbench.onshape", v:2, name:name, url:location.href, asm:r.asm, features:r.features, geom:r.geom};
+    if(!w||w.closed){ save(); return; }
+    send();
+    /* the SimBench tab never said it was ready: the file instead */
+    setTimeout(function(){ if(!sent&&!failed){ failed=true; save(); } },30000);
   })
   .catch(function(e){
     if(w&&!w.closed) try{ w.close(); }catch(x){}
@@ -106,7 +131,31 @@ function onshapeGrab(SB){
 }
 /* The bookmark's address, for a SimBench at sb (its own address). */
 function onshapeBookmarklet(sb){
-  return "javascript:"+encodeURIComponent("("+onshapeGrab.toString()+")("+JSON.stringify(String(sb).replace(/#.*$/,""))+");void 0");
+  return "javascript:"+encodeURIComponent("("+onshapeGrab.toString()+")("+JSON.stringify(String(sb).replace(/#.*$/,""))+","+onshapeRead.toString()+");void 0");
+}
+
+/* ---- Sign in with Onshape (functions/onshape): works where bookmarks are blocked ---- */
+/* Whether this site can sign in to Onshape, and whether it already has:
+   {ready, signedIn}; ready is false with no server (a file, a plain host). */
+async function onshapeSignInState(){
+  try{
+    const r=await fetch("onshape/status",{credentials:"same-origin",cache:"no-store"});
+    if(!r.ok) return {ready:false, signedIn:false};
+    const j=await r.json();
+    return {ready:!!j.ready, signedIn:!!j.signedIn};
+  }catch(e){ return {ready:false, signedIn:false}; }
+}
+/* The whole robot from a pasted assembly address, read through the sign-in.
+   Resolves to the same payload the bookmark sends. */
+async function onshapeFromLink(href, say){
+  const ref=onshapeRef(href);
+  if(!ref) throw new Error("that isn't an Onshape document link. Open your assembly in Onshape and copy the whole address from the address bar");
+  const host=new URL("onshape",location.href).href.replace(/\/$/,"");
+  const denied="Onshape says you can't read it: sign in again, and make sure the document is yours or shared with you";
+  let name="";
+  try{ const r=await fetch(host+"/api/documents/"+ref.did,{credentials:"same-origin",headers:{Accept:"application/json"}}); if(r.ok) name=String((await r.json()).name||""); }catch(e){}
+  const r=await onshapeRead(host, ref, {cred:"same-origin", say, denied});
+  return {format:ONSHAPE_FORMAT, v:2, name:name||"Onshape assembly", url:String(href).trim(), asm:r.asm, features:r.features, geom:r.geom};
 }
 
 /* ---- the SimBench side: the #onshape= fragment, back into the two JSON documents ---- */
