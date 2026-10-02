@@ -347,7 +347,11 @@ const Sim={
              power — a fixed small band overshoots badly at speed. Everything is
              in the code's frame, where ticks count up under positive power
              whatever setDirection says, exactly as the SDK reports them. */
-          const err=s.target-pos;
+          /* a drive wheel aims where it's heading, not where it is: it carries
+             the robot's momentum, so its encoder (from the wheel, see
+             stepRigid) runs on after the power drops */
+          const lead=this.physics!=="kinematic"&&this.driveWheel(name)?RTP_LEAD:0;
+          const err=s.target-pos-(s.vel||0)*lead;
           const perSec=(s.spec.rpm||300)/60*s.tpr;           // ticks/s at full power
           const stop=Math.abs(s.cmd)*Math.abs(s.cmd)*perSec/(2*SLEW);
           const band=Math.max(8,1.8*stop);
@@ -363,7 +367,12 @@ const Sim={
         }
         s.act=act;
         const prev=s.ticks;
-        s.revs+=(s.spec.rpm||300)*s.act/60*dt;
+        /* a drive motor's encoder counts what its wheel did, not its free speed:
+           rigid physics sets it from the wheel's own spin (stepRigid), and the
+           kinematic model at the speed it moves the robot */
+        const dw=this.driveWheel(name);
+        if(dw&&this.physics!=="kinematic"){ s.vel=s.vel||0; continue; }
+        s.revs+=(dw?dw.revsAtFull:(s.spec.rpm||300)/60)*s.act*dt;
         s.ticks=s.revs*s.tpr;
         // a revolute joint with known limits (Onshape) stops there too: angle from
         // the output turns through the joint's reduction
@@ -451,6 +460,15 @@ const Sim={
       for(const b of Match.bots.concat(Match.players)) t=Math.min(t,rayCapsule(x,y,c,sn,{a:[b.x,b.y], b:[b.x,b.y], r:b.hx||MATCH_BOT.hx}));
     return Math.max(0,t);
   },
+  /* A drive motor's wheel, if it drives one: the motor-output turns a second
+     at full power that roll the robot at the kinematic model's speed */
+  driveWheel(name){
+    const r=this.rig, dtn=this.drivetrain, d=this.dev[name];
+    if(!r||!dtn||!dtn.ok||(d&&d.mech)) return null;        // a motor on a joint is never a wheel
+    const i=r.devs.indexOf(name), w=i>=0?r.drive.wheels[i]:null;
+    if(!w||!(w.r>0)) return null;
+    return {i, w, revsAtFull:KIN_SPEED/(2*Math.PI*w.r)*(w.gear||r.gear||1)};
+  },
   /* What a drive motor does to its wheel: its output in the code's frame,
      flipped by setDirection(REVERSE), flipped again when positive power turns
      the wheel backward the way it's mounted (mount -1). +1 pushes the robot
@@ -482,7 +500,7 @@ const Sim={
     const rk=this.rig&&this.rig.drive.kind;
     if(this.rig&&rk!=="tank"&&rk!=="mecanum"){
       this.steerModules();
-      const SPD=1.15;                          // m/s of rim at full power, as below
+      const SPD=KIN_SPEED;                     // m/s of rim at full power, as below
       const W=this.rig.drive.wheels, fk=fkFromIk(ikMatrix(rk,W));
       const t=chassisFromWheels(fk,this.rig.devs.map((n,i)=>this.wheelCmd(n,W[i]&&W[i].mount)*SPD));
       const h=this.chassis.h, c=Math.cos(h), s=Math.sin(h);
@@ -508,7 +526,7 @@ const Sim={
       const lf=dtn.wheels.filter(w=>w.left&&w.front)[0], lb=dtn.wheels.filter(w=>w.left&&w.back)[0];
       if(lf&&lb&&this.dev[lf.dev]&&this.dev[lb.dev]) strafe=(this.wheelCmd(lb.dev,mountOf(lb))-this.wheelCmd(lf.dev,mountOf(lf)))/2;
     }
-    const SPEED=1.15, TURN=3.4;               // m/s and rad/s at full power
+    const SPEED=KIN_SPEED, TURN=3.4;          // m/s and rad/s at full power
     const v=(L+R)/2*SPEED, w=(R-L)/2*TURN;
     this.chassis.h += w*dt;
     this.chassis.x += (v*Math.cos(this.chassis.h) - strafe*SPEED*Math.sin(this.chassis.h))*dt;
@@ -540,6 +558,13 @@ const Sim={
     const cmd=this.rig.devs.map((n,i)=>this.wheelCmd(n,W[i]&&W[i].mount));
     const st=Dyn.step(this.dstate,cmd,this.rig,dt);
     this.dstate=st;
+    // each drive encoder from its wheel's spin, back in the code's frame (see wheelCmd)
+    this.rig.devs.forEach((n,i)=>{
+      const s=this.dev[n], w=W[i]; if(!s||!w||s.kind!=="motor"||!this.driveWheel(n)) return;
+      const sg=(s.reversed?-1:1)*(w.mount===-1?-1:1), prev=s.ticks;
+      s.revs+=(st.wheelOmega[i]||0)*(w.gear||this.rig.gear||1)/(2*Math.PI)*sg*dt;
+      s.ticks=s.revs*s.tpr; s.vel=(s.ticks-prev)/dt;
+    });
     const c=Math.cos(this.chassis.h), s=Math.sin(this.chassis.h);
     this.chassis.x += (st.v.x*c - st.v.y*s)*dt;
     this.chassis.y += (st.v.x*s + st.v.y*c)*dt;
@@ -660,6 +685,8 @@ function rayCapsule(px,py,dx,dy,o){
 const SLIDE_CARRIED_KG=0.10;         // what rides the carriage besides the payload
 const isLinearKind=k=>normJointKind(k)==="linear";
 // metres of travel per encoder tick: the joint's own (Onshape, or set by hand), else the spool guess
+/* The kinematic model's rim speed at full power, m/s */
+const KIN_SPEED=1.15;
 function slideMPerTick(s){ return slideMmPerTick(s.mech,s.tpr)/1000; }   // the view draws with the same (src/step.js)
 // which sign of motor output raises the load: the joint's direction against
 // gravity; 0 for a slide that runs level (it carries nothing up)
@@ -786,3 +813,4 @@ function buildRig(cad,dtn,base,dev,opts){
 const g0=geo=>geo&&geo.wheels&&geo.wheels.length?"cad":"code";
 const clamp01=v=>Math.max(0,Math.min(1,v));
 const SLEW=8;                                   // motor power change per second (power units / s)
+const RTP_LEAD=0.15;                              // s of travel RUN_TO_POSITION looks ahead
