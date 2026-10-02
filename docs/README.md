@@ -2,6 +2,7 @@
 
 | Guide | What it covers |
 |---|---|
+| [HANDOFF.md](HANDOFF.md) | Start here: where the real-joints and real-Java work stands, the benchmark numbers, what's next, and two bugs worth knowing about. |
 | [joints.md](joints.md) | How a STEP file becomes a moving robot: Onshape mates, joint specs (with the format reference), the click-to-fix editor, and the automatic finder. |
 | [robot-setup.md](robot-setup.md) | Setting up a robot once: the four checks, setting the drive base by numbers, saving and sharing the setup file, and what the bench reads by itself first. |
 | [online.md](online.md) | Online matches: finding or hosting one, the room, chat and marks, how the host keeps one match for everyone, the network and what it can't do yet. |
