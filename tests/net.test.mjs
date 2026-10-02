@@ -429,3 +429,20 @@ test('online: a pose from a clock running ahead cannot freeze that robot, and a 
   run(hub, [H, G], 1, (pc) => { if (pc === G) pc.sim.chassis.x += 0.01; });
   assert.ok(H.M.players.find((p) => p.id === 'guest').x - before > 0.3, 'the host still sees it move');
 });
+
+// ---- the real network's setup (src/net.js netTrystero), with the library faked ----
+test('network: players meet on a fixed set of working relays, and a CDN that fails to load falls back to a second one', async () => {
+  const E = loadWithField();
+  const tried = [], joins = [];
+  const fake = { selfId: 'me', joinRoom(cfg, name) { joins.push({ cfg, name });
+    const act = () => ({ send() {}, onMessage: null });
+    return { makeAction: act, onPeerJoin: null, onPeerLeave: null, leave() {} }; } };
+  const T = await E.netTrystero(async (u) => { tried.push(u); if (/jsdelivr/.test(u)) throw new Error('Failed to fetch dynamically imported module'); return fake; });
+  assert.equal(tried.length, 2, 'the second CDN after the first failed');
+  assert.ok(/esm\.sh/.test(tried[1]));
+  T.join('m-ABCDE');
+  const cfg = joins[0].cfg;
+  assert.deepEqual(cfg.relayConfig.urls, E.NET_RELAYS, 'every player uses the same, explicit relays');
+  assert.ok(E.NET_RELAYS.length >= 5 && E.NET_RELAYS.every((u) => /^wss:\/\//.test(u)));
+  for (const dead of ['relay.agorist.space', 'bucket.coracle.social']) assert.ok(!E.NET_RELAYS.some((u) => u.includes(dead)), dead + ' is not used');
+});

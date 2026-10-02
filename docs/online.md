@@ -42,7 +42,8 @@ Open **Online** in the top bar.
 
 ## The network
 
-- **Direct connections.** Browsers connect straight to each other with WebRTC. They find each other through public [Nostr](https://nostr.com) relays, using the [Trystero](https://github.com/dmotz/trystero) library (MIT). Trystero is loaded from jsDelivr, pinned to one version, and only when someone opens **Online**.
+- **Direct connections.** Browsers connect straight to each other with WebRTC. They find each other through public [Nostr](https://nostr.com) relays, using the [Trystero](https://github.com/dmotz/trystero) library (MIT). Trystero is loaded from jsDelivr (or esm.sh if jsDelivr fails), pinned to one version, and only when someone opens **Online**.
+- **Which relays.** SimBench names its relays (`NET_RELAYS` in `src/net.js`): seven large public ones, all used at once, so one or two being down doesn't stop anyone. Left to itself, Trystero picked the same 5 of its built-in 28 for every SimBench player, and two of those were down or refused connections, so players often never found each other. Only "who is in which room" goes through a relay; the match itself is direct.
 - **No server.** The match itself never passes through any server, and SimBench runs none. There's no account, no sign-in and no API key.
 - **Your IP address.** Like any peer-to-peer game, the other players' browsers can see your IP address.
 - **Blocked networks.** Some school and company networks block direct connections between browsers. If players can't connect, try a phone hotspot or a home network. A TURN relay would fix this for every network, but it has to run somewhere with a secret key, so it isn't in the browser code.

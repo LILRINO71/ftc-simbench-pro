@@ -30,6 +30,18 @@
 const NET_PROTO=2;                                 // 2: timed poses, mechanisms, robot copies
 const NET_APP="ftc-simbench-pro";
 const NET_LIB="https://cdn.jsdelivr.net/npm/trystero@0.25.4/+esm";
+/* the same version from a second CDN: a browser remembers a failed module import for
+   the rest of the page, so "try again" needs a different address to mean anything */
+const NET_LIB2="https://esm.sh/trystero@0.25.4";
+/* Where players find each other. Left to itself, Trystero 0.25.4 picks 5 of its 28
+   default relays from the app id, the same 5 for every SimBench, and those 5 were
+   bucket.coracle.social (refuses the connection), relay.agorist.space (down, 502),
+   relay02.lnfi.network, relay.sigit.io and strfry.shock.network: players often
+   never found each other. These are large public relays that take Trystero's
+   short-lived messages; all of them are used, so one or two being down doesn't
+   matter. (Only who-is-where goes through them; the match itself is direct.) */
+const NET_RELAYS=["wss://relay.damus.io","wss://nos.lol","wss://relay.primal.net","wss://nostr.mom",
+  "wss://relay.nostr.net","wss://offchain.pub","wss://relay.nos.social"];
 const NET_SLOTS=["red1","red2","blue1","blue2"];
 const NET_ABC="ABCDEFGHJKLMNPQRSTUVWXYZ23456789";   // no 0/O or 1/I to misread
 const NET_HZ={pose:20, snap:12};
@@ -91,10 +103,11 @@ function netLoopback(){
 }
 /* The browser's network: Trystero, WebRTC between the players' browsers,
    found through public Nostr relays. Loaded the first time a player goes online. */
-async function netTrystero(){
-  const T=await import(NET_LIB);
+async function netTrystero(load){
+  load=load||(u=>import(u));
+  let T; try{ T=await load(NET_LIB); }catch(e){ T=await load(NET_LIB2); }
   const out={self:T.selfId, onError:null, join(name){
-    const r=T.joinRoom({appId:NET_APP}, name, {onJoinError:d=>{ if(out.onError) out.onError(Object.assign({room:name},d)); }});
+    const r=T.joinRoom({appId:NET_APP, relayConfig:{urls:NET_RELAYS}}, name, {onJoinError:d=>{ if(out.onError) out.onError(Object.assign({room:name},d)); }});
     const a=r.makeAction("m"), b=r.makeAction("b");
     let msg=null, bin=null, jn=null, lv=null;
     a.onMessage=(d,meta)=>{ if(msg) msg(d, meta&&meta.peerId); };
