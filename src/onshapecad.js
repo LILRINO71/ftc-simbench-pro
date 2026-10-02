@@ -200,7 +200,8 @@ function cadFromOnshape(p,opts){
     source:"onshape", shapes, onshape:{url:p.url||null, parts:nOcc, withShape:solids.length, kg:kgParts?kgSum:null, kgParts, triangles:triAfter, trianglesBefore:triBefore}};
   // ---- the joints: the mates, onto parts that are Onshape's own, so all of them match ----
   say("The joints …");
-  const rep=applyOnshapeMates(cad,A,{features:p.features||null});
+  if(p.noLimits) why.push(p.noLimits+" list(s) of mate limits couldn't be read from Onshape, so some joints may have no stops. Try again to read them.");
+  const rep=applyOnshapeMates(cad,A,{features:p.features||null, featuresBy:p.featuresBy||null});
   cad.onshape.report=rep; cad.onshape.why=why.concat(rep.why||[]);
   onshapeLinks(cad);
   return cad;

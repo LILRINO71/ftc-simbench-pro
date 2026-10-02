@@ -71,8 +71,16 @@ function onshapeRead(host, ref, opt){
       if(e.status===400||e.status===404) throw fail("this isn't an assembly",e.status); throw e; }),
     get(base+"/features"+(cfg?"?"+cfg.slice(1):"")).catch(()=>null)])
   .then(r=>{
-    const asm=r[0], features=r[1];
+    const asm=r[0], features=r[1], featuresBy={}; let noLimits=0;
     if(!asm||!asm.rootAssembly) throw fail("this isn't an assembly");
+    // that call lists the root's own features: each subassembly's mate limits (where lifts and
+    // claws live) come from its own definition, keyed the way subAssemblies is
+    const subs=(asm.subAssemblies||[]).filter(d=>d.documentMicroversion&&(d.features||[]).some(f=>f&&f.featureType==="mate"));
+    const subLimits=()=>Promise.all(subs.map(d=>{
+      const c=d.fullConfiguration||d.configuration||"default", key=[d.documentId||"",d.elementId||"",c].join("|");
+      return get(host+"/api/assemblies/d/"+d.documentId+"/m/"+d.documentMicroversion+"/e/"+d.elementId+"/features?configuration="+encodeURIComponent(c)+(d.documentId!==ref.did?"&linkDocumentId="+ref.did:""))
+        .then(f=>{ featuresBy[key]=f; },e=>{ if(e&&e.status===401) throw e; noLimits++; });
+    }));
     // every Part Studio the robot uses, once, however many parts it places from it
     const jobs=[], seen={};
     [asm.rootAssembly].concat(asm.subAssemblies||[]).forEach(a=>(a.instances||[]).forEach(i=>{
@@ -92,7 +100,7 @@ function onshapeRead(host, ref, opt){
       ]).then(t=>{ geom[j.key]={parts:osCompactTess(t[0]), mass:osCompactMass(t[1])}; },e=>{ if(e&&e.status===401) throw e; geom[j.key]=null; })   // a studio this user can't read (403) is left out, named by the builder
         .then(()=>{ done++; say("Reading part shapes: "+done+" of "+jobs.length+" part studios …",done,jobs.length); return one(); });
     };
-    return Promise.all([one(),one(),one(),one()]).then(()=>({asm, features, geom}));
+    return Promise.all([one(),one(),one(),one(),subLimits()]).then(()=>({asm, features, featuresBy, geom, noLimits:noLimits+(features?0:1)}));
   });
 }
 
@@ -118,7 +126,7 @@ async function onshapeFromLink(href, say, host){
   let name="";
   try{ const r=await fetch(host+"/api/documents/"+ref.did,{credentials:"same-origin",headers:{Accept:"application/json"}}); if(r.ok) name=String((await r.json()).name||""); }catch(e){}
   const r=await onshapeRead(host, ref, {cred:"same-origin", say, denied});
-  return {format:ONSHAPE_FORMAT, v:3, name:name||"Onshape assembly", url:String(href).trim(), asm:r.asm, features:r.features, geom:r.geom};
+  return {format:ONSHAPE_FORMAT, v:3, name:name||"Onshape assembly", url:String(href).trim(), asm:r.asm, features:r.features, featuresBy:r.featuresBy, noLimits:r.noLimits, geom:r.geom};
 }
 
 /* What came in is untrusted (a dropped .onshape.json, a relayed read): keep
@@ -126,7 +134,14 @@ async function onshapeFromLink(href, say, host){
 function checkOnshapePayload(p){
   if(!p||typeof p!=="object"||p.format!==ONSHAPE_FORMAT) throw new Error("it isn't a robot read from Onshape");
   if(!p.asm||typeof p.asm!=="object"||!p.asm.rootAssembly||typeof p.asm.rootAssembly!=="object") throw new Error("it has no assembly definition");
-  const f=p.features, features=f&&(Array.isArray(f)||(typeof f==="object"&&Array.isArray(f.features)))?f:null;
+  const isFeat=f=>!!f&&(Array.isArray(f)||(typeof f==="object"&&Array.isArray(f.features)));
+  const features=isFeat(p.features)?p.features:null;
+  // each subassembly's features, by its definition key
+  let featuresBy=null;
+  if(p.featuresBy&&typeof p.featuresBy==="object"&&!Array.isArray(p.featuresBy)){
+    featuresBy={};
+    for(const k of Object.keys(p.featuresBy).slice(0,2000)) if(isFeat(p.featuresBy[k])) featuresBy[String(k).slice(0,200)]=p.featuresBy[k];
+  }
   const str=v=>typeof v==="string"?v.slice(0,200):"";
   const url=/^https:\/\/([a-z0-9-]+\.)*onshape\.com\//i.test(str(p.url))?str(p.url):"";
   const num=v=>Number.isFinite(+v)?+v:null, vec=(v,n)=>Array.isArray(v)&&v.length>=n&&v.slice(0,n).every(x=>Number.isFinite(+x))?v.slice(0,n).map(Number):null;
@@ -150,5 +165,6 @@ function checkOnshapePayload(p){
       geom[k]={parts, mass};
     }
   }
-  return {format:ONSHAPE_FORMAT, name:str(p.name).trim()||"Onshape assembly", url, asm:p.asm, features, geom};
+  const noLimits=Number.isFinite(+p.noLimits)?Math.max(0,Math.min(1e4,Math.round(+p.noLimits))):0;
+  return {format:ONSHAPE_FORMAT, name:str(p.name).trim()||"Onshape assembly", url, asm:p.asm, features, featuresBy, noLimits, geom};
 }

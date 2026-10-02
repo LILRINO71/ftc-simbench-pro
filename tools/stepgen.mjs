@@ -641,7 +641,18 @@ function onshapeAssembly(top, R) {
     { message: { parameterId: m.type === 'SLIDER' ? 'limitAxialZMin' : 'limitRotationMin', expression: q(m, m.limits[0]) } },
     { message: { parameterId: m.type === 'SLIDER' ? 'limitAxialZMax' : 'limitRotationMax', expression: q(m, m.limits[1]) } }
   ] } })) };
-  return { assembly, features: features2, geom: onshapeGeom(top) };
+  // the same limits the way Onshape really lists them: each element's features
+  // endpoint has only its own mates, so a subassembly's come by its definition
+  // key (documentId|elementId|configuration). `features` above keeps every
+  // limit in one list, as payloads from before this split did.
+  const featuresSplit = { root: { features: [] }, by: {} };
+  for (const f of features2.features) {
+    const own = [...idOf.values()].find((v) => v.id === f.message.featureId).ownerUid;
+    if (own === top.uid) { featuresSplit.root.features.push(f); continue; }
+    const key = 'DOC|E' + own + '|default';
+    (featuresSplit.by[key] || (featuresSplit.by[key] = { features: [] })).features.push(f);
+  }
+  return { assembly, features: features2, featuresSplit, geom: onshapeGeom(top) };
 }
 /* What the Onshape link reads per part studio (src/onshapelink.js): each part's
    triangles in its own frame, its colour and its mass, keyed the same way. */

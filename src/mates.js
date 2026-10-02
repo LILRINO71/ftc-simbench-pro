@@ -56,15 +56,31 @@ const mateKey=s=>String(s||"").replace(/\s*<\d+>\s*$/,"").replace(/\s+/g," ").tr
 const pathKey=p=>(p||[]).join("/");
 
 /* ---- quantity expressions from the features endpoint: "18 in", "-90 deg",
-   "0.3 m", "25.4*mm". Metres and radians out; NaN if unreadable. */
+   "0.3 m", "25.4*mm", "1/2 in", "2 * 25.4 mm". Metres and radians out; NaN
+   if unreadable (a variable like "#armMax") or not set: an unset bound
+   comes as isNull, or with a nullValue such as "No minimum". */
+const MATE_UNITS={"":1, m:1, meter:1, meters:1, mm:0.001, millimeter:0.001, millimeters:0.001, cm:0.01, centimeter:0.01, centimeters:0.01,
+  in:0.0254, inch:0.0254, inches:0.0254, ft:0.3048, foot:0.3048, feet:0.3048, rad:1, radian:1, radians:1, deg:Math.PI/180, degree:Math.PI/180, degrees:Math.PI/180};
 function mateQty(e){
-  if(e&&typeof e==="object") e=e.expression!=null?e.expression:(e.value!=null?e.value:"");
-  const m=/^\s*(-?[\d.]+(?:e-?\d+)?)\s*\*?\s*([a-z]*)\s*$/i.exec(String(e==null?"":e));
-  if(!m) return NaN;
-  const v=+m[1], u=m[2].toLowerCase();
-  const k={"":1, m:1, meter:1, meters:1, mm:0.001, millimeter:0.001, cm:0.01, in:0.0254, inch:0.0254, ft:0.3048,
-           rad:1, radian:1, deg:Math.PI/180, degree:Math.PI/180}[u];
-  return k==null?NaN:v*k;
+  if(e&&typeof e==="object"){
+    if(e.isNull===true||(typeof e.nullValue==="string"&&e.nullValue.trim())) return NaN;
+    e=e.expression!=null?e.expression:(e.value!=null?e.value:"");
+  }
+  const m=/^(.*?)\s*\*?\s*([a-z]*)\s*$/i.exec(String(e==null?"":e).trim());
+  const k=m?MATE_UNITS[m[2].toLowerCase()]:null;
+  return k==null?NaN:mateNum(m[1])*k;
+}
+/* + - * / and brackets over plain numbers; NaN for anything else */
+function mateNum(s){
+  let i=0;
+  const sp=()=>{ while(s[i]===" ") i++; };
+  const atom=()=>{ sp();
+    if(s[i]==="("){ i++; const v=sum(); sp(); if(s[i++]!==")") throw 0; return v; }
+    if(s[i]==="-"||s[i]==="+"){ const g=s[i++]==="-"?-1:1; return g*atom(); }
+    const m=/^(\d+\.?\d*|\.\d+)(e[+-]?\d+)?/i.exec(s.slice(i)); if(!m) throw 0; i+=m[0].length; return +m[0]; };
+  const prod=()=>{ let v=atom(); for(;;){ sp(); if(s[i]==="*"){ i++; v*=atom(); } else if(s[i]==="/"){ i++; v/=atom(); } else return v; } };
+  const sum=()=>{ let v=prod(); for(;;){ sp(); if(s[i]==="+"){ i++; v+=prod(); } else if(s[i]==="-"){ i++; v-=prod(); } else return v; } };
+  try{ const v=sum(); sp(); return i===s.length?v:NaN; }catch(x){ return NaN; }
 }
 
 /* ---- read the assembly definition. Mates in a subassembly are written
@@ -80,8 +96,8 @@ function parseOnshapeAssembly(json){
 
   const inst=new Map();                          // path -> {path, name, type, partId, parent}
   const mates=[], relations=[], groups=[];
-  const featById=new Map();
-  const readFeatures=(feats,prefix)=>{
+  const featById=new Map();                     // definition key#feature id -> its mates, one per copy
+  const readFeatures=(feats,prefix,dk)=>{
     for(const f of (feats||[])){
       if(!f||f.suppressed) continue;
       const d=f.featureData||{}, id=pathKey(prefix)+"#"+(f.id||d.id||"");
@@ -92,7 +108,8 @@ function parseOnshapeAssembly(json){
         // some API versions carry the limits on the mate itself
         const L=d.limits||d.mateLimits;
         if(L) m.limits=L;
-        mates.push(m); featById.set(f.id,m);
+        mates.push(m);
+        for(const k of [dk+"#"+f.id, "*#"+f.id]){ if(!featById.has(k)) featById.set(k,[]); featById.get(k).push(m); }
       }else if(f.featureType==="mateRelation"){
         const ids=[]; const grab=x=>{ if(!x) return; if(Array.isArray(x)) return x.forEach(grab);
           if(typeof x==="object"){ if(typeof x.featureId==="string") ids.push(x.featureId); for(const k in x) if(typeof x[k]==="object") grab(x[k]); } };
@@ -116,12 +133,12 @@ function parseOnshapeAssembly(json){
         const d=defs.get(defKey(i));
         if(!d){ why.push("subassembly \""+i.name+"\" has no definition in subAssemblies; its parts are read as one rigid body."); continue; }
         walk(d.instances,path,depth+1);
-        readFeatures(d.features,path);
+        readFeatures(d.features,path,defKey(d));
       }
     }
   };
   walk(root.instances,[],0);
-  readFeatures(root.features,[]);
+  readFeatures(root.features,[],"");
 
   const occ=new Map();
   for(const o of (root.occurrences||[])){
@@ -136,21 +153,45 @@ function parseOnshapeAssembly(json){
 
 /* Mate limits live in the assembly's features (GET …/assemblies/…/features).
    Read whatever form they come in: limitsEnabled plus limitAxialZMin/Max for
-   a slider, limitRotationMin/Max for a revolute. */
-function applyMateLimits(A,featuresJson){
-  let n=0;
+   a slider, limitRotationMin/Max for a revolute. That call lists one
+   element's own features, so a subassembly's come with its definition key
+   (dk, as subAssemblies writes it); the root's have none, and an old payload
+   that put every mate's limits on the root still finds them. The limits stay
+   as Onshape gives them, mate values; applyOnshapeMates makes them travel
+   from the drawn pose. */
+function applyMateLimits(A,featuresJson,dk){
+  let n=0; dk=dk||"";
   const list=(featuresJson&&(featuresJson.features||featuresJson))||[];
   for(const f of (Array.isArray(list)?list:[])){
     const msg=f&&(f.message||f);
     const fid=msg&&(msg.featureId||msg.id); if(!fid) continue;
-    const m=A.featById.get(fid); if(!m) continue;
+    const ms=A.featById.get(dk+"#"+fid)||(dk===""?A.featById.get("*#"+fid):null); if(!ms) continue;
     const P={};
     for(const p of (msg.parameters||[])){ const q=p&&(p.message||p); if(q&&q.parameterId) P[q.parameterId]=q; }
     if(P.limitsEnabled&&P.limitsEnabled.value===false) continue;
     const lo=mateQty(P.limitAxialZMin||P.limitRotationMin), hi=mateQty(P.limitAxialZMax||P.limitRotationMax);
-    if(Number.isFinite(lo)||Number.isFinite(hi)){ m.limits=[lo,hi]; n++; }
+    if(Number.isFinite(lo)||Number.isFinite(hi)){ for(const m of ms) m.limits=[lo,hi]; n++; }
   }
   return n;
+}
+
+/* Onshape measures a mate's value as its second end (connector 2) against
+   its first, along or about the first's z. The bench measures a joint as
+   the child's travel from where it was drawn, along or about the parent
+   end's z. The value where it was drawn (v0) and the sign between the two
+   (s), so a limit L becomes travel s*(L-v0). Null when the two z axes
+   aren't parallel. */
+function mateTravel(A,m,parentEnd,lin){
+  const W=m.ends.map(e=>{ const o=A.occ.get(pathKey(e.path)); return o?mMul(o.T,e.cs):null; });
+  if(!W[0]||!W[1]) return null;
+  const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+  const z1=W[0].r[2], z2=W[1].r[2], d=dot(z1,z2);
+  if(Math.abs(d)<0.9) return null;
+  let v0;
+  if(lin) v0=dot([W[1].t[0]-W[0].t[0],W[1].t[1]-W[0].t[1],W[1].t[2]-W[0].t[2]],z1);
+  else{ const x1=W[0].r[0], x2=W[1].r[0];
+    v0=Math.atan2(dot([x1[1]*x2[2]-x1[2]*x2[1],x1[2]*x2[0]-x1[0]*x2[2],x1[0]*x2[1]-x1[1]*x2[0]],z1),dot(x1,x2)); }
+  return {v0, s:parentEnd===0?1:-Math.sign(d)};
 }
 
 /* ---- Onshape part occurrences -> STEP solids, by placement.
@@ -210,7 +251,11 @@ function applyOnshapeMates(cad,json,opts){
   opts=opts||{};
   const A=parseOnshapeAssembly(json);
   const why=A.why.slice();
-  if(opts.features) why.push(applyMateLimits(A,opts.features)+" mate limit(s) read from the features list.");
+  if(opts.features||opts.featuresBy){
+    let n=opts.features?applyMateLimits(A,opts.features,""):0;
+    for(const k in (opts.featuresBy||{})) n+=applyMateLimits(A,opts.featuresBy[k],k);
+    why.push(n+" mate limit(s) read from the features list"+(opts.featuresBy?"s":"")+".");
+  }
   const {map, G}=matchOnshapeParts(A,cad,why);
   if(!map.size) throw new Error("none of the Onshape parts line up with this STEP's parts. Export the STEP from the same assembly, and load it first.");
 
@@ -252,7 +297,10 @@ function applyOnshapeMates(cad,json,opts){
   // welded the plates of an arm (fastened to the hub on its motor's shaft) to the chassis.
   const fixedIdx=keys.map((k,i)=>i).filter(i=>A.occ.get(keys[i]).fixed);
   let frameSeed=fixedIdx.concat(partsOf([]).filter(i=>!touched.has(i)));
-  if(!fixedIdx.length){
+  // a fixed subassembly (most teams fix a "Drivetrain" one) is frame too, all but what moves in it
+  const fixedSubs=[...A.inst.values()].filter(x=>x.type==="Assembly"&&(A.occ.get(pathKey(x.path))||{}).fixed);
+  for(const x of fixedSubs) frameSeed=frameSeed.concat(under(x.path).filter(i=>!movingEnd.has(i)));
+  if(!fixedIdx.length&&!fixedSubs.length){
     const size=new Map(); for(const i of partsOf([])) if(touched.has(i)){ const b=find(i); size.set(b,(size.get(b)||0)+1); }
     let big=null; for(const [b,c] of size) if(big==null||c>size.get(big)) big=b;
     if(big!=null) frameSeed=frameSeed.concat(partsOf([]).filter(i=>find(i)===big));
@@ -272,8 +320,12 @@ function applyOnshapeMates(cad,json,opts){
   let ground;
   if(frameSeed.length) ground=find(frameSeed[0]);
   else{
-    const w=keys.map((k,i)=>i).find(i=>wheelIdx.includes(solidOf(i)));
-    ground=find(w!=null?w:0);
+    // nothing fixed and nothing at the root: the body with the most parts,
+    // never a wheel on its own (the robot would spin about an axle)
+    const n=new Map(); keys.forEach((k,i)=>{ const b=find(i); n.set(b,(n.get(b)||0)+1); });
+    const wheelOnly=b=>keys.every((k,i)=>find(i)!==b||wheelIdx.includes(solidOf(i)));
+    let best=null; for(const [b,c] of n) if(!wheelOnly(b)&&(best==null||c>n.get(best))) best=b;
+    ground=best!=null?best:find(0);
   }
   const bodyOf=i=>find(i);
 
@@ -381,11 +433,16 @@ function applyOnshapeMates(cad,json,opts){
              fromMate:{name:j.m.name, type:t, id:j.m.fid}};
     if(j.m.limits){
       const lo=Array.isArray(j.m.limits)?j.m.limits[0]:mateQty(j.m.limits.min), hi=Array.isArray(j.m.limits)?j.m.limits[1]:mateQty(j.m.limits.max);
-      if(Number.isFinite(lo)||Number.isFinite(hi)) m.limits=[lo,hi];
+      const q=mateTravel(A,j.m,j.parentEnd,lin);
+      if(q&&(Number.isFinite(lo)||Number.isFinite(hi))){
+        const a=q.s*(lo-q.v0), b=q.s*(hi-q.v0);
+        m.limits=q.s>0?[a,b]:[b,a];
+      }else if(!q&&(Number.isFinite(lo)||Number.isFinite(hi))) why.push("\""+j.m.name+"\" has limits, but its two ends' axes don't line up, so they were left off.");
     }
     if(t==="CYLINDRICAL") why.push("\""+j.m.name+"\" is cylindrical (turns and slides); it's simulated as the turn.");
     if(t==="PIN_SLOT") why.push("\""+j.m.name+"\" is a pin-slot; it's simulated as the pin's turn.");
     if(kind==="fixed") why.push("\""+j.m.name+"\" is a "+t.toLowerCase().replace("_","-")+" mate, which the bench doesn't simulate; it's held where it was drawn.");
+    m.fromMate.key=j.m.id;
     mechOf.set(j.child,m);
     for(const si of members) solids[si].mech=m.id;
     mechs.push(m);
@@ -394,9 +451,10 @@ function applyOnshapeMates(cad,json,opts){
   for(const j of joints){ const m=mechOf.get(j.child); if(!m) continue; const pm=mechOf.get(j.parent); if(pm) m.parent=pm.id; }
 
   // relations: one joint driven through another (a cascade slide, a gear pair, a rack)
-  const byFid=new Map(); for(const [b,m] of mechOf) byFid.set(m.fromMate.id,m);
+  const byKey=new Map(); for(const [b,m] of mechOf) byKey.set(m.fromMate.key,m);
   for(const r of A.relations){
-    const ms=r.ids.map(id=>byFid.get(id)).filter(Boolean);
+    // a relation names mates in its own definition: in this copy of it
+    const ms=r.ids.map(id=>byKey.get(pathKey(r.prefix)+"#"+id)).filter(Boolean);
     if(ms.length!==2) continue;
     const k=r.type==="RACK_AND_PINION"||r.type==="SCREW"?(Number.isFinite(r.length)?r.length/(2*Math.PI):NaN)
            :(Number.isFinite(r.ratio)&&r.ratio!==0?r.ratio:1);
