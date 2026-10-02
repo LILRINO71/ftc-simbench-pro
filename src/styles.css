@@ -660,8 +660,17 @@ kbd{display:inline-block; min-width:15px; padding:0 3px; border:1px solid var(--
 
 @media (max-width:1000px){
   .hdr-btn span,.status-chip span:not(.dot){display:none;}
+  #matchBtn span,#onlineBtn span{display:inline;}   /* their <i> is a status dot, not an icon: keep the word */
   .hdr-btn{padding:0 9px;}
   .status-chip{padding:0 10px;}
+}
+/* a phone: the header wraps, so pop-overs anchored to a button run off the left edge */
+@media (max-width:760px){
+  #statusPanel,#matchMenu{position:fixed; left:12px; right:12px; top:auto; width:auto; min-width:0; max-width:none;}
+}
+@media (max-width:520px){
+  .cad-tree{right:10px; width:auto; max-height:36%;}
+  .cad-info{left:10px; right:10px; width:auto; bottom:52px; max-height:40%; overflow:auto;}
 }
 .hint.warn{color:var(--warn);}
 #frameNote:empty,#exactNote:empty{display:none;}
@@ -769,7 +778,7 @@ kbd{display:inline-block; min-width:15px; padding:0 3px; border:1px solid var(--
 .mh-events li{font-size:10.5px; line-height:1.35; opacity:.9; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
 .mh-events li span{font-family:var(--mono); opacity:.6; margin-right:5px;}
 .mh-events li.red{color:#ffc4bf} .mh-events li.blue{color:#c3d8ff}
-@media (max-width:760px){ .match-skill{display:none;} .match-hud{top:40px; right:6px; min-width:180px;} }
+@media (max-width:760px){ .match-hud{top:40px; right:6px; min-width:180px;} }
 
 /* ================= calm layer =================
    Sentence case in one typeface instead of spaced capitals, controls that sit
