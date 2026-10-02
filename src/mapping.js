@@ -142,10 +142,22 @@ function wheelCorner(name){
   }
   return c;
 }
+/* A motor named like a wheel: a side, and an end or a word that says drive.
+   A "leftLift" is not a wheel. */
+function isWheelName(name){
+  const c=wheelCorner(name);
+  return (c.left||c.right)&&(c.front||c.back||/drive|wheel|motor/i.test(name));
+}
 /* Drive motors: those whose power comes straight off a stick. */
 function detectDrivetrain(code){
   // on the VM the drive is what the motors did when the sticks moved (src/jvmrun.js)
-  if(code&&code.vm) return code.vm.an.drive?Object.assign({},code.vm.an.drive,{wheels:code.vm.an.drive.wheels.map(w=>Object.assign({},w))}):null;
+  if(code&&code.vm){
+    if(code.vm.an.drive) return Object.assign({},code.vm.an.drive,{wheels:code.vm.an.drive.wheels.map(w=>Object.assign({},w))});
+    // an autonomous has no sticks to probe with: go by name, as the line reader does
+    if(code.hasLoop) return null;
+    const wheels=code.devices.filter(d=>/DcMotor/i.test(d.type||"")&&isWheelName(d.name)).map(d=>Object.assign({dev:d.name},wheelCorner(d.name)));
+    return wheels.length<2?null:{wheels, style:wheels.length>=4?"mecanum":"tank", ok:wheels.some(w=>w.left)&&wheels.some(w=>w.right)};
+  }
   const motors=code.devices.filter(d=>/DcMotor/i.test(d.type||""));
   if(motors.length<2) return null;
   const analog={};
@@ -153,12 +165,8 @@ function detectDrivetrain(code){
   const isAuto = !code.hasLoop && code.auto && code.auto.length>0;
   const wheels=[];
   for(const mo of motors){
-    if(isAuto){
-      // no sticks in an autonomous: go by name, but a "leftLift" is not a wheel
-      const c=wheelCorner(mo.name);
-      if(!(c.left||c.right)) continue;
-      if(!(c.front||c.back||/drive|wheel|motor/i.test(mo.name))) continue;
-    } else if(!analog[mo.name]) continue;   // PID-driven arms are not part of the drive base
+    if(isAuto){ if(!isWheelName(mo.name)) continue; }   // no sticks in an autonomous: go by name
+    else if(!analog[mo.name]) continue;   // PID-driven arms are not part of the drive base
     let expr=null;
     const scan=list=>{ for(const st of list||[]){
       if(st.kind==="if"){ scan(st.then); if(st.else) scan(st.else); }
