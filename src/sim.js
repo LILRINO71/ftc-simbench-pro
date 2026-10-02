@@ -81,6 +81,7 @@ const Sim={
         const drv=Object.values(self.dev).find(o=>o!==s&&o.mech===s.mech&&(o.kind==="motor"||o.kind==="servo"));
         return drv?(drv.kind==="motor"?Math.abs(drv.ticks)<20:Math.abs(drv.act-drv.restPos)<0.02):false; },
       telemetry(lines){ self.vmTel=lines; },
+      advance(dt){ self.clock=(self.clock||0)+dt; },
       rumble(i,meth,a){ if(self.onRumble) self.onRumble(i,meth,a); },
     };
   },
@@ -89,7 +90,7 @@ const Sim={
     if(!this.code) return;
     this.imuZero=this.chassis.h;
     if(this.prog){
-      this.prog.init();
+      this.prog.init(); this.prog.settle(8);
       for(const n in this.dev){ const s=this.dev[n]; if(s.kind==="servo") s.act=s.cmd; }
       this.phase="init";
       return;

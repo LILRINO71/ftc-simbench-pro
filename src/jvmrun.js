@@ -110,6 +110,19 @@ JvProgram.prototype.init=function(){
   if(this.linear){ this.gen=vm.invoke(this.self,"runOpMode",[],null); this.step(); }
   else{ this.drain(vm.invoke(this.self,"init",[],null)); }
 };
+/* A driver waits for INIT to finish before pressing START: run INIT's sleeps
+   (a hub-by-hub firmware readout, a servo settling) until the OpMode parks on
+   waitForStart(), sits in an INIT loop, or `maxSec` of INIT has passed. */
+JvProgram.prototype.settle=function(maxSec){
+  const host=this.vm.host; if(!host||!host.advance||!this.linear) return 0;
+  let t=0;
+  while(!this.done&&!this.waitStart&&this.gen&&t<(maxSec||8)){
+    const now=host.now();
+    if(now>=this.resumeAt){ const before=this.resumeAt; this.step(); if(this.resumeAt===before&&!this.waitStart) break; }   // an INIT loop: leave it running
+    else { const dt=Math.min(this.resumeAt-now,0.5); host.advance(dt); t+=dt; }
+  }
+  return t;
+};
 JvProgram.prototype.start=function(){
   if(this.done&&!this.linear) return;
   this.started=true;
@@ -174,7 +187,7 @@ function jvProbeHost(){
     pad(i){ return H.pads[i]||{}; },
     now(){ return H.clock; }, runtime(){ return H.t; }, heading(){ return H.h; }, omega(){ return 0; },
     pose(){ return {x:0,y:0,h:H.h}; }, vel(){ return {x:0,y:0}; }, ray(){ return 8.19; }, color(){ return [120,120,120]; }, volts(){ return 12.6; },
-    touch(){ return false; }, telemetry(l){ H.tel=l; }, rumble(){},
+    touch(){ return false; }, telemetry(l){ H.tel=l; }, rumble(){}, advance(dt){ H.clock+=dt; },
     cmd(name,op,v){ H.cmds.push([name,op,v]); },
   };
   return H;
@@ -182,7 +195,7 @@ function jvProbeHost(){
 /* One run: INIT, START, then `ticks` passes with these sticks. */
 function jvProbeRun(comp,pad1,pad2,ticks){
   const H=jvProbeHost(), P=new JvProgram(comp,H.host);
-  P.init();
+  P.init(); P.settle(8);
   for(let k=0;k<3&&!P.done;k++){ H.clock+=0.02; P.tick(); }        // a few INIT ticks, like a driver waiting
   H.pads={1:Object.assign({},pad1||{}),2:Object.assign({},pad2||{})};
   P.start();

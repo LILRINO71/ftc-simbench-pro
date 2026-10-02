@@ -531,7 +531,7 @@ function jvNatives(){
     .forEach(k=>d(JV_HW+"HardwareMap.DeviceMapping."+k,Object.assign({sup:JV_HW+"HardwareMap.DeviceMapping"},DEVMAP(k))));
   // devices
   d(JV_HW+"HardwareDevice",{kind:"interface"});
-  ["DcMotorSimple","DcMotor","DcMotorEx","Servo","ServoImplEx","CRServo","IMU","DistanceSensor","ColorSensor","NormalizedColorSensor","TouchSensor","DigitalChannel","AnalogInput","VoltageSensor","PwmControl","LED"]
+  ["DcMotorSimple","DcMotor","DcMotorEx","Servo","ServoImplEx","CRServo","DistanceSensor","ColorSensor","NormalizedColorSensor","TouchSensor","DigitalChannel","AnalogInput","VoltageSensor","PwmControl","LED"]
     .forEach(n=>{ if(!N[JV_HW+n]) d(JV_HW+n,{kind:"interface",ifs:[JV_HW+"HardwareDevice"]}); });
   en(JV_HW+"DcMotorSimple.Direction",["FORWARD","REVERSE"],JV_HW+"DcMotorSimple",{m:{inverted(vm,o){ return vm.enumConst(JV_HW+"DcMotorSimple.Direction",o.__en==="FORWARD"?"REVERSE":"FORWARD"); }}});
   en(JV_HW+"DcMotor.RunMode",["RUN_WITHOUT_ENCODER","RUN_USING_ENCODER","RUN_TO_POSITION","STOP_AND_RESET_ENCODER","RESET_ENCODERS","RUN_USING_ENCODERS","RUN_WITHOUT_ENCODERS"],JV_HW+"DcMotor");
