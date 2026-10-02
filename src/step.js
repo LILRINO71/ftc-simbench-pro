@@ -10,24 +10,28 @@
 function splitStepRecords(s){
   const out=[]; const n=s.length;
   let start=0, i=0, pending="";
-  // next ';', quote and comment, refreshed only once the cursor passes them —
-  // re-scanning from the cursor every step would be quadratic on a big file
-  let ns=s.indexOf(";"), nq=s.indexOf("'"), nc=s.indexOf("/*");
+  // the next ';', quote and comment at or after the cursor, or n when there is
+  // none, refreshed only once the cursor passes them: re-scanning from the
+  // cursor every step would be quadratic on a big file. "None" is n, not -1:
+  // with -1, V8's optimised code (from about the fourth parse in a page)
+  // searched for a missing comment again on every record, to the end of the
+  // file each time (tests/step-speed.test.mjs).
+  const at=(p,from)=>{ const k=s.indexOf(p,from); return k<0?n:k; };
+  let ns=at(";",0), nq=at("'",0), nc=at("/*",0);
   for(;;){
-    if(ns>=0&&ns<i) ns=s.indexOf(";",i);
-    if(ns<0) break;
-    if(nq>=0&&nq<i) nq=s.indexOf("'",i);
-    if(nc>=0&&nc<i) nc=s.indexOf("/*",i);
-    const q=nq<0?n:nq, c=nc<0?n:nc;
-    if(q<ns&&q<c){                               // skip a string, honouring '' escapes
-      let j=q+1;
+    if(ns<i) ns=at(";",i);
+    if(ns>=n) break;
+    if(nq<i) nq=at("'",i);
+    if(nc<i) nc=at("/*",i);
+    if(nq<ns&&nq<nc){                            // skip a string, honouring '' escapes
+      let j=nq+1;
       for(;;){ const k=s.indexOf("'",j); if(k<0){ j=n; break; }
         if(s.charCodeAt(k+1)===39){ j=k+2; continue; } j=k+1; break; }
       i=j; continue;
     }
-    if(c<ns){                                    // drop a comment, keep the text around it
-      pending+=s.slice(start,c);
-      const e=s.indexOf("*/",c+2); start=i=(e<0?n:e+2);
+    if(nc<ns){                                   // drop a comment, keep the text around it
+      pending+=s.slice(start,nc);
+      const e=s.indexOf("*/",nc+2); start=i=(e<0?n:e+2);
       continue;
     }
     out.push((pending+s.slice(start,ns)).replace(/\r?\n/g," "));
