@@ -98,19 +98,18 @@ The research behind the fixes is in
 
 ## Measured
 
-`research/fullrobots/bench.mjs` measures real teams' code and CAD. The
-corpus is built by `research/realcad/fetch.mjs` and the code fetchers.
-Against the base (4d7907e), on 28 teams' main TeleOps:
+`research/fullrobots/bench.mjs` measures real teams' code and CAD; `baseline.txt` is the latest
+run (engine 41ce363). Against the base (4d7907e), on 28 teams' main TeleOps:
 
 | | before | now |
 | --- | --- | --- |
-| drives correctly | 1 | 12 |
-| drives at all | 4 | 16 |
-| mechanisms found | 4 | 16 |
+| drives correctly | 1 | 13 |
+| drives at all | 4 | 17 |
+| moves a mechanism | 4 | 17 |
 
-Across every enabled TeleOp, 41 drive correctly, and 20 of the 28 teams have
-at least one that does. The median number of questions on a CAD fell from 5
-to 4 with no code, and from 21 to 8 with the ITD code.
+Across all 190 enabled TeleOps, 46 drive correctly (it was 4), and 21 of 28 teams have one that
+does. The median number of questions on a CAD fell from 5 to 3 with no code, and from 21 to 8 with
+the ITD code. Overall: 77 better, 0 worse.
 
 ## Not done, in order
 
@@ -128,7 +127,10 @@ to 4 with no code, and from 21 to 8 with the ITD code.
    (`src/jointspec.js`) plus the setup file covers most of it.
 4. **Device to joint from the Control Hub config XML**, the first rung of
    the report's matching ladder. Not started.
-5. **The legacy line reader's drive sense.** When the old reader handles
+5. **Four OpModes time out** in the bench (120 s): rr05's `TeleOpFullNew` and three t25832 test
+   OpModes. Profile one with `--only=rr05`. It may be a busy-wait the VM's budget doesn't break, or
+   a slow library stand-in.
+6. **The legacy line reader's drive sense.** When the old reader handles
    the code, the drive still comes from names, not from a probe. An
    optional cleanup: the VM path already probes.
 

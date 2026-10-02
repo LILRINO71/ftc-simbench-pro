@@ -134,46 +134,28 @@ spec gives 9 ANSWER + 11 CONFIRM, 212 buttons, 12 status rows, and 1 of 10 devic
 `tests/fixtures/assembly.step` + `CompetitionTeleOp` pair gives 5 ANSWER + 3 CONFIRM and a red light
 with 2 rows. It drives backward, turns left and strafes left.
 
-## The baseline (engine 4d7907e)
+## The baseline (engine 41ce363)
 
 ```
-CODE drives correctly 1/28, drives at all 4/28, mechanisms 4/28 | CAD parse 15/15, questions median 5 (no code) / 21 (ITD code)
+CODE drives correctly 13/28, drives at all 17/28, mechanisms 17/28 | CAD parse 11/11, questions median 3 (no code) / 8 (ITD code)
 ```
 
-**Code, main TeleOp, 28 teams** (`baseline.txt` has a line per team):
+Against the first baseline (4d7907e): 77 better, 0 worse. Two changes moved the numbers. The team's
+real Java now runs on a small Java VM (`src/jvm*.js`), and the drive is measured from what its motors do.
+Robot check notes (a live gauge, a suggestion) no longer count as questions.
 
-| What stops it | Teams |
-|---|---|
-| No motors or servos found: the hardware is in a Robot, subsystem or base class | 15: rr1team, t11691, t13115, t16072, t18244, t19922, t21836, t25609, t25832, t27570, t7198, t8535, tKleongf, tLaSalle, tRocket |
-| Drives through a library the bench doesn't run | 5: Pedro `Follower` (pedro), RR 0.5 `setWeightedDrivePower` (rr05), RR 1.0 `setDrivePowers` (tOakGrove, tTechTurb, tTechTurtles) |
-| No main loop found | 3: FTCLib `CommandOpMode` (t18763), a runner class (tCyberRaptors), a base class (tTechTigers) |
-| Motors found, none fed straight from a stick | 1: t10158 |
-| Drives, but wrong | 3: t21337 (its hook motors are taken as wheels, so the strafe spins); tEverybot (wheels fight on stick up; its turn is on the left stick and strafe on the right); tRyali (forward and strafe are reversed against its turn) |
-| Drives correctly | 1: t24791, mounted as its code says |
+- **Code, main TeleOp, 28 teams:** drives correctly 13 (was 1), at all 17 (was 4), moves a mechanism
+  17 (was 4). Across all 190 enabled TeleOps: 46 drive correctly (was 4), 55 at all, 43 move a mechanism.
+  21 of 28 teams have a TeleOp that drives correctly.
+- **Errors:** rr05's main TeleOp and three of t25832's test OpModes hit the 120 s limit.
+- **CAD:** median questions 3 with no code (was 5), 8 with the ITD TeleOp (was 21). The ITD TeleOp
+  drives correctly on 9 of 11.
+- **Corpus differences:** this run is from a container whose corpus has 11 CAD files. The owner's two
+  robots and `fullrobots/` (bo19280pp, hh9384pp) are only on the owner's PC. Their rows are carried
+  over from 4d7907e and marked `carried`. Re-run the baseline there to measure them.
 
-Mechanisms move for 4 teams (t21337, t24791, tEverybot, tRyali), the same 4 that drive at all. Across
-all 187 enabled TeleOps: 4 drive correctly, 9 at all, and 11 move a mechanism.
-
-**CAD, 15 files.** Every one parses, in up to 7 s (the largest is 120 MB).
-
-- **Questions:** a median of 5 with no code, 4 of them the setup steps. A median of 21 with the ITD
-  TeleOp, up to 38. On every robot the finder handles, 9 or 10 of those are "your code moves X, but no
-  joint is tied to it", plus up to 10 "nothing drives Servo N", with up to 212 buttons. Only the
-  default robot with its own spec gets to 6, and those are its 4 setup steps and 2 genuine code notes
-  (`uppies1` is never commanded; `outRot` barely moves).
-- **Mechanisms:** with the ITD TeleOp, at most 1 of its 10 mechanism devices has a joint on any robot
-  without a spec. That 1 is the device the code calls `motor`, which matches the finder's joint name
-  "Motor 1" by luck.
-- **Driving with the ITD TeleOp:** right on 12 of 15. It fails on:
-  - ftc8375 (motor controllers read as wheels; turning drifts 0.24 m);
-  - ultimate-drivebase (3 wheels, so strafing spins);
-  - hh9384pp (a mecanum robot whose stick up goes diagonally, 0.81 m forward and 0.58 m right, and
-    whose strafe spins).
-- **Own code:** right on 0 of 3.
-  - fixture-assembly drives backward, turns left and strafes left on its drawn base; it would be right
-    mounted as its code says.
-  - bo19280pp is command-based and doesn't drive.
-  - hh9384pp spins and goes diagonally.
+The first baseline's per-team breakdown (what stopped each team) is in git history:
+`git show 4d7907e:research/fullrobots/README.md`.
 
 ## Keeping it honest
 
