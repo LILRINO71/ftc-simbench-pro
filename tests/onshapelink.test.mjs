@@ -26,19 +26,23 @@ function studioOf(u) {
   const key = m[1] + '/' + m[2] + '/' + m[3] + '/e/' + m[4] + '|' + decodeURIComponent(m[6]);
   return { key, what: m[5], g: R.onshape.geom[key] };
 }
-function apiAnswer(u, asm, features) {
+function apiAnswer(u, asm, features, real) {
   const st = studioOf(u);
   if (st) {
     if (!st.g) return null;
     if (st.what === 'massproperties') return { bodies: Object.fromEntries(Object.entries(st.g.mass).map(([k, v]) => [k, { mass: [v.kg, v.kg, v.kg], centroid: [0, 0, 0] }])) };
     return Object.entries(st.g.parts).map(([id, b]) => {
-      const facets = []; for (let i = 0; i < b.tri.length; i += 9) facets.push({ vertices: [b.tri.slice(i, i + 3), b.tri.slice(i + 3, i + 6), b.tri.slice(i + 6, i + 9)] });
-      return { id, name: b.name, faces: [{ color: b.color ? hex(b.color) : null, facets }] };
+      // real: as Onshape's spec writes them, points {x,y,z} and an appearance with its colour
+      const pt = (i) => (real ? { x: b.tri[i], y: b.tri[i + 1], z: b.tri[i + 2] } : b.tri.slice(i, i + 3));
+      const facets = []; for (let i = 0; i < b.tri.length; i += 9) facets.push({ vertices: [pt(i), pt(i + 3), pt(i + 6)] });
+      const face = real ? { appearance: b.color ? { color: b.color.map((v) => String(Math.round(v * 255))), opacity: 255 } : null, facets }
+        : { color: b.color ? hex(b.color) : null, facets };
+      return { id, name: b.name, faces: [face] };
     });
   }
   return /\/features$/.test(u) ? features : asm;
 }
-function onshapeTab({ href = PAGE, asm = R.onshape.assembly, features = R.onshape.features, popups = true, answers = true } = {}) {
+function onshapeTab({ href = PAGE, asm = R.onshape.assembly, features = R.onshape.features, popups = true, answers = true, real = false, busy = 0 } = {}) {
   const t = { fetched: [], alerts: [], opened: [], downloads: [], got: [], listeners: [] };
   const popup = { closed: false, location: { href: '' }, close() { this.closed = true; },
     postMessage(d, origin) { if (d && d.type === 'simbench-progress') return; t.got.push({ d, origin }); } };
@@ -52,7 +56,9 @@ function onshapeTab({ href = PAGE, asm = R.onshape.assembly, features = R.onshap
     window: win,
     fetch: async (u, o) => {
       t.fetched.push({ u, cred: o && o.credentials });
-      const body = apiAnswer(u, asm, features);
+      // busy: Onshape answers the first `busy` calls with 429 Too Many Requests
+      if (t.fetched.length <= busy) return { ok: false, status: 429, headers: { get: (h) => (h === 'Retry-After' ? '0' : null) }, json: async () => ({}) };
+      const body = apiAnswer(u, asm, features, real);
       if (body == null) return { ok: false, status: 404, json: async () => ({}) };
       return { ok: true, status: 200, json: async () => JSON.parse(JSON.stringify(body)) };
     },
@@ -98,6 +104,19 @@ test('bookmark: reads the whole robot with the team\'s own sign-in and hands it 
   assert.equal(cad.solids.length, R.truth.leafParts);
   assert.equal(cad.mechs.filter((m) => m.fromMate).length, R.truth.joints.length);
   assert.ok(Math.abs(cad.onshape.kg - R.truth.massKg) < 1e-3);
+});
+
+test('bookmark: Onshape\'s real shapes ({x,y,z} points, appearance colours) and a busy answer still give the whole robot', async () => {
+  const tab = onshapeTab({ real: true, busy: 3 });
+  await click(E, tab);
+  assert.deepEqual(tab.alerts, []);
+  assert.equal(tab.got.length, 1, 'retried past the 429s');
+  const cad = E.cadFromOnshape(E.checkOnshapePayload(tab.got[0].d));
+  assert.equal(cad.solids.length, R.truth.leafParts);
+  for (const s of cad.solids) {
+    assert.ok(s.tri.pos.every(Number.isFinite), s.name + ' has real points');
+    assert.ok(Array.isArray(s.color), s.name + ' has its colour');
+  }
 });
 
 test('bookmark: the ship build (minified) makes a bookmark that works the same', async () => {

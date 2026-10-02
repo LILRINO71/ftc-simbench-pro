@@ -27,7 +27,8 @@ function onshapeGeomKey(i){
 function osColor(c){
   if(c==null) return null;
   if(typeof c==="string"){ const m=/^#?([0-9a-f]{6})/i.exec(c.trim()); if(!m) return null; const v=parseInt(m[1],16); return [(v>>16&255)/255,(v>>8&255)/255,(v&255)/255]; }
-  if(Array.isArray(c)&&c.length>=3){ const big=c.some(x=>x>1); return c.slice(0,3).map(x=>Math.max(0,Math.min(1,big?x/255:x))); }
+  if(Array.isArray(c)&&c.length>=3){ const n=c.slice(0,3).map(Number); if(!n.every(Number.isFinite)) return null;
+    const big=n.some(x=>x>1); return n.map(x=>Math.max(0,Math.min(1,big?x/255:x))); }
   if(typeof c==="object"){
     if(c.color) return osColor(c.color);
     if(c.appearance) return osColor(c.appearance);
@@ -49,7 +50,9 @@ function osCompactTess(tess){
       const col=osColor(f.color||f.appearance||b.color||b.appearance);
       const key=col?col.map(x=>Math.round(x*255)).join(","):"";
       for(const fc of f.facets||[]){
-        const v=fc.vertices||fc.points; if(!v||v.length<3) continue;
+        const v0=fc.vertices||fc.points; if(!v0||v0.length<3) continue;
+        // Onshape writes a point as [x,y,z] or as {x,y,z}
+        const v=v0.slice(0,3).map(p=>Array.isArray(p)?p.map(Number):[+p.x,+p.y,+p.z]);
         tri.push(v[0][0],v[0][1],v[0][2],v[1][0],v[1][1],v[1][2],v[2][0],v[2][1],v[2][2]);
         const u=[v[1][0]-v[0][0],v[1][1]-v[0][1],v[1][2]-v[0][2]], w=[v[2][0]-v[0][0],v[2][1]-v[0][1],v[2][2]-v[0][2]];
         const a=Math.hypot(u[1]*w[2]-u[2]*w[1],u[2]*w[0]-u[0]*w[2],u[0]*w[1]-u[1]*w[0]);
@@ -79,15 +82,20 @@ function cadFromOnshape(p,opts){
   const geom={};
   for(const k in p.geom||{}){ const g=p.geom[k]||{};
     geom[k]={parts:g.parts||(g.tess?osCompactTess(g.tess):{}), mass:g.mass&&!g.mass.bodies?g.mass:osCompactMass(g.mass)}; }
-  // every instance, root and subassemblies: an occurrence's path names them
-  const insts=new Map();
-  for(const a of [A.rootAssembly].concat(A.subAssemblies||[])) for(const i of a.instances||[]) if(!insts.has(i.id)) insts.set(i.id,i);
+  // an occurrence's path names instances from the root down: each step inside the
+  // subassembly the step before it instances (two subassemblies can reuse an id)
+  const defKey=o=>[o.documentId||"",o.elementId||"",o.fullConfiguration||o.configuration||"default"].join("|");
+  const defs=new Map(); for(const d of A.subAssemblies||[]) defs.set(defKey(d),d);
+  const instAt=path=>{ let list=A.rootAssembly.instances||[], i=null;
+    for(const id of path||[]){ i=list.find(x=>x.id===id); if(!i) return null;
+      if(i.type==="Assembly"){ const d=defs.get(defKey(i)); list=d?d.instances||[]:[]; } }
+    return i; };
   const solids=[], P=[], missing=new Set(), why=[];
   const mn=[Infinity,Infinity,Infinity], mx=[-Infinity,-Infinity,-Infinity];
   let kgSum=0, kgParts=0, nOcc=0;
   for(const o of A.rootAssembly.occurrences||[]){
     if(o.hidden) continue;
-    const inst=insts.get(o.path[o.path.length-1]);
+    const inst=instAt(o.path);
     if(!inst||inst.type!=="Part"||inst.suppressed) continue;
     nOcc++;
     const key=onshapeGeomKey(inst), G=geom[key], body=G&&G.parts[inst.partId];
@@ -114,7 +122,7 @@ function cadFromOnshape(p,opts){
     const pn=/(\d{4}-\d{4}-\d{1,4}|REV-\d{2}-\d{4})/.exec((inst.partNumber||"")+" "+raw);
     const mass=G.mass&&G.mass[inst.partId];
     const sd={name:nm, part:pn?pn[1]:null, kind:solidKind(nm,pn?pn[1]:null), size, pts:thinPoints(pts.length>=4?pts:pts.concat(pts),120),
-      rawTri:{pos,nor}, color:body.color||null, occT:{r:R.map(r=>r.slice()), t:t.slice()}, osPath:o.path.join("/")};
+      rawTri:{pos,nor}, color:osColor(body.color), occT:{r:R.map(r=>r.slice()), t:t.slice()}, osPath:o.path.join("/")};
     if(mass){ sd.kg=mass.kg; kgSum+=mass.kg; kgParts++; }
     for(const q of sd.pts) P.push(q);
     solids.push(sd);

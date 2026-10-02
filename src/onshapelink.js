@@ -41,7 +41,13 @@ function onshapeGrab(SB){
     alert("Saved \""+a.download+"\". Drop it into SimBench: it is the whole robot, joints and all.");
   };
   window.addEventListener("message",function(e){ if(e.origin===sbOrigin&&e.data&&e.data.type==="simbench-ready"){ ready=true; send(); } });
-  var get=function(u){ return fetch(u,{credentials:"include",headers:{Accept:"application/json"}}).then(function(r){ if(!r.ok) throw new Error("Onshape said "+r.status); return r.json(); }); };
+  /* Onshape answers 429 (too many calls) or 503 when busy: wait as asked, up to 5 tries */
+  var get=function(u,n){ n=n||0; return fetch(u,{credentials:"include",headers:{Accept:"application/json"}}).then(function(r){
+    if((r.status===429||r.status===503)&&n<5){ var s=+r.headers.get("Retry-After"); return new Promise(function(ok){ setTimeout(ok,(s>0?s*1000:1500*Math.pow(2,n))); }).then(function(){ return get(u,n+1); }); }
+    if(r.status===401||r.status===403) throw new Error("Onshape said you aren't allowed to read it ("+r.status+"): sign in to Onshape in this browser");
+    if(!r.ok) throw new Error("Onshape said "+r.status); return r.json(); }); };
+  /* a point as Onshape writes it: [x,y,z] or {x,y,z}, in metres */
+  var P=function(p,k){ return Array.isArray(p)?+p[k]:p?+p["xyz"[k]]:NaN; };
   /* one part studio: each part's triangles (part studio frame, metres) and the colour that covers most of it */
   var compact=function(tess){
     var out={}, bodies=Array.isArray(tess)?tess:((tess&&tess.bodies)||[]);
@@ -52,8 +58,9 @@ function onshapeGrab(SB){
       (b.faces||[]).forEach(function(f){
         var c=f.color||f.appearance||null, key=JSON.stringify(c), a=0;
         (f.facets||[]).forEach(function(fc){ var v=fc.vertices; if(!v||v.length<3) return;
-          for(var q=0;q<3;q++){ tri[o++]=v[q][0]; tri[o++]=v[q][1]; tri[o++]=v[q][2]; }
-          var ux=v[1][0]-v[0][0],uy=v[1][1]-v[0][1],uz=v[1][2]-v[0][2],wx=v[2][0]-v[0][0],wy=v[2][1]-v[0][1],wz=v[2][2]-v[0][2];
+          var at=o;
+          for(var q=0;q<3;q++){ tri[o++]=P(v[q],0); tri[o++]=P(v[q],1); tri[o++]=P(v[q],2); }
+          var ux=tri[at+3]-tri[at],uy=tri[at+4]-tri[at+1],uz=tri[at+5]-tri[at+2],wx=tri[at+6]-tri[at],wy=tri[at+7]-tri[at+1],wz=tri[at+8]-tri[at+2];
           a+=Math.hypot(uy*wz-uz*wy,uz*wx-ux*wz,ux*wy-uy*wx); });
         if(c){ area[key]=(area[key]||0)+a; if(area[key]>bestA){ bestA=area[key]; best=c; } }
       });

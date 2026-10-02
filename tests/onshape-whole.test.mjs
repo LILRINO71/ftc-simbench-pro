@@ -60,3 +60,32 @@ test('onshape whole robot: a part Onshape sent no shape for is named, not silent
   assert.equal(cad.solids.length, R.truth.leafParts - 1);
   assert.ok(cad.onshape.why.some((w) => /without a shape/.test(w)));
 });
+
+// ---- the shapes Onshape's API really sends (its OpenAPI spec, cad.onshape.com/api/openapi) ----
+test('onshape whole robot: facet points written as {x,y,z} and colours as strings still draw', () => {
+  const tess = [{ id: 'JHD', name: 'Plate', faces: [{ appearance: { color: ['255', '128', '0'], opacity: 255 },
+    facets: [{ vertices: [{ x: 0, y: 0, z: 0 }, { x: 0.1, y: 0, z: 0 }, { x: 0, y: 0.1, z: 0 }] }] }] }];
+  const c = E.osCompactTess(tess);
+  assert.deepEqual(Array.from(c.JHD.tri), [0, 0, 0, 0.1, 0, 0, 0, 0.1, 0]);
+  assert.deepEqual(c.JHD.color.map((x) => Math.round(x * 255)), [255, 128, 0]);
+});
+
+test('onshape whole robot: two subassemblies that reuse an instance id each place their own part', () => {
+  const p = payload(), A = p.asm;
+  // the first part instance in the root, as a template
+  const part = A.rootAssembly.instances.find((i) => i.type === 'Part');
+  const occ = A.rootAssembly.occurrences.find((o) => o.path.length === 1 && o.path[0] === part.id);
+  const key = E.onshapeGeomKey(part);
+  // two subassemblies, each with one instance called "Shared" but different parts
+  const mk = (eid, name) => ({ documentId: part.documentId, elementId: eid, configuration: 'default', fullConfiguration: 'default',
+    instances: [Object.assign({}, part, { id: 'Shared', name })], features: [] });
+  A.subAssemblies = (A.subAssemblies || []).concat([mk('a'.repeat(24), 'Left claw'), mk('b'.repeat(24), 'Right claw')]);
+  const T = occ.transform.slice(), T2 = T.slice(); T2[3] += 0.5;
+  A.rootAssembly.instances.push({ id: 'SubA', type: 'Assembly', name: 'Claw A', documentId: part.documentId, elementId: 'a'.repeat(24), configuration: 'default', fullConfiguration: 'default' },
+    { id: 'SubB', type: 'Assembly', name: 'Claw B', documentId: part.documentId, elementId: 'b'.repeat(24), configuration: 'default', fullConfiguration: 'default' });
+  A.rootAssembly.occurrences.push({ path: ['SubA', 'Shared'], transform: T }, { path: ['SubB', 'Shared'], transform: T2 });
+  assert.ok(p.geom[key]);
+  const cad = E.cadFromOnshape(p);
+  const names = cad.solids.map((s) => s.name);
+  assert.ok(names.includes('Left claw') && names.includes('Right claw'), names.join(', '));
+});
