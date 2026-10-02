@@ -192,3 +192,41 @@ public class T extends LinearOpMode {
   assert.equal(E.Shots.flying.at(-1).t, f0, 'the shot in flight');
   E.Shots.flying.pop();
 });
+
+test('drive encoders count how far the wheels rolled, so an encoder auto drives the distance it asks for', () => {
+  const java = `
+@Autonomous(name = "Enc24")
+public class Enc24 extends LinearOpMode {
+    DcMotor leftDrive, rightDrive;
+    @Override
+    public void runOpMode() {
+        leftDrive = hardwareMap.get(DcMotor.class, "leftDrive");
+        rightDrive = hardwareMap.get(DcMotor.class, "rightDrive");
+        leftDrive.setDirection(DcMotor.Direction.REVERSE);
+        leftDrive.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
+        rightDrive.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
+        leftDrive.setTargetPosition(1500);
+        rightDrive.setTargetPosition(1500);
+        leftDrive.setMode(DcMotor.RunMode.RUN_TO_POSITION);
+        rightDrive.setMode(DcMotor.RunMode.RUN_TO_POSITION);
+        waitForStart();
+        leftDrive.setPower(0.5);
+        rightDrive.setPower(0.5);
+        while (opModeIsActive() && (leftDrive.isBusy() || rightDrive.isBusy())) {
+            idle();
+        }
+        leftDrive.setPower(0);
+        rightDrive.setPower(0);
+    }
+}`;
+  for (const physics of ['rigid', 'kinematic']) {
+    const b = sampleBench(E, java);
+    E.Sim.reset(b.code, b.cad, b.map, { ...b.opts, physics });
+    run(E, 6);
+    const s = E.Sim.dev.rightDrive, r = E.Sim.rig.drive.wheels[0].r;
+    const rolled = E.Sim.env().device('rightDrive', 'getCurrentPosition') / s.tpr * 2 * Math.PI * r;
+    const moved = Math.hypot(E.Sim.chassis.x, E.Sim.chassis.y);
+    assert.ok(Math.abs(rolled - 1500 / s.tpr * 2 * Math.PI * r) < 0.03, `${physics}: reached its target`);
+    assert.ok(Math.abs(moved - rolled) < 0.03 * rolled + 0.01, `${physics}: the encoders say ${rolled.toFixed(3)} m, the robot moved ${moved.toFixed(3)} m`);
+  }
+});
