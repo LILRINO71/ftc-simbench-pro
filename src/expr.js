@@ -8,7 +8,8 @@
    evaluator knows before tokenizing. */
 function normalizeExpr(src){
   return String(src)
-    .replace(/\w+\s*\.\s*getRobotYawPitchRollAngles\s*\(\s*\)\s*\.\s*get(Yaw|Pitch|Roll)\s*\([^)]*\)/g,"__imu$1")
+    // the SDK answers in the unit asked for, and in degrees with no unit
+    .replace(/\w+\s*\.\s*getRobotYawPitchRollAngles\s*\(\s*\)\s*\.\s*get(Yaw|Pitch|Roll)\s*\(([^)]*)\)/g,(m,w,u)=>/RADIANS/.test(u)?"__imu"+w:"(__imu"+w+"*57.29577951308232)")
     .replace(/\b[A-Za-z_$][\w$]*\s*\.\s*(RADIANS|DEGREES)\b/g,"0")
     .replace(/(\d)[fFdDlL]\b/g,"$1");
 }

@@ -21,7 +21,7 @@ const EXPORTS = [
   'JOINT_KINDS', 'leverOf', 'holdTorque', 'armAngleDeg',
   'jvParse', 'jvLex', 'JVM', 'JvProgram', 'jvCompile', 'jvAnalyze', 'jvProbeRun', 'jvProbeHost', 'netTrystero', 'NET_RELAYS', 'jvCodeFor', 'jvMaybe', 'jvPrelude',
   'parseExpr', 'evalNode', 'parseJava', 'deriveBindings', 'travelRange', 'isCommanded',
-  'Match', 'MATCH_SKILL', 'MATCH_PTS', 'boxPush', 'Online', 'netLoopback', 'netGzip', 'netGunzip', 'netHash', 'netSample', 'netAB', 'netKeep', 'dtWheelGeom', 'dtCompositeWheels', 'dtWheelOfParts', 'dtRollerHand', 'dtFrame', 'dtBaseSet', 'dtSymmetricSet', 'dtDriveComposites', 'driveFromSpec', 'liteCluster', 'liteBuild', 'liteEncode', 'liteDecode', 'LITE_FORMAT', 'netCode', 'netSlotPose', 'netSlotY', 'netEl', 'netEls', 'NET_SLOTS', 'NET_PROTO', 'autoMap', 'wheelCorner', 'detectDrivetrain', 'analyze', 'checkRobot', 'setupAuto', 'isDriveDevice', 'Sim', 'driveProbe', 'driveVerdict',
+  'Match', 'MATCH_SKILL', 'MATCH_PTS', 'boxPush', 'Online', 'netLoopback', 'netGzip', 'netGunzip', 'netHash', 'netSample', 'netAB', 'netKeep', 'dtWheelGeom', 'dtCompositeWheels', 'dtWheelOfParts', 'dtRollerHand', 'dtFrame', 'dtBaseSet', 'dtSymmetricSet', 'dtDriveComposites', 'driveFromSpec', 'liteCluster', 'liteBuild', 'liteEncode', 'liteDecode', 'LITE_FORMAT', 'netCode', 'netSlotPose', 'netSlotY', 'netEl', 'netEls', 'NET_SLOTS', 'NET_PROTO', 'autoMap', 'wheelCorner', 'detectDrivetrain', 'analyze', 'checkRobot', 'setupAuto', 'isDriveDevice', 'Sim', 'driveProbe', 'driveVerdict', 'motorTpr', 'normalizeExpr',
   'AUTO_JAVA', 'coverage', 'lineAt', 'collectStaticFields',
   'parseRobotConfig', 'checkRobotConfig', 'configKind', 'codeKind', 'diffOpModes',
   // Pro
