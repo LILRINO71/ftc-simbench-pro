@@ -164,20 +164,26 @@ function push(code, cad, map, opts, pad, sigma) {
   const S0 = engine().Sim, orig = S0.wheelCmd, fromCode = sigma === 1 || sigma === -1;
   if (fromCode) S0.wheelCmd = function (name) { const d = this.dev[name]; return d ? sigma * d.act : 0; };
   try {
-    let p0 = null, prevH = 0, turn = 0;
+    let p0 = null, prevH = 0, turn = 0, best = null, fk = null;
+    // what the wheels were told, as an ideal chassis twist (rad/s for cw), at the moment
+    // of the push they were told the most: a heading controller (the stick sets a target
+    // heading) stops commanding a turn once the robot gets there, which is still its intent
+    const intentNow = (s) => {
+      const rig = s.rig; if (!(rig && rig.drive && rig.drive.wheels && rig.drive.wheels.length)) return;
+      try {
+        const En = engine(), W = rig.drive.wheels; if (!fk) fk = En.fkFromIk(En.ikMatrix(rig.drive.kind, W));
+        const t = En.chassisFromWheels(fk, rig.devs.map((n, i) => s.wheelCmd(n, W[i] && W[i].mount)));
+        const size = Math.abs(t.vx) + Math.abs(t.vy) + 0.2 * Math.abs(t.omega);
+        if (!best || size > best.size) best = { size, intent: { fwd: r3(t.vx), right: r3(-t.vy), cw: r3(-t.omega) } };
+      } catch (e) { /* no intent */ }
+    };
     const S = run(code, cad, map, opts, [[{}, {}, 0.1], [pad, {}, 1.0]], (s, k) => {
       if (k === 4) { p0 = { x: s.chassis.x, y: s.chassis.y, h: s.chassis.h }; prevH = s.chassis.h; }
-      else if (k > 4) { const h = s.chassis.h; turn += Math.atan2(Math.sin(h - prevH), Math.cos(h - prevH)); prevH = h; }
+      else if (k > 4) { const h = s.chassis.h; turn += Math.atan2(Math.sin(h - prevH), Math.cos(h - prevH)); prevH = h; intentNow(s); }
     });
     const dx = S.chassis.x - p0.x, dy = S.chassis.y - p0.y, c = Math.cos(p0.h), sn = Math.sin(p0.h);
     const out = { fwd: r3(c * dx + sn * dy), right: r3(-(-sn * dx + c * dy)), cw: +(-turn * 180 / Math.PI).toFixed(1) };
-    // what the wheels were told at the end of the push, as an ideal chassis twist (rad/s for cw)
-    const rig = S.rig;
-    if (rig && rig.drive && rig.drive.wheels && rig.drive.wheels.length) try {
-      const En = engine(), W = rig.drive.wheels, fk = En.fkFromIk(En.ikMatrix(rig.drive.kind, W));
-      const t = En.chassisFromWheels(fk, rig.devs.map((n, i) => S.wheelCmd(n, W[i] && W[i].mount)));
-      out.intent = { fwd: r3(t.vx), right: r3(-t.vy), cw: r3(-t.omega) };
-    } catch (e) { out.intent = null; }
+    out.intent = best ? best.intent : null;
     return out;
   } finally { if (fromCode) S0.wheelCmd = orig; }
 }
