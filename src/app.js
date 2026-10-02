@@ -1378,18 +1378,22 @@ function takeCAD(file){
 }
 /* The whole robot from Onshape (src/onshapecad.js): parts, colours, mass and
    the mates as joints, no STEP and nothing to answer. */
-function loadOnshapeRobot(p){
+function loadOnshapeRobot(p,reparse){
   let cad;
+  const from=p.from==="urdf"?"URDF":"Onshape";
   try{ cad=cadFromOnshape(p,{up:OPTS.up, shift:OPTS.shift}); }
-  catch(e){ onshapeNote("Your robot came from Onshape, but it couldn't be built: "+esc(e.message)+". Try the bookmark again; if it keeps failing, export a STEP and drop it.","bad"); return false; }
-  LAST_STEP={name:p.name, text:"", onshape:p, label:p.name+" · from Onshape"};
-  JOINTS.spec=JOINTS.report=JOINTS.devices=null; JOINTS.name=JOINTS.step=null;
+  catch(e){ onshapeNote("Your robot came from "+from+", but it couldn't be built: "+esc(e.message)+(p.from==="urdf"?".":". Try the bookmark again; if it keeps failing, export a STEP and drop it."),"bad"); return false; }
+  if(p.from==="urdf"){ cad.source="urdf"; if(p.notes&&p.notes.length) cad.onshape.why=p.notes.concat(cad.onshape.why||[]); }
+  LAST_STEP={name:p.name, text:"", onshape:p, label:p.name+" · from "+from};
+  // a new robot drops the last one's joints; the same one re-read (a new up, a new centre) keeps them
+  if(!reparse||JOINTS.step!==p.name){ JOINTS.spec=JOINTS.report=JOINTS.devices=null; JOINTS.name=JOINTS.step=null; }
   MATES.asm=p.asm; MATES.features=p.features; MATES.name=p.name; MATES.url=p.url||null; MATES.fromLink=true; MATES.report=cad.onshape.report;
   SetupUI.beforeParse&&SetupUI.beforeParse(p.name);
-  loadCAD(cad, p.name+" · from Onshape · "+cad.solids.length+" parts · "+cad.mechs.filter(m=>m.fromMate).length+" joints", "ok");
+  loadCAD(cad, p.name+" · from "+from+" · "+cad.solids.length+" parts · "+cad.mechs.filter(m=>m.fromMate).length+" joints", "ok");
   recomputeChain(cad.mechs);
+  if(JOINTS.spec) applyJoints();
   const rep=cad.onshape.report, n=cad.mechs.filter(m=>m.fromMate).length;
-  $("#mateStatus").textContent=p.name+" · whole robot from Onshape · "+n+" joint"+(n===1?"":"s"); $("#mateDrop").className="drop ok";
+  $("#mateStatus").textContent=p.name+" · whole robot from "+from+" · "+n+" joint"+(n===1?"":"s"); $("#mateDrop").className="drop ok";
   $("#mateNote").innerHTML=(cad.onshape.why||[]).map(w=>"<li>"+esc(w)+"</li>").join("");
   const pill=$("#matePill"); if(pill){ pill.textContent=n+" joint"+(n===1?"":"s"); pill.className="pill ok"; }
   onshapeNote("<b>"+esc(p.name)+"</b> loaded "+(p.from==="urdf"?"from its URDF":"straight from Onshape")+": "+cad.solids.length+" parts with their colours"+
@@ -1399,19 +1403,24 @@ function loadOnshapeRobot(p){
   void rep;
   return true;
 }
-/* This tab was opened by the bookmark: say we're ready, then take the robot */
+/* This tab was opened by the bookmark: say we're ready, then take the robot.
+   A second click reuses this tab and only changes its #hash: wait again then. */
+let ONSHAPE_WAIT=null;
+addEventListener("hashchange",()=>{ if(/^#onshape-wait/.test(location.hash)) waitForOnshape(); });
 function waitForOnshape(){
   try{ history.replaceState(null,"",location.pathname+location.search); }catch(e){}
   onshapeNote("Reading your robot from Onshape … keep the Onshape tab open.");
+  if(ONSHAPE_WAIT) removeEventListener("message",ONSHAPE_WAIT);
   let got=false;
   const okOrigin=o=>/^https:\/\/([a-z0-9-]+\.)*onshape\.com$/i.test(o);
-  addEventListener("message",e=>{
+  addEventListener("message",ONSHAPE_WAIT=e=>{
     if(!okOrigin(e.origin)||!e.data) return;
     const d=e.data;
     if(d.type==="simbench-progress"){ if(!got) onshapeNote(esc(String(d.text||"").slice(0,160))); return; }
     if(d.format!==ONSHAPE_FORMAT||got) return;
     got=true;
     let p; try{ p=checkOnshapePayload(d); }catch(x){ onshapeNote("What came from Onshape couldn't be read: "+esc(x.message),"bad"); return; }
+    removeEventListener("message",ONSHAPE_WAIT); ONSHAPE_WAIT=null;
     if(p.geom) loadOnshapeRobot(p); else holdOnshape(p);
   });
   const ping=()=>{ if(got) return; try{ if(window.opener) window.opener.postMessage({type:"simbench-ready"},"*"); }catch(e){} setTimeout(ping,600); };
@@ -1419,7 +1428,7 @@ function waitForOnshape(){
 }
 function parseAndLoad(done){
   if(!LAST_STEP) return;
-  if(LAST_STEP.onshape){ loadOnshapeRobot(LAST_STEP.onshape); if(done&&CAD) done(CAD); return; }
+  if(LAST_STEP.onshape){ loadOnshapeRobot(LAST_STEP.onshape,true); if(done&&CAD) done(CAD); return; }
   const {name,text}=LAST_STEP, mb=(text.length/1048576).toFixed(1);
   SetupUI.beforeParse(name);
   $("#cadStatus").textContent="parsing "+mb+" MB …";
@@ -2055,7 +2064,9 @@ function takeUrdfPart(file){
       let p;
       try{ p=urdfToPayload(URDF_IN.text,URDF_IN.files,URDF_IN.name); }
       catch(e){ $("#cadStatus").textContent="couldn't read this URDF — "+e.message; $("#cadDrop").className="drop bad"; return; }
-      if(loadOnshapeRobot(p)){ $("#cadStatus").textContent=URDF_IN.name+" · from URDF · "+CAD.solids.length+" parts · "+CAD.mechs.filter(m=>m.fromMate).length+" joints"; CAD.source="urdf"; }
+      // gathered once: a lone .stl dropped later waits for its own .urdf, it doesn't rebuild this one
+      const nm=URDF_IN.name; URDF_IN.text=null; URDF_IN.name=null; URDF_IN.files={};
+      if(loadOnshapeRobot(p)) $("#cadStatus").textContent=nm+" · from URDF · "+CAD.solids.length+" parts · "+CAD.mechs.filter(m=>m.fromMate).length+" joints";
     },200);
   };
   if(isUrdf) r.readAsText(file); else r.readAsArrayBuffer(file);
