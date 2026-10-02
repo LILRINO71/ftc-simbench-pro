@@ -957,7 +957,16 @@ table.grid th{font-size:11px; font-weight:500;}
 .su-steps{list-style:none; margin:8px 0 0; padding:0; display:flex; flex-direction:column; gap:6px; counter-reset:su;}
 .su-step{border:1px solid var(--line-2); border-radius:8px; padding:8px 10px; counter-increment:su; background:var(--panel);}
 .su-step.done{border-color:color-mix(in srgb, var(--pass) 35%, var(--line-2));}
-.su-head{display:flex; align-items:baseline; gap:8px;}
+.su-head{display:flex; align-items:baseline; gap:8px; cursor:pointer; list-style:none;}
+.su-head::-webkit-details-marker{display:none}
+.su-step details:not([open]) .su-st{color:var(--tx-3);}
+details.fine{margin-top:6px;}
+details.fine summary{cursor:pointer; font-size:11.5px; color:var(--tx-3); list-style:none;}
+details.fine summary::-webkit-details-marker{display:none}
+details.fine summary::before{content:"\25B8  ";}
+details.fine[open] summary::before{content:"\25BE  ";}
+details.fine summary:hover{color:var(--accent-tx);}
+.drop .dt small{font-weight:400; color:var(--tx-3); font-size:11px; margin-left:6px; letter-spacing:.02em;}
 .su-head b{font-weight:600;}
 .su-head b::before{content:counter(su) ". "; color:var(--tx-3); font-weight:500;}
 .su-step.done .su-head b::before{content:"\2713  "; color:var(--pass);}

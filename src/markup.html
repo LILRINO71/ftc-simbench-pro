@@ -125,7 +125,7 @@
       </div>
       <div class="sec" data-sec="helpers">
         <div class="sec-head"><h3>Helper classes</h3><span class="count" id="helperCount"></span></div>
-        <p class="hint">A .java with no <code>@TeleOp</code> or <code>@Autonomous</code> lands here: your <code>MecanumDrive</code>, an <code>Arm</code> with its Road Runner actions, a PID class. Every OpMode can use them.</p>
+        <p class="hint">Files with no <code>@TeleOp</code> or <code>@Autonomous</code>. Every OpMode can use them.</p>
         <div class="oplist" id="helperList"></div>
       </div>
       <div class="sec" data-sec="howto">
@@ -160,36 +160,37 @@
       <div class="sec" data-sec="cad">
         <div class="sec-head"><h3>Robot CAD</h3><span class="spacer"></span><span class="mono dim" id="vpDims">—</span></div>
         <div class="drop ok" id="cadDrop" tabindex="0" role="button" aria-label="Load a STEP CAD file">
-          <div class="dt">STEP / STP assembly</div>
+          <div class="dt">Robot CAD <small>STEP · URDF · Onshape</small></div>
           <div class="ds" id="cadStatus">sample: fulll.step (measured)</div>
         </div>
         <input type="file" id="cadFile" accept=".step,.stp,.STEP,.STP,.urdf,.stl,.STL,.json" multiple hidden>
-        <p class="hint" id="frameNote"></p>
-        <p class="hint" id="exactNote"></p>
+        <details class="fine"><summary>How the CAD was read</summary>
+          <p class="hint" id="frameNote"></p>
+          <p class="hint" id="exactNote"></p>
+        </details>
       </div>
       <div class="sec" data-sec="setup">
         <div class="sec-head"><h3>Robot setup</h3><span class="pill" id="setupPill">—</span><span class="spacer"></span>
           <button class="btn-sm" id="setupDownload" type="button" title="This robot's whole setup in one file: give it to teammates to drop in with the STEP">Download setup</button></div>
-        <p class="hint">Check each step once. Whatever you set is saved for this robot and comes back every time it loads, also after you export the CAD again. <b>Download setup</b> gives your team the same robot: drop the file in with the STEP.</p>
+        <p class="hint">Saved for this robot. <b>Download setup</b> to share it with your team.</p>
         <ol class="su-steps" id="setupSteps"></ol>
       </div>
       <div class="sec" data-sec="robotcheck">
         <div class="sec-head"><h3>Robot check</h3><span class="pill" id="rcPill">—</span></div>
-        <p class="hint">Your robot, checked against your own code: every motor and servo it moves has a joint, every joint carries parts and has something driving it, and nothing swings through the frame. Anything the bench can't be sure of is a question here.</p>
+        <p class="hint">Your robot against your code. Only what the bench can't be sure of is asked.</p>
         <div id="robotCheck"></div>
       </div>
       <div class="sec" data-sec="mates">
         <div class="sec-head"><h3>Mates &amp; joints</h3><span class="pill" id="matePill">none</span><span class="spacer"></span>
           <button class="btn-sm" id="mateClear" type="button" hidden>Remove</button></div>
-        <p class="hint">A STEP file has no mates, so the bench has to guess the joints. Your Onshape assembly's mates make every joint exact: axis, pivot, travel limits, and the parts it carries.</p>
+        <p class="hint">A STEP has no joints, so they're guessed. Onshape's mates make every joint exact.</p>
         <div class="onshape-quick" id="onshapeQuick">
-          <div class="oq-title">Your Onshape mates in one click</div>
+          <div class="oq-title">Your whole robot from Onshape, in one click</div>
           <ol class="hint">
-            <li>Drag this to your bookmarks bar (just once): <a class="bm-link" id="mateBookmarklet" href="#" draggable="true" title="Drag me to your bookmarks bar">Send to SimBench</a></li>
-            <li>In Onshape, open your robot's assembly and click that bookmark. SimBench opens with the mates.</li>
-            <li>Drop the STEP you exported from the same assembly, if SimBench doesn't have it open already.</li>
+            <li>Drag this to your bookmarks bar, once: <a class="bm-link" id="mateBookmarklet" href="#" draggable="true" title="Drag me to your bookmarks bar">Send to SimBench</a></li>
+            <li>Open your robot's assembly in Onshape and click it. SimBench opens with the parts, colours, mass and every mate as a joint. No STEP needed.</li>
           </ol>
-          <p class="hint" id="bmNote">It reads the assembly with your own Onshape sign-in and hands it to SimBench inside the link, so nothing is uploaded anywhere. No API key.</p>
+          <p class="hint" id="bmNote">Uses your own Onshape sign-in. Nothing is uploaded, no API key.</p>
         </div>
         <details class="mate-manual"><summary>Or by hand, with the assembly's URL</summary>
         <div class="form2">
@@ -287,9 +288,7 @@
           <div class="slide"><input type="range" id="muSlider" min="0.2" max="1.4" step="0.05" value="0.9"><span class="v" id="muVal">0.90</span></div>
         </div>
         <div class="mass-read" id="massRead"></div>
-        <p class="hint">Rigid body mode drives the robot with its real mass, centre of mass and wheel traction taken from the
-          CAD: it accelerates like the build, transfers load when you brake, and breaks grip if you ask for more than the
-          tiles can give. Kinematic mode is the old behaviour — instant, perfect, and wrong.</p>
+        <p class="hint">Rigid body: the CAD's mass, centre of mass and wheel grip, so it accelerates and slips like the build. Kinematic: instant and perfect.</p>
       </div>
       <div class="sec" data-sec="cfgvars">
         <div class="sec-head"><h3>Config variables</h3><span class="pill" id="cfgVarPill">—</span></div>

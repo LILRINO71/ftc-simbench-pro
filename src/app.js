@@ -95,7 +95,7 @@ function initRails(){
   tg.addEventListener("click",()=>{ const open=dock.classList.contains("closed"); setDock(open); store.set("ftcbench.dock",open?"1":"0"); });
   const pip=$("#pip"), ph=$("#pipHead");
   const setPip=open=>{ pip.classList.toggle("closed",!open); ph.setAttribute("aria-expanded",String(open)); };
-  setPip(store.get("ftcbench.pip","1")!=="0");
+  setPip(store.get("ftcbench.pip","0")!=="0");
   ph.addEventListener("click",()=>{ const open=pip.classList.contains("closed"); setPip(open); store.set("ftcbench.pip",open?"1":"0"); });
 }
 
@@ -272,8 +272,6 @@ function updateDS(){
   if(!CODE){ hint.hidden=true; }
   else if(Online.playing()&&ph==="init"){ hint.hidden=false; hint.innerHTML=`Online match: it starts on its own<small>everyone's robot STARTs at the same moment</small>`; }
   else if(Online.state==="done"){ hint.hidden=false; hint.innerHTML=`Match over<small>the host can start another · Leave the match to drive on your own</small>`; }
-  else if(ph==="init"){ hint.hidden=false; hint.innerHTML=`Press START to run “${esc(CODE.opmode||"OpMode")}”<small>INIT already ran everything before waitForStart()</small>`; }
-  else if(ph==="loaded"||ph==="stopped"){ hint.hidden=false; hint.innerHTML=`Press INIT<small>${ph==="stopped"?"then START to run it again":"to run the setup code"}</small>`; }
   else hint.hidden=true;
   updateClock();
 }
@@ -551,7 +549,14 @@ function renderDS(){
   const env=Sim.env(); let out="";
   if(Sim.phase==="loaded"||Sim.phase==="stopped")
     out+=`<div class="dsk">${Sim.phase==="stopped"?"OpMode stopped.":"Press INIT to start."}</div>`;
-  for(const t of CODE.telemetry){
+  // the Java VM runs the team's own telemetry.addData/update: show exactly what it sent
+  const vmLines=CODE.engine==="vm"&&Array.isArray(Sim.vmTel)?Sim.vmTel:null;
+  if(vmLines) for(const l of vmLines.slice(0,40)){
+    const i=String(l).indexOf(" : ");
+    out+=i<0?(l?`<div class="dsl">${esc(l)}</div>`:`<div>&nbsp;</div>`)
+      :`<div><span class="dsk">${esc(l.slice(0,i))} :</span> <span class="dsv">${esc(l.slice(i+3))}</span></div>`;
+  }
+  else for(const t of CODE.telemetry){
     if(t.kind==="addLine"){ out+=t.label?`<div class="dsl">${esc(t.label)}</div>`:`<div>&nbsp;</div>`; continue; }
     const v=telemetryValue(t,env);
     out+=`<div><span class="dsk">${esc(t.label)} :</span> <span class="dsv">${v==null?"—":esc(fmtNum(v))}</span></div>`;
@@ -796,15 +801,17 @@ function renderFindings(){
 function renderCoverage(){
   if(!CODE){ $("#coverage").innerHTML=""; return; }
   const cov=coverage(CODE), pill=$("#covPill");
-  pill.textContent=cov.understood+" / "+cov.total+" statements";
-  pill.className="pill"+(cov.skipped.length?" warnp":" live");
+  // on the Java VM every statement runs; what's left to say is a crash or the library calls it stood in for
+  const crash=cov.vm&&cov.skipped.find(s=>/exception/.test(s.why)), nStub=cov.vm?cov.skipped.length-(crash?1:0):0;
+  pill.textContent=!cov.vm?cov.understood+" / "+cov.total+" statements":crash?"stopped":nStub?"runs · "+nStub+" stand-in"+(nStub===1?"":"s"):"runs as Java";
+  pill.className="pill"+(crash?" failp":cov.skipped.length?" warnp":" live");
   Editor.marks(cov.skipped.map(s=>s.line));
-  const mode=CODE.hasLoop?"TeleOp loop":(CODE.auto&&CODE.auto.length?"autonomous sequence of "+CODE.auto.length+" steps":"no loop found");
+  const mode=cov.vm?"Java, the way the robot runs it":CODE.hasLoop?"TeleOp loop":(CODE.auto&&CODE.auto.length?"autonomous sequence of "+CODE.auto.length+" steps":"no loop found");
   if(!cov.skipped.length){
     $("#coverage").innerHTML=`<p class="cov-ok"><b>Everything</b> in this OpMode runs on the bench — ${esc(mode)}.</p>`;
     return;
   }
-  $("#coverage").innerHTML=`<p class="cov-ok" style="margin:0 0 6px">Runs as a ${esc(mode)}. These lines are skipped, not guessed at:</p>`+
+  $("#coverage").innerHTML=`<p class="cov-ok" style="margin:0 0 6px">${cov.vm?"Runs as Java. "+(crash?"It stopped here, as it would on the robot:":"These library calls do nothing on the bench:"):"Runs as a "+esc(mode)+". These lines are skipped, not guessed at:"}</p>`+
     cov.skipped.map(s=>`<div class="cov-row"><span class="ln">line ${s.line||"?"}</span><span class="tx">${esc(String(s.text).slice(0,90))}</span><span class="why">${esc(s.why)}</span></div>`).join("");
 }
 
@@ -820,8 +827,8 @@ function renderConfigVars(){
   }
   pill.textContent=CODE.config.length+" field"+(CODE.config.length===1?"":"s");
   note.innerHTML=CODE.hasConfigAnnotation
-    ?"The class has <code>@Config</code>, so FTC Dashboard lists these too. Edits apply live — press INIT to start from the source values."
-    :"Edits apply live. Note the class has no <code>@Config</code>, so FTC Dashboard itself won't list these until you add it.";
+    ?"Edits apply live. INIT starts from the source values."
+    :"Edits apply live. (No <code>@Config</code>, so FTC Dashboard won't list them.)";
   box.innerHTML=CODE.config.map(f=>{
     const v=Sim.vars[f.name]!==undefined?Sim.vars[f.name]:0;
     const input=f.type==="boolean"
@@ -1802,7 +1809,9 @@ const SetupUI={
     chip.hidden=def||n===4||!LAST_STEP||this.chipGone===CAD;
     const seg=(attr,vals,cur)=>`<div class="seg">${vals.map(([v,t])=>`<button type="button" data-${attr}="${v}" class="${v===cur?"on":""}">${t}</button>`).join("")}</div>`;
     const ok=k=>done(k)?"":`<button class="btn-sm primary" type="button" data-su-ok="${k}">Looks right</button>`;
-    const li=(k,title,st,body)=>`<li class="su-step${done(k)?" done":""}"><div class="su-head"><b>${title}</b><span class="su-st">${esc(st)}${!SETUP.done[k]&&A[k]?" · found":""}</span></div>${body}</li>`;
+    // a step that's done folds to one line; click it to change it
+    const open=this.open||(this.open=new Set());
+    const li=(k,title,st,body)=>`<li class="su-step${done(k)?" done":""}"><details data-su-k="${k}"${!done(k)||open.has(k)||(k==="drive"&&this.formOpen)?" open":""}><summary class="su-head"><b>${title}</b><span class="su-st">${esc(st)}${!SETUP.done[k]&&A[k]?" · found":""}</span></summary>${body}</details></li>`;
     const out=[];
     // 1. floor and up
     out.push(li("up","Floor and up",F.up?"up is "+F.up:"",
@@ -1848,6 +1857,9 @@ const SetupUI={
     $("#vpSetup").addEventListener("click",()=>{ const nav=$('.tabs[data-tabs="left"]'); if(nav) selectTab(nav,"robot");
       const s=document.querySelector('[data-sec="setup"]'); if(s) s.scrollIntoView({block:"start", behavior:"smooth"}); this.chipGone=CAD; this.render(); });
     $("#setupSteps").addEventListener("click",e=>{
+      // a step the user opens stays open across re-renders (only their clicks count, not the first draw)
+      const sm=e.target.closest("summary"), dt=sm&&sm.parentElement;
+      if(dt&&dt.dataset.suK){ const o=this.open||(this.open=new Set()); if(dt.open) o.delete(dt.dataset.suK); else o.add(dt.dataset.suK); return; }
       const b=e.target.closest("button"); if(!b) return;
       const d=b.dataset;
       if(d.suOk) this.confirm(d.suOk);
@@ -1900,7 +1912,7 @@ function renderRobotCheckNow(){
   // nothing to ask: say so, and say when there would be (joints the bench had to guess)
   const guessed=RC.items.some(i=>i.key==="source"&&i.ask==="mates");
   put((open.length?open.map(row).join(""):`<p class="rc-done">Nothing to ask: every motor and servo your code moves has a joint, and every joint checks out.</p>`+
-      (guessed?"":`<p class="hint">These joints were made for this robot, so there are no questions. A robot with no Onshape mates or joint spec gets its joints guessed, and then this asks you about anything it isn't sure of. ${btn("guess","","See it with guessed joints")}</p>`))+
+      (guessed?"":`<p class="hint">These joints came with the robot, so nothing is guessed. ${btn("guess","","See it with guessed joints")}</p>`))+
     (ok.length?`<details class="rc-ok"><summary>${ok.length} checked</summary>${ok.map(row).join("")}</details>`:""));
   boxes.forEach(box=>box.querySelectorAll("[data-rc]").forEach(b=>b.addEventListener("click",()=>robotCheckAct(b.dataset.rc,b.dataset.a))));
 }
