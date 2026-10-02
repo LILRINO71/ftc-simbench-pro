@@ -116,7 +116,14 @@ JvProgram.prototype.init=function(){
   if(!this.self||this.done) return;
   this.attached=true;
   if(this.linear){ this.gen=vm.invoke(this.self,"runOpMode",[],null); this.step(); }
-  else{ this.drain(vm.invoke(this.self,"init",[],null)); }
+  else{ this.drain(vm.invoke(this.self,"init",[],null)); this.autoTel(); }
+};
+/* An iterative OpMode's telemetry: the SDK sends it after init(), init_loop(),
+   start() and each loop() by itself, so an OpMode that never calls
+   telemetry.update() still shows its lines. */
+JvProgram.prototype.autoTel=function(){
+  if(this.linear||!this.vm) return;
+  const t=jvTel(this.vm); if(t.lines.length) JV_TEL_M.update(this.vm);
 };
 /* A driver waits for INIT to finish before pressing START: run INIT's sleeps
    (a hub-by-hub firmware readout, a servo settling) until the OpMode parks on
@@ -136,7 +143,7 @@ JvProgram.prototype.start=function(){
   this.started=true;
   const vm=this.vm;
   if(this.linear){ if(this.waitStart||this.gen){ this.waitStart=false; this.resumeAt=0; this.step(); } }
-  else if(this.self&&!this.done){ this.drain(vm.invoke(this.self,"start",[],null)); }
+  else if(this.self&&!this.done){ this.drain(vm.invoke(this.self,"start",[],null)); this.autoTel(); }
 };
 /* One sim tick: threads the OpMode started, then the OpMode itself. */
 JvProgram.prototype.tick=function(){
@@ -155,7 +162,7 @@ JvProgram.prototype.tick=function(){
     this.step();
     return;
   }
-  if(!this.started){ if(this.self){ const g=vm.invoke(this.self,"init_loop",[],null); this.drain(g); } return; }
+  if(!this.started){ if(this.self){ const g=vm.invoke(this.self,"init_loop",[],null); this.drain(g); this.autoTel(); } return; }
   if(now<this.resumeAt) return;
   if(!this.gen) this.gen=vm.invoke(this.self,"loop",[],null);
   // an iterative loop() runs to its end each tick; a sleep inside it holds the next one
@@ -163,7 +170,7 @@ JvProgram.prototype.tick=function(){
   try{
     for(let guard=0;guard<1e5;guard++){
       const r=this.gen.next();
-      if(r.done){ this.gen=null; return; }
+      if(r.done){ this.gen=null; this.autoTel(); return; }
       if(r.value&&r.value.sleep!=null){ this.resumeAt=now+r.value.sleep/1000; return; }
       if(r.value&&r.value.gate) return;
     }

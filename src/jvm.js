@@ -1011,6 +1011,7 @@ JVM.prototype.run=function*(m,self,args,owner){
   const prevCls=this.curCls, prevM=this.curMeth; this.curCls=owner||(self&&self.__c)||prevCls; this.curMeth=m.name;
   try{
     const r=yield* this.exBlock(m.body.body,sc);
+    this.lastRk=jvTypeKind(m.ret);
     if(r&&r.s===JV_RET) return m.ret?jvCoerce(r.v,m.ret):r.v;
     return undefined;
   } catch(e){ if(e&&typeof e==="object"&&!e.__where) e.__where=this.where(); throw e; }
@@ -1260,7 +1261,10 @@ JVM.prototype.kind=function(e,sc){
     case "name":{ const s=sc.find(e.name); let t=s?s.t[e.name]:null;
       if(!s){ const fr=sc.fr; const c=fr&&fr.cls; t=c?this.fieldType(c,e.name):null; }
       return t&&!t.dims?(t.name==="char"?"c":JV_INTS.has(t.name)?"i":null):null; }
-    case "field":{ if(e.name==="length") return "i"; const r=this.nodeInfo.get(e), t=r&&r.ftype; return t&&!t.dims?(JV_INTS.has(t.name)?"i":null):null; }
+    case "field":{ if(e.name==="length") return "i";
+      if(/^(MAX|MIN)_VALUE$/.test(e.name)&&e.obj&&e.obj.k==="name"&&/^(Integer|Long|Short|Byte)$/.test(e.obj.name)) return "i";
+      const r=this.nodeInfo.get(e), t=r&&r.ftype; return t&&!t.dims?(t.name==="char"?"c":JV_INTS.has(t.name)?"i":null):null; }
+    case "index":{ const t=this.typeOf(e,sc); return t&&!t.dims?(t.name==="char"?"c":JV_INTS.has(t.name)?"i":null):null; }
     case "call":{ const r=this.nodeInfo.get(e); return r&&r.rk||null; }
     case "un": return e.op==="!"?null:this.kind(e.a,sc);
     case "pre": case "post": return this.kind(e.a,sc);
@@ -1274,6 +1278,14 @@ JVM.prototype.kind=function(e,sc){
     case "cond": { const a=this.kind(e.a,sc), b=this.kind(e.b,sc); return a===b?a:null; }
     case "assign": return this.kind(e.t,sc);
   }
+  return null;
+};
+/* The declared type of a name, a field or an array element, or null */
+JVM.prototype.typeOf=function(e,sc){
+  if(e.k==="paren") return this.typeOf(e.e,sc);
+  if(e.k==="name"){ const s=sc.find(e.name); if(s) return s.t[e.name]||null; const c=sc.fr&&sc.fr.cls; return c?this.fieldType(c,e.name):null; }
+  if(e.k==="field"){ const r=this.nodeInfo.get(e); return r&&r.ftype||null; }
+  if(e.k==="index"){ const t=this.typeOf(e.a,sc); return t&&t.dims?Object.assign({},t,{dims:t.dims-1}):null; }
   return null;
 };
 JVM.prototype.fieldType=function(c,name){
@@ -1488,7 +1500,7 @@ JVM.prototype.binop=function*(e,sc){
   if(e.op==="||") return jvTruth(yield* this.ev(e.a,sc))||jvTruth(yield* this.ev(e.b,sc));
   const a=yield* this.ev(e.a,sc), b=yield* this.ev(e.b,sc);
   switch(e.op){
-    case "==": return jvEq(a,b)||(a&&b&&a.__type&&b.__type&&a.__type===b.__type);
+    case "==": return !!(jvEq(a,b)||(a&&b&&a.__type&&b.__type&&a.__type===b.__type));
     case "!=": return !(jvEq(a,b)||(a&&b&&a.__type&&b.__type&&a.__type===b.__type));
     case "<": return jvNum(a)<jvNum(b);
     case ">": return jvNum(a)>jvNum(b);
@@ -1532,7 +1544,8 @@ JVM.prototype.store=function*(t,v,sc){
     const a=yield* this.ev(t.a,sc), ix=jvNum(yield* this.ev(t.i,sc));
     if(!Array.isArray(a)) { if(a==null) throw this.jthrow("NullPointerException","indexing null"); return v; }
     if(ix<0||ix>=a.length) throw this.jthrow("ArrayIndexOutOfBoundsException","Index "+ix+" out of bounds for length "+a.length);
-    a[ix]=v; return v;
+    const ty=this.typeOf(t,sc), cv=ty&&!ty.dims?jvCoerce(v,ty):v;
+    a[ix]=cv; return cv;
   }
   throw JvError("can't assign to "+t.k,t.p);
 };
@@ -1587,6 +1600,8 @@ JVM.prototype.methodRef=function*(e,sc){
 
 JVM.prototype.call=function*(e,sc){
   const args=[]; for(const a of e.args) args.push(yield* this.ev(a,sc));
+  // for natives that print a value the way Java would (StringBuilder.append(1) is "1")
+  this.argCtx={args:e.args,sc}; this.lastRk=undefined;
   let r;
   if(e.obj===null){
     // an unqualified call: this class, its supers, enclosing classes, a local lambda never
@@ -1644,23 +1659,36 @@ JVM.prototype.call=function*(e,sc){
     let o;
     if(e.obj.k==="name"&&!this.lookup(e.obj.name,sc)){ const c=this.typeIn(e.obj.name,sc); o=c?{__type:c}:yield* this.ev(e.obj,sc); }
     else o=yield* this.ev(e.obj,sc);
+    // the object may itself be a call (a.b().c()): this call's own facts again
+    this.argCtx={args:e.args,sc}; this.lastRk=undefined;
     if(o&&o.__pkg){ this.note(o.__pkg+"."+e.name); r=this.opaqueVal(o.__pkg+"."+e.name); }
     else if(o&&o.__type&&!o.classLit) r=yield* this.invokeStatic(o.__type,e.name,args,e);
     else if(o&&o.__type&&o.classLit) r=jvClassMethod(o.__type,e.name,args);
     else r=yield* this.invoke(o,e.name,args,e);
   }
   if(r&&r.__block){ const b=r.__block; yield b; r=r.then?r.then():undefined; }
-  this.setRk(e,r);
+  this.setRk(e,r,sc);
   return r;
 };
 /* Remember whether a call returned an int, for the / that uses it */
-JVM.prototype.setRk=function(e,r){
+JVM.prototype.setRk=function(e,r,sc){
   const ni=this.ni(e);
   if(ni.rk!==undefined) return;
+  // a method the team wrote: its declared return type
+  if(this.lastRk){ ni.rk=this.lastRk; return; }
+  const on=e.obj&&e.obj.k==="name"?e.obj.name:null;
+  if(e.name==="charAt"){ ni.rk="c"; return; }
+  if(e.name==="signum"){ ni.rk=on==="Integer"||on==="Long"?"i":null; return; }
+  if((on==="Math"||on==="StrictMath")&&/^(abs|max|min)$/.test(e.name)&&sc){ ni.rk=e.args.every(a=>{ const k=this.kind(a,sc); return k==="i"||k==="c"; })?"i":null; return; }
+  if(on==="System"&&/^(currentTimeMillis|nanoTime)$/.test(e.name)){ ni.rk="i"; return; }
   ni.rk=(JV_INT_METHODS.has(e.name)&&typeof r==="number"&&Number.isInteger(r))?"i":null;
 };
+/* The kind of a value of declared type t: "i" for the int types, "c" for char */
+function jvTypeKind(t){ return t&&!t.dims?(t.name==="char"||t.name==="Character"?"c":JV_INTS.has(t.name)?"i":null):null; }
+/* The kind of the current native call's i-th argument (see argCtx) */
+JVM.prototype.argKind=function(i){ const c=this.argCtx; return c&&c.args[i]?this.kind(c.args[i],c.sc):null; };
 const JV_INT_METHODS=new Set(["getCurrentPosition","getTargetPosition","size","length","ordinal","indexOf","lastIndexOf","intValue","longValue","parseInt","parseLong",
-  "round","getPortNumber","compareTo","floorDiv","floorMod","getTargetPositionTolerance","nextInt","hashCode","getAsInt","toIntExact","charAt","count","signum"]);
+  "round","getPortNumber","compareTo","floorDiv","floorMod","getTargetPositionTolerance","nextInt","hashCode","getAsInt","toIntExact","count"]);
 function jvClassMethod(c,name){
   if(name==="getSimpleName") return c.name;
   if(name==="getName"||name==="getCanonicalName"||name==="getTypeName") return c.fqn;
