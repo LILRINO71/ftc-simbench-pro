@@ -535,7 +535,8 @@ function JVM(units,natives){
   this.natives=natives||{};
   this.opaque=new Map();           // stub classes made up on the fly
   this.stubbed=new Map();          // "Class.method" -> count, what the stubs absorbed
-  this.budget=0;                   // statements left before a forced tick (a busy-wait)
+  this.BUDGET=20000; this.budget=this.BUDGET;   // loop passes left before a forced tick (a busy-wait)
+  this.steps=0; this.gateMark=-1;   // statements run, and the count at the last gate
   this.host=null;
   for(const u of units) for(const d of u.types) this.declare(d,u,null);
   for(const k in this.natives) this.declareNative(k,this.natives[k]);
@@ -591,7 +592,23 @@ JVM.prototype.opaqueClass=function(name){
   return c;
 };
 JVM.prototype.opaqueVal=function(name){ return {__c:this.opaqueClass(name),f:Object.create(null),n:null,[JV_OPAQUE_TAG]:true}; };
-JVM.prototype.note=function(what){ this.stubbed.set(what,(this.stubbed.get(what)||0)+1); };
+JVM.prototype.mk=function(fqn,fields,n){
+  const c=this.classes.get(fqn)||this.opaqueClass(fqn);
+  const o={__c:c,f:Object.create(null),n:n||null};
+  for(let k=c;k;k=this.supOf(k)) if(k.decl) for(const f of k.fields) if(!(f.name in o.f)) o.f[f.name]=jvDefault(f.type);
+  if(fields) Object.assign(o.f,fields);
+  return o;
+};
+JVM.prototype.enumConst=function(fqn,name){
+  const c=this.classes.get(fqn); if(!c) return null;
+  if(!c.ready) jvDrain(this.ready(c));
+  return c.sf[name]||null;
+};
+JVM.prototype.note=function(what){
+  const e=this.stubbed.get(what);
+  if(e){ e.n++; return; }
+  const w=this.where(); this.stubbed.set(what,{n:1,file:w.file,pos:w.pos});
+};
 
 /* ---- type resolution ---- */
 const JV_LANG={String:1,Object:1,Math:1,Integer:1,Double:1,Float:1,Long:1,Boolean:1,Character:1,Short:1,Byte:1,Number:1,System:1,Thread:1,Runnable:1,
@@ -628,6 +645,10 @@ JVM.prototype.findType0=function(name,ctx){
   if(u){
     for(const t of u.types) if(t.name===name){ const c=this.classes.get(u.pkg?u.pkg+"."+name:name); if(c) return c; }
     for(const im of u.imports){
+      if(im.static&&!im.star&&im.name.endsWith("."+name)){
+        const o=this.findType(im.name.slice(0,im.name.length-name.length-1),null), n=o&&this.nestedOf(o,name);
+        if(n) return n;
+      }
       if(im.static||im.star) continue;
       if(im.name===name||im.name.endsWith("."+name)){
         if(this.classes.has(im.name)) return this.classes.get(im.name);
@@ -715,10 +736,14 @@ JVM.prototype.ready=function*(c){
     }
   }
   const sc=this.staticScope(c);
+  const prevCls=this.curCls; this.curCls=c;
+  try{
   for(const m of c.sinits){
     if(m.k==="field"){ if(m.init) c.sf[m.name]=jvCoerce(yield* this.evInit(m.init,m.type,sc),m.type); }
     else yield* this.exBlock(m.body.body,new JvScope(sc));
   }
+  } catch(e){ if(e&&typeof e==="object"&&!e.__where) e.__where=this.where(); throw e; }
+  finally { this.curCls=prevCls; }
 };
 JVM.prototype.staticScope=function(c){ const s=new JvScope(null,{self:null,cls:c}); return s; };
 function jvDefault(t){
@@ -765,6 +790,8 @@ JVM.prototype.runCtor=function*(c,o,args,node){
   if(c.opaque){ return; }
   const ctor=this.pickMethod(c.ctors,args);
   const sup=this.supOf(c);
+  const prevCls=this.curCls; this.curCls=c;
+  try{
   const fr={self:o,cls:c};
   const sc=new JvScope(o.__cap||null,fr);
   if(ctor) this.bindParams(ctor.params,args,sc);
@@ -783,10 +810,14 @@ JVM.prototype.runCtor=function*(c,o,args,node){
     }
     yield* this.initFields(c,o);
   }
+  this.curCls=c;
   if(rest.length){ const r=yield* this.exBlock(rest,sc); void r; }
+  } catch(e){ if(e&&typeof e==="object"&&!e.__where) e.__where=this.where(); throw e; }
+  finally { this.curCls=prevCls; }
 };
 JVM.prototype.initFields=function*(c,o){
   const fr={self:o,cls:c}, sc=new JvScope(o.__cap||null,fr);
+  this.curCls=c;
   for(const m of c.inits){
     if(m.k==="field"){ if(m.init) o.f[m.name]=jvCoerce(yield* this.evInit(m.init,m.type,sc),m.type); }
     else yield* this.exBlock(m.body.body,new JvScope(sc));
@@ -819,8 +850,17 @@ JVM.prototype.pickMethod=function(list,args){
   for(const m of list){
     const ps=m.params, va=ps.length&&ps[ps.length-1].varargs;
     if(!(ps.length===args.length||(va&&args.length>=ps.length-1))) continue;
-    let s=ps.length===args.length?2:1;
-    for(let k=0;k<Math.min(ps.length,args.length);k++) s+=this.fit(args[k],ps[k].type);
+    let s=ps.length===args.length?2:1, bad=false;
+    for(let k=0;k<args.length;k++){
+      const p=ps[Math.min(k,ps.length-1)];
+      if(!p) break;
+      // a varargs slot takes its element type, unless one array is passed for it
+      const vslot=p.varargs&&k>=ps.length-1&&!(args.length===ps.length&&(Array.isArray(args[k])||args[k]===null));
+      const f=this.fit(args[k],vslot?{name:p.type.name,dims:p.type.dims-1}:p.type);
+      if(f===0) bad=true;
+      s+=f;
+    }
+    if(bad) s-=10;
     if(s>bs){ bs=s; best=m; }
   }
   return best||list.find(m=>m.params.length===args.length)||null;
@@ -832,21 +872,39 @@ JVM.prototype.fit=function(v,t){
   if(typeof v==="number") return n==="double"||n==="float"?3:JV_INTS.has(n)?(Number.isInteger(v)?3:1):(n==="Double"||n==="Number"||n==="Object"?2:0);
   if(typeof v==="boolean") return n==="boolean"||n==="Boolean"?3:0;
   if(typeof v==="string") return n==="String"||n==="CharSequence"||n==="Object"?3:0;
-  if(v instanceof JvFn) return (JV_PRIM.has(n)||n==="String")?0:2;
-  if(jvIsObj(v)) return v.__c.name===n?4:this.isSubName(v.__c,n.replace(/^.*\./,""))?3:(JV_PRIM.has(n)?0:1);
+  if(v instanceof JvFn){ if(JV_PRIM.has(n)||n==="String") return 0; if(JV_FUNC_IFACE.test(n)) return 3; const l=this.bySimple.get(n.replace(/^.*\./,"")); return l&&l.some(c=>this.isFunctional(c))?3:1; }
+  if(jvIsObj(v)){
+    if(v.__c.name===n) return 4;
+    const sn=n.replace(/^.*\./,"");
+    if(this.isSubName(v.__c,sn)||v[JV_OPAQUE_TAG]||v.__c.opaque||sn==="Object") return 3;
+    if(JV_PRIM.has(n)||n==="String") return 0;
+    // a type the VM knows that this object isn't: no fit; one it can't see: maybe
+    return (this.bySimple.has(sn)||JV_FUNC_IFACE.test(sn))&&!this.hasNativeBase(v.__c)?0:1;
+  }
   if(v===null) return JV_PRIM.has(n)?0:1;
   return 1;
+};
+const JV_FUNC_IFACE=/^(?:java\.\w+\.(?:function\.)?)?(Runnable|Callable|Supplier|Consumer|BiConsumer|Function|BiFunction|Predicate|BiPredicate|BooleanSupplier|DoubleSupplier|IntSupplier|LongSupplier|DoubleUnaryOperator|DoubleBinaryOperator|UnaryOperator|BinaryOperator|DoubleConsumer|IntConsumer|DoubleFunction|IntFunction|ToDoubleFunction|ToIntFunction|Comparator|InstantFunction|\w*Listener|\w*Callback)$/;
+/* An interface with exactly one abstract method: a lambda can be one */
+JVM.prototype.isFunctional=function(c){
+  if(!c||c.kind!=="interface") return false;
+  if(c.native) return !!c.native.functional;
+  if(c.functional!==undefined) return c.functional;
+  let n=0; for(const [,l] of c.methods) for(const m of l) if(!m.body&&!m.static) n++;
+  return (c.functional=n===1);
 };
 /* Every method with this name, from the class up its supers and interfaces */
 JVM.prototype.methodsOf=function(c,name){
   const out=[], seen=new Set(), st=[c];
   while(st.length){ const k=st.shift(); if(!k||seen.has(k)) continue; seen.add(k);
     const l=k.methods&&k.methods.get(name);
-    if(l) for(const m of l) if(!out.some(o=>o.params.length===m.params.length&&o.body)) out.push(Object.assign(m,{owner:m.owner||k}));
+    // an override hides its super's method of the same signature; other overloads stay
+    if(l) for(const m of l){ const sig=jvSig(m); if(!out.some(o=>o.body&&jvSig(o)===sig)) out.push(Object.assign(m,{owner:m.owner||k})); }
     st.push(this.supOf(k)); for(const f of this.ifsOf(k)) st.push(f); }
   // a concrete one before an abstract one with the same arity
   return out.sort((a,b)=>(a.body?0:1)-(b.body?0:1));
 };
+function jvSig(m){ return m.sig||(m.sig=m.params.map(p=>p.type.name.replace(/^.*\./,"")+"[]".repeat(p.type.dims||0)).join(",")); }
 JVM.prototype.findMethod=function(c,name,args){
   const own=this.methodsOf(c,name);
   const m=this.pickMethod(own.filter(x=>x.body),args)||this.pickMethod(own,args);
@@ -859,6 +917,8 @@ JVM.prototype.nativeMethod=function(c,name){
   }
   return null;
 };
+JVM.prototype.isLib=function(c){ for(let k=c;k;k=k.outer) if(k.decl&&k.decl.lib) return true; return false; };
+JVM.prototype.isBuilder=function(c){ for(let k=c;k;k=this.supOf(k)) if(this.builders.has(k.fqn)) return true; return false; };
 JVM.prototype.hasNativeBase=function(c){ for(let k=c;k;k=this.supOf(k)) if(k.native||k.opaque) return k; return null; };
 
 /* Call a method on a receiver. */
@@ -878,7 +938,13 @@ JVM.prototype.invoke=function*(self,name,args,node,startCls){
   // Object's methods, and enum constants'
   const om=yield* this.objectMethod(self,name,args,node);
   if(om!==JV_NONE) return om;
+  // a library builder: any setter records its value and hands the object back
+  for(let k=startCls||c, g=0; k&&g<30; k=this.supOf(k), g++) if(k.native&&k.native.any){ const r=k.native.any(this,self,name,args,node); return (r&&typeof r.next==="function"&&typeof r[Symbol.iterator]==="function")?yield* r:r; }
   if(m&&!m.body){ throw this.jthrow("AbstractMethodError",c.name+"."+name+"() has no body"+jvWhere(node)); }
+  // a library builder written in Java: a setter it doesn't spell out still chains
+  if(this.builders&&this.isBuilder(c)){ this.note(c.name+"."+name); return self; }
+  // the library classes here are partial: a member they don't spell out is a stub
+  if(this.isLib(c)){ this.note(c.name+"."+name); return jvOpaqueResult(this,name,c.name,args); }
   // a class that extends a library type nobody describes: its methods are stubs
   if(this.hasNativeBase(c)){ this.note(c.name+"."+name); return jvOpaqueResult(this,name,c.name,args); }
   throw this.jthrow("NoSuchMethodError",c.name+" has no method "+name+"("+args.length+" args)"+jvWhere(node));
@@ -889,7 +955,7 @@ JVM.prototype.objectMethod=function*(self,name,args,node){
   switch(name){
     case "equals": if(args.length===1) return jvEq(self,args[0]); break;
     case "hashCode": if(!args.length) return jvHash(self); break;
-    case "getClass": if(!args.length) return {__type:c}; break;
+    case "getClass": if(!args.length) return {__type:c,classLit:true}; break;
     case "toString": if(!args.length) return self.__en!==undefined?self.__en:c.name+"@"+(jvHash(self)>>>0).toString(16); break;
     case "name": if(self.__en!==undefined&&!args.length) return self.__en; break;
     case "ordinal": if(self.__en!==undefined&&!args.length) return self.__eo; break;
@@ -917,6 +983,7 @@ JVM.prototype.invokeStatic=function*(c,name,args,node){
   if(m&&m.body) return yield* this.run(m,null,args,m.owner);
   if(c.kind==="enum"){ if(name==="values") return c.consts.slice(); if(name==="valueOf") return c.sf[args[args.length-1]]||null; }
   const s=this.supOf(c); if(s&&(s.native||s.opaque)) return yield* this.invokeStatic(s,name,args,node);
+  if(this.isLib(c)){ this.note(c.name+"."+name); return jvOpaqueResult(this,name,c.name,args); }
   throw this.jthrow("NoSuchMethodError",c.name+" has no static method "+name+jvWhere(node));
 };
 /* Run a method body. */
@@ -925,11 +992,18 @@ JVM.prototype.run=function*(m,self,args,owner){
   this.bindParams(m.params,args,sc);
   this.depth=(this.depth||0)+1;
   if(this.depth>400){ this.depth=0; throw this.jthrow("StackOverflowError","calls nested too deep in "+m.name+"()"); }
+  const prevCls=this.curCls, prevM=this.curMeth; this.curCls=owner||(self&&self.__c)||prevCls; this.curMeth=m.name;
   try{
     const r=yield* this.exBlock(m.body.body,sc);
     if(r&&r.s===JV_RET) return m.ret?jvCoerce(r.v,m.ret):r.v;
     return undefined;
-  } finally { this.depth--; }
+  } catch(e){ if(e&&typeof e==="object"&&!e.__where) e.__where=this.where(); throw e; }
+  finally { this.depth--; this.curCls=prevCls; this.curMeth=prevM; }
+};
+/* Where the VM is: file and line, for a crash report */
+JVM.prototype.where=function(){
+  const u=this.curCls&&this.unitOf(this.curCls);
+  return {file:u?u.file:null,pos:this.at,cls:this.curCls&&this.curCls.name,meth:this.curMeth};
 };
 /* A lambda, a method reference or a native function value. */
 JVM.prototype.callFn=function*(fn,args,name){
@@ -968,7 +1042,7 @@ JVM.prototype.tickCheck=function*(node){
   if(--this.budget<0){ this.budget=this.BUDGET; yield {gate:true,forced:true,at:node&&node.p}; }
 };
 JVM.prototype.ex=function*(st,sc){
-  this.at=st.p;
+  this.at=st.p; this.steps++;
   switch(st.k){
     case "expr": yield* this.ev(st.e,sc); return null;
     case "local":
@@ -1219,7 +1293,10 @@ JVM.prototype.lookup=function(name,sc){
   const u=fr&&fr.cls&&this.unitOf(fr.cls);
   if(u) for(const im of u.imports) if(im.static){
     if(im.star){ const c=this.findType(im.name,null); if(c&&(name in c.sf||(c.decl&&c.sinits.some(f=>f.name===name))||(c.native&&c.native.sf&&name in c.native.sf)||(c.native&&c.native.enumConsts&&c.native.enumConsts.indexOf(name)>=0)||(c.decl&&c.decl.kind==="enum"&&c.decl.consts.some(q=>q.name===name)))) return {k:"static",c}; }
-    else if(im.name.endsWith("."+name)){ const c=this.findType(im.name.slice(0,im.name.length-name.length-1),null); if(c) return {k:"static",c}; }
+    else if(im.name.endsWith("."+name)){ const c=this.findType(im.name.slice(0,im.name.length-name.length-1),null);
+      // `import static a.B.Inner;` brings in a nested class, not a field
+      if(c&&!(name in c.sf)&&!(c.decl&&c.sinits.some(f=>f.name===name))&&this.nestedOf(c,name)) continue;
+      if(c) return {k:"static",c}; }
   }
   return null;
 };
@@ -1240,7 +1317,10 @@ JVM.prototype.ev=function*(e,sc){
         if(w.k==="local") return w.s.v[e.name];
         if(w.k==="field") return w.o.f[e.name];
         if(w.k==="nfield") return w.c.native.get(this,w.o,e.name);
-        yield* this.ready(w.c); return e.name in w.c.sf?w.c.sf[e.name]:(w.c.native&&w.c.native.sf&&e.name in w.c.native.sf?w.c.native.sf[e.name]:null);
+        yield* this.ready(w.c);
+        if(e.name in w.c.sf) return w.c.sf[e.name];
+        if(w.c.native&&w.c.native.sget){ const r=w.c.native.sget(this,e.name); if(r!==undefined) return r; }
+        return null;
       }
       const c=this.typeIn(e.name,sc);
       if(c) return {__type:c};
@@ -1366,7 +1446,7 @@ JVM.prototype.instOf=function(v,tname,sc){
   if(typeof v==="number") return /^(Number|Double|Integer|Float|Long|Short|Byte|Comparable)$/.test(n);
   if(typeof v==="boolean") return n==="Boolean";
   if(Array.isArray(v)) return false;
-  if(v instanceof JvFn) return true;
+  if(v instanceof JvFn){ const t=this.typeIn(tname,sc); return JV_FUNC_IFACE.test(n)||!!(t&&this.isFunctional(t)); }
   if(!v.__c) return false;
   const t=this.typeIn(tname,sc);
   return t?this.isSub(v.__c,t)||this.isSubName(v.__c,n):this.isSubName(v.__c,n);
@@ -1456,7 +1536,7 @@ JVM.prototype.getField=function*(o,name,e,sc){
       for(const f of this.ifsOf(k)){ yield* this.ready(f); if(name in f.sf) return f.sf[name]; }
     }
     if(c.opaque){ this.note(c.name+"."+name); return this.opaqueVal(c.fqn+"."+name); }
-    if(this.hasNativeBase(c)) return this.opaqueVal(c.fqn+"."+name);
+    if(this.hasNativeBase(c)||this.isLib(c)){ this.note(c.name+"."+name); return this.opaqueVal(c.fqn+"."+name); }
     throw this.jthrow("NoSuchFieldError",c.name+"."+name+jvWhere(e));
   }
   if(typeof o==="string"||typeof o==="number"||typeof o==="boolean") return undefined;
@@ -1465,7 +1545,7 @@ JVM.prototype.getField=function*(o,name,e,sc){
   for(let k=o.__c;k;k=this.supOf(k)) if(k.native&&k.native.get){ const r=k.native.get(this,o,name); if(r!==undefined) return r; }
   // a static read through an instance
   for(let k=o.__c;k;k=this.supOf(k)) if(name in k.sf) return k.sf[name];
-  if(this.hasNativeBase(o.__c)) return this.opaqueVal(name);
+  if(this.hasNativeBase(o.__c)||this.isLib(o.__c)){ this.note(o.__c.name+"."+name); return this.opaqueVal(name); }
   return null;
 };
 JVM.prototype.methodRef=function*(e,sc){
@@ -1523,6 +1603,10 @@ JVM.prototype.call=function*(e,sc){
       }
     }
     if(!done){
+      for(let k=fr&&fr.cls;k&&!done;k=k.outer) if(k.kind==="enum"&&(e.name==="values"||e.name==="valueOf")){ r=yield* this.invokeStatic(k,e.name,args,e); done=true; }
+      if(!done&&fr&&fr.self){ const om=yield* this.objectMethod(fr.self,e.name,args,e); if(om!==JV_NONE){ r=om; done=true; } }
+    }
+    if(!done){
       // static imports
       const u=fr&&fr.cls&&this.unitOf(fr.cls);
       if(u) for(const im of u.imports) if(im.static&&(im.star||im.name.endsWith("."+e.name))){
@@ -1562,7 +1646,8 @@ JVM.prototype.setRk=function(e,r){
 const JV_INT_METHODS=new Set(["getCurrentPosition","getTargetPosition","size","length","ordinal","indexOf","lastIndexOf","intValue","longValue","parseInt","parseLong",
   "round","getPortNumber","compareTo","floorDiv","floorMod","getTargetPositionTolerance","nextInt","hashCode","getAsInt","toIntExact","charAt","count","signum"]);
 function jvClassMethod(c,name){
-  if(name==="getSimpleName"||name==="getName") return c.name;
+  if(name==="getSimpleName") return c.name;
+  if(name==="getName"||name==="getCanonicalName"||name==="getTypeName") return c.fqn;
   if(name==="isInstance") return false;
   return null;
 }

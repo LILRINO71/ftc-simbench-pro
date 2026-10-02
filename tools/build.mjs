@@ -23,7 +23,7 @@ export const SITE = 'https://ftc-simbench-pro.pages.dev';
 
 // Concatenation order matters: later files use functions and constants the
 // earlier ones define. The engine never touches the DOM; only view3d and app do.
-export const ORDER = ['hardware', 'samples', 'step', 'hull', 'inertia', 'expr', 'java', 'roadrunner', 'mapping', 'robotconfig',
+export const ORDER = ['hardware', 'samples', 'step', 'hull', 'inertia', 'expr', 'jvm', 'jvmlib', 'jvmprelude', 'jvmrun', 'java', 'roadrunner', 'mapping', 'robotconfig',
   'compare', 'analyze', 'drivetrain', 'frame', 'mates', 'onshapelink', 'jointspec', 'autorig-lib', 'autorig', 'robotcheck', 'dynamics', 'field', 'shots', 'match', 'robotlite', 'net', 'controllers', 'session', 'mathdoc',
   'gitimport', 'onboarding', 'sim', 'tessellate', 'view3d', 'cadview', 'app'];
 

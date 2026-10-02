@@ -19,7 +19,8 @@ test('coverage: a clean competition OpMode runs nearly everything', () => {
 test('coverage: unsupported lines are reported with the right line number, not dropped', () => {
   const src = COMP.replace('liftPid.setPID(kP, kI, kD);',
     'liftPid.setPID(kP, kI, kD);\n            for (int k = 0; k < 3; k++) { grip.setPosition(0.1); }\n            follower.update();\n            clicks++;');
-  const code = E.parseJava(src);
+  // the line reader on its own reports what it can't run
+  const code = E.parseJava(src, { engine: 'legacy' });
   const cov = E.coverage(code);
   const lines = src.split('\n');
   const lineOf = (needle) => lines.findIndex((l) => l.includes(needle)) + 1;
@@ -28,6 +29,13 @@ test('coverage: unsupported lines are reported with the right line number, not d
   assert.ok(loop, 'for loop reported'); assert.equal(loop.line, lineOf('for (int k'));
   assert.ok(call, 'call into another class reported'); assert.equal(call.line, lineOf('follower.update'));
   assert.ok(!cov.skipped.some((s) => /clicks/.test(s.text)), 'clicks++ is simulated, not skipped');
+  // the Java VM runs the loop, and still names the one thing it can't find, on its line
+  const vm = E.parseJava(src);
+  assert.equal(vm.engine, 'vm');
+  const vc = E.coverage(vm);
+  assert.ok(!vc.skipped.some((s) => /loops inside/.test(s.why)), 'the VM runs the for loop');
+  const f = vc.skipped.find((s) => /follower/.test(s.text));
+  assert.ok(f, 'the unknown follower is reported'); assert.equal(f.line, lineOf('follower.update'));
 });
 
 test('coverage: x++ and x-- are simulated', () => {

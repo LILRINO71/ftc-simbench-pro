@@ -1,0 +1,196 @@
+// The Java VM (src/jvm.js, jvmlib.js, jvmprelude.js, jvmrun.js): real team
+// code shapes the line reader in java.js couldn't run. Each OpMode here ran
+// nothing before the VM: hardware in a Robot class, FTCLib commands, Road
+// Runner's setDrivePowers, Pedro's TeleOp drive.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { loadEngine } from './load.mjs';
+
+const E = loadEngine();
+
+// a headless run: INIT, START, then `secs` with gamepad1 held as given
+function run(code, pad1, secs, onTick) {
+  const H = { t: 0, clock: 0, h: 0, pads: { 1: {}, 2: {} } };
+  const devs = new Map();
+  const host = {
+    dev(name, type, kind) { let s = devs.get(name); if (!s) { s = { name, type, kind, cmd: kind === 'servo' ? null : 0, act: 0, ticks: 0, offset: 0, vel: 0, target: 0, reversed: false, mode: 'run', tpr: 537.7, spec: { rpm: 312 } }; devs.set(name, s); } return s; },
+    pad(i) { return H.pads[i] || {}; }, now() { return H.clock; }, runtime() { return H.t; }, heading() { return H.h; }, omega() { return 0; },
+    pose() { return { x: 0, y: 0, h: H.h }; }, vel() { return { x: 0, y: 0 }; }, ray() { return 8.19; }, color() { return [0, 0, 0]; }, volts() { return 12.6; }, touch() { return false; },
+    telemetry(l) { H.tel = l; }, rumble() {},
+  };
+  const comp = E.jvCompile(code.main, code.libs || []);
+  assert.ok(comp.ok, comp.err);
+  const P = new E.JvProgram(comp, host);
+  P.init();
+  H.pads[1] = pad1 || {};
+  P.start();
+  for (let k = 0; k < Math.round(secs / 0.02); k++) { H.clock += 0.02; H.t += 0.02; P.tick(); for (const [, s] of devs) s.ticks += (s.cmd || 0) * 8; if (onTick) onTick(devs, k); }
+  return { P, devs, H };
+}
+
+const ROBOT = `package org.firstinspires.ftc.teamcode.hw;
+import com.qualcomm.robotcore.hardware.*;
+public class Robot {
+  public DcMotorEx lf, lb, rf, rb; public Servo claw;
+  private final HardwareMap hw;
+  public Robot(HardwareMap hw) { this.hw = hw; }
+  public void init() {
+    lf = hw.get(DcMotorEx.class, "leftFront"); lb = hw.get(DcMotorEx.class, "leftBack");
+    rf = hw.get(DcMotorEx.class, "rightFront"); rb = hw.get(DcMotorEx.class, "rightBack");
+    lf.setDirection(DcMotorSimple.Direction.REVERSE); lb.setDirection(DcMotorSimple.Direction.REVERSE);
+    claw = hw.get(Servo.class, "claw");
+  }
+  public void drive(double y, double x, double r) {
+    double d = Math.max(Math.abs(y) + Math.abs(x) + Math.abs(r), 1);
+    double[] p = { (y + x + r) / d, (y - x + r) / d, (y - x - r) / d, (y + x - r) / d };
+    DcMotorEx[] m = { lf, lb, rf, rb };
+    for (int i = 0; i < 4; i++) m[i].setPower(p[i]);
+  }
+}`;
+
+test('vm: a TeleOp whose hardware lives in a Robot class drives', () => {
+  const main = `package org.firstinspires.ftc.teamcode;
+import org.firstinspires.ftc.teamcode.hw.Robot;
+import com.qualcomm.robotcore.eventloop.opmode.*;
+@TeleOp(name="Main") public class Main extends LinearOpMode {
+  Robot robot;
+  public void runOpMode() {
+    robot = new Robot(hardwareMap); robot.init();
+    waitForStart();
+    while (opModeIsActive()) {
+      robot.drive(-gamepad1.left_stick_y, gamepad1.left_stick_x, gamepad1.right_stick_x);
+      if (gamepad1.a) robot.claw.setPosition(0.8); else if (gamepad1.b) robot.claw.setPosition(0.2);
+    }
+  }
+}`;
+  const fwd = run({ main, libs: [{ file: 'Robot.java', src: ROBOT }] }, { left_stick_y: -1 }, 0.2);
+  for (const n of ['leftFront', 'leftBack', 'rightFront', 'rightBack']) assert.ok(Math.abs(fwd.devs.get(n).cmd - 1) < 1e-9, n + ' full power');
+  assert.equal(fwd.devs.get('leftFront').reversed, true);
+  const a = run({ main, libs: [{ file: 'Robot.java', src: ROBOT }] }, { a: true }, 0.1);
+  assert.equal(a.devs.get('claw').cmd, 0.8);
+  // parseJava picks the VM, finds the four drive wheels from what the sticks do, and their corners
+  const code = E.parseJava(main, { libs: [{ file: 'Robot.java', src: ROBOT }] });
+  assert.equal(code.engine, 'vm');
+  const dt = E.detectDrivetrain(code);
+  assert.equal(dt.style, 'mecanum');
+  const w = Object.fromEntries(dt.wheels.map((x) => [x.dev, x]));
+  assert.ok(w.leftFront.left && w.leftFront.front && w.rightBack.right && w.rightBack.back, 'corners from turn and strafe');
+  assert.ok(E.isCommanded(code, 'claw'), 'the claw is found by pressing A');
+});
+
+test('vm: Java semantics teams rely on (int division, casts, strings, switch on an enum, lambdas, exceptions)', () => {
+  const main = `import com.qualcomm.robotcore.eventloop.opmode.*; import com.qualcomm.robotcore.hardware.*; import java.util.*;
+@TeleOp public class T extends LinearOpMode {
+  enum Mode { IDLE, UP, DOWN }
+  interface Op { double apply(double v); }
+  public void runOpMode() {
+    DcMotor m = hardwareMap.get(DcMotor.class, "m");
+    int a = 7 / 2; double b = 7 / 2.0; int c = (int) 3.9; long d = Math.round(2.5);
+    String s = "a" + a + b + 'x';
+    Mode mode = Mode.UP;
+    double out = 0;
+    switch (mode) { case IDLE: out = 0; break; case UP: out = 0.5; break; default: out = -1; }
+    List<Integer> l = new ArrayList<>(); for (int i = 0; i < 4; i++) l.add(i * i);
+    int sum = 0; for (int v : l) sum += v;
+    Op twice = v -> v * 2;
+    try { throw new IllegalStateException("x"); } catch (IllegalStateException e) { out += 0.1; } finally { out += 0.01; }
+    telemetry.addData("s", s); telemetry.addData("n", a + "," + c + "," + d + "," + sum); telemetry.update();
+    waitForStart();
+    while (opModeIsActive()) { m.setPower(twice.apply(out) / 4); }
+  }
+}`;
+  const r = run({ main }, {}, 0.06);
+  assert.deepEqual(r.H.tel, ['s : a33.5x', 'n : 3,3,3,14']);
+  assert.ok(Math.abs(r.devs.get('m').cmd - (0.61 * 2) / 4) < 1e-9);
+});
+
+test('vm: FTCLib command-based OpMode: subsystems, default command, button binding', () => {
+  const sub = `package org.firstinspires.ftc.teamcode;
+import com.arcrobotics.ftclib.command.SubsystemBase;
+import com.qualcomm.robotcore.hardware.*;
+public class Claw extends SubsystemBase { private final Servo s; public Claw(HardwareMap h){ s = h.get(Servo.class, "claw"); } public void open(){ s.setPosition(1); } public void close(){ s.setPosition(0); } }`;
+  const main = `package org.firstinspires.ftc.teamcode;
+import com.arcrobotics.ftclib.command.*; import com.arcrobotics.ftclib.gamepad.*; import com.arcrobotics.ftclib.drivebase.MecanumDrive; import com.arcrobotics.ftclib.hardware.motors.MotorEx;
+import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
+@TeleOp public class Cmd extends CommandOpMode {
+  public void initialize() {
+    GamepadEx g = new GamepadEx(gamepad1);
+    Claw claw = new Claw(hardwareMap);
+    MecanumDrive dr = new MecanumDrive(new MotorEx(hardwareMap, "fl"), new MotorEx(hardwareMap, "fr"), new MotorEx(hardwareMap, "bl"), new MotorEx(hardwareMap, "br"));
+    schedule(new RunCommand(() -> dr.driveRobotCentric(g.getLeftX(), g.getLeftY(), g.getRightX())));
+    g.getGamepadButton(GamepadKeys.Button.A).whenPressed(new InstantCommand(claw::open, claw));
+    g.getGamepadButton(GamepadKeys.Button.B).whenPressed(claw::close);
+  }
+}`;
+  const r = run({ main, libs: [{ file: 'Claw.java', src: sub }] }, { left_stick_y: -1, a: true }, 0.1);
+  assert.equal(r.P.error, null);
+  assert.equal(r.devs.get('claw').cmd, 1, 'A opened the claw through a command');
+  // FTCLib inverts the right side itself: forward is +left, -right in the motors' own frame
+  assert.ok(r.devs.get('fl').cmd > 0.99 && r.devs.get('fr').cmd < -0.99, 'stick up drives');
+});
+
+test('vm: Road Runner 1.0 setDrivePowers through the team\'s own MecanumDrive', () => {
+  const drive = `package org.firstinspires.ftc.teamcode;
+import com.acmerobotics.roadrunner.*; import com.qualcomm.robotcore.hardware.*;
+public final class MecanumDrive {
+  public final DcMotorEx leftFront, leftBack, rightBack, rightFront; public Pose2d pose;
+  public MecanumDrive(HardwareMap hardwareMap, Pose2d pose) { this.pose = pose;
+    leftFront = hardwareMap.get(DcMotorEx.class, "leftFront"); leftBack = hardwareMap.get(DcMotorEx.class, "leftBack");
+    rightBack = hardwareMap.get(DcMotorEx.class, "rightBack"); rightFront = hardwareMap.get(DcMotorEx.class, "rightFront");
+    leftFront.setDirection(DcMotorSimple.Direction.REVERSE); leftBack.setDirection(DcMotorSimple.Direction.REVERSE); }
+  public void setDrivePowers(PoseVelocity2d powers) {
+    MecanumKinematics.WheelVelocities<Time> wheelVels = new MecanumKinematics(1).inverse(PoseVelocity2dDual.constant(powers, 1));
+    double maxPowerMag = 1;
+    for (DualNum<Time> power : wheelVels.all()) maxPowerMag = Math.max(maxPowerMag, power.value());
+    leftFront.setPower(wheelVels.leftFront.get(0) / maxPowerMag); leftBack.setPower(wheelVels.leftBack.get(0) / maxPowerMag);
+    rightBack.setPower(wheelVels.rightBack.get(0) / maxPowerMag); rightFront.setPower(wheelVels.rightFront.get(0) / maxPowerMag);
+  }
+}`;
+  const main = `package org.firstinspires.ftc.teamcode;
+import com.acmerobotics.roadrunner.*; import com.qualcomm.robotcore.eventloop.opmode.*;
+@TeleOp public class RR extends LinearOpMode { public void runOpMode() {
+  MecanumDrive d = new MecanumDrive(hardwareMap, new Pose2d(0, 0, 0)); waitForStart();
+  while (opModeIsActive()) d.setDrivePowers(new PoseVelocity2d(new Vector2d(-gamepad1.left_stick_y, -gamepad1.left_stick_x), -gamepad1.right_stick_x));
+} }`;
+  const r = run({ main, libs: [{ file: 'MecanumDrive.java', src: drive }] }, { right_stick_x: 1 }, 0.06);
+  // turning right: left wheels forward, right wheels back (in the wheels' own sense)
+  assert.equal(Math.sign(r.devs.get('leftFront').cmd), 1);
+  assert.equal(Math.sign(r.devs.get('rightFront').cmd), -1);
+});
+
+test('vm: Pedro 2.x TeleOp drive from MecanumConstants names and directions', () => {
+  const consts = `package org.firstinspires.ftc.teamcode.pedro;
+import com.pedropathing.follower.*; import com.pedropathing.ftc.FollowerBuilder; import com.pedropathing.ftc.drivetrains.MecanumConstants;
+import com.qualcomm.robotcore.hardware.*;
+public class Constants {
+  public static FollowerConstants followerConstants = new FollowerConstants().mass(10);
+  public static MecanumConstants driveConstants = new MecanumConstants().leftFrontMotorName("FL").leftRearMotorName("BL").rightFrontMotorName("FR").rightRearMotorName("BR")
+    .leftFrontMotorDirection(DcMotorSimple.Direction.REVERSE).leftRearMotorDirection(DcMotorSimple.Direction.REVERSE).xVelocity(80);
+  public static Follower createFollower(HardwareMap hardwareMap) { return new FollowerBuilder(followerConstants, hardwareMap).mecanumDrivetrain(driveConstants).pinpointLocalizer(null).build(); }
+}`;
+  const main = `package org.firstinspires.ftc.teamcode;
+import com.pedropathing.follower.Follower; import com.qualcomm.robotcore.eventloop.opmode.*; import org.firstinspires.ftc.teamcode.pedro.Constants;
+@TeleOp public class P extends OpMode { Follower f;
+  public void init() { f = Constants.createFollower(hardwareMap); }
+  public void start() { f.startTeleopDrive(); }
+  public void loop() { f.setTeleOpDrive(-gamepad1.left_stick_y, -gamepad1.left_stick_x, -gamepad1.right_stick_x, true); f.update(); }
+}`;
+  const r = run({ main, libs: [{ file: 'Constants.java', src: consts }] }, { left_stick_y: -1 }, 0.06);
+  assert.equal(r.P.error, null);
+  for (const n of ['FL', 'BL', 'FR', 'BR']) assert.equal(r.devs.get(n).cmd, 1, n);
+  assert.equal(r.devs.get('FL').reversed, true);
+});
+
+test('vm: a crash is reported with its file and line, like the Driver Station would stop', () => {
+  const main = `import com.qualcomm.robotcore.eventloop.opmode.*; import com.qualcomm.robotcore.hardware.*;
+@TeleOp public class C extends LinearOpMode { DcMotor m;
+  public void runOpMode() {
+    waitForStart();
+    while (opModeIsActive()) {
+      m.setPower(1);
+    }
+  } }`;
+  const r = run({ main }, {}, 0.06);
+  assert.equal(r.P.error.cls, 'NullPointerException');
+  assert.equal(r.P.error.line, 6);
+});

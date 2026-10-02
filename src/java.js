@@ -372,6 +372,13 @@ function lineAt(code, at){
 
 /* What the interpreter actually runs, and what it had to skip. */
 function coverage(code){
+  // on the VM everything runs; what it couldn't is a library call it stubbed, or a crash
+  if(code&&code.vm){
+    const sk=(code.vm.stubs||[]).filter(x=>!/^(getTelemetry|FtcDashboard|TelemetryPacket|PanelsTelemetry|RobotLog|Log)\b/.test(x[0]))
+      .map(x=>({line:x[3]||null,file:x[2]||null,text:x[0].replace(/^\?/,"")+(/^\?/.test(x[0])?"":"(…)"),why:/^\?/.test(x[0])?"a name the bench can't find in your files":"a library call the bench doesn't model (it does nothing here)",phase:"loop"}));
+    if(code.vm.error) sk.unshift({line:code.vm.error.line,text:code.vm.error.cls+": "+code.vm.error.msg,why:"the OpMode stopped with this exception"+(code.vm.error.file?" in "+code.vm.error.file:""),phase:"loop"});
+    return {total:100+sk.length,understood:100,skipped:sk,vm:true};
+  }
   const devices={}; code.devices.forEach(d=>devices[d.name]=1);
   const timers={}; (code.timers||[]).forEach(n=>timers[n]=1);
   // a PID object: built before START, or declared with a PID type anywhere (a field)
@@ -594,7 +601,9 @@ function parseJava(raw,opts){
   // a Road Runner 1.0 auto: its trajectories and actions (src/roadrunner.js),
   // with the team's helper classes from the other files it was given
   if(typeof rrDetect==="function"&&rrDetect(src)) rrAttach(out,raw,(opts&&opts.libs)||[]);
-  return out;
+  // code the line reader can't follow (hardware in a Robot class, FTCLib, Road
+  // Runner and Pedro drives, loops, objects) runs on the Java VM instead (src/jvmrun.js)
+  return typeof jvMaybe==="function"?jvMaybe(out,raw,opts):out;
 }
 
 function idRefs(n, out){
@@ -661,6 +670,7 @@ function deriveBindings(stmts){
 }
 /* Does anything in the loop actually move this device? */
 function isCommanded(code,name){
+  if(code&&code.vm) return jvCommanded(code,name);
   let found=false;
   const scan=list=>{ for(const st of list||[]){
     if(st.kind==="if"){ scan(st.then); if(st.else) scan(st.else); }
@@ -677,6 +687,7 @@ function isCommanded(code,name){
    motor's RUN_TO_POSITION targets, which autos set too). */
 function travelRange(code,devName,op){
   op=op||"setPosition";
+  if(code&&code.vm){ const r=op==="setPosition"&&code.vm.an.ranges[devName]; return r?Object.assign({},r):null; }
   const vals=[]; const seenVar={};
   const scan=(list)=>{ for(const st of list){
     if(st.kind==="if"){ scan(st.then); if(st.else) scan(st.else); }

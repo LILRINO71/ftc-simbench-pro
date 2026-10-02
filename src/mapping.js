@@ -86,6 +86,8 @@ function wheelCorner(name){
 }
 /* Drive motors: those whose power comes straight off a stick. */
 function detectDrivetrain(code){
+  // on the VM the drive is what the motors did when the sticks moved (src/jvmrun.js)
+  if(code&&code.vm) return code.vm.an.drive?Object.assign({},code.vm.an.drive,{wheels:code.vm.an.drive.wheels.map(w=>Object.assign({},w))}):null;
   const motors=code.devices.filter(d=>/DcMotor/i.test(d.type||""));
   if(motors.length<2) return null;
   const analog={};

@@ -20,22 +20,10 @@ const Sim={
     this.code=code; this.cad=cad; this.map=map; this.opts=opts;
     this.bump=null; this.vel={x:0,y:0};
     this.pc=0; this.sleepEnd=null; this.sleptMs=0; this.autoDone=false; this.pass=null; this.resumeAt=0;
-    for(const d of code.devices){
-      const mech=cad.mechs.filter(m=>m.id===map[d.name])[0]||null;
-      const spec=specFor(d,mech,opts.trust);
-      let kind = spec.kind;
-      if (kind === "crservo") kind = "motor";
-      const isMotor=kind==="motor";
-      this.dev[d.name]={kind, mech, spec,
-        // a servo nothing has commanded yet is unpowered: it sits where the CAD drew it
-        cmd:isMotor?0:(mech&&Number.isFinite(mech.restPos)?mech.restPos:0.5),
-        act:isMotor?0:(mech&&Number.isFinite(mech.restPos)?mech.restPos:0.5), revs:0, ticks:0, stalled:false,
-        reversed:false, mode:"run", target:0,
-        tpr: 28*(spec.ratio||19.2),        // goBILDA: 28 counts per motor rev
-        // the servo position the CAD was drawn at: a joint spec says; else the code's own
-        restPos:(mech&&Number.isFinite(mech.restPos))?mech.restPos:restPosOf(code,d.name),
-        sec60:spec.sec60||0.18, travelDeg:travelDegOf(spec)};
-    }
+    this.clock=0; this.vmTel=null;
+    for(const d of code.devices) this.makeDev(d);
+    // the team's code on the Java VM (src/jvmrun.js): one program per run
+    this.prog=code.vm&&typeof JvProgram==="function"?new JvProgram(code.vm.comp,this.vmHost()):null;
     for(const v in code.vars) this.vars[v]=code.vars[v];
     for(const n of (code.timers||[])) this.timers[n]=0;
     this.dt=0.02;
@@ -56,10 +44,56 @@ const Sim={
     this.rr=code.rr&&typeof RRRuntime==="function"?RRRuntime(this,code.rr):null;
     this.phase="loaded";
   },
+  /* One device's state: what the code commands and what the mechanism does. */
+  makeDev(d){
+    const map=this.map||{}, cad=this.cad||{mechs:[]};
+    const mech=(cad.mechs||[]).filter(m=>m.id===map[d.name])[0]||null;
+    const spec=specFor(d,mech,this.opts&&this.opts.trust);
+    let kind = spec.kind;
+    if (kind === "crservo") kind = "motor";
+    const isMotor=kind==="motor";
+    return (this.dev[d.name]={kind, mech, spec,
+      // a servo nothing has commanded yet is unpowered: it sits where the CAD drew it
+      cmd:isMotor?0:(mech&&Number.isFinite(mech.restPos)?mech.restPos:0.5),
+      act:isMotor?0:(mech&&Number.isFinite(mech.restPos)?mech.restPos:0.5), revs:0, ticks:0, stalled:false,
+      reversed:false, mode:"run", target:0,
+      tpr: 28*(spec.ratio||19.2),        // goBILDA: 28 counts per motor rev
+      // the servo position the CAD was drawn at: a joint spec says; else the code's own
+      restPos:(mech&&Number.isFinite(mech.restPos))?mech.restPos:(this.code&&!this.code.vm?restPosOf(this.code,d.name):0.5),
+      sec60:spec.sec60||0.18, travelDeg:travelDegOf(spec)});
+  },
+  /* What the Java VM asks of the robot: devices, sticks, time, sensors. */
+  vmHost(){
+    const self=this;
+    return {
+      dev(name,type,kind){ return self.dev[name]||self.makeDev({name,type,cfg:name,intent:"",declaredRole:null}); },
+      pad(i){ return self.pad[i]||{}; },
+      now(){ return self.clock||0; }, runtime(){ return self.t; }, resetRuntime(){ self.t=0; },
+      heading(){ return self.chassis.h; },
+      omega(){ return self.dstate&&Number.isFinite(self.dstate.omega)?self.dstate.omega:0; },
+      pose(){ return {x:self.chassis.x,y:self.chassis.y,h:self.chassis.h}; },
+      vel(){ const v=self.vel||{x:0,y:0}, h=self.chassis.h, c=Math.cos(h), sn=Math.sin(h); return {x:v.x*c+v.y*sn, y:-v.x*sn+v.y*c}; },
+      ray(){ return self.frontRay(); },
+      color(){ let r=120,g=120,b=120; if(typeof Field!=="undefined"&&Field.ok&&Field.zoneAt){ const z=Field.zoneAt(self.chassis.x/0.0254,self.chassis.y/0.0254);
+        if(z==="red LOADING ZONE"){ r=200; g=50; b=50; } else if(z==="blue LOADING ZONE"){ r=50; g=50; b=200; } else if(z==="red side") r=140; else if(z==="blue side") b=140; } return [r,g,b]; },
+      volts(){ return 12.6; },
+      touch(name){ const s=self.dev[name]; if(!s||!s.mech) return self.frontRay()<0.015;
+        const drv=Object.values(self.dev).find(o=>o!==s&&o.mech===s.mech&&(o.kind==="motor"||o.kind==="servo"));
+        return drv?(drv.kind==="motor"?Math.abs(drv.ticks)<20:Math.abs(drv.act-drv.restPos)<0.02):false; },
+      telemetry(lines){ self.vmTel=lines; },
+      rumble(i,meth,a){ if(self.onRumble) self.onRumble(i,meth,a); },
+    };
+  },
   /* INIT: everything before waitForStart() — directions, PID objects, start positions. */
   init(){
     if(!this.code) return;
     this.imuZero=this.chassis.h;
+    if(this.prog){
+      this.prog.init();
+      for(const n in this.dev){ const s=this.dev[n]; if(s.kind==="servo") s.act=s.cmd; }
+      this.phase="init";
+      return;
+    }
     this.exec(this.code.inits||[],this.env());
     for(const n in this.dev){ const s=this.dev[n]; if(s.kind==="servo") s.act=s.cmd; }
     // Road Runner: which way the drive's motors move this robot is known once
@@ -74,8 +108,10 @@ const Sim={
     for(const n in this.timers) this.timers[n]=0;
     if(this.rr) this.rr.start();
     this.phase="running";
+    if(this.prog) this.prog.start();
   },
   stop(){
+    if(this.prog&&this.phase==="running") this.prog.stop();
     for(const n in this.dev){ const s=this.dev[n]; if(s.kind==="motor"){ s.cmd=0; s.mode="run"; } }
     this.phase="stopped";
   },
@@ -261,7 +297,13 @@ const Sim={
   tick(dt){
     if(!this.code||this.phase==="empty") return;
     this.dt=dt;
-    if(this.phase==="running"){
+    this.clock=(this.clock||0)+dt;
+    if(this.prog){
+      // the VM: INIT loops run while waiting, the OpMode once it's started
+      if(this.phase==="running"){ this.t+=dt; this.prog.tick(); }
+      else if(this.phase==="init") this.prog.tick();
+    }
+    else if(this.phase==="running"){
       this.t+=dt;
       if(this.code.hasLoop){
         // one pass of the loop per tick; a pass that sleeps holds until the
@@ -696,9 +738,12 @@ function buildRig(cad,dtn,base,dev,opts){
     // non-mecanum wheels roll along the CAD's own drive direction (a kiwi's
     // wheels point round the circle, an X-drive's at 45 degrees)
     const alpha=(kind!=="mecanum"&&g&&Number.isFinite(g.alpha))?g.alpha:0;
-    // which way positive power turns this wheel (src/drivetrain.js dtMounts):
-    // measured from the motor in the CAD, else the standard inboard build
-    const mount=(g&&(g.mount===1||g.mount===-1))?g.mount:(kind==="swerve"?1:(w.left?-1:1));
+    // which way positive power turns this wheel (src/drivetrain.js dtMounts).
+    // The team's own code on the VM says it best: it drives their real robot,
+    // so whatever sign its "stick up" gives a wheel rolls that wheel forward.
+    // Else measured from the motor in the CAD, else the standard inboard build.
+    const mount=(w.sense===1||w.sense===-1)&&o.mountFrom!=="cad"?w.sense
+      :(g&&(g.mount===1||g.mount===-1))?g.mount:(kind==="swerve"?1:(w.left?-1:1));
     // c: the CAD wheel's centre in the canonical frame, for the view to turn its parts
     wheels.push({x, y, z:0, r, roller, alpha, mount, corner:corner.length===2?corner:null, c:g&&g.c?g.c.slice():null});
     devs.push(w.dev);
