@@ -39,8 +39,9 @@ cannot do this: it refuses Pages on a private repo unless you pay
    - **Framework preset:** None
    - **Build command:** `npm run build:ship`
    - **Build output directory:** `dist`
-   - Nothing else. No environment variables, no secrets. (`.node-version` in the repo pins Node 22,
-     and there are no dependencies to install.)
+   - Nothing else. (`.node-version` in the repo pins Node 22, and there are no dependencies to
+     install.) Cloudflare also picks up `functions/` by itself: that's **Sign in with Onshape**,
+     which needs two secrets; see the next section.
 5. **Save and Deploy.** The first build takes about a minute. The link appears at the top of the
    page as `https://ftc-simbench-pro.pages.dev` — that is your shareable link, and every push to
    `main` rebuilds it automatically.
@@ -63,6 +64,40 @@ npm run build:ship
 the free plan, publishing this repo to Pages would mean making it public, which defeats the point.
 Use Cloudflare or Netlify instead, or publish only the built `dist/` to a separate public repo and
 accept that the bundle is readable (it is anyway — see below).
+
+## Sign in with Onshape (do this once)
+
+School computers block the "Send to SimBench" bookmark: their admins list `javascript:` URLs as
+blocked, so clicking it does nothing and dragging it shows `about:blank#blocked`. **Sign in with
+Onshape** works there instead. The team signs in through Onshape's own page, pastes their
+assembly's address, and gets the whole robot. It runs in `functions/onshape/[[path]].js`, a
+Cloudflare Pages Function that ships with the site, and it needs an Onshape app of yours:
+
+1. Go to <https://dev-portal.onshape.com>, sign in with your Onshape account, and open
+   **OAuth applications → Create new OAuth application**.
+   - **Name:** `FTC SimBench` (teams see this on Onshape's Allow page)
+   - **Primary format:** `com.ftcsimbench.app` (any unique name; it can't change later)
+   - **Summary:** `Reads your robot's assembly so SimBench can simulate it.`
+   - **Redirect URLs:** `https://ftc-simbench-pro.pages.dev/onshape/callback`
+     (add `https://app.ftc-simbench.com/onshape/callback` too once the domain is live)
+   - **OAuth URL:** `https://ftc-simbench-pro.pages.dev/`
+   - **Permissions:** tick only **Application can read your documents**.
+2. Click **Create application**. Copy the **Client ID** and the **Client secret** right away;
+   Onshape shows the secret only once.
+3. In Cloudflare: **Workers & Pages → ftc-simbench-pro → Settings → Variables and Secrets → Add**,
+   for **Production**:
+   - `ONSHAPE_CLIENT_ID`: the Client ID
+   - `ONSHAPE_CLIENT_SECRET`: the Client secret (type **Secret**)
+4. **Deployments → the latest one → Retry deployment**, so the function sees them.
+5. Open the site, click **Get my robot from Onshape → Sign in with Onshape**, click **Allow**, and
+   paste an assembly's address. Then try it with a teammate's Onshape account too. If Onshape
+   shows them an error instead of the Allow page, the app needs a store entry before others can use
+   it: open the app in the dev portal and create one.
+
+Until the secrets are set, the pop-up says Sign in with Onshape isn't switched on and offers the
+bookmark and STEP files instead. The secret never reaches the page. Each team's Onshape token is
+kept in an encrypted, HttpOnly cookie that only `/onshape/*` sees. The function only reads, and only
+the calls the robot reader makes, and only from `cad.onshape.com`.
 
 ## The domain
 
@@ -120,6 +155,7 @@ it for a competition venue with bad wifi.
 ## Checklist before you announce it
 
 - [ ] `npm test` green, `npm run build:ship` clean
+- [ ] Sign in with Onshape set up (above), and tried on a school computer
 - [ ] Opened `dist/index.html` from the filesystem and driven a robot
 - [ ] Support link points at your real checkout
 - [ ] Tested on the laptop the team actually brings to competition

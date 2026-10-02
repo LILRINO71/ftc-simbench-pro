@@ -70,8 +70,18 @@ The research behind the fixes is in
 
 - **Onshape, the whole robot, no STEP** (`src/onshapelink.js`,
   `src/onshapecad.js`). The pop-up (`OnshapeHelp` in `src/app.js`) walks a
-  team through it in four steps with pictures and a troubleshooting list, and
-  shows the progress while the robot comes in. Every endpoint, parameter and
+  team through it in three steps with pictures and a troubleshooting list, and
+  shows the progress while the robot comes in.
+  - **Sign in with Onshape** is the main way (`functions/onshape/[[path]].js`,
+    a Cloudflare Pages Function). School Chromebooks block bookmarklets (the
+    admin's URL blocklist has `javascript://*`), and the owner hit exactly
+    that: a click did nothing, and a drag showed `about:blank#blocked`. The
+    team signs in through Onshape's OAuth page and pastes the assembly's
+    address; the page runs the same reader (`onshapeRead`) through the
+    function, which keeps the token in an encrypted HttpOnly cookie and passes
+    on only read calls for the robot. Onshape's API has no CORS, so a server
+    is needed. It needs the owner's OAuth app (`DEPLOY.md`); without it the
+    pop-up falls back to the bookmark. Tests: `tests/onshape-signin.test.mjs`. Every endpoint, parameter and
   response field it relies on was checked against Onshape's OpenAPI spec
   (points as `[x,y,z]` or `{x,y,z}`, colours as `appearance.color`, retries
   on 429/503), and Onshape's CSP allows a bookmark to run there.
@@ -140,10 +150,12 @@ and from 21 to 8 with the ITD code.
 
 ## Not done, in order
 
-1. **Test the bookmark against live Onshape.** It's checked against
-   Onshape's OpenAPI spec and a generated payload, never a real assembly
-   (a cloud container can't sign in to Onshape). Try it on the team's own
-   robot first. Still open from the research: the real call count and
+1. **Switch on Sign in with Onshape and test it live.** Register the OAuth
+   app and set the two secrets (`DEPLOY.md`), then try it on a school
+   Chromebook with the team's own robot. Check that a second Onshape account
+   can authorize the app before it has a public store entry. The reader is
+   checked against Onshape's OpenAPI spec and a generated payload, never a
+   real assembly (a cloud container can't sign in to Onshape). Still open from the research: the real call count and
    payload size, how Onshape counts session-cookie calls against its quota,
    and whether linked (COTS) parts come with their colours.
 2. **Test online on two real computers.** The relays and the loader are

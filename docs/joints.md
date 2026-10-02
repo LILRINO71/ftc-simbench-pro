@@ -22,6 +22,11 @@ pin-slot) out from the chassis as a joint tree. Each joint gets its true axis an
 it carries, its limits from the features list, and any gear, rack or screw relation to another
 joint.
 
+**Sign in with Onshape** (`src/onshapelink.js`, `functions/onshape/`): in the **Get my robot from
+Onshape** pop-up, sign in through Onshape's own page once, then paste the assembly's address. It
+reads the same API calls as the bookmark below, through a small Cloudflare Pages Function, and works
+on school computers, which block bookmarks. Setting it up for a site is in `DEPLOY.md`.
+
 **In one click** (`src/onshapelink.js`): drag **Send to SimBench** from the **Mates & joints**
 panel to the bookmarks bar once. Then, on the robot's assembly tab in Onshape, click the bookmark.
 It reads that assembly's definition and mate features from Onshape's API with the team's own
