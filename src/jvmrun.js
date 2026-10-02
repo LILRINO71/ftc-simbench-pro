@@ -217,11 +217,14 @@ function jvAnalyze(comp,isAuto){
   const runs={N:base};
   if(!isAuto) for(const k in JV_STICKS){ runs[k]=jvProbeRun(comp,JV_STICKS[k],{},6); for(const d of runs[k].P.vm.devices?runs[k].P.vm.devices.values():[]) if(!devs.find(x=>x.name===d.name)) devs.push(d); }
   const intents=jvIntents(comp.srcs||{});
-  out.devices=devs.map(d=>{ const intent=intents[d.name]||"";
-    return {name:d.name,type:d.type,kind:d.kind,cfg:d.name,intent,declaredRole:/torque/i.test(intent)?"Torque":(/speed/i.test(intent)?"Speed":null),fromVm:true}; });
+  // named by its configuration name (the same in every file that asks for it); the
+  // variable the line reader would have named it by is kept as its alias
+  out.devices=devs.map(d=>{ const it=intents[d.name]||{}, intent=it.intent||"";
+    return {name:d.name,type:d.type,kind:d.kind,cfg:d.name,alias:it.var&&it.var!==d.name?it.var:null,intent,declaredRole:/torque/i.test(intent)?"Torque":(/speed/i.test(intent)?"Speed":null),fromVm:true}; });
   // every command any run gave, for "is this device ever commanded"
   const cmdOf=new Map();
-  for(const k in runs) for(const [n,op,v] of runs[k].H.cmds){ if(!cmdOf.has(n)) cmdOf.set(n,[]); cmdOf.get(n).push([op,v]); }
+  // what moves a device: power, position, velocity, a target; not setDirection
+  for(const k in runs) for(const [n,op,v] of runs[k].H.cmds){ if(op==="setDirection") continue; if(!cmdOf.has(n)) cmdOf.set(n,[]); cmdOf.get(n).push([op,v]); }
   out.commanded=Array.from(cmdOf.keys());
   for(const [n,l] of cmdOf){ const p=l.filter(x=>x[0]==="setPosition").map(x=>x[1]); if(p.length) out.ranges[n]={lo:Math.min(...p),hi:Math.max(...p),n:p.length}; }
   if(!isAuto) out.drive=jvDriveFrom(runs,devs);
@@ -283,17 +286,18 @@ function jvIntents(srcs){
   const out={};
   for(const f in srcs){
     const src=srcs[f], lines=src.split(/\r?\n/);
-    const re=/(?:this\s*\.\s*)?([A-Za-z_$][\w$]*)\s*=\s*(?:\([^)]*\)\s*)?hardwareMap\s*\.\s*(?:get\s*\(\s*[\w.]+\s*\.\s*class\s*,\s*|\w+\s*\.\s*get\s*\(\s*)"([^"]+)"/g;
+    const re=/(?:this\s*\.\s*)?([A-Za-z_$][\w$]*)\s*=\s*(?:\([^)]*\)\s*)?(?:[\w$]+\s*\.\s*)?(?:hardwareMap|hwMap|hw|map|hardware|hMap|ahwMap)\s*\.\s*(?:get\s*\(\s*[\w.]+\s*\.\s*class\s*,\s*|\w+\s*\.\s*get\s*\(\s*)"([^"]+)"/g;
     let m;
     while((m=re.exec(src))){
       const v=m[1], cfg=m[2];
-      if(out[cfg]) continue;
+      if(out[cfg]&&out[cfg].intent) continue;
+      if(!out[cfg]) out[cfg]={intent:"",var:v};
       const dl=lines.findIndex(l=>new RegExp("\\b(?:"+DEVT+"|\\w*Motor\\w*|\\w*Servo\\w*)\\s+"+v.replace(/\$/g,"\\$")+"\\s*[;=,]").test(l));
       if(dl<0) continue;
       const got=[];
       for(let L=dl-1;L>=0&&L>dl-5;L--){ const t=lines[L].trim(); if(/^\/\//.test(t)){ const c=t.replace(/^\/+\s*/,"").trim(); if(c&&!/^=+$/.test(c)) got.unshift(c); } else break; }
       const tail=/\/\/\s*(.+)$/.exec(lines[dl]); if(tail) got.push(tail[1].trim());
-      if(got.length) out[cfg]=got.join(" ");
+      out[cfg]={intent:got.join(" "), var:v};
     }
   }
   return out;
@@ -323,14 +327,13 @@ function jvControlsRead(comp){
   if(/getRightY|getLeftY|getRightX|getLeftX/.test(all)) ["right_stick_y","left_stick_y"].forEach(x=>out.add(x));
   return JV_CONTROLS.filter(c=>out.has(c));
 }
-function jvMechProbe(comp,an,budgetMs){
-  const t0=Date.now(), base=jvProbeRun(comp,{},{},8), B=[];
+function jvMechProbe(comp,an){
+  const base=jvProbeRun(comp,{},{},8), B=[];
   const used=jvControlsRead(comp);
   const snap=r=>{ const o={}; for(const [n,s] of r.H.devs) o[n]=[s.cmd==null?null:+s.cmd,+s.target||0,s.mode]; return o; };
   const b0=snap(base);
   const drive=new Set(an.drive?an.drive.wheels.map(w=>w.dev):[]);
   for(const pad of [1,2]) for(const c of used){
-    if(Date.now()-t0>(budgetMs||1500)) return B;
     const v=/trigger/.test(c)?1:/_stick_y$/.test(c)?-1:true;
     const p={}; p[c]=v;
     let r; try{ r=jvProbeRun(comp,pad===1?p:{},pad===2?p:{},8); }catch(e){ continue; }
@@ -365,7 +368,9 @@ function jvMaybe(out,raw,opts){
     engine:"vm", devices:an.devices, hasLoop:!isAuto, hasWait:true,
     vm:{comp:r.comp, an, error:an.error, stubs:an.stubs.slice(0,40)}, legacy:{devices:legacy.devices.length, skipped:cov?cov.skipped.length:null}
   });
-  try{ v.bindings=isAuto?[]:jvMechProbe(r.comp,an,opts&&opts.probeMs); }catch(e){ v.bindings=[]; }
+  // which control moves what: probed once per code (r is memoized), never against the clock
+  if(!r.bindings){ try{ r.bindings=isAuto?[]:jvMechProbe(r.comp,an); }catch(e){ r.bindings=[]; } }
+  v.bindings=r.bindings.slice();
   for(const b of v.bindings) if(an.commanded.indexOf(b.dev)<0) an.commanded.push(b.dev);
   // drive bindings: the sticks feed the wheels
   if(an.drive) for(const w of an.drive.wheels) for(const ax of ["left_stick_y","left_stick_x","right_stick_x"])

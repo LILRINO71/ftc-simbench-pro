@@ -194,3 +194,67 @@ test('vm: a crash is reported with its file and line, like the Driver Station wo
   assert.equal(r.P.error.cls, 'NullPointerException');
   assert.equal(r.P.error.line, 6);
 });
+
+// ---- from the code review of the VM work ----
+const ROBOT_DIR = (rev) => `package org.firstinspires.ftc.teamcode.hw;
+import com.qualcomm.robotcore.hardware.*;
+public class Robot {
+  public DcMotorEx lf, lb, rf, rb, spare;
+  public Robot(HardwareMap hw) {
+    lf = hw.get(DcMotorEx.class, "leftFront"); lb = hw.get(DcMotorEx.class, "leftBack");
+    rf = hw.get(DcMotorEx.class, "rightFront"); rb = hw.get(DcMotorEx.class, "rightBack");
+    spare = hw.get(DcMotorEx.class, "spare");
+    ${rev.map((n) => n + '.setDirection(DcMotorSimple.Direction.REVERSE);').join(' ')}
+    spare.setDirection(DcMotorSimple.Direction.REVERSE);
+  }
+  public void drive(double y, double x, double r) { lf.setPower(y + x + r); lb.setPower(y - x + r); rf.setPower(y - x - r); rb.setPower(y + x - r); }
+}`;
+const MAIN_DIR = `package org.firstinspires.ftc.teamcode;
+import org.firstinspires.ftc.teamcode.hw.Robot;
+import com.qualcomm.robotcore.eventloop.opmode.*;
+@TeleOp(name="Dir") public class Dir extends LinearOpMode { public void runOpMode() { Robot r = new Robot(hardwareMap); waitForStart();
+  while (opModeIsActive()) r.drive(-gamepad1.left_stick_y, gamepad1.left_stick_x, gamepad1.right_stick_x); } }`;
+
+test('vm: two programs sharing an OpMode file never see each other\'s classes (parsed code is cached, so nothing per-run may live on it)', () => {
+  const senses = (rev) => {
+    const comp = E.jvCompile(MAIN_DIR, [{ file: 'Robot.java', src: ROBOT_DIR(rev) }]);
+    return E.jvAnalyze(comp, false).drive.wheels.map((w) => w.dev + ':' + w.sense).join(' ');
+  };
+  const a1 = senses(['lf', 'lb']), b1 = senses(['rf', 'lb']);
+  assert.notEqual(a1, b1, 'a different Robot class gives a different drive');
+  assert.equal(senses(['lf', 'lb']), a1); assert.equal(senses(['rf', 'lb']), b1);
+});
+
+test('vm: a wrong setDirection still shows on a robot whose CAD has its drive motors (mounting from the CAD, not the code)', async () => {
+  const { buildRobot } = await import('../tools/stepgen.mjs');
+  const cad = E.parseSTEP(buildRobot('mecanum-zup').text);
+  const verdict = (rev) => {
+    const code = E.parseJava(MAIN_DIR, { libs: [{ file: 'Robot.java', src: ROBOT_DIR(rev) }] });
+    assert.equal(code.engine, 'vm');
+    const pr = E.driveProbe(code, cad, {}, { front: E.frontFromWheels(cad) || '+x' });
+    let out = null; E.driveVerdict(pr, (k, sev, title, how) => { out = { sev, title, how }; });
+    return out;
+  };
+  const right = verdict(['lf', 'lb']), wrong = verdict(['rf', 'lb']);
+  assert.equal(right.sev, 'pass', right.title);
+  assert.equal(wrong.sev, 'fail', 'reversing the wrong motor is caught: ' + wrong.title);
+  assert.ok(/from the CAD/.test(right.how));
+});
+
+test('vm: setDirection alone isn\'t moving a device; the controls list comes from pressing them', () => {
+  const code = E.parseJava(MAIN_DIR, { libs: [{ file: 'Robot.java', src: ROBOT_DIR(['lf', 'lb']) }] });
+  assert.equal(E.isCommanded(code, 'spare'), false, 'spare is only reversed, never moved');
+  assert.equal(E.isCommanded(code, 'leftFront'), true);
+  // the devices are named by their configuration name, the variable kept as an alias
+  const lf = code.devices.find((d) => d.name === 'leftFront');
+  assert.equal(lf.alias, 'lf');
+});
+
+test('mapping: two motors named alike share a lift; two servos named alike stay apart (a mirrored pair)', () => {
+  const mechs = [{ id: 'Lift', kind: 'linear' }, { id: 'Arm', kind: 'revolute-lift' }];
+  const m = E.autoMap([
+    { name: 'liftLeft', type: 'DcMotorEx', cfg: 'liftLeft' }, { name: 'liftRight', type: 'DcMotorEx', cfg: 'liftRight' },
+    { name: 'armL', type: 'Servo', cfg: 'armL' }, { name: 'armR', type: 'Servo', cfg: 'armR' }], mechs);
+  assert.equal(m.liftLeft, 'Lift'); assert.equal(m.liftRight, 'Lift');
+  assert.equal([m.armL, m.armR].filter((x) => x === 'Arm').length, 1);
+});

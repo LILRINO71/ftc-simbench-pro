@@ -538,6 +538,10 @@ function JVM(units,natives){
   this.BUDGET=20000; this.budget=this.BUDGET;   // loop passes left before a forced tick (a busy-wait)
   this.steps=0; this.gateMark=-1;   // statements run, and the count at the last gate
   this.host=null;
+  // what a run learns about a node of the parsed code (who owns a method, a field's
+  // type, whether a call returns an int, an anonymous class). Parsed code is cached
+  // and shared by every VM, so none of it may be stored on the node itself.
+  this.nodeInfo=new WeakMap();
   for(const u of units) for(const d of u.types) this.declare(d,u,null);
   for(const k in this.natives) this.declareNative(k,this.natives[k]);
 }
@@ -899,11 +903,14 @@ JVM.prototype.methodsOf=function(c,name){
   while(st.length){ const k=st.shift(); if(!k||seen.has(k)) continue; seen.add(k);
     const l=k.methods&&k.methods.get(name);
     // an override hides its super's method of the same signature; other overloads stay
-    if(l) for(const m of l){ const sig=jvSig(m); if(!out.some(o=>o.body&&jvSig(o)===sig)) out.push(Object.assign(m,{owner:m.owner||k})); }
+    if(l) for(const m of l){ const sig=jvSig(m); if(!out.some(o=>o.body&&jvSig(o)===sig)) { const ni=this.ni(m); if(!ni.owner) ni.owner=k; out.push(m); } }
     st.push(this.supOf(k)); for(const f of this.ifsOf(k)) st.push(f); }
   // a concrete one before an abstract one with the same arity
   return out.sort((a,b)=>(a.body?0:1)-(b.body?0:1));
 };
+/* This VM's notes on a parsed node (see nodeInfo) */
+JVM.prototype.ni=function(n){ let r=this.nodeInfo.get(n); if(!r){ r={}; this.nodeInfo.set(n,r); } return r; };
+JVM.prototype.ownerOf=function(m){ const r=this.nodeInfo.get(m); return r?r.owner:undefined; };
 function jvSig(m){ return m.sig||(m.sig=m.params.map(p=>p.type.name.replace(/^.*\./,"")+"[]".repeat(p.type.dims||0)).join(",")); }
 JVM.prototype.findMethod=function(c,name,args){
   const own=this.methodsOf(c,name);
@@ -932,7 +939,7 @@ JVM.prototype.invoke=function*(self,name,args,node,startCls){
   const c=self.__c;
   if(self[JV_OPAQUE_TAG]||c.opaque){ this.note(c.name+"."+name); return jvOpaqueResult(this,name,c.name,args); }
   const m=this.findMethod(startCls||c,name,args);
-  if(m&&m.body) return yield* this.run(m,self,args,m.owner);
+  if(m&&m.body) return yield* this.run(m,self,args,this.ownerOf(m));
   const nm=this.nativeMethod(startCls||c,name);
   if(nm){ const r=nm(this,self,args,node); return (r&&typeof r.next==="function"&&typeof r[Symbol.iterator]==="function")?yield* r:r; }
   // Object's methods, and enum constants'
@@ -980,7 +987,7 @@ JVM.prototype.invokeStatic=function*(c,name,args,node){
     this.note(c.name+"."+name); return jvOpaqueResult(this,name,c.name,args);
   }
   const m=this.findMethod(c,name,args);
-  if(m&&m.body) return yield* this.run(m,null,args,m.owner);
+  if(m&&m.body) return yield* this.run(m,null,args,this.ownerOf(m));
   if(c.kind==="enum"){ if(name==="values") return c.consts.slice(); if(name==="valueOf") return c.sf[args[args.length-1]]||null; }
   const s=this.supOf(c); if(s&&(s.native||s.opaque)) return yield* this.invokeStatic(s,name,args,node);
   if(this.isLib(c)){ this.note(c.name+"."+name); return jvOpaqueResult(this,name,c.name,args); }
@@ -1244,9 +1251,8 @@ JVM.prototype.kind=function(e,sc){
     case "name":{ const s=sc.find(e.name); let t=s?s.t[e.name]:null;
       if(!s){ const fr=sc.fr; const c=fr&&fr.cls; t=c?this.fieldType(c,e.name):null; }
       return t&&!t.dims?(t.name==="char"?"c":JV_INTS.has(t.name)?"i":null):null; }
-    case "field":{ if(e.name==="length") return "i"; const t=e.ftype; return t&&!t.dims?(JV_INTS.has(t.name)?"i":null):null; }
-    case "index":{ const t=e.etype; return t&&JV_INTS.has(t.name)?"i":null; }
-    case "call": return e.rk||null;
+    case "field":{ if(e.name==="length") return "i"; const r=this.nodeInfo.get(e), t=r&&r.ftype; return t&&!t.dims?(JV_INTS.has(t.name)?"i":null):null; }
+    case "call":{ const r=this.nodeInfo.get(e); return r&&r.rk||null; }
     case "un": return e.op==="!"?null:this.kind(e.a,sc);
     case "pre": case "post": return this.kind(e.a,sc);
     case "bin":{
@@ -1355,7 +1361,7 @@ JVM.prototype.ev=function*(e,sc){
       if(!c){ if(e.body) c=this.opaqueClass(e.type); else { this.note("new "+e.type); return this.opaqueVal(e.type); } }
       if(e.body){
         // an anonymous class: extends c, or implements it when c is an interface
-        const ac=e.anonCls&&e.anonCls.vm===this?e.anonCls:null;
+        const ac=this.ni(e).anonCls||null;
         let cls=ac;
         if(!cls){
           const ctx=this.ctxType(sc);
@@ -1363,7 +1369,7 @@ JVM.prototype.ev=function*(e,sc){
           cls.isStatic=false; cls.anonOf=c;
           if(c.kind==="interface"&&!c.opaque){ cls.sup=null; cls.ifs=[c]; } else { cls.sup=c; cls.ifs=[]; }
           cls.decl.anon=true;
-          e.anonCls=cls; cls.vm=this;
+          this.ni(e).anonCls=cls;
         }
         const self=sc.fr&&sc.fr.self;
         return yield* this.construct(cls,args,self,sc,null,e);
@@ -1531,7 +1537,7 @@ JVM.prototype.getField=function*(o,name,e,sc){
     const n=this.nestedOf(c,name); if(n&&!(name in c.sf)) return {__type:n};
     yield* this.ready(c);
     for(let k=c, g=0; k&&g<30; k=this.supOf(k), g++){
-      if(name in k.sf){ if(e){ e.ftype=k.ftypes&&k.ftypes[name]||null; } return k.sf[name]; }
+      if(name in k.sf){ if(e) this.ni(e).ftype=k.ftypes&&k.ftypes[name]||null; return k.sf[name]; }
       if(k.native&&k.native.sget){ const r=k.native.sget(this,name); if(r!==undefined) return r; }
       for(const f of this.ifsOf(k)){ yield* this.ready(f); if(name in f.sf) return f.sf[name]; }
     }
@@ -1541,7 +1547,7 @@ JVM.prototype.getField=function*(o,name,e,sc){
   }
   if(typeof o==="string"||typeof o==="number"||typeof o==="boolean") return undefined;
   if(o[JV_OPAQUE_TAG]) return this.opaqueVal(o.__c.fqn+"."+name);
-  if(name in o.f){ if(e&&!e.ftype) e.ftype=this.fieldType(o.__c,name); return o.f[name]; }
+  if(name in o.f){ if(e){ const ni=this.ni(e); if(!ni.ftype) ni.ftype=this.fieldType(o.__c,name); } return o.f[name]; }
   for(let k=o.__c;k;k=this.supOf(k)) if(k.native&&k.native.get){ const r=k.native.get(this,o,name); if(r!==undefined) return r; }
   // a static read through an instance
   for(let k=o.__c;k;k=this.supOf(k)) if(name in k.sf) return k.sf[name];
@@ -1580,9 +1586,9 @@ JVM.prototype.call=function*(e,sc){
     for(let g=0; cls&&g<20&&!done; g++){
       const m=this.findMethod(cls,e.name,args);
       if(m&&m.body){
-        if(m.static) r=yield* this.run(m,null,args,m.owner);
-        else if(self){ const vm2=self.__c!==cls?this.findMethod(self.__c,e.name,args):m; r=yield* this.run(vm2&&vm2.body?vm2:m,self,args,(vm2&&vm2.body?vm2:m).owner); }
-        else r=yield* this.run(m,null,args,m.owner);
+        if(m.static) r=yield* this.run(m,null,args,this.ownerOf(m));
+        else if(self){ const vm2=self.__c!==cls?this.findMethod(self.__c,e.name,args):m; { const mm=vm2&&vm2.body?vm2:m; r=yield* this.run(mm,self,args,this.ownerOf(mm)); } }
+        else r=yield* this.run(m,null,args,this.ownerOf(m));
         done=true; break;
       }
       if(self||!m){
@@ -1640,8 +1646,9 @@ JVM.prototype.call=function*(e,sc){
 };
 /* Remember whether a call returned an int, for the / that uses it */
 JVM.prototype.setRk=function(e,r){
-  if(e.rk!==undefined) return;
-  e.rk=(JV_INT_METHODS.has(e.name)&&typeof r==="number"&&Number.isInteger(r))?"i":null;
+  const ni=this.ni(e);
+  if(ni.rk!==undefined) return;
+  ni.rk=(JV_INT_METHODS.has(e.name)&&typeof r==="number"&&Number.isInteger(r))?"i":null;
 };
 const JV_INT_METHODS=new Set(["getCurrentPosition","getTargetPosition","size","length","ordinal","indexOf","lastIndexOf","intValue","longValue","parseInt","parseLong",
   "round","getPortNumber","compareTo","floorDiv","floorMod","getTargetPositionTolerance","nextInt","hashCode","getAsInt","toIntExact","charAt","count","signum"]);
