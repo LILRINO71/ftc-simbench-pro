@@ -134,20 +134,22 @@ spec gives 9 ANSWER + 11 CONFIRM, 212 buttons, 12 status rows, and 1 of 10 devic
 `tests/fixtures/assembly.step` + `CompetitionTeleOp` pair gives 5 ANSWER + 3 CONFIRM and a red light
 with 2 rows. It drives backward, turns left and strafes left.
 
-## The baseline (engine 41ce363)
+## The baseline (engine 34d03fe)
 
 ```
-CODE drives correctly 13/28, drives at all 17/28, mechanisms 17/28 | CAD parse 11/11, questions median 3 (no code) / 8 (ITD code)
+CODE drives correctly 18/28, drives at all 19/28, mechanisms 18/28 | CAD parse 11/11, questions median 3 (no code) / 8 (ITD code)
 ```
 
-Against the first baseline (4d7907e): 77 better, 0 worse. Two changes moved the numbers. The team's
-real Java now runs on a small Java VM (`src/jvm*.js`), and the drive is measured from what its motors do.
+Against the first baseline (4d7907e) the main TeleOps went from 1 to 18 driving correctly. The team's
+real Java runs on a small Java VM (`src/jvm*.js`), and the drive is measured from what its motors do.
 Robot check notes (a live gauge, a suggestion) no longer count as questions.
 
-- **Code, main TeleOp, 28 teams:** drives correctly 13 (was 1), at all 17 (was 4), moves a mechanism
-  17 (was 4). Across all 190 enabled TeleOps: 46 drive correctly (was 4), 55 at all, 43 move a mechanism.
-  21 of 28 teams have a TeleOp that drives correctly.
-- **Errors:** rr05's main TeleOp and three of t25832's test OpModes hit the 120 s limit.
+- **Code, main TeleOp, 28 teams:** drives correctly 18 (was 1), at all 19 (was 4), moves a mechanism
+  18 (was 4). Across all 190 enabled TeleOps: 55 drive correctly (was 4), 58 at all, 44 move a
+  mechanism. 23 of 28 teams have a TeleOp that drives correctly. Nothing times out.
+- **Since 41ce363 (15 better, 0 worse):** wheel sides from running the code; `DcMotor.Direction`
+  reverses; the IMU reports the heading; trigger and arcade turning; no lift as a fifth wheel; the
+  Pinpoint and Road Runner 1.0 localizer classes; INIT busy-waits see the robot move.
 - **CAD:** median questions 3 with no code (was 5), 8 with the ITD TeleOp (was 21). The ITD TeleOp
   drives correctly on 9 of 11.
 - **Corpus differences:** this run is from a container whose corpus has 11 CAD files. The owner's two

@@ -51,6 +51,17 @@ The research behind the fixes is in
   - `jvMechProbe` finds which control moves which device.
 - `parseJava` (`src/java.js`) tries the old line reader first and switches
   to the VM when the reader can't follow all of the code (`code.engine === "vm"`).
+  Even when the reader covers everything, the code is still run, and each
+  wheel's side and end come from what it did (`code.vmDrive`, used by
+  `detectDrivetrain`), because config names don't always match where a
+  motor sits.
+- The drive probe tries the turn stick, then the right trigger, then the left
+  stick's x (arcade). Wheels are the motors that get at least half the
+  strongest forward power, so a lift that follows the stick a little isn't one.
+- Busy-waits during INIT see the robot move (`Sim.stepDevices`, the host's
+  `world(dt)`); an INIT that never returns stops with a `Hang` error.
+- The IMU reports the robot's heading with a real gyro's small noise
+  (±0.017°). Before, `getRobotYawPitchRollAngles()` always read 0.
 - The sim (`src/sim.js`) runs the VM program live. Wheel mounting comes from
   the CAD's motors first (so a wrong `setDirection` still fails the drive
   check), then from the code's own forward, then from the standard build.
@@ -58,7 +69,12 @@ The research behind the fixes is in
 ### CAD: joints that are declared, not guessed
 
 - **Onshape, the whole robot, no STEP** (`src/onshapelink.js`,
-  `src/onshapecad.js`).
+  `src/onshapecad.js`). The pop-up (`OnshapeHelp` in `src/app.js`) walks a
+  team through it in four steps with pictures and a troubleshooting list, and
+  shows the progress while the robot comes in. Every endpoint, parameter and
+  response field it relies on was checked against Onshape's OpenAPI spec
+  (points as `[x,y,z]` or `{x,y,z}`, colours as `appearance.color`, retries
+  on 429/503), and Onshape's CSP allows a bookmark to run there.
   - The "Send to SimBench" bookmark runs on the team's signed-in Onshape tab.
     It reads the assembly, its features, and each Part Studio's tessellated
     faces with colours and mass properties.
@@ -86,6 +102,17 @@ The research behind the fixes is in
 - **White robot**: the frame-rate watchdog swapped in the light copy, whose
   materials differed from the full robot's. Both now use the same
   environment-lit metal (`src/view3d.js`; `tests/robot-look.test.mjs`).
+- **No lag after loading a robot.** One OpenCascade worker stopping used to
+  send every remaining part to the page's own thread (seconds per part). Now
+  a stopped worker costs one part and is replaced
+  (`tests/tess-workers.test.mjs`). Panels redraw only when on screen and
+  changed.
+- **Graphics.** sRGB output with ACES filmic tone mapping (`linearize()` turns
+  authored colours into linear light once), a shadow box that follows the
+  robot (about 5.7 px/cm), a cool fill light, and painted foam tiles.
+- **Online.** Players meet on seven named relays (`NET_RELAYS` in
+  `src/net.js`); Trystero's own pick for this app id included two dead ones.
+  The library falls back to esm.sh when jsDelivr fails.
 - **Decluttered**:
   - the setup steps that are found fold to one line;
   - long hints are cut short;
@@ -99,40 +126,49 @@ The research behind the fixes is in
 ## Measured
 
 `research/fullrobots/bench.mjs` measures real teams' code and CAD; `baseline.txt` is the latest
-run (engine 41ce363). Against the base (4d7907e), on 28 teams' main TeleOps:
+run (engine 34d03fe). Against the base (4d7907e), on 28 teams' main TeleOps:
 
 | | before | now |
 | --- | --- | --- |
-| drives correctly | 1 | 13 |
-| drives at all | 4 | 17 |
-| moves a mechanism | 4 | 17 |
+| drives correctly | 1 | 18 |
+| drives at all | 4 | 19 |
+| moves a mechanism | 4 | 18 |
 
-Across all 190 enabled TeleOps, 46 drive correctly (it was 4), and 21 of 28 teams have one that
-does. The median number of questions on a CAD fell from 5 to 3 with no code, and from 21 to 8 with
-the ITD code. Overall: 77 better, 0 worse.
+Across all 190 enabled TeleOps, 55 drive correctly (it was 4), and 23 of 28 teams have one that
+does. Nothing times out. The median number of questions on a CAD fell from 5 to 3 with no code,
+and from 21 to 8 with the ITD code.
 
 ## Not done, in order
 
-1. **Test the bookmark against live Onshape.** It is tested only against
-   the payload `tools/stepgen.mjs` produces. The research's three spikes are
-   still open: the real call count and payload size for a full FTC
-   assembly, how Onshape counts session-cookie calls against its quota, and
-   whether `tessellatedfaces` returns `outputFaceAppearances` colours for
-   linked (COTS) documents.
-2. **A Fusion 360 "Export to SimBench" script.** It would write the URDF
-   `src/urdf.js` reads, or the package below. Not written.
-3. **The robot package `ftc-sim-bench.robot`**: one file with the
-   geometry, joints and device bindings, so reloading and sharing a robot
-   asks nothing. See section 4 of the report. For now the joint spec
-   (`src/jointspec.js`) plus the setup file covers most of it.
-4. **Device to joint from the Control Hub config XML**, the first rung of
+1. **Test the bookmark against live Onshape.** It's checked against
+   Onshape's OpenAPI spec and a generated payload, never a real assembly
+   (a cloud container can't sign in to Onshape). Try it on the team's own
+   robot first. Still open from the research: the real call count and
+   payload size, how Onshape counts session-cookie calls against its quota,
+   and whether linked (COTS) parts come with their colours.
+2. **Test online on two real computers.** The relays and the loader are
+   fixed and tested with the library faked; a cloud container's proxy carries
+   no WebSockets, so no live match ran here. A TURN relay would still be
+   needed for networks that block direct connections.
+3. **Teams whose main TeleOp still doesn't drive** (see `baseline.txt`):
+   - t13115 leaves its drive in `STOP_AND_RESET_ENCODER` (real: it wouldn't
+     drive on its robot either; the page now says so);
+   - rr05 builds its Road Runner drive in a field initializer, where
+     `hardwareMap` is still null (real: it crashes on the robot too);
+   - tCyberRaptors and tTechTigers: no hardware is found (a runner class, a
+     base class);
+   - tTechTurb: Road Runner 1.0 `setDrivePowers` through its own drive;
+   - t25609 and t27570: no stick reaches a wheel. Start with
+     `node research/fullrobots/bench.mjs --code-only --primary-only --only=t25609 --no-compare`,
+     then run `jvProbeRun` (exported by `tests/load.mjs`) on the team's files
+     and print each motor's power under each stick.
+4. **Loading still parses on the page's thread.** The default robot's STEP
+   (`parseSTEP`), the shape list for meshing (`stepShapeUnits`) and the robot
+   check take a few seconds on a laptop. A worker for `parseSTEP` would help.
+5. **The robot package `ftc-sim-bench.robot`**: one file with the geometry,
+   joints and device bindings. See section 4 of the report.
+6. **Device to joint from the Control Hub config XML**, the first rung of
    the report's matching ladder. Not started.
-5. **Four OpModes time out** in the bench (120 s): rr05's `TeleOpFullNew` and three t25832 test
-   OpModes. Profile one with `--only=rr05`. It may be a busy-wait the VM's budget doesn't break, or
-   a slow library stand-in.
-6. **The legacy line reader's drive sense.** When the old reader handles
-   the code, the drive still comes from names, not from a probe. An
-   optional cleanup: the VM path already probes.
 
 ## Fixed along the way (worth knowing)
 
@@ -148,6 +184,14 @@ the ITD code. Overall: 77 better, 0 worse.
   record (found with gdb: memchr over the whole body, ~80k times). That was
   the CAD benchmark's 600 s timeouts. "None" is now the string length. Test:
   `tests/step-speed.test.mjs`.
+- **The IMU always read 0.** The native IMU passed the yaw to the Java
+  `YawPitchRollAngles` as native state instead of its fields. Any field-centric
+  drive ran as if the robot never turned. Test: `tests/jvm.test.mjs`.
+- **`DcMotor.Direction.REVERSE` did nothing on the VM.** The native interfaces
+  didn't extend each other (`DcMotor` < `DcMotorSimple`), so the nested enum
+  was a stub. Test: `tests/jvm.test.mjs`.
+- **`analyze()` crashed on a VM drive** (it read the line reader's statement
+  off each wheel), so robots on the VM lost all their findings.
 - `tests/robotcheck.test.mjs` is slow (minutes) in a cloud container but
   passes.
 
