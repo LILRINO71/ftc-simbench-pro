@@ -1376,8 +1376,50 @@ function takeCAD(file){
   $("#cadStatus").textContent="reading "+file.name+" …"; $("#cadDrop").className="drop";
   readText(file,text=>{ LAST_STEP={name:file.name, text}; parseAndLoad(); },m=>{ $("#cadStatus").textContent=m; });
 }
+/* The whole robot from Onshape (src/onshapecad.js): parts, colours, mass and
+   the mates as joints, no STEP and nothing to answer. */
+function loadOnshapeRobot(p){
+  let cad;
+  try{ cad=cadFromOnshape(p,{up:OPTS.up, shift:OPTS.shift}); }
+  catch(e){ onshapeNote("Your robot came from Onshape, but it couldn't be built: "+esc(e.message)+". Try the bookmark again; if it keeps failing, export a STEP and drop it.","bad"); return false; }
+  LAST_STEP={name:p.name, text:"", onshape:p, label:p.name+" · from Onshape"};
+  JOINTS.spec=JOINTS.report=JOINTS.devices=null; JOINTS.name=JOINTS.step=null;
+  MATES.asm=p.asm; MATES.features=p.features; MATES.name=p.name; MATES.url=p.url||null; MATES.fromLink=true; MATES.report=cad.onshape.report;
+  SetupUI.beforeParse&&SetupUI.beforeParse(p.name);
+  loadCAD(cad, p.name+" · from Onshape · "+cad.solids.length+" parts · "+cad.mechs.filter(m=>m.fromMate).length+" joints", "ok");
+  recomputeChain(cad.mechs);
+  const rep=cad.onshape.report, n=cad.mechs.filter(m=>m.fromMate).length;
+  $("#mateStatus").textContent=p.name+" · whole robot from Onshape · "+n+" joint"+(n===1?"":"s"); $("#mateDrop").className="drop ok";
+  $("#mateNote").innerHTML=(cad.onshape.why||[]).map(w=>"<li>"+esc(w)+"</li>").join("");
+  const pill=$("#matePill"); if(pill){ pill.textContent=n+" joint"+(n===1?"":"s"); pill.className="pill ok"; }
+  onshapeNote("<b>"+esc(p.name)+"</b> loaded straight from Onshape: "+cad.solids.length+" parts with their colours"+
+    (cad.onshape.kg?", "+cad.onshape.kg.toFixed(1)+" kg from your materials":"")+", and "+n+" joint"+(n===1?"":"s")+" from your mates. Load your code and press INIT.","ok");
+  renderFrameNote&&renderFrameNote();
+  Status.render&&Status.render();
+  void rep;
+  return true;
+}
+/* This tab was opened by the bookmark: say we're ready, then take the robot */
+function waitForOnshape(){
+  try{ history.replaceState(null,"",location.pathname+location.search); }catch(e){}
+  onshapeNote("Reading your robot from Onshape … keep the Onshape tab open.");
+  let got=false;
+  const okOrigin=o=>/^https:\/\/([a-z0-9-]+\.)*onshape\.com$/i.test(o);
+  addEventListener("message",e=>{
+    if(!okOrigin(e.origin)||!e.data) return;
+    const d=e.data;
+    if(d.type==="simbench-progress"){ if(!got) onshapeNote(esc(String(d.text||"").slice(0,160))); return; }
+    if(d.format!==ONSHAPE_FORMAT||got) return;
+    got=true;
+    let p; try{ p=checkOnshapePayload(d); }catch(x){ onshapeNote("What came from Onshape couldn't be read: "+esc(x.message),"bad"); return; }
+    if(p.geom) loadOnshapeRobot(p); else holdOnshape(p);
+  });
+  const ping=()=>{ if(got) return; try{ if(window.opener) window.opener.postMessage({type:"simbench-ready"},"*"); }catch(e){} setTimeout(ping,600); };
+  ping();
+}
 function parseAndLoad(done){
   if(!LAST_STEP) return;
+  if(LAST_STEP.onshape){ loadOnshapeRobot(LAST_STEP.onshape); if(done&&CAD) done(CAD); return; }
   const {name,text}=LAST_STEP, mb=(text.length/1048576).toFixed(1);
   SetupUI.beforeParse(name);
   $("#cadStatus").textContent="parsing "+mb+" MB …";
@@ -1543,6 +1585,7 @@ async function takeOnshapeHash(){
 /* Use them: on the team's robot straight away, or when its STEP is dropped
    (parseAndLoad applies MATES by itself), never on the default robot. */
 function holdOnshape(p){
+  if(p.geom&&loadOnshapeRobot(p)) return;
   MATES.asm=p.asm; MATES.features=p.features; MATES.name=p.name; MATES.url=p.url||null; MATES.report=null; MATES.fromLink=true;
   JOINTS.spec=null; JOINTS.report=null; ONSHAPE_OFFER=null;
   if(ownRobot()) applyMates();
@@ -3102,6 +3145,7 @@ function proBoot(){
   try{
     if(/^#join=/i.test(location.hash)) NetUI.invited(location.hash.slice(6));
     if(/^#onshape=/.test(location.hash)) takeOnshapeHash();
+    else if(/^#onshape-wait/.test(location.hash)) waitForOnshape();
     else if(new URLSearchParams(location.search).get("robot")!=="sample") loadDefaultRobot();
   }catch(e){}
 })();

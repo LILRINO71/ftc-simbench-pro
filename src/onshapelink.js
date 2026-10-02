@@ -14,39 +14,82 @@
 const ONSHAPE_FORMAT="ftc-simbench.onshape";
 
 /* The bookmark itself: this function's source, run on an Onshape tab. It
-   uses nothing from SimBench, only the browser. SB is SimBench's address. */
+   uses nothing from SimBench, only the browser. SB is SimBench's address.
+   It reads the assembly (parts, placements, mates), its features (limits),
+   and, once per part studio the robot uses, that studio's tessellated
+   shapes with their colours and its mass properties: the whole robot, no
+   STEP. Then it hands all of it to the SimBench tab it opened, by
+   postMessage (no size limit, never through a server). */
 function onshapeGrab(SB){
   var m=/^(.*)\/documents\/([0-9a-f]{24})\/(w|v|m)\/([0-9a-f]{24})\/e\/([0-9a-f]{24})/i.exec(location.href);
   if(!m){ alert("Open your robot's assembly in Onshape (the assembly tab, not a Part Studio), then click the SimBench bookmark again."); return; }
-  var base=m[1]+"/api/assemblies/d/"+m[2]+"/"+m[3]+"/"+m[4]+"/e/"+m[5];
-  var name=String(document.title||"").replace(/\s*[|\-–]\s*Onshape\s*$/i,"").trim()||"Onshape assembly";
-  /* open the tab now, while the click still counts, and fill it in when the mates are read */
-  var w=window.open("","ftcsimbench_onshape");
-  try{ if(w){ w.document.title="SimBench"; w.document.body.innerHTML="<p style='font:16px system-ui,sans-serif;margin:40px'>Reading <b></b> from Onshape…</p>"; w.document.body.querySelector("b").textContent=name; } }catch(e){}
+  var host=m[1], did=m[2], base=host+"/api/assemblies/d/"+did+"/"+m[3]+"/"+m[4]+"/e/"+m[5];
+  var name=String(document.title||"").replace(/\s*[|\-\u2013]\s*Onshape\s*$/i,"").trim()||"Onshape assembly";
+  var sbOrigin=new URL(SB).origin;
+  /* open the tab now, while the click still counts; it says it's ready, then gets the robot */
+  var w=window.open(SB+"#onshape-wait","ftcsimbench_onshape");
+  var ready=false, payload=null, sent=false, failed=false;
+  var say=function(t){ try{ if(w&&!w.closed) w.postMessage({type:"simbench-progress",text:t},sbOrigin); }catch(e){} };
+  var send=function(){ if(sent||!ready||!payload) return; sent=true; try{ w.postMessage(payload,sbOrigin); }catch(e){ sent=false; save(); } };
+  var save=function(){
+    /* no SimBench tab, or it never answered: one file to drop into SimBench instead */
+    var j=JSON.stringify(payload,function(k,v){ return v instanceof Float32Array?Array.from(v,function(x){ return Math.round(x*1e5)/1e5; }):v; });
+    var a=document.createElement("a");
+    a.href=URL.createObjectURL(new Blob([j],{type:"application/json"}));
+    a.download=name.replace(/[\\/:*?"<>|]+/g,"_")+".onshape.json";
+    document.body.appendChild(a); a.click(); a.remove();
+    alert("Saved \""+a.download+"\". Drop it into SimBench: it is the whole robot, joints and all.");
+  };
+  window.addEventListener("message",function(e){ if(e.origin===sbOrigin&&e.data&&e.data.type==="simbench-ready"){ ready=true; send(); } });
   var get=function(u){ return fetch(u,{credentials:"include",headers:{Accept:"application/json"}}).then(function(r){ if(!r.ok) throw new Error("Onshape said "+r.status); return r.json(); }); };
-  Promise.all([get(base+"?includeMateFeatures=true&includeMateConnectors=true&includeNonSolids=false"), get(base+"/features").catch(function(){ return null; })])
+  /* one part studio: each part's triangles (part studio frame, metres) and the colour that covers most of it */
+  var compact=function(tess){
+    var out={}, bodies=Array.isArray(tess)?tess:((tess&&tess.bodies)||[]);
+    bodies.forEach(function(b){
+      var n=0, best=null, bestA=-1, area={};
+      (b.faces||[]).forEach(function(f){ (f.facets||[]).forEach(function(){ n++; }); });
+      var tri=new Float32Array(n*9), o=0;
+      (b.faces||[]).forEach(function(f){
+        var c=f.color||f.appearance||null, key=JSON.stringify(c), a=0;
+        (f.facets||[]).forEach(function(fc){ var v=fc.vertices; if(!v||v.length<3) return;
+          for(var q=0;q<3;q++){ tri[o++]=v[q][0]; tri[o++]=v[q][1]; tri[o++]=v[q][2]; }
+          var ux=v[1][0]-v[0][0],uy=v[1][1]-v[0][1],uz=v[1][2]-v[0][2],wx=v[2][0]-v[0][0],wy=v[2][1]-v[0][1],wz=v[2][2]-v[0][2];
+          a+=Math.hypot(uy*wz-uz*wy,uz*wx-ux*wz,ux*wy-uy*wx); });
+        if(c){ area[key]=(area[key]||0)+a; if(area[key]>bestA){ bestA=area[key]; best=c; } }
+      });
+      out[b.id]={name:b.name||b.id, tri:o<tri.length?tri.slice(0,o):tri, color:best||b.color||b.appearance||null};
+    });
+    return out;
+  };
+  var mass=function(mp){ var out={}, B=mp&&mp.bodies; if(B) for(var id in B){ var x=B[id], kg=Array.isArray(x.mass)?x.mass[0]:x.mass; if(kg>0) out[id]={kg:kg,com:x.centroid?x.centroid.slice(0,3):null}; } return out; };
+  say("Reading the assembly …");
+  Promise.all([get(base+"?includeMateFeatures=true&includeMateConnectors=true&includeNonSolids=false&excludeSuppressed=true"), get(base+"/features").catch(function(){ return null; })])
   .then(function(r){
     var asm=r[0], features=r[1];
     if(!asm||!asm.rootAssembly) throw new Error("this tab isn't an assembly");
-    var payload={format:"ftc-simbench.onshape", v:1, name:name, url:location.href, asm:asm, features:features};
-    var json=JSON.stringify(payload);
-    var packed=new Blob([json]).stream().pipeThrough(new CompressionStream("gzip"));
-    return new Response(packed).arrayBuffer().then(function(buf){
-      var u=new Uint8Array(buf), s="";
-      for(var i=0;i<u.length;i+=32768) s+=String.fromCharCode.apply(null,u.subarray(i,i+32768));
-      var b=btoa(s).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
-      if(b.length<1500000){
-        var to=SB+"#onshape="+b;
-        if(w&&!w.closed){ w.location.href=to; return; }
-        if(window.open(to,"_blank")) return;
-      }
-      /* too big for an address, or no new tab allowed: one file to drop into SimBench */
-      if(w&&!w.closed) try{ w.close(); }catch(e){}
-      var a=document.createElement("a");
-      a.href=URL.createObjectURL(new Blob([json],{type:"application/json"}));
-      a.download=name.replace(/[\\/:*?"<>|]+/g,"_")+".onshape.json";
-      document.body.appendChild(a); a.click(); a.remove();
-      alert("Saved \""+a.download+"\". Drop it into SimBench's Mates & joints box, with the STEP of the same assembly.");
+    var jobs=[], seen={};
+    [asm.rootAssembly].concat(asm.subAssemblies||[]).forEach(function(a){ (a.instances||[]).forEach(function(i){
+      if(i.type!=="Part"||i.suppressed) return;
+      var ver=i.documentVersion?"v/"+i.documentVersion:"m/"+i.documentMicroversion, key=i.documentId+"/"+ver+"/e/"+i.elementId+"|"+(i.configuration||"");
+      if(seen[key]) return; seen[key]=1; jobs.push({key:key,i:i,ver:ver});
+    }); });
+    var geom={}, done=0, at=0;
+    var one=function(){
+      if(at>=jobs.length) return Promise.resolve();
+      var j=jobs[at++], i=j.i, ps=host+"/api/partstudios/d/"+i.documentId+"/"+j.ver+"/e/"+i.elementId;
+      var q="?configuration="+encodeURIComponent(i.configuration||"")+(i.documentId!==did?"&linkDocumentId="+did:"");
+      return Promise.all([
+        get(ps+"/tessellatedfaces"+q+"&outputFaceAppearances=true&outputFacetNormals=false&chordTolerance=0.0015&angleTolerance=0.35"),
+        get(ps+"/massproperties"+q+"&massAsGroup=false").catch(function(){ return null; })
+      ]).then(function(t){ geom[j.key]={parts:compact(t[0]),mass:mass(t[1])}; },function(){ geom[j.key]=null; })
+        .then(function(){ done++; say("Reading part shapes: "+done+" of "+jobs.length+" part studios …"); return one(); });
+    };
+    return Promise.all([one(),one(),one(),one()]).then(function(){
+      payload={format:"ftc-simbench.onshape", v:2, name:name, url:location.href, asm:asm, features:features, geom:geom};
+      if(!w||w.closed){ save(); return; }
+      send();
+      /* the SimBench tab never said it was ready: the file instead */
+      setTimeout(function(){ if(!sent&&!failed){ failed=true; save(); } },30000);
     });
   })
   .catch(function(e){
@@ -84,12 +127,29 @@ async function readOnshapeHash(h){
   let p; try{ p=JSON.parse(text); }catch(e){ throw new Error("the link is damaged"); }
   return checkOnshapePayload(p);
 }
-/* What came in is untrusted: keep only the two documents and a short name and address. */
+/* What came in is untrusted: keep only the documents, the shapes, and a short name and address. */
 function checkOnshapePayload(p){
   if(!p||typeof p!=="object"||p.format!==ONSHAPE_FORMAT) throw new Error("it isn't mates from the SimBench bookmark");
   if(!p.asm||typeof p.asm!=="object"||!p.asm.rootAssembly||typeof p.asm.rootAssembly!=="object") throw new Error("it has no assembly definition");
   const f=p.features, features=f&&(Array.isArray(f)||(typeof f==="object"&&Array.isArray(f.features)))?f:null;
   const str=v=>typeof v==="string"?v.slice(0,200):"";
   const url=/^https:\/\/([a-z0-9-]+\.)*onshape\.com\//i.test(str(p.url))?str(p.url):"";
-  return {name:str(p.name).trim()||"Onshape assembly", url, asm:p.asm, features};
+  // the shapes: part studio key -> {parts: id -> {name, tri (numbers), color}, mass}
+  let geom=null;
+  if(p.geom&&typeof p.geom==="object"){
+    geom={};
+    let tris=0;
+    for(const k of Object.keys(p.geom).slice(0,5000)){
+      const g=p.geom[k]; if(!g||typeof g!=="object"||!g.parts||typeof g.parts!=="object") continue;
+      const parts={};
+      for(const id of Object.keys(g.parts).slice(0,2000)){
+        const b=g.parts[id]; if(!b) continue;
+        const t=b.tri; if(!(t instanceof Float32Array||Array.isArray(t))) continue;
+        tris+=t.length/9; if(tris>8e6) throw new Error("the robot is too big to draw");
+        parts[id]={name:str(b.name), tri:t, color:b.color==null?null:(typeof b.color==="object"||typeof b.color==="string"?b.color:null)};
+      }
+      geom[k]={parts, mass:g.mass&&typeof g.mass==="object"?g.mass:{}};
+    }
+  }
+  return {name:str(p.name).trim()||"Onshape assembly", url, asm:p.asm, features, geom};
 }

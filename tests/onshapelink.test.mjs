@@ -16,24 +16,52 @@ const PAGE = `https://cad.onshape.com/documents/${D}/w/${W}/e/${EL}`;
 const SB = 'https://ftc-simbench-pro.pages.dev/';
 
 /* A browser tab on Onshape, just enough for the bookmark: the page address and
-   title, fetch answering the two API calls, window.open, alert, a download. */
-function onshapeTab({ href = PAGE, asm = R.onshape.assembly, features = R.onshape.features, popups = true } = {}) {
-  const t = { fetched: [], alerts: [], opened: [], downloads: [] };
-  const popup = { closed: false, location: { href: '' }, document: { title: '', body: { innerHTML: '', querySelector: () => ({}) } }, close() { this.closed = true; } };
+   title, fetch answering the API (the assembly, its features, and per part
+   studio its tessellated faces and mass properties, shaped like Onshape's),
+   window.open, postMessage both ways, alert, a download. */
+const hex = (c) => '#' + c.map((v) => Math.round(v * 255).toString(16).padStart(2, '0')).join('');
+function studioOf(u) {
+  const m = /\/partstudios\/d\/(\w+)\/(v|m)\/(\w+)\/e\/(\w+)\/(tessellatedfaces|massproperties)\?configuration=([^&]*)/.exec(u);
+  if (!m) return null;
+  const key = m[1] + '/' + m[2] + '/' + m[3] + '/e/' + m[4] + '|' + decodeURIComponent(m[6]);
+  return { key, what: m[5], g: R.onshape.geom[key] };
+}
+function apiAnswer(u, asm, features) {
+  const st = studioOf(u);
+  if (st) {
+    if (!st.g) return null;
+    if (st.what === 'massproperties') return { bodies: Object.fromEntries(Object.entries(st.g.mass).map(([k, v]) => [k, { mass: [v.kg, v.kg, v.kg], centroid: [0, 0, 0] }])) };
+    return Object.entries(st.g.parts).map(([id, b]) => {
+      const facets = []; for (let i = 0; i < b.tri.length; i += 9) facets.push({ vertices: [b.tri.slice(i, i + 3), b.tri.slice(i + 3, i + 6), b.tri.slice(i + 6, i + 9)] });
+      return { id, name: b.name, faces: [{ color: b.color ? hex(b.color) : null, facets }] };
+    });
+  }
+  return /\/features$/.test(u) ? features : asm;
+}
+function onshapeTab({ href = PAGE, asm = R.onshape.assembly, features = R.onshape.features, popups = true, answers = true } = {}) {
+  const t = { fetched: [], alerts: [], opened: [], downloads: [], got: [], listeners: [] };
+  const popup = { closed: false, location: { href: '' }, close() { this.closed = true; },
+    postMessage(d, origin) { if (d && d.type === 'simbench-progress') return; t.got.push({ d, origin }); } };
   t.popup = popup;
+  const win = { open: (u, n) => { t.opened.push([u, n]); if (!popups) return null; popup.location.href = u; return popup; },
+    addEventListener: (ev, f) => { if (ev === 'message') t.listeners.push(f); } };
   t.env = {
     location: { href },
     document: { title: 'Robot 2026 | Onshape', body: { appendChild() {} },
       createElement: () => { const a = { click() { t.downloads.push({ name: a.download, href: a.href }); }, remove() {} }; return a; } },
-    window: { open: (u, n) => { t.opened.push([u, n]); return popups ? (u ? { closed: false, location: { href: u } } : popup) : null; } },
+    window: win,
     fetch: async (u, o) => {
       t.fetched.push({ u, cred: o && o.credentials });
-      const body = /\/features$/.test(u) ? features : asm;
+      const body = apiAnswer(u, asm, features);
+      if (body == null) return { ok: false, status: 404, json: async () => ({}) };
       return { ok: true, status: 200, json: async () => JSON.parse(JSON.stringify(body)) };
     },
     alert: (m) => t.alerts.push(m),
-    URL: { createObjectURL: (b) => b },
+    URL: Object.assign(function (u) { return new URL(u); }, { createObjectURL: (b) => b }),
+    setTimeout: (f, ms) => setTimeout(f, Math.min(ms, 50)),
   };
+  // the SimBench tab, once open, says it's ready (from its own origin)
+  if (answers) setTimeout(() => t.listeners.forEach((f) => f({ origin: new URL(SB).origin, data: { type: 'simbench-ready' } })), 5);
   return t;
 }
 async function click(engine, tab) {
@@ -42,51 +70,53 @@ async function click(engine, tab) {
   const code = decodeURIComponent(href.slice('javascript:'.length));
   const names = Object.keys(tab.env);
   new Function(...names, code)(...names.map((k) => tab.env[k]));
-  for (let i = 0; i < 200 && !tab.popup.location.href && !tab.alerts.length && !tab.downloads.length; i++) await new Promise((r) => setTimeout(r, 10));
+  for (let i = 0; i < 400 && !tab.got.length && !tab.alerts.length && !tab.downloads.length; i++) await new Promise((r) => setTimeout(r, 10));
 }
 
-test('bookmark: reads the assembly with the team own sign-in and opens SimBench with it in the #fragment', async () => {
+test('bookmark: reads the whole robot with the team\'s own sign-in and hands it to the SimBench tab', async () => {
   const tab = onshapeTab();
   await click(E, tab);
   assert.deepEqual(tab.alerts, []);
-  // the same two API pages the manual steps open, with the browser's own cookies
   const L = E.onshapeApiLinks(PAGE);
-  assert.deepEqual(tab.fetched.map((f) => f.u).sort(), [L.def, L.features].sort());
+  const urls = tab.fetched.map((f) => f.u);
+  assert.ok(urls.some((u) => u.startsWith(L.def.split('?')[0] + '?')), 'the assembly definition');
+  assert.ok(urls.includes(L.features), 'its features (mate limits)');
+  // each part studio once, however many times its parts are used
+  const studios = Object.keys(R.onshape.geom);
+  assert.equal(urls.filter((u) => /tessellatedfaces/.test(u)).length, studios.length);
+  assert.equal(urls.filter((u) => /massproperties/.test(u)).length, studios.length);
   assert.ok(tab.fetched.every((f) => f.cred === 'include'));
-  // the tab it opened at the click is sent to SimBench, the robot in the fragment only
-  const to = tab.popup.location.href;
-  assert.ok(to.startsWith(SB + '#onshape='), to.slice(0, 80));
-  const p = await E.readOnshapeHash(to.split('#onshape=')[1]);
+  // it opened SimBench waiting, and posted the robot only to SimBench's own origin
+  assert.ok(tab.popup.location.href.startsWith(SB + '#onshape-wait'));
+  assert.equal(tab.got.length, 1);
+  assert.equal(tab.got[0].origin, new URL(SB).origin);
+  const p = E.checkOnshapePayload(tab.got[0].d);
   assert.deepEqual(p.asm, R.onshape.assembly);
-  assert.deepEqual(p.features, R.onshape.features);
   assert.equal(p.name, 'Robot 2026');
-  assert.equal(p.url, PAGE);
-  // and those rebuild the robot's joints on its STEP
-  const rep = E.applyOnshapeMates(E.parseSTEP(R.text), p.asm, { features: p.features });
-  assert.equal(rep.matched, R.truth.leafParts);
-  assert.equal(rep.joints, R.truth.joints.length);
+  // and that is the whole robot: every part with its shape, every joint from a mate
+  const cad = E.cadFromOnshape(p);
+  assert.equal(cad.solids.length, R.truth.leafParts);
+  assert.equal(cad.mechs.filter((m) => m.fromMate).length, R.truth.joints.length);
+  assert.ok(Math.abs(cad.onshape.kg - R.truth.massKg) < 1e-3);
 });
 
 test('bookmark: the ship build (minified) makes a bookmark that works the same', async () => {
   const M = loadEngine(minifyJS(engineBundle()));
   const tab = onshapeTab();
   await click(M, tab);
-  const p = await E.readOnshapeHash(tab.popup.location.href.split('#onshape=')[1]);
+  const p = E.checkOnshapePayload(tab.got[0].d);
   assert.deepEqual(p.asm, R.onshape.assembly);
+  assert.equal(E.cadFromOnshape(p).solids.length, R.truth.leafParts);
 });
 
-test('bookmark: an assembly too big for an address is saved as one file to drop in', async () => {
-  // incompressible filler: a 5 MB assembly definition
-  let seed = 7; const junk = Array.from({ length: 600000 }, () => ((seed = (seed * 48271) % 2147483647) % 1e9).toString(36));
-  const asm = Object.assign({}, R.onshape.assembly, { filler: junk });
-  const tab = onshapeTab({ asm });
+test('bookmark: no SimBench tab (pop-ups blocked) saves the whole robot as one file to drop in', async () => {
+  const tab = onshapeTab({ popups: false, answers: false });
   await click(E, tab);
   assert.equal(tab.downloads.length, 1);
   assert.equal(tab.downloads[0].name, 'Robot 2026.onshape.json');
   const p = E.checkOnshapePayload(JSON.parse(await tab.downloads[0].href.text()));
-  assert.equal(p.asm.filler.length, junk.length);
   assert.ok(/Drop it into SimBench/.test(tab.alerts[0]));
-  assert.ok(tab.popup.closed, 'the waiting tab is closed');
+  assert.equal(E.cadFromOnshape(p).solids.length, R.truth.leafParts);
 });
 
 test('bookmark: not on an assembly page, it says so and reads nothing', async () => {

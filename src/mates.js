@@ -172,6 +172,13 @@ function applyMateLimits(A,featuresJson){
    the most parts wins. */
 function matchOnshapeParts(A,cad,why){
   const solids=(cad&&cad.solids)||[];
+  // parts built from Onshape itself (src/onshapecad.js) carry their own path: exact
+  if(solids.length&&solids.every(s=>s.osPath)){
+    const at=new Map(solids.map((s,i)=>[s.osPath,i])), map=new Map();
+    for(const p of A.parts){ const k=pathKey(p.path); if(at.has(k)) map.set(k,at.get(k)); }
+    why.push("All "+map.size+" parts come from Onshape itself, so every mate lands on its own part.");
+    return {map, G:{r:[[1,0,0],[0,1,0],[0,0,1]],t:[0,0,0]}};
+  }
   const S=solids.map((s,i)=>({i, key:mateKey(s.name), T:s.occT||null})).filter(x=>x.T);
   if(!S.length) return {map:new Map(), G:null};
   const P=A.parts.map(p=>({p, key:mateKey(p.name), T:A.occ.get(pathKey(p.path)).T}));

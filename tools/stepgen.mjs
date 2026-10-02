@@ -641,7 +641,34 @@ function onshapeAssembly(top, R) {
     { message: { parameterId: m.type === 'SLIDER' ? 'limitAxialZMin' : 'limitRotationMin', expression: q(m, m.limits[0]) } },
     { message: { parameterId: m.type === 'SLIDER' ? 'limitAxialZMax' : 'limitRotationMax', expression: q(m, m.limits[1]) } }
   ] } })) };
-  return { assembly, features: features2 };
+  return { assembly, features: features2, geom: onshapeGeom(top) };
+}
+/* What the bookmark fetches per part studio (src/onshapecad.js): each part's
+   triangles in its own frame, its colour and its mass, keyed the same way. */
+function primTris(b) {
+  const T = [], push = (a, c, d) => { const A = fPt(b.F, a), B = fPt(b.F, c), C = fPt(b.F, d); T.push(...A, ...B, ...C); };
+  if (b.type === 'prism') {
+    const P = b.profile, n = P.length;
+    for (let i = 1; i + 1 < n; i++) { push([P[0][0], P[0][1], 0], [P[i + 1][0], P[i + 1][1], 0], [P[i][0], P[i][1], 0]); push([P[0][0], P[0][1], b.h], [P[i][0], P[i][1], b.h], [P[i + 1][0], P[i + 1][1], b.h]); }
+    for (let i = 0; i < n; i++) { const a = P[i], c = P[(i + 1) % n]; push([a[0], a[1], 0], [c[0], c[1], 0], [c[0], c[1], b.h]); push([a[0], a[1], 0], [c[0], c[1], b.h], [a[0], a[1], b.h]); }
+  } else {
+    const N = 24, ring = Array.from({ length: N }, (_, i) => { const a = 2 * Math.PI * i / N; return [b.r * Math.cos(a), b.r * Math.sin(a)]; });
+    for (let i = 0; i < N; i++) { const a = ring[i], c = ring[(i + 1) % N];
+      push([0, 0, 0], [c[0], c[1], 0], [a[0], a[1], 0]); push([0, 0, b.h], [a[0], a[1], b.h], [c[0], c[1], b.h]);
+      push([a[0], a[1], 0], [c[0], c[1], 0], [c[0], c[1], b.h]); push([a[0], a[1], 0], [c[0], c[1], b.h], [a[0], a[1], b.h]); }
+  }
+  return T;
+}
+function onshapeGeom(top) {
+  const geom = {};
+  walk(top, (p) => {
+    if (p.kind !== 'part') return;
+    const key = 'DOC/m/MV/e/E' + p.uid + '|default';
+    if (geom[key]) return;
+    const tri = [].concat(...p.bodies.map(primTris)).map((v) => +v.toFixed(6));
+    geom[key] = { parts: { ['P' + p.uid]: { name: p.name, tri, color: p.color || null } }, mass: { ['P' + p.uid]: { kg: p.kg } } };
+  });
+  return geom;
 }
 
 /* Build one robot: place in CAD by V, bake structure if asked, compute truth. */

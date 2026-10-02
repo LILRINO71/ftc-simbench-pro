@@ -169,6 +169,10 @@ const View={
 
   robotMat(k){
     this._rmat=this._rmat||{};
+    // a part's own colour (a robot read from Onshape): "rgb:r,g,b" in 0..255
+    if(!this._rmat[k]&&/^rgb:/.test(k)){ const c=k.slice(4).split(",").map(Number);
+      const m=new THREE.MeshStandardMaterial({color:new THREE.Color(c[0]/255,c[1]/255,c[2]/255),metalness:0.25,roughness:0.6});
+      m.userData.shared=true; this._rmat[k]=m; return m; }
     if(!this._rmat[k]){ const m=new THREE.MeshStandardMaterial(Object.assign({},ROBOT_MAT[k]||ROBOT_MAT.metal));
       m.userData.shared=true; this._rmat[k]=m; }
     return this._rmat[k];
@@ -558,7 +562,8 @@ const View={
       const byKind={};
       for(const s of list){
         if(!s.tri) s.tri=solidTriangles(s.pts)||{pos:[],nor:[]};
-        (byKind[s.kind||"metal"]=byKind[s.kind||"metal"]||[]).push(s.tri);
+        const mk=s.color&&s.keepTri?"rgb:"+s.color.map(v=>Math.round(v*255)).join(","):(s.kind||"metal");
+        (byKind[mk]=byKind[mk]||[]).push(s.tri);
       }
       const g=new THREE.Group();
       for(const k in byKind){
