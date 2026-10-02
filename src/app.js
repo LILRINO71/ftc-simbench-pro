@@ -1392,8 +1392,8 @@ function loadOnshapeRobot(p){
   $("#mateStatus").textContent=p.name+" · whole robot from Onshape · "+n+" joint"+(n===1?"":"s"); $("#mateDrop").className="drop ok";
   $("#mateNote").innerHTML=(cad.onshape.why||[]).map(w=>"<li>"+esc(w)+"</li>").join("");
   const pill=$("#matePill"); if(pill){ pill.textContent=n+" joint"+(n===1?"":"s"); pill.className="pill ok"; }
-  onshapeNote("<b>"+esc(p.name)+"</b> loaded straight from Onshape: "+cad.solids.length+" parts with their colours"+
-    (cad.onshape.kg?", "+cad.onshape.kg.toFixed(1)+" kg from your materials":"")+", and "+n+" joint"+(n===1?"":"s")+" from your mates. Load your code and press INIT.","ok");
+  onshapeNote("<b>"+esc(p.name)+"</b> loaded "+(p.from==="urdf"?"from its URDF":"straight from Onshape")+": "+cad.solids.length+" parts with their colours"+
+    (cad.onshape.kg?", "+cad.onshape.kg.toFixed(1)+" kg from your materials":"")+", and "+n+" joint"+(n===1?"":"s")+" from your "+(p.from==="urdf"?"joints":"mates")+". Load your code and press INIT.","ok");
   renderFrameNote&&renderFrameNote();
   Status.render&&Status.render();
   void rep;
@@ -2036,22 +2036,44 @@ function wireMates(){
     if(JOINTS.spec) applyJoints(); else if(LAST_STEP) parseAndLoad();
   });
 }
+/* A URDF and its STL meshes, dropped together (src/urdf.js): gathered as they
+   are read, then built once into the robot, joints and all. */
+const URDF_IN={text:null,name:null,files:{},timer:null};
+function takeUrdfPart(file){
+  const r=new FileReader();
+  const isUrdf=/\.urdf$/i.test(file.name);
+  r.onload=()=>{
+    if(isUrdf){ URDF_IN.text=r.result; URDF_IN.name=file.name.replace(/\.urdf$/i,""); }
+    else URDF_IN.files[file.name]=r.result;
+    clearTimeout(URDF_IN.timer);
+    URDF_IN.timer=setTimeout(()=>{
+      if(!URDF_IN.text){ $("#cadStatus").textContent=Object.keys(URDF_IN.files).length+" mesh file(s) waiting for their .urdf"; return; }
+      let p;
+      try{ p=urdfToPayload(URDF_IN.text,URDF_IN.files,URDF_IN.name); }
+      catch(e){ $("#cadStatus").textContent="couldn't read this URDF — "+e.message; $("#cadDrop").className="drop bad"; return; }
+      if(loadOnshapeRobot(p)){ $("#cadStatus").textContent=URDF_IN.name+" · from URDF · "+CAD.solids.length+" parts · "+CAD.mechs.filter(m=>m.fromMate).length+" joints"; CAD.source="urdf"; }
+    },200);
+  };
+  if(isUrdf) r.readAsText(file); else r.readAsArrayBuffer(file);
+}
 function routeFile(file){
   const n=file.name.toLowerCase();
-  if(/\.(step|stp)$/.test(n)) takeCAD(file);
+  if(/\.(urdf|stl)$/.test(n)) takeUrdfPart(file);
+  else if(/\.(step|stp)$/.test(n)) takeCAD(file);
   else if(/\.ftcsim$/.test(n)) Session.take(file);
   else if(/\.xml$/.test(n)) takeRobotConfig(file);
   else if(/\.json$/.test(n)) takeMates(file);
   else takeCode(file);
 }
-function wireDrop(dropEl,inputEl,handler){
+function wireDrop(dropEl,inputEl,handler,all){
   const open=()=>inputEl.click();
   dropEl.addEventListener("click",e=>{ if(e.target!==inputEl) open(); });
   dropEl.addEventListener("keydown",e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); open(); } });
   ["dragenter","dragover"].forEach(ev=>dropEl.addEventListener(ev,e=>{ e.preventDefault(); e.stopPropagation(); dropEl.classList.add("armed"); document.body.classList.remove("dragging"); }));
   ["dragleave","drop"].forEach(ev=>dropEl.addEventListener(ev,e=>{ e.preventDefault(); dropEl.classList.remove("armed"); }));
-  dropEl.addEventListener("drop",e=>{ e.stopPropagation(); document.body.classList.remove("dragging"); const f=e.dataTransfer.files[0]; if(f) handler(f); });
-  inputEl.addEventListener("change",e=>{ const f=e.target.files[0]; if(f) handler(f); inputEl.value=""; });
+  dropEl.addEventListener("drop",e=>{ e.stopPropagation(); document.body.classList.remove("dragging");
+    const fs=[].slice.call(e.dataTransfer.files||[]); (all?fs:fs.slice(0,1)).forEach(handler); });
+  inputEl.addEventListener("change",e=>{ const fs=[].slice.call(e.target.files||[]); (all?fs:fs.slice(0,1)).forEach(handler); inputEl.value=""; });
 }
 function wirePageDrop(){
   let depth=0;
@@ -3054,7 +3076,8 @@ function proBoot(){
   });
 
   // hardware
-  wireDrop($("#cadDrop"),$("#cadFile"),takeCAD);
+  // the robot: a STEP, an Onshape .onshape.json, or a URDF with its meshes
+  wireDrop($("#cadDrop"),$("#cadFile"),f=>/\.(urdf|stl|json)$/i.test(f.name)?routeFile(f):takeCAD(f),true);
   wireDrop($("#cfgDrop"),$("#cfgFile"),takeRobotConfig);
   wireMates();
   wirePageDrop();
