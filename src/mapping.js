@@ -91,7 +91,7 @@ function autoMap(devices,mechs,opts){
   // a servo turns things; a slide is pulled by a motor (or a continuous servo)
   const fitKind=(dev,mech)=>{ const sv=/servo/i.test(dev.type||"")&&!/crservo/i.test(dev.type||""), lin=normJointKind(mech.kind)==="linear";
     return sv&&lin?0.8:1; };
-  const score=(dev,mech)=>Math.max(one(dev.name,mech), one(dev.cfg,mech))*fitKind(dev,mech);
+  const score=(dev,mech)=>Math.max(one(dev.name,mech), one(dev.cfg,mech), dev.alias?one(dev.alias,mech):0)*fitKind(dev,mech);
   const pairs=[];
   const acts=[];
   for(const dev of devices){
@@ -108,7 +108,9 @@ function autoMap(devices,mechs,opts){
     if(map[dev.name]!==null) continue;
     const st=mapStem(dev.name)||mapStem(dev.cfg);
     if(st.length<3) continue;
-    const twin=acts.find(o=>o!==dev&&map[o.name]&&(mapStem(o.name)===st||mapStem(o.cfg)===st)&&/dcmotor/i.test(o.type||"")===/dcmotor/i.test(dev.type||""));
+    // motors only: two servos named alike are usually a mirrored pair (one sent 1-p), not one joint's
+    if(!/dcmotor/i.test(dev.type||"")) continue;
+    const twin=acts.find(o=>o!==dev&&map[o.name]&&(mapStem(o.name)===st||mapStem(o.cfg)===st)&&/dcmotor/i.test(o.type||""));
     if(twin) map[dev.name]=map[twin.name];
   }
   return map;

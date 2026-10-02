@@ -680,9 +680,9 @@ function applyRig(r){
 function applyDeviceMemory(){
   if(!CODE) return;
   const ids={}; CAD.mechs.forEach(m=>ids[m.id]=1);
-  for(const d of CODE.devices) if(Object.prototype.hasOwnProperty.call(RIG_DEVICES,d.name)){
-    const v=RIG_DEVICES[d.name]; if(v===null||ids[v]) MAP[d.name]=v;
-  }
+  // remembered by the device's name, or (code now run on the Java VM) by the variable it was before
+  for(const d of CODE.devices){ const k=Object.prototype.hasOwnProperty.call(RIG_DEVICES,d.name)?d.name:(d.alias&&Object.prototype.hasOwnProperty.call(RIG_DEVICES,d.alias)?d.alias:null);
+    if(k==null) continue; const v=RIG_DEVICES[k]; if(v===null||ids[v]) MAP[d.name]=v; }
 }
 function saveRig(){
   store.set(rigKey(),JSON.stringify(exportRig()));
@@ -1998,7 +1998,7 @@ function mapDevices(){
   const J=JOINTS.report&&CAD.mates&&CAD.mates.source==="spec"?JOINTS.devices:null;
   if(J) for(const d of CODE.devices){
     const own=k=>k&&Object.prototype.hasOwnProperty.call(J,k)?J[k]:null;
-    const j=own(d.name)||own(d.cfg), picked=RIG_DEVICES[d.name];
+    const j=own(d.name)||own(d.cfg)||own(d.alias), picked=RIG_DEVICES[d.name];
     // a device the user mapped to one of these joints by hand keeps it
     if(j&&CAD.mechs.some(m=>m.id===j)&&!(picked&&CAD.mechs.some(m=>m.id===picked))) MAP[d.name]=j;
   }
