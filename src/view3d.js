@@ -170,10 +170,14 @@ const View={
   robotMat(k){
     this._rmat=this._rmat||{};
     // a part's own colour (a robot read from Onshape): "rgb:r,g,b" in 0..255
-    if(!this._rmat[k]&&/^rgb:/.test(k)){ const c=k.slice(4).split(",").map(Number);
-      const m=new THREE.MeshStandardMaterial({color:new THREE.Color(c[0]/255,c[1]/255,c[2]/255),metalness:0.25,roughness:0.6});
+    if(!this._rmat[k]&&/^rgb:/.test(k)){ const c=k.slice(4).split(",").map(Number), env=this.envMap();
+      const m=new THREE.MeshStandardMaterial({color:new THREE.Color(c[0]/255,c[1]/255,c[2]/255),metalness:0.3,roughness:0.55,envMap:env||null,envMapIntensity:0.7});
       m.userData.shared=true; this._rmat[k]=m; return m; }
     if(!this._rmat[k]){ const m=new THREE.MeshStandardMaterial(Object.assign({},ROBOT_MAT[k]||ROBOT_MAT.metal));
+      // the same room to reflect as the light copy (liteMat): without it a metal part
+      // reflects nothing and draws near-black, and the light copy, which has it, white,
+      // so a slow computer switching copies turned the robot white
+      const env=this.envMap(); if(env&&!m.transparent){ m.envMap=env; m.envMapIntensity=0.7; }
       m.userData.shared=true; this._rmat[k]=m; }
     return this._rmat[k];
   },
@@ -445,8 +449,9 @@ const View={
     g.computeVertexNormals(); g.computeBoundingBox(); g.computeBoundingSphere();
     return g;
   },
+  /* lit like the full robot's own materials (robotMat), so switching copies doesn't change how it looks */
   liteMat(){ if(!this._liteMat){ const env=this.envMap(); this._liteMat=new THREE.MeshStandardMaterial({vertexColors:true, flatShading:true,
-      metalness:env?0.45:0.15, roughness:0.5, envMap:env||null, envMapIntensity:0.8}); this._liteMat.userData.shared=true; } return this._liteMat; },
+      metalness:env?0.75:0.2, roughness:env?0.38:0.5, envMap:env||null, envMapIntensity:1.0}); this._liteMat.userData.shared=true; } return this._liteMat; },
   /* drawn into the shadow map only */
   shadowMat(){ if(!this._shadowMat){ this._shadowMat=new THREE.MeshBasicMaterial({colorWrite:false, depthWrite:false}); this._shadowMat.userData.shared=true; } return this._shadowMat; },
   /* Which copy draws: the exact one up close, the light one in the driver's view
