@@ -1401,7 +1401,7 @@ function loadOnshapeRobot(p,reparse){
   LAST_STEP={name:p.name, text:"", onshape:p, label:p.name+" · from "+from};
   // a new robot drops the last one's joints; the same one re-read (a new up, a new centre) keeps them
   if(!reparse||JOINTS.step!==p.name){ JOINTS.spec=JOINTS.report=JOINTS.devices=null; JOINTS.name=JOINTS.step=null; }
-  MATES.asm=p.asm; MATES.features=p.features; MATES.name=p.name; MATES.url=p.url||null; MATES.fromLink=true; MATES.report=cad.onshape.report;
+  MATES.asm=p.asm; MATES.features=p.features; MATES.featuresBy=p.featuresBy||null; MATES.name=p.name; MATES.url=p.url||null; MATES.fromLink=true; MATES.report=cad.onshape.report;
   SetupUI.beforeParse&&SetupUI.beforeParse(p.name);
   loadCAD(cad, p.name+" · from "+from+" · "+cad.solids.length+" parts · "+cad.mechs.filter(m=>m.fromMate).length+" joints", "ok");
   recomputeChain(cad.mechs);
@@ -1431,6 +1431,7 @@ const OnshapeHelp={
     const ov=$("#osOverlay"); if(!ov) return;
     const mac=/Mac|iPhone|iPad/i.test((navigator.userAgentData&&navigator.userAgentData.platform)||navigator.platform||navigator.userAgent);
     for(const id of ["osKey1","osKey2","osKey3"]){ const k=$("#"+id); if(k) k.textContent=mac?"⌘ Cmd":"Ctrl"; }
+    for(const k of $$(".os-mod")) k.textContent=mac?"⌘ Cmd":"Ctrl";
     const phone=matchMedia("(pointer:coarse)").matches&&!matchMedia("(any-pointer:fine)").matches;
     $("#osPhone").hidden=!phone;
     const href=onshapeBookmarklet(location.origin+location.pathname);
@@ -1454,6 +1455,15 @@ const OnshapeHelp={
     $("#osDone").addEventListener("click",()=>this.close());
     $("#osShowSteps").addEventListener("click",()=>this.open());
     $("#osSeeRobot").addEventListener("click",()=>{ this.close(); const nav=$('.tabs[data-tabs="left"]'); if(nav) selectTab(nav,"robot"); });
+    // copy and paste: the STEP, the address, the pages of text
+    $("#osStepPick").addEventListener("click",()=>$("#cadFile").click());
+    $("#osPasteLink").value=store.get("ftcbench.onshapeLink","")||"";
+    $("#osPasteLink").addEventListener("input",()=>this.pasteLink());
+    $("#osPaste").addEventListener("input",()=>{ clearTimeout(this.pasteT); this.pasteT=setTimeout(()=>this.takePaste(),60); });
+    $("#osLimitLinks").addEventListener("click",e=>{ const a=e.target.closest("[data-lk]"); if(!a) return;
+      this.paste.pending=a.dataset.lk; this.say("osPasteTip","Now copy that page (Ctrl + A, Ctrl + C) and paste it in the box in step 3."); });
+    $("#osPasteSee").addEventListener("click",()=>{ this.close(); const nav=$('.tabs[data-tabs="left"]'); if(nav) selectTab(nav,"robot"); });
+    this.pasteLink();
     $("#osSignIn").addEventListener("click",()=>this.signIn());
     $("#osSignOut").addEventListener("click",()=>this.signOut());
     $("#osLinkForm").addEventListener("submit",e=>{ e.preventDefault(); this.fromLink(); });
@@ -1465,12 +1475,76 @@ const OnshapeHelp={
     this.chip();
   },
   view(guide){ $("#osGuide").hidden=!guide; $("#osProgress").hidden=guide; $("#osOverlay").hidden=false; },
-  open(){ this.mode="guide"; $("#osBmTip").hidden=true; this.view(true); const s=$(".os-sheet"); if(s) s.scrollTop=0; this.refresh(); },
+  open(){ this.mode="guide"; $("#osBmTip").hidden=true; this.view(true); const s=$(".os-sheet"); if(s) s.scrollTop=0; this.refresh();
+    // the STEP parses after the file picker closes: keep the steps' ticks current while open
+    clearInterval(this.pasteIv); this.pasteIv=setInterval(()=>{ if($("#osOverlay").hidden||this.mode!=="guide") clearInterval(this.pasteIv); else this.pasteState(); },700);
+    this.pasteState(); },
+  /* ---- copy and paste ---- */
+  paste:{asm:false, limits:[], pending:"", got:{}},
+  pasteLink(){
+    const href=$("#osPasteLink").value.trim(), L=onshapeApiLinks(href), a=$("#osOpenJoints");
+    this.say("osPasteLinkTip",href&&!L?"That isn't an Onshape assembly address. In Onshape, click your Assembly tab, then copy the whole address from the address bar.":"");
+    if(L){ a.href=L.def; a.setAttribute("aria-disabled","false"); store.set("ftcbench.onshapeLink",href); }
+    else{ a.removeAttribute("href"); a.setAttribute("aria-disabled","true"); }
+    if(this.paste.asm&&MATES.asm) this.renderLimits();
+    this.pasteState();
+  },
+  takePaste(){
+    const box=$("#osPaste"), text=box.value;
+    if(!text.trim()) return;
+    let r; try{ r=readOnshapePaste(text); }catch(e){ this.say("osPasteTip",e.message+"."); return; }
+    box.value="";
+    if(r.kind==="assembly"){
+      MATES.asm=r.json; MATES.features=null; MATES.featuresBy={}; MATES.name="your Onshape assembly";
+      MATES.url=$("#osPasteLink").value.trim()||null; MATES.fromLink=true; MATES.report=null;
+      JOINTS.spec=JOINTS.report=null;
+      this.paste={asm:true, limits:[], pending:"", got:{}};
+      this.renderLimits();
+      this.say("osPasteTip","✓ Got your joints: "+r.mates+" mate"+(r.mates===1?"":"s")+"."+(this.paste.limits.length?" Limits are next (step 4), or skip them.":""));
+    }else{
+      if(!this.paste.asm||!MATES.asm){ this.say("osPasteTip","That's a limits page. Paste your joints page first (the button in step 3)."); return; }
+      const k=this.paste.pending||"", link=this.paste.limits.find(x=>x.key===k);
+      if(k==="") MATES.features=r.json; else MATES.featuresBy[k]=r.json;
+      this.paste.got[k]=true; this.paste.pending="";
+      this.renderLimits();
+      this.say("osPasteTip","✓ Got the limits for "+(link?link.name:"the main assembly")+".");
+    }
+    this.applyPaste();
+  },
+  renderLimits(){
+    const L=this.paste.limits=onshapeLimitLinks(MATES.asm,$("#osPasteLink").value.trim());
+    const box=$("#osLimitLinks");
+    if(!this.paste.asm){ box.innerHTML='<span class="dim">These show up after step 3.</span>'; return; }
+    if(!L.length){ box.innerHTML='<span class="dim">Paste your assembly\'s address in step 2 to get these links.</span>'; return; }
+    box.innerHTML=L.map(x=>'<a class="btn-sm" target="_blank" rel="noopener" data-lk="'+esc(x.key)+'" href="'+esc(x.url)+'">Open ↗ '+esc(x.name)+'</a>'+
+      (this.paste.got[x.key]?'<span class="got">✓</span>':'')).join("");
+  },
+  /* the STEP of their own robot is in and the joints came: put the joints on it */
+  applyPaste(){
+    if(this.paste.asm&&MATES.asm&&ownRobot()&&LAST_STEP&&!LAST_STEP.onshape&&!LAST_STEP.session) applyMates();
+    this.pasteState();
+  },
+  pasteState(){
+    const step=ownRobot()&&LAST_STEP&&!LAST_STEP.onshape&&!LAST_STEP.session;
+    const ok=$("#osStepOk"); ok.hidden=!step; if(step) ok.textContent="✓ "+LAST_STEP.name;
+    $("#osPs1").classList.toggle("done",!!step);
+    $("#osPs2").classList.toggle("done",!!onshapeApiLinks($("#osPasteLink").value.trim()));
+    $("#osPs3").classList.toggle("done",this.paste.asm&&!!MATES.asm);
+    $("#osPs4").classList.toggle("done",Object.keys(this.paste.got).length>0);
+    const rep=MATES.report, show=!!(step&&this.paste.asm&&MATES.asm&&rep);
+    $("#osPasteResult").hidden=!show;
+    if(show){
+      const nl=Object.keys(this.paste.got).length;
+      $("#osPasteResultText").textContent="✓ "+LAST_STEP.name+": "+rep.joints+" joint"+(rep.joints===1?"":"s")+" from your mates, "+
+        rep.matched+" of "+rep.parts+" parts matched"+(nl?", limits from "+nl+" page"+(nl===1?"":"s"):"")+".";
+    }
+    else if(step&&this.paste.asm&&MATES.asm&&!rep){ const t=$("#mateStatus").textContent; if(/Couldn't|line up/.test(t)) this.say("osPasteTip",t); }
+  },
   /* whether this site can sign in to Onshape (it needs functions/onshape), and whether it has */
   async refresh(){
     const st=this.signin=await onshapeSignInState();
-    $("#osSignInWay").hidden=!st.ready; $("#osNoSignIn").hidden=st.ready;
-    if(!st.ready) $("#osBmWay").open=true;
+    // signing in is the quicker way where it's switched on (functions/onshape) and the account allows it
+    $("#osSignWay").hidden=!st.ready;
     $("#osSignIn").hidden=st.signedIn; $("#osSignedIn").hidden=!st.signedIn;
     $("#osStep1").classList.toggle("done",st.signedIn);
     return st;
@@ -1705,7 +1779,7 @@ function takeRobotConfig(file){ readText(file,text=>setRobotConfig(text,file.nam
    The two JSON files come from Onshape's own API, opened in a tab that's
    signed in to Onshape: no keys, nothing sent anywhere but Onshape.
    ============================================================ */
-const MATES={asm:null, features:null, name:null, report:null, url:null};
+const MATES={asm:null, features:null, featuresBy:null, name:null, report:null, url:null};
 /* ---- mates from the "Send to SimBench" bookmark (src/onshapelink.js) ----
    They arrive in this page's #onshape= fragment. If the team already has
    their own robot open in another SimBench tab, that tab is offered them
@@ -1746,7 +1820,7 @@ async function takeOnshapeHash(){
    (parseAndLoad applies MATES by itself), never on the default robot. */
 function holdOnshape(p){
   if(p.geom&&loadOnshapeRobot(p)) return;
-  MATES.asm=p.asm; MATES.features=p.features; MATES.name=p.name; MATES.url=p.url||null; MATES.report=null; MATES.fromLink=true;
+  MATES.asm=p.asm; MATES.features=p.features; MATES.featuresBy=p.featuresBy||null; MATES.name=p.name; MATES.url=p.url||null; MATES.report=null; MATES.fromLink=true;
   JOINTS.spec=null; JOINTS.report=null; ONSHAPE_OFFER=null;
   if(ownRobot()) applyMates();
   else{
@@ -1793,7 +1867,7 @@ function applyMates(){
     st.textContent="Got "+MATES.name+". Load the STEP of the same assembly and the mates apply to it."; drop.className="drop"; return;
   }
   try{
-    const rep=applyOnshapeMates(CAD,MATES.asm,{features:MATES.features});
+    const rep=applyOnshapeMates(CAD,MATES.asm,{features:MATES.features, featuresBy:MATES.featuresBy||null});
     MATES.report=rep;
     recomputeChain(CAD.mechs);
     View.hiddenParts=View.hiddenParts||new Set();

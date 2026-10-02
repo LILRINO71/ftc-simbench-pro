@@ -142,6 +142,58 @@ function onshapeBookmarklet(sb){
   return "javascript:"+encodeURIComponent("("+onshapeGrab.toString()+")("+JSON.stringify(String(sb).replace(/#.*$/,""))+","+onshapeRead.toString()+");void 0");
 }
 
+/* ---- Copy and paste: no app, no bookmark, no sign-up ----
+   The team opens their assembly's own API page in a tab already signed in
+   to Onshape (school accounts included: an Enterprise opens it on its own
+   domain), copies the page's text and pastes it here. Those calls ride the
+   team's browser session, so they count against no API limit. The joints
+   then go onto the STEP the team exported from the same assembly. */
+
+/* What came from a paste: {kind:"assembly"|"features", json, mates}, or an
+   error that says what to do. A copied page may carry Chrome's
+   "Pretty-print" line or stray text around the JSON. */
+function readOnshapePaste(text){
+  const s=String(text||"").trim();
+  if(!s) throw new Error("nothing was pasted yet");
+  if(/^<(!doctype|html)|<body[\s>]/i.test(s)) throw new Error("that's a web page, not Onshape's page of text. Sign in to Onshape in this browser, open the link again, and copy that page");
+  const a=s.search(/[{[]/), b=Math.max(s.lastIndexOf("}"),s.lastIndexOf("]"));
+  if(a<0) throw new Error("that isn't the page of text from Onshape. On that page press Ctrl+A, then Ctrl+C, and paste here");
+  let j;
+  try{ if(b<a) throw 0; j=JSON.parse(s.slice(a,b+1)); }
+  catch(e){ throw new Error("only part of the page came through. On that page press Ctrl+A, then Ctrl+C, and paste again"); }
+  if(j&&typeof j==="object"&&j.rootAssembly&&typeof j.rootAssembly==="object"){
+    const isMate=f=>f&&f.featureType==="mate"&&!f.suppressed;
+    const mates=[j.rootAssembly].concat(Array.isArray(j.subAssemblies)?j.subAssemblies:[]).reduce((n,d)=>n+((d&&d.features)||[]).filter(isMate).length,0);
+    return {kind:"assembly", json:j, mates};
+  }
+  if(j&&(Array.isArray(j)||(typeof j==="object"&&Array.isArray(j.features)))) return {kind:"features", json:j};
+  if(j&&typeof j==="object"&&j.message&&j.status){
+    const st=+j.status;
+    throw new Error("Onshape said \""+String(j.message).slice(0,120)+"\" ("+st+"). "+
+      (st===401||st===403?"Sign in to Onshape in this browser with the account that can open the robot, then open the link again":
+       st===400||st===404?"The address has to come from your Assembly tab, not a Part Studio: copy it again":"Open the link again"));
+  }
+  throw new Error("that isn't your assembly's joints page. Use the Open your joints page button, then copy that page");
+}
+/* The pages to open for mate limits: the main assembly's, and each
+   subassembly's that has mates (that call only lists one element's own
+   features). key is what applyMateLimits files them under. */
+function onshapeLimitLinks(asm, href){
+  const ref=onshapeRef(href), L=onshapeApiLinks(href);
+  if(!ref||!L||!asm||!asm.rootAssembly) return [];
+  const out=[{key:"", name:"Main assembly", url:L.features}];
+  const names={};
+  for(const d of [asm.rootAssembly].concat(asm.subAssemblies||[])) for(const i of (d.instances||[]))
+    if(i&&i.type==="Assembly") names[[i.documentId||"",i.elementId||"",i.fullConfiguration||i.configuration||"default"].join("|")]=String(i.name||"").replace(/\s*<\d+>\s*$/,"");
+  for(const d of (asm.subAssemblies||[])){
+    if(!d||!d.documentMicroversion||!(d.features||[]).some(f=>f&&f.featureType==="mate"&&!f.suppressed)) continue;
+    const cfg=d.fullConfiguration||d.configuration||"default", key=[d.documentId||"",d.elementId||"",cfg].join("|");
+    if(out.some(o=>o.key===key)) continue;
+    out.push({key, name:names[key]||"Subassembly", url:ref.host+"/api/assemblies/d/"+d.documentId+"/m/"+d.documentMicroversion+"/e/"+d.elementId+"/features?configuration="+encodeURIComponent(cfg)+(d.documentId!==ref.did?"&linkDocumentId="+ref.did:"")});
+  }
+  return out;
+}
+
 /* ---- Sign in with Onshape (functions/onshape): works where bookmarks are blocked ---- */
 /* Whether this site can sign in to Onshape, and whether it already has:
    {ready, signedIn}; ready is false with no server (a file, a plain host). */

@@ -1066,6 +1066,16 @@ details.fine summary:hover{color:var(--accent-tx);}
 .os-link .btn-sm{font-size:13.5px; padding:6px 14px;}
 .os-step.done .os-n{background:var(--pass);}
 .os-pic .p-addr.hi{stroke:var(--accent); stroke-width:2;}
+.os-input{display:block; width:100%; box-sizing:border-box; font:13px var(--mono); padding:7px 9px; margin:6px 0 2px; border-radius:7px; border:1px solid var(--line); background:var(--panel); color:var(--tx);}
+.os-paste{display:block; width:100%; box-sizing:border-box; height:64px; resize:vertical; font:12px var(--mono); padding:7px 9px; margin:6px 0 2px; border-radius:7px; border:1px dashed var(--accent-line, var(--accent)); background:var(--panel); color:var(--tx);}
+.os-input:focus,.os-paste:focus{outline:2px solid var(--accent); outline-offset:1px;}
+.os-link-btn{display:inline-block; text-decoration:none;}
+.os-link-btn[aria-disabled="true"]{opacity:.45; pointer-events:none;}
+.os-limits{display:flex; flex-wrap:wrap; gap:6px 10px; margin:6px 0 2px; font-size:13px;}
+.os-limits .btn-sm{font-size:12.5px; text-decoration:none;}
+.os-limits .got{color:var(--pass); font-weight:700;}
+.os-result{margin-top:14px; padding:10px 12px; border-radius:9px; border:1px solid var(--pass); background:var(--panel-2);}
+.os-result .os-prog{margin:0 0 8px;}
 .os-way{margin-top:18px; border-top:1px solid var(--line-2); padding-top:10px;}
 .os-way summary{cursor:pointer; font-size:13.5px; color:var(--accent-tx); font-weight:600;}
 .os-steps.small{margin-top:10px;}
