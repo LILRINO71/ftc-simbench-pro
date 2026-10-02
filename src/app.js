@@ -1766,7 +1766,10 @@ const SetupUI={
     a.download=name+".simbench.json"; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),2000);
   },
   isDefault(){ return typeof DEFAULT_ROBOT!=="undefined"&&CAD&&CAD.name===DEFAULT_ROBOT.step; },
-  complete(){ return SETUP_STEPS.every(k=>SETUP.done[k]); },
+  /* a step is done when someone checked it, or the robot itself answers it (src/robotcheck.js setupAuto) */
+  auto(){ try{ return CAD?setupAuto(CAD,CODE,MAP):{}; }catch(e){ return {}; } },
+  isDone(k,A){ return !!(SETUP.done[k]||(A||this.auto())[k]); },
+  complete(){ const A=this.auto(); return SETUP_STEPS.every(k=>this.isDone(k,A)); },
   confirm(k){ SETUP.done[k]=true; saveRig(); this.render(); },
   /* the drive base as typed: kind, wheel size, track, wheelbase, rollers, and the base's centre */
   applyForm(){
@@ -1784,12 +1787,13 @@ const SetupUI={
     const box=$("#setupSteps"), pill=$("#setupPill"), chip=$("#vpSetup"); if(!box) return;
     if(!CAD){ box.innerHTML=""; return; }
     let D=null; try{ D=driveFromCAD(CAD,{front:OPTS.front}); }catch(e){ D=null; }
-    const F=CAD.frame||{}, n=SETUP_STEPS.filter(k=>SETUP.done[k]).length, def=this.isDefault();
+    const A=this.auto(), done=k=>this.isDone(k,A);
+    const F=CAD.frame||{}, n=SETUP_STEPS.filter(done).length, def=this.isDefault();
     pill.textContent=def?"ready":n===4?"set up":n+" of 4 checked"; pill.className="pill"+(def||n===4?" ok":"");
     chip.hidden=def||n===4||!LAST_STEP||this.chipGone===CAD;
     const seg=(attr,vals,cur)=>`<div class="seg">${vals.map(([v,t])=>`<button type="button" data-${attr}="${v}" class="${v===cur?"on":""}">${t}</button>`).join("")}</div>`;
-    const ok=k=>SETUP.done[k]?"":`<button class="btn-sm primary" type="button" data-su-ok="${k}">Looks right</button>`;
-    const li=(k,title,st,body)=>`<li class="su-step${SETUP.done[k]?" done":""}"><div class="su-head"><b>${title}</b><span class="su-st">${esc(st)}</span></div>${body}</li>`;
+    const ok=k=>done(k)?"":`<button class="btn-sm primary" type="button" data-su-ok="${k}">Looks right</button>`;
+    const li=(k,title,st,body)=>`<li class="su-step${done(k)?" done":""}"><div class="su-head"><b>${title}</b><span class="su-st">${esc(st)}${!SETUP.done[k]&&A[k]?" · found":""}</span></div>${body}</li>`;
     const out=[];
     // 1. floor and up
     out.push(li("up","Floor and up",F.up?"up is "+F.up:"",
@@ -1869,7 +1873,7 @@ function renderRobotCheckNow(){
   catch(e){ RC=null; put(`<p class="hint">The robot check stopped: ${esc(e.message)}</p>`); return; }
   pill.textContent=RC.ready?(RC.warn?RC.warn+" to confirm":"ready"):RC.need+" to answer";
   pill.className="pill "+(RC.ready?(RC.warn?"warnp":"ok"):"bad");
-  const SEV={fail:"ANSWER",warn:"CONFIRM",ok:"OK"};
+  const SEV={fail:"ANSWER",warn:"CONFIRM",note:"NOTE",ok:"OK"};
   const btn=(act,arg,txt,cls)=>`<button class="btn-sm${cls?" "+cls:""}" data-rc="${act}" data-a="${esc(arg)}">${esc(txt)}</button>`;
   const ok=RC.items.filter(i=>i.sev==="ok"), open=RC.items.filter(i=>i.sev!=="ok");
   const row=(it,n)=>{
@@ -1989,7 +1993,7 @@ function downloadJoints(){
    decide. Either way, what the user picked by hand in the table stays. */
 function mapDevices(){
   if(!CODE||!CAD) return;
-  MAP=autoMap(CODE.devices,CAD.mechs);
+  MAP=autoMap(CODE.devices,CAD.mechs,{cad:CAD});
   applyDeviceMemory();
   const J=JOINTS.report&&CAD.mates&&CAD.mates.source==="spec"?JOINTS.devices:null;
   if(J) for(const d of CODE.devices){
@@ -3114,7 +3118,7 @@ function proBoot(){
     for(const m of CAD.mechs){ m.kind=m.hasActuator===false?"fixed":null; m.leverOverride=null; m.label=null; }
     CAD.mechs=CAD.mechs.filter(m=>!m.manual);
     classifyMechs(CAD.mechs);
-    if(CODE) MAP=autoMap(CODE.devices,CAD.mechs);
+    if(CODE) MAP=autoMap(CODE.devices,CAD.mechs,{cad:CAD});
     rigChanged();
   });
 

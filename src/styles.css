@@ -725,9 +725,10 @@ kbd{display:inline-block; min-width:15px; padding:0 3px; border:1px solid var(--
 .rc-item.fail{border-left-color:var(--fail); background:linear-gradient(90deg,var(--fail-soft),var(--panel-2) 70%);}
 .rc-item.warn{border-left-color:var(--warn);}
 .rc-item.ok{border-left-color:var(--pass);}
+.rc-item.note{border-left-color:var(--line,#5a6070); opacity:.92;}
 .rc-head{display:flex; gap:8px; align-items:baseline;}
 .rc-sev{font-family:var(--mono); font-size:9.5px; font-weight:700; letter-spacing:.08em; flex:none;}
-.rc-item.fail .rc-sev{color:var(--fail)} .rc-item.warn .rc-sev{color:var(--warn)} .rc-item.ok .rc-sev{color:var(--pass)}
+.rc-item.fail .rc-sev{color:var(--fail)} .rc-item.warn .rc-sev{color:var(--warn)} .rc-item.ok .rc-sev{color:var(--pass)} .rc-item.note .rc-sev{color:var(--muted,#8a90a0)}
 .rc-text{font-size:12.5px; line-height:1.35;}
 .rc-acts{display:flex; flex-wrap:wrap; gap:5px; margin-top:6px;}
 .rc-cand{display:inline-flex; align-items:center; gap:4px; padding:2px 4px 2px 7px; border:1px solid var(--line-2); border-radius:6px; font-size:11.5px;}

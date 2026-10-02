@@ -17,12 +17,16 @@
                 (the wrong servo on it, or the wrong drawn position)
      targets    RUN_TO_POSITION targets fit the slide's travel
      scale      drawn at robot size and about a robot's weight (the STEP's units)
-   Each item: {key, sev: "ok"|"warn"|"fail", text, device?, joint?, ask?}.
+   Each item: {key, sev: "ok"|"note"|"warn"|"fail", text, device?, joint?, ask?}.
+   Only "fail" (answer) and "warn" (confirm) are questions. Something the bench
+   can run without a person is a "note": a device with no joint drawn for it
+   runs as a live gauge driven by the code, a joint nothing drives sits still,
+   guessed joints are offered an exact source. Notes carry one-click answers.
    ask says what to ask the team: "pick-parts" (click what this device
    moves), "drop-joint", "pick-device" (which of your devices drives it),
    "mates" (exact joints from Onshape), "look" (show it in the CAD view).
    ============================================================ */
-const {checkRobot}=(function(){
+const {checkRobot, setupAuto}=(function(){
   const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
   const sub=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]];
   const add=(a,b)=>[a[0]+b[0],a[1]+b[1],a[2]+b[2]];
@@ -44,7 +48,7 @@ const {checkRobot}=(function(){
     const p=m.pivot||[0,0,0], Rp=[dot(R[0],p),dot(R[1],p),dot(R[2],p)];
     return {R, t:sub(p,Rp)};
   }
-  const sevRank={fail:0,warn:1,ok:2};
+  const sevRank={fail:0,warn:1,note:2,ok:3};
   // from the geometry alone, so once per CAD (the joints change, the parts don't)
   const ACTS=new WeakMap(), MASS=new WeakMap();
   function cadActuators(cad){
@@ -72,10 +76,10 @@ const {checkRobot}=(function(){
 
     // where the joints came from
     const src=cad&&cad.mates&&cad.mates.source;
-    if(src==="onshape") put({key:"source", sev:"ok", text:"Joints come from your Onshape mates, so axes, pivots and parts are exact."});
+    if(src==="onshape") put({key:"source", sev:"ok", text:cad.source==="urdf"?"Joints come from your URDF's joints, so axes, pivots and parts are exact.":"Joints come from your Onshape mates, so axes, pivots and parts are exact."});
     else if(src==="spec"&&!(cad.mates.auto)) put({key:"source", sev:"ok", text:"Joints come from a joint spec"+(cad.mates.name?" ("+cad.mates.name+")":"")+"."});
-    else put({key:"source", sev:"warn", ask:"mates", text:(src==="spec"?"Joints were found from the geometry":"Joints are guessed from the assembly")+
-      ". Your Onshape mates would make them exact; otherwise confirm the ones below."});
+    else put({key:"source", sev:"note", ask:"mates", text:(src==="spec"?"Joints were found from the geometry":"Joints are guessed from the assembly")+
+      ". The Onshape bookmark or a URDF would make them exact."});
 
     // every device the code moves
     const driven=new Map();                          // joint id -> device
@@ -83,8 +87,8 @@ const {checkRobot}=(function(){
       const j=map&&map[d.name]&&byId.get(map[d.name]);
       if(j){ driven.set(j.id,d.name); put({key:"dev:"+d.name, sev:"ok", device:d.name, joint:j.id, ask:"look", text:d.name+" drives \""+label(j)+"\"."}); continue; }
       if(!moved(d.name)) continue;
-      put({key:"dev:"+d.name, sev:"fail", device:d.name, ask:"pick-parts",
-        text:"Your code moves "+d.name+", but no joint in the CAD is tied to it. Click the part "+d.name+" moves."});
+      put({key:"dev:"+d.name, sev:"note", device:d.name, ask:"pick-parts",
+        text:d.name+" runs as a live gauge: your code moves it, and no joint in the CAD is tied to it yet. Click the part it moves to see it move."});
     }
 
     // every joint
@@ -99,8 +103,8 @@ const {checkRobot}=(function(){
         if(!to) put({key:"follow:"+m.id, sev:"fail", joint:m.id, ask:"drop-joint", text:"\""+label(m)+"\" follows \""+m.couple.to+"\", which isn't a joint."});
         continue;
       }
-      if(!driven.has(m.id)&&acts.length) put({key:"undriven:"+m.id, sev:"warn", joint:m.id, ask:"pick-device",
-        text:"Nothing in your code drives \""+label(m)+"\". Which of your devices moves it, or is it not a joint?"});
+      if(!driven.has(m.id)&&acts.length) put({key:"undriven:"+m.id, sev:"note", joint:m.id, ask:"pick-device",
+        text:"\""+label(m)+"\" stays where it's drawn: nothing in your code drives it. Pick the device that moves it, if one does."});
     }
 
     // the likely answers: a device the code moves and the joints nothing drives, paired by kind
@@ -112,7 +116,7 @@ const {checkRobot}=(function(){
     for(const it of items) if(it.ask==="pick-parts"&&it.device){
       const d=acts.find(x=>x.name===it.device);
       it.candidates=free.map(m=>({joint:m.id, label:label(m), v:fits(d,m)})).filter(c=>c.v>0).sort((a,b)=>b.v-a.v).slice(0,6).map(({joint,label})=>({joint,label}));
-      if(it.candidates.length) it.text="Your code moves "+it.device+", but no joint is tied to it. Which one is it? Or click the part "+it.device+" moves.";
+      if(it.candidates.length) it.text=it.device+" runs as a live gauge: no joint is tied to it yet. Is it one of these? Or click the part it moves.";
     }
     const loose=items.filter(i=>i.ask==="pick-parts").map(i=>acts.find(x=>x.name===i.device)).filter(Boolean);
     for(const it of items) if(it.ask==="pick-device"){
@@ -266,5 +270,29 @@ const {checkRobot}=(function(){
     }
     return out;
   }
-  return {checkRobot};
+  /* The robot setup steps (src/app.js SetupUI) the robot itself already
+     answers, so nobody is asked them: up from standing wheels or an exact
+     import; the front axis from the way the wheels roll; the drive base from
+     real wheels of a known kind; the joints when they are exact (Onshape,
+     URDF, a joint spec) or every device the code moves already has one. */
+  function setupAuto(cad,code,map){
+    const out={up:false,front:false,drive:false,joints:false};
+    if(!cad) return out;
+    const exact=cad.source==="onshape"||cad.source==="urdf";
+    const F=cad.frame||{};
+    let D=null; try{ D=driveFromCAD(cad,{}); }catch(e){ D=null; }
+    const W=D&&D.wheels?D.wheels:[];
+    out.up=exact||(Array.isArray(F.wheels)?F.wheels.length>=3:!!F.wheels)||/wheel/i.test(F.upWhy||"");
+    out.front=W.length>=3&&typeof frontFromWheels==="function"&&!!frontFromWheels(cad);
+    out.drive=W.length>=3&&!!D.kind&&D.kind!=="unknown"&&!W.some(w=>w.mirrored);
+    const src=cad.mates&&cad.mates.source;
+    if(exact||(src==="spec"&&!cad.mates.auto)) out.joints=true;
+    else if(code){
+      const acts=(code.devices||[]).filter(d=>/servo|dcmotor/i.test(d.type||"")&&!isDriveDevice(d));
+      const moved=acts.filter(d=>typeof isCommanded!=="function"||isCommanded(code,d.name));
+      out.joints=moved.length>0&&moved.every(d=>map&&map[d.name]);
+    }
+    return out;
+  }
+  return {checkRobot, setupAuto};
 })();

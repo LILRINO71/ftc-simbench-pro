@@ -289,8 +289,9 @@ function probeCode(task) {
 /* src/app.js SetupUI.render (the four "Robot setup" steps): a step is done only when someone presses it.
    SETUP.done is emptied for every new CAD (loadCAD) and nothing completes a step by itself today, so a
    new robot shows all four. MIRRORED HERE: change this in the same commit that makes a step complete itself. */
-function setupOpen(cad, code, D) {
-  const done = {};
+function setupOpen(cad, code, D, MAP) {
+  // a step is done when the robot itself answers it (src/robotcheck.js setupAuto, as app.js SetupUI.isDone)
+  const En = engine(), done = En.setupAuto ? En.setupAuto(cad, code, MAP || {}) : {};
   const steps = ['up', 'front', 'drive', 'joints'].filter((k) => !done[k]);
   return { open: steps.length, steps, driveFormOpens: !(D && D.wheels && D.wheels.length) };
 }
@@ -300,7 +301,7 @@ function questions(cad, code, layout, front, specDevices, D, label) {
   const En = engine(), out = { code: label };
   let MAP = {};
   if (code) {
-    MAP = En.autoMap(code.devices, cad.mechs);
+    MAP = En.autoMap(code.devices, cad.mechs, { cad });
     if (specDevices && cad.mates && cad.mates.source === 'spec') for (const d of code.devices) {
       const own = (k) => (k && Object.prototype.hasOwnProperty.call(specDevices, k) ? specDevices[k] : null);
       const j = own(d.name) || own(d.cfg);
@@ -309,12 +310,13 @@ function questions(cad, code, layout, front, specDevices, D, label) {
   }
   try {
     const rc = En.checkRobot(cad, code || { devices: [] }, MAP, { isCommanded: code ? (n) => En.isCommanded(code, n) : () => false, front });
-    const open = rc.items.filter((i) => i.sev !== 'ok');
+    // a question is what the page labels ANSWER or CONFIRM; a NOTE (a live gauge, a suggestion) asks nothing
+    const open = rc.items.filter((i) => i.sev === 'fail' || i.sev === 'warn');
     const kinds = {}; for (const i of open) { const k = i.key.split(':')[0] + ':' + i.sev; kinds[k] = (kinds[k] || 0) + 1; }
-    out.rc = { fail: rc.need, warn: rc.warn, open: open.length, withButtons: open.filter((i) => i.ask).length, kinds,
+    out.rc = { fail: rc.need, warn: rc.warn, open: open.length, notes: rc.items.filter((i) => i.sev === 'note').length, withButtons: open.filter((i) => i.ask).length, kinds,
       buttons: open.reduce((s, i) => s + (i.ask === 'pick-parts' ? 2 * (i.candidates || []).length + 1 : i.ask === 'pick-device' ? 2 + (i.candidates || []).length : i.ask ? 1 : 0), 0) };
   } catch (e) { out.rc = { err: errText(e), open: 0 }; }
-  out.setup = setupOpen(cad, code, D);
+  out.setup = setupOpen(cad, code, D, MAP);
   let findings = [];
   if (code) try { findings = En.analyze(code, cad, MAP, Object.assign(SIM_OPTS(), { front })); } catch (e) { out.analyzeErr = errText(e); }
   const st = En.statusOf(findings, { stalled: [], missing: [], blocked: false, slipping: false, frontAcross: !!En.frontAcrossWheels(cad, front) });

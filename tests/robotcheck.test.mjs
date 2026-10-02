@@ -33,9 +33,10 @@ test('robot check: the hand-made joints and the team TeleOp check out, nothing t
     assert.ok(R.items.some((i) => i.device === d && i.sev === 'ok'), d + ' drives a joint');
 });
 
-test('robot check: guessed joints become questions in the team device names, with likely answers', () => {
+test('robot check: guessed joints become one-click suggestions in the team device names, not questions', () => {
   const R = check(auto);
   const q = R.items.filter((i) => i.ask === 'pick-parts');
+  assert.ok(q.every((i) => i.sev === 'note'), 'a device with no joint runs as a gauge; nothing blocks START');
   assert.ok(q.length >= 8, 'each servo the code moves is asked about');
   const up = q.find((i) => i.device === 'uppies');
   assert.ok(up && /slide/i.test(up.candidates[0].label), 'the lift motor is offered the slides first');
@@ -49,8 +50,9 @@ test('robot check: an answer closes its question', () => {
   const before = check(spec), up = before.items.find((i) => i.device === 'uppies');
   spec.joints.find((j) => j.id === up.candidates[0].joint).device = 'uppies';
   const after = check(spec);
-  assert.ok(!after.items.some((i) => i.device === 'uppies' && i.sev === 'fail'));
-  assert.equal(after.need, before.need - 1);
+  assert.ok(after.items.some((i) => i.device === 'uppies' && i.sev === 'ok'));
+  const notes = (r) => r.items.filter((i) => i.sev === 'note').length;
+  assert.ok(notes(after) < notes(before), 'its suggestion is gone');
 });
 
 test('robot check: a frame rail put on the arm is caught, by name', () => {
