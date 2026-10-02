@@ -96,7 +96,15 @@ JvProgram.prototype.step=function(){
   }catch(e){ this.fail(e); this.gen=null; }
 };
 JvProgram.prototype.drain=function(g){
-  try{ for(let n=0;n<2e5;n++){ const r=g.next(); if(r.done) return r.value; } }catch(e){ this.fail(e); }
+  // a constructor or init() that never returns hangs INIT on the robot too: stop
+  // after a fixed amount of work and say where it was going round
+  const vm=this.vm, limit=vm.steps+1e6;
+  const host=vm.host;
+  try{ for(let n=0;n<2e5;n++){ const r=g.next(); if(r.done) return r.value;
+    // a busy-wait (a forced gate): the robot keeps moving meanwhile, as it would
+    if(r.value&&r.value.forced&&host&&host.world) host.world(0.02);
+    if(vm.steps>limit){ const at=vm.where(); this.error={cls:"Hang",msg:"INIT never finishes: a loop keeps going without waiting for anything",file:at&&at.file,line:at&&at.line,in:at&&at.in};
+      this.done=true; return undefined; } } }catch(e){ this.fail(e); }
   return undefined;
 };
 JvProgram.prototype.init=function(){
@@ -188,6 +196,10 @@ function jvProbeHost(){
     now(){ return H.clock; }, runtime(){ return H.t; }, heading(){ return H.h; }, omega(){ return 0; },
     pose(){ return {x:0,y:0,h:H.h}; }, vel(){ return {x:0,y:0}; }, ray(){ return 8.19; }, color(){ return [120,120,120]; }, volts(){ return 12.6; },
     touch(){ return false; }, telemetry(l){ H.tel=l; }, rumble(){}, advance(dt){ H.clock+=dt; },
+    // time passing while the code busy-waits: motors run, RUN_TO_POSITION ones head for their target
+    world(dt){ H.clock+=dt; for(const [,s] of H.devs){ if(s.kind!=="motor") continue;
+      if(s.mode==="rtp"){ const pos=s.ticks-(s.offset||0), err=(s.target||0)-pos; s.ticks+=Math.sign(err)*Math.min(Math.abs(err),2500*dt*Math.max(0.2,Math.abs(s.cmd||1))); }
+      else if(s.mode!=="reset") s.ticks+=(s.cmd||0)*400*dt; } },
     cmd(name,op,v){ H.cmds.push([name,op,v]); },
   };
   return H;
@@ -199,12 +211,15 @@ function jvProbeRun(comp,pad1,pad2,ticks){
   for(let k=0;k<3&&!P.done;k++){ H.clock+=0.02; P.tick(); }        // a few INIT ticks, like a driver waiting
   H.pads={1:Object.assign({},pad1||{}),2:Object.assign({},pad2||{})};
   P.start();
+  // a probe is a measurement, not a match: it stops after a fixed amount of work,
+  // so code that busy-waits through every tick can't stall loading the robot
+  const LIMIT=P.vm.steps+600000;
   const tick=()=>{ H.clock+=0.02; H.t+=0.02; P.tick(); for(const [,s] of H.devs) s.ticks+=(s.cmd||0)*8; };
-  for(let k=0;k<(ticks||6);k++) tick();
+  for(let k=0;k<(ticks||6)&&P.vm.steps<LIMIT;k++) tick();
   // code that sets up its hardware after START (a busy-wait on isStarted(), then
   // init) needs longer before the sticks reach a motor: keep going while nothing
   // has power yet, up to a little over a second
-  for(let k=ticks||6;k<60&&!P.done&&!P.error&&pad1&&Object.keys(pad1).length&&![...H.devs.values()].some(s=>s.kind==="motor"&&s.cmd);k++) tick();
+  for(let k=ticks||6;k<60&&P.vm.steps<LIMIT&&!P.done&&!P.error&&pad1&&Object.keys(pad1).length&&![...H.devs.values()].some(s=>s.kind==="motor"&&s.cmd);k++) tick();
   const motors={};
   for(const [n,s] of H.devs) motors[n]={cmd:s.cmd, reversed:!!s.reversed, kind:s.kind, type:s.type, target:s.target, mode:s.mode};
   return {P,H,motors};

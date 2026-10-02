@@ -344,3 +344,39 @@ import com.qualcomm.robotcore.hardware.*; import com.qualcomm.robotcore.eventloo
   const an = E.jvAnalyze(E.jvCompile(main, [{ file: 'Robot.java', src: robot }]), false);
   assert.ok(an.drive && an.drive.wheels.length === 4, 'stick up drives: ' + JSON.stringify(an.drive));
 });
+
+test('vm: a Road Runner 1.0 dead-wheel localizer runs (OverflowEncoder, RawEncoder, Twist2dDual)', () => {
+  const loc = `package org.firstinspires.ftc.teamcode;
+import com.acmerobotics.roadrunner.*; import com.acmerobotics.roadrunner.ftc.*; import com.qualcomm.robotcore.hardware.*;
+public class Loc { public final Encoder par; int last; boolean init;
+  public Loc(HardwareMap hw){ par = new OverflowEncoder(new RawEncoder(hw.get(DcMotorEx.class, "par"))); par.setDirection(DcMotorSimple.Direction.REVERSE); }
+  public Twist2dDual<Time> update(){ PositionVelocityPair p = par.getPositionAndVelocity();
+    if (!init) { init = true; last = p.position; return new Twist2dDual<>(Vector2dDual.constant(new Vector2d(0, 0), 2), DualNum.constant(0, 2)); }
+    int d = p.position - last; last = p.position;
+    return new Twist2dDual<>(new Vector2dDual<>(new DualNum<Time>(new double[]{ d * 0.001, p.velocity * 0.001 }), new DualNum<Time>(new double[]{ 0, 0 })), new DualNum<>(new double[]{ 0, 0 })); } }`;
+  const main = `package org.firstinspires.ftc.teamcode;
+import com.acmerobotics.roadrunner.*; import com.qualcomm.robotcore.hardware.*; import com.qualcomm.robotcore.eventloop.opmode.*;
+@TeleOp(name="RR") public class RR extends LinearOpMode { public void runOpMode() { Loc l = new Loc(hardwareMap); DcMotorEx m = hardwareMap.get(DcMotorEx.class, "m");
+  Pose2d pose = new Pose2d(0, 0, 0); waitForStart();
+  while (opModeIsActive()) { Twist2dDual<Time> t = l.update(); pose = pose.plus(t.value()); PoseVelocity2d v = t.velocity().value();
+    telemetry.addData("x", pose.position.x); telemetry.update(); m.setPower(-gamepad1.left_stick_y); } } }`;
+  const an = E.jvAnalyze(E.jvCompile(main, [{ file: 'Loc.java', src: loc }]), false);
+  assert.equal(an.error, null);
+  assert.deepEqual(an.stubs.filter((s) => /Encoder|Twist|Dual|PositionVelocity/.test(s[0])), []);
+});
+
+test('vm: an INIT that waits for a RUN_TO_POSITION slide finishes (the slide moves meanwhile); an endless one is called out', () => {
+  const op = (wait) => `package x; import com.qualcomm.robotcore.hardware.*; import com.qualcomm.robotcore.eventloop.opmode.*;
+@TeleOp public class W extends OpMode { DcMotorEx slide, lf;
+  public void init() { slide = hardwareMap.get(DcMotorEx.class, "slide"); lf = hardwareMap.get(DcMotorEx.class, "lf");
+    slide.setTargetPosition(300); slide.setMode(DcMotor.RunMode.RUN_TO_POSITION); slide.setPower(1);
+    ${wait} }
+  public void loop() { lf.setPower(-gamepad1.left_stick_y); } }`;
+  const H = E.jvProbeHost(), P = new E.JvProgram(E.jvCompile(op('while (slide.getTargetPosition() != slide.getCurrentPosition()) { }'), []), H.host);
+  const t0 = Date.now(); P.init();
+  assert.equal(P.error, null, 'INIT returned');
+  assert.ok(Date.now() - t0 < 5000);
+  const Q = new E.JvProgram(E.jvCompile(op('while (true) { }'), []), E.jvProbeHost().host);
+  Q.init();
+  assert.equal(Q.error && Q.error.cls, 'Hang', 'an endless INIT says so');
+});

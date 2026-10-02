@@ -82,6 +82,7 @@ const Sim={
         return drv?(drv.kind==="motor"?Math.abs(drv.ticks)<20:Math.abs(drv.act-drv.restPos)<0.02):false; },
       telemetry(lines){ self.vmTel=lines; },
       advance(dt){ self.clock=(self.clock||0)+dt; },
+      world(dt){ self.stepDevices(dt); self.clock=(self.clock||0)+dt; },
       rumble(i,meth,a){ if(self.onRumble) self.onRumble(i,meth,a); },
     };
   },
@@ -321,6 +322,18 @@ const Sim={
       else if(this.code.auto&&this.code.auto.length) this.stepAuto();
     }
 
+    this.stepDevices(dt);
+    this.updateCOM();
+    this.driveChassis(dt);
+    Shots.tick(dt,this.chassis);
+    // the rest of the match (src/match.js): only the live sim plays it, never a probe's copy
+    // (online, src/net.js steps it instead, whatever this robot is doing)
+    if(this===Sim&&this.phase==="running"&&typeof Match!=="undefined"&&Match.on&&!Match.net) Match.tick(dt,this);
+  },
+  /* Every motor and servo moves for dt: the motor model, RUN_TO_POSITION, servo
+     slew and the joints' stops. tick() runs it; so does INIT, when an OpMode
+     busy-waits for a mechanism to arrive (src/jvmrun.js drain) */
+  stepDevices(dt){
     for(const name in this.dev){
       const s=this.dev[name];
       if(s.kind==="motor"){
@@ -387,12 +400,6 @@ const Sim={
         if(qc!==q){ s.act=s.restPos+qc/k; s.stalled=true; }
       }
     }
-    this.updateCOM();
-    this.driveChassis(dt);
-    Shots.tick(dt,this.chassis);
-    // the rest of the match (src/match.js): only the live sim plays it, never a probe's copy
-    // (online, src/net.js steps it instead, whatever this robot is doing)
-    if(this===Sim&&this.phase==="running"&&typeof Match!=="undefined"&&Match.on&&!Match.net) Match.tick(dt,this);
   },
   /* A slide carrying its load out moves the centre of mass with it. The shift
      is the carried mass over the mass the dynamics actually runs on — never the

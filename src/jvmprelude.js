@@ -1031,6 +1031,8 @@ public final class DualNum<T> {
   public DualNum times(double k){ double[] v = new double[values.length]; for (int i=0;i<v.length;i++) v[i]=values[i]*k; return new DualNum(v); }
   public DualNum div(double k){ return times(1.0/k); }
   public DualNum unaryMinus(){ return times(-1); }
+  /* the derivatives only: drop(1) of [x, dx, ddx] is [dx, ddx] */
+  public DualNum drop(int n){ int k = Math.max(0, values.length - n); double[] v = new double[k]; for (int i=0;i<k;i++) v[i]=values[i+n]; return new DualNum(v); }
 }`,
 `package com.acmerobotics.roadrunner;
 public final class PoseVelocity2dDual<T> {
@@ -1040,7 +1042,17 @@ public final class PoseVelocity2dDual<T> {
   public PoseVelocity2d value(){ return new PoseVelocity2d(new Vector2d(linearVel.x.value(), linearVel.y.value()), angVel.value()); }
 }`,
 `package com.acmerobotics.roadrunner;
-public final class Vector2dDual<T> { public final DualNum<T> x; public final DualNum<T> y; public Vector2dDual(DualNum<T> x, DualNum<T> y){ this.x=x; this.y=y; } public Vector2d value(){ return new Vector2d(x.value(), y.value()); } }`,
+public final class Vector2dDual<T> { public final DualNum<T> x; public final DualNum<T> y; public Vector2dDual(DualNum<T> x, DualNum<T> y){ this.x=x; this.y=y; } public Vector2d value(){ return new Vector2d(x.value(), y.value()); }
+  public Vector2dDual<T> drop(int n){ return new Vector2dDual<T>(x.drop(n), y.drop(n)); }
+  public static Vector2dDual constant(Vector2d v, int n){ return new Vector2dDual(DualNum.constant(v.x, n), DualNum.constant(v.y, n)); } }`,
+`package com.acmerobotics.roadrunner;
+/* what a Road Runner 1.0 localizer returns from update(): a twist and its rate */
+public final class Twist2dDual<T> {
+  public final Vector2dDual<T> line; public final DualNum<T> angle;
+  public Twist2dDual(Vector2dDual<T> line, DualNum<T> angle){ this.line=line; this.angle=angle; }
+  public Twist2d value(){ return new Twist2d(line.value(), angle.value()); }
+  public PoseVelocity2dDual<T> velocity(){ return new PoseVelocity2dDual<T>(line.drop(1), angle.drop(1)); }
+}`,
 `package com.acmerobotics.roadrunner;
 public final class Time {}`,
 `package com.acmerobotics.roadrunner;
@@ -1110,6 +1122,45 @@ public class RaceAction implements Action { private List<Action> actions;
 import com.acmerobotics.roadrunner.Action;
 public final class Actions {
   public static void runBlocking(Action a){ com.acmerobotics.dashboard.telemetry.TelemetryPacket p = new com.acmerobotics.dashboard.telemetry.TelemetryPacket(); while (a.run(p)) simbench.Sim.tick(); }
+}`,
+`package com.acmerobotics.roadrunner.ftc;
+public final class PositionVelocityPair {
+  public final int position; public final int velocity; public final int rawPosition; public final int rawVelocity;
+  public PositionVelocityPair(int position, int velocity, int rawPosition, int rawVelocity){ this.position=position; this.velocity=velocity; this.rawPosition=rawPosition; this.rawVelocity=rawVelocity; }
+  public PositionVelocityPair(Number position, Number velocity, Number rawPosition, Number rawVelocity){ this(position.intValue(), velocity.intValue(), rawPosition.intValue(), rawVelocity.intValue()); }
+}`,
+`package com.acmerobotics.roadrunner.ftc;
+import com.qualcomm.robotcore.hardware.*;
+public interface Encoder {
+  PositionVelocityPair getPositionAndVelocity();
+  DcMotorController getController();
+  DcMotorSimple.Direction getDirection();
+  void setDirection(DcMotorSimple.Direction direction);
+}`,
+`package com.acmerobotics.roadrunner.ftc;
+import com.qualcomm.robotcore.hardware.*;
+/* Road Runner's dead-wheel encoder on a motor port: the motor's own direction is
+   undone, then this encoder's applied (as in road-runner-ftc RawEncoder) */
+public final class RawEncoder implements Encoder {
+  private final DcMotorEx m; private DcMotorSimple.Direction direction = DcMotorSimple.Direction.FORWARD;
+  public RawEncoder(DcMotorEx m){ this.m = m; }
+  private int applyDirection(int x){ if (m.getDirection() == DcMotorSimple.Direction.REVERSE) x = -x; if (direction == DcMotorSimple.Direction.REVERSE) x = -x; return x; }
+  public PositionVelocityPair getPositionAndVelocity(){ int p = applyDirection(m.getCurrentPosition()), v = applyDirection((int) m.getVelocity()); return new PositionVelocityPair(p, v, p, v); }
+  public DcMotorController getController(){ return m.getController(); }
+  public DcMotorSimple.Direction getDirection(){ return direction; }
+  public void setDirection(DcMotorSimple.Direction d){ direction = d; }
+}`,
+`package com.acmerobotics.roadrunner.ftc;
+import com.qualcomm.robotcore.hardware.*;
+/* the hub reports velocity in 16 bits; Road Runner's wrapper fixes the overflow. Here
+   nothing overflows, so it passes the raw encoder through */
+public final class OverflowEncoder implements Encoder {
+  public final RawEncoder encoder;
+  public OverflowEncoder(RawEncoder e){ encoder = e; }
+  public PositionVelocityPair getPositionAndVelocity(){ return encoder.getPositionAndVelocity(); }
+  public DcMotorController getController(){ return encoder.getController(); }
+  public DcMotorSimple.Direction getDirection(){ return encoder.getDirection(); }
+  public void setDirection(DcMotorSimple.Direction d){ encoder.setDirection(d); }
 }`,
 `package com.acmerobotics.roadrunner.ftc;
 import com.qualcomm.robotcore.hardware.*;

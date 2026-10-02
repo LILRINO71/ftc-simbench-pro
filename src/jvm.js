@@ -542,6 +542,7 @@ function JVM(units,natives){
   // type, whether a call returns an int, an anonymous class). Parsed code is cached
   // and shared by every VM, so none of it may be stored on the node itself.
   this.nodeInfo=new WeakMap();
+  this.mcache=new WeakMap();        // class -> name -> its methods (methodsOf)
   for(const u of units) for(const d of u.types) this.declare(d,u,null);
   for(const k in this.natives) this.declareNative(k,this.natives[k]);
 }
@@ -575,7 +576,7 @@ JVM.prototype.declare=function(d,u,outer){
   }
   return c;
 };
-JVM.prototype.addMethod=function(c,m){ const l=c.methods.get(m.name)||[]; l.push(m); c.methods.set(m.name,l); };
+JVM.prototype.addMethod=function(c,m){ const l=c.methods.get(m.name)||[]; l.push(m); c.methods.set(m.name,l); if(this.mcache) this.mcache=new WeakMap(); };
 /* A native class: a JS description of a library type (src/jvmlib.js). */
 JVM.prototype.declareNative=function(fqn,def){
   const name=fqn.replace(/^.*\./,"");
@@ -901,6 +902,12 @@ JVM.prototype.isFunctional=function(c){
 };
 /* Every method with this name, from the class up its supers and interfaces */
 JVM.prototype.methodsOf=function(c,name){
+  // a class's methods never change once declared: look each name up once per class
+  let byName=this.mcache.get(c); if(!byName){ byName=new Map(); this.mcache.set(c,byName); }
+  let hit=byName.get(name); if(!hit){ hit=this.methodsOf0(c,name); byName.set(name,hit); }
+  return hit;
+};
+JVM.prototype.methodsOf0=function(c,name){
   const out=[], seen=new Set(), st=[c];
   while(st.length){ const k=st.shift(); if(!k||seen.has(k)) continue; seen.add(k);
     const l=k.methods&&k.methods.get(name);
