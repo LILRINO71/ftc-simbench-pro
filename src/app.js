@@ -173,6 +173,7 @@ function renderOpList(){
   });
   $$(".oplist [data-oprm]").forEach(b=>b.addEventListener("click",()=>{
     const id=b.dataset.oprm;
+    if(Online.playing()&&id===CURRENT_ID){ NetUI.say("The OpMode can't change during an online match. Leave the match first.","warn"); return; }
     LIBRARY=LIBRARY.filter(e=>e.id!==id); saveLibrary();
     if(id===CURRENT_ID) selectOpMode(LIBRARY[0].id); else { renderOpList(); renderOpSelect(); renderCompareSelects(); }
   }));
@@ -198,8 +199,10 @@ function selectOpMode(id){
   CONFIG_OVR={};
   if(!e.code){
     CODE=null;
+    if(Sim.phase==="init"||Sim.phase==="running") Sim.stop();
+    Sim.phase="empty";
     $("#coverage").innerHTML=`<p class="cov-ok">Couldn't read this file: ${esc(e.error||"unknown error")}</p>`;
-    renderOpList(); renderOpSelect(); return;
+    renderOpList(); renderOpSelect(); updateDS(); buildGauges(); renderPad(); return;
   }
   CODE=e.code;
   // an auto written for another season's field would run into this one's HIVEs
@@ -208,7 +211,7 @@ function selectOpMode(id){
   analyzeAll();
   if(!Online.inMatch()) Field.reset();                            // selected and INIT'd: a fresh match
   Shots.reset();
-  Sim.load(CODE,CAD,MAP,withPose());
+  Sim.load(CODE,CAD,MAP,withPose()); Physics.sync();
   applyConfigOverrides(); Sim.init(); applyConfigOverrides();    // like a DS: selected and INIT'd, waiting for START
   resetMatch();
   Shots.adopt(CODE); ShotUI.dirty=true; renderShotSetup();
@@ -1276,7 +1279,7 @@ function analyzeAll(){
 function reloadSim(){
   if(!CODE||!CAD) return;
   const phase=Sim.phase;
-  Sim.load(CODE,CAD,MAP,withPose()); applyConfigOverrides();
+  Sim.load(CODE,CAD,MAP,withPose()); applyConfigOverrides(); Physics.sync();
   if(phase!=="stopped"){ Sim.init(); applyConfigOverrides(); resetMatch(); }
   if(phase==="running") Sim.start();
   renderPad(); renderLegend3D(); updateDS();
@@ -1954,7 +1957,12 @@ const KEYMAP={KeyA:"a",KeyB:"b",KeyX:"x",KeyY:"y",KeyQ:"left_bumper",KeyE:"right
 const STICKKEYS={KeyI:["left_stick_y",-1],KeyK:["left_stick_y",1],KeyJ:["left_stick_x",-1],KeyL:["left_stick_x",1],
                  KeyU:["right_stick_x",-1],KeyO:["right_stick_x",1]};
 const KEY_PAD={};                   // which gamepad each held key went to
-const typing=e=>{ const t=e.target.tagName; return t==="TEXTAREA"||t==="INPUT"||t==="SELECT"||(e.target.dataset&&e.target.dataset.stick)||(e.target.getAttribute&&e.target.getAttribute("role")==="tab"); };
+const typing=e=>{ const el=e.target, t=el.tagName;
+  // a checkbox or a slider just clicked leaves the keys driving (a slider keeps its arrow keys)
+  if(t==="INPUT"){ const ty=(el.type||"text").toLowerCase();
+    if(ty==="range") return /^(Arrow|Home$|End$|Page)/.test(e.key||"");
+    return !/^(checkbox|radio|button|submit|reset|color|file)$/.test(ty); }
+  return t==="TEXTAREA"||t==="SELECT"||el.isContentEditable||(el.dataset&&el.dataset.stick)||(el.getAttribute&&el.getAttribute("role")==="tab"); };
 function knobTo(pad,axis,v){
   if(pad!==activePad) return;
   for(const k of STICKS){
@@ -1973,9 +1981,10 @@ function releaseKey(code){
 }
 addEventListener("keydown",e=>{
   if(typing(e)||e.ctrlKey||e.metaKey||e.altKey) return;
+  if(document.querySelector(".overlay:not([hidden])")) return;      // the tour, Onshape, GitHub pop-ups keep their keys
   if(e.code==="BracketLeft"||e.code==="BracketRight"){ const side=e.code==="BracketLeft"?"left":"right";
     setRail(side,$("#app").classList.contains(side+"-closed")); return; }
-  if(e.code==="KeyF"&&!e.repeat){ e.preventDefault(); shotFire(); return; }
+  if(e.code==="KeyF"&&!e.repeat){ if(CadView.on) return; e.preventDefault(); shotFire(); return; }
   const sk=STICKKEYS[e.code];
   if(sk){ e.preventDefault(); const p=padFor(CODE,sk[0],activePad); KEY_PAD[e.code]=p;
     Sim.pad[p][sk[0]]=sk[1]; knobTo(p,sk[0],sk[1]); return; }
