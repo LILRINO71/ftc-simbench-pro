@@ -2703,6 +2703,10 @@ const Perf={ema:16.7, t:0, pr:Math.min(devicePixelRatio||1,2), downAt:-1e9, quie
   },
   set(){ if(View.ren){ View.ren.setPixelRatio(this.pr); View.resize(); } }
 };
+/* innerHTML only when the markup differs: an identical string still costs a layout */
+function setIfChanged(el,html){ if(el&&el.__html!==html){ el.__html=html; el.innerHTML=html; } }
+/* on screen: in the page, not hidden, and laid out (a folded section or a closed tab has no box) */
+function shown(sel){ const el=typeof sel==="string"?document.querySelector(sel):sel; return !!(el&&el.getClientRects().length); }
 function guarded(fn){ try{ fn(); }catch(e){ if(!loopErr){ loopErr=e; console.error("bench:",e); } } }
 function frame(now){
   Perf.frame(now-frameAt,now); frameAt=performance.now();
@@ -2717,11 +2721,14 @@ function frame(now){
   slowAcc+=dt;
   if(slowAcc>=0.05){ slowAcc=0; guarded(()=>{
     Pads.meters();
-    Graph.sample(); Graph.draw(); Graph.updateLegendValues();
-    $("#dsPanel").innerHTML=renderDS();
+    // 20 times a second: only what's on screen, and only when it changed (each
+    // innerHTML is a layout; a folded or hidden panel needs none)
+    Graph.sample(); Graph.draw(); Graph.updateLegendValues();          // draw() skips itself off screen
+    if(shown("#dsPanel")) setIfChanged($("#dsPanel"),renderDS());
     updateClock(); updateConfigValues(); renderMatchHud();
-    const m=renderMech();
-    if(m){ $("#mech").innerHTML=m.svg; $("#pipDeg").textContent=m.deg+"° off level"; }
+    const pip=$("#pip");
+    if(pip&&!pip.hidden&&!pip.classList.contains("closed")){ const m=renderMech();
+      if(m){ setIfChanged($("#mech"),m.svg); $("#pipDeg").textContent=m.deg+"° off level"; } }
     const c=Sim.chassis||{x:0,y:0,h:0};
     const zone=Field.ok?Field.zoneAt(c.x/IN,c.y/IN):null;
     $("#vpPose").textContent=poseText(c)+(Sim.bump?` · against the ${Sim.bump}`:zone&&/LOADING|HIVE/.test(zone)?` · ${zone}`:"");

@@ -437,9 +437,16 @@ onmessage=async e=>{
 };`;
     const url=URL.createObjectURL(new Blob([src],{type:"text/javascript"}));
     const w=new Worker(url);
-    w.onmessage=e=>{ const p=this.pending[e.data.id]; if(!p) return; delete this.pending[e.data.id];
+    w.onmessage=e=>{ w.done=(w.done||0)+1; w.job=null; const p=this.pending[e.data.id]; if(!p) return; delete this.pending[e.data.id];
       e.data.ok?p.resolve(e.data.res):p.reject(new Error(e.data.error||"OpenCascade couldn't read this STEP file")); };
-    w.onerror=e=>{ e.preventDefault&&e.preventDefault(); this.fail(new Error("the OpenCascade worker didn't start ("+(e.message||"blocked")+")")); };
+    // one worker's error (a part too big for its memory, a hiccup loading OpenCascade)
+    // costs that worker's shape, not every worker: only workers that can never start
+    // at all (a sandbox, offline) mean there are none
+    w.onerror=e=>{ e.preventDefault&&e.preventDefault();
+      const err=new Error("the OpenCascade worker stopped ("+(e.message||"blocked")+")");
+      if(w.job!=null&&this.pending[w.job]){ const p=this.pending[w.job]; delete this.pending[w.job]; p.reject(err); }
+      w.dead=true; try{ w.terminate(); }catch(x){} if(this.worker===w) this.worker=null;
+      if(!w.done){ this.startFails=(this.startFails||0)+1; if(this.startFails>=3) this.fail(err); } };
     return w;
   },
   fail(err){ for(const id in this.pending){ this.pending[id].reject(err); } this.pending={};
@@ -487,7 +494,7 @@ onmessage=async e=>{
   send(w,text,params,ms){
     const id=++this.seq, buf=new TextEncoder().encode(text).buffer;
     const job=new Promise((resolve,reject)=>{ this.pending[id]={resolve,reject}; });
-    w.postMessage({id, buf, params},[buf]);
+    w.job=id; w.postMessage({id, buf, params},[buf]);
     let timer=null;
     const late=new Promise((_,rej)=>{ timer=setTimeout(()=>{ delete this.pending[id]; rej(new Error("slow")); },ms); });
     return Promise.race([job,late]).finally(()=>clearTimeout(timer));
@@ -512,9 +519,9 @@ onmessage=async e=>{
           for(let u;(u=queue.shift());){
             try{ got(u,await this.send(pool[i],u.text,params,90000)); }
             catch(e){ failed++;
-              // a shape that hangs takes its worker with it: start a fresh one
-              if(/slow/.test(e.message)){ const dead=pool[i]; try{ dead.terminate(); }catch(x){}
-                if(dead===this.worker) this.worker=null; pool[i]=this.makeWorker(); } }
+              // a shape that hangs, or a worker that stopped, takes that worker with it: start a fresh one
+              if(/slow/.test(e.message)||pool[i].dead){ const dead=pool[i]; try{ dead.terminate(); }catch(x){}
+                if(dead===this.worker) this.worker=null; if(this.noWorker) break; pool[i]=this.makeWorker(); } }
             tick();
             if(this.noWorker) break;
           }
@@ -525,8 +532,11 @@ onmessage=async e=>{
         for(const w of pool) if(w!==this.worker) try{ w.terminate(); }catch(e){}
       }
     }
-    // no worker allowed (or it died): the same, on the main thread, one shape
-    // per turn of the event loop so the page stays alive
+    // no workers at all: a few small shapes can still mesh on the page itself, but
+    // meshing a whole robot there stalls the page for seconds at a time (the lag
+    // teams saw), so a bigger robot keeps its simplified shapes instead
+    if(this.noWorker&&queue.length>8&&!meshesOf.size) throw new Error("this browser won't run OpenCascade in the background, so the parts stay simplified");
+    if(this.noWorker&&queue.length>8){ failed+=queue.length; queue.length=0; }
     for(let u;(u=queue.shift());){
       try{ got(u,await this.mainThread(new TextEncoder().encode(u.text).buffer,params)); }catch(e){ failed++; }
       tick(); await new Promise(r=>setTimeout(r,0));
