@@ -37,9 +37,10 @@ test('robot check: guessed joints become one-click suggestions in the team devic
   const R = check(auto);
   const q = R.items.filter((i) => i.ask === 'pick-parts');
   assert.ok(q.every((i) => i.sev === 'note'), 'a device with no joint runs as a gauge; nothing blocks START');
-  assert.ok(q.length >= 8, 'each servo the code moves is asked about');
-  const up = q.find((i) => i.device === 'uppies');
-  assert.ok(up && /slide/i.test(up.candidates[0].label), 'the lift motor is offered the slides first');
+  assert.ok(q.length >= 4, 'each servo the code moves with no joint gets a suggestion');
+  // the lift pairs with a slide by itself now (uppies and uppies1 share it, a two-motor lift)
+  const up = R.items.find((i) => i.device === 'uppies');
+  assert.ok(up && up.sev === 'ok' && /slide/i.test(up.joint), 'the lift motor finds the slide: ' + (up && up.joint));
   const claw = q.find((i) => i.device === 'outClaw');
   assert.ok(claw.candidates.every((c) => /servo/i.test(c.label)), 'a servo is offered servo joints');
   assert.ok(R.items.some((i) => i.key === 'source' && i.ask === 'mates'), 'and it says mates would make them exact');
@@ -47,10 +48,12 @@ test('robot check: guessed joints become one-click suggestions in the team devic
 
 test('robot check: an answer closes its question', () => {
   const spec = JSON.parse(JSON.stringify(auto));
-  const before = check(spec), up = before.items.find((i) => i.device === 'uppies');
-  spec.joints.find((j) => j.id === up.candidates[0].joint).device = 'uppies';
+  // a servo still waiting for its joint: answering its suggestion pairs it
+  const before = check(spec), up = before.items.find((i) => i.ask === 'pick-parts' && i.candidates && i.candidates.length);
+  const dev = up.device;
+  spec.joints.find((j) => j.id === up.candidates[0].joint).device = dev;
   const after = check(spec);
-  assert.ok(after.items.some((i) => i.device === 'uppies' && i.sev === 'ok'));
+  assert.ok(after.items.some((i) => i.device === dev && i.sev === 'ok'));
   const notes = (r) => r.items.filter((i) => i.sev === 'note').length;
   assert.ok(notes(after) < notes(before), 'its suggestion is gone');
 });
