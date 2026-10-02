@@ -1367,6 +1367,7 @@ function loadCAD(cad,label,cls){
   if(restored) $("#cadStatus").textContent=label+" · rig restored";
   syncOptionControls();
   DRIVE_CACHE={key:null,val:null}; Physics.sync(); MathTab.invalidate();
+  OnshapeHelp.chip();
 }
 
 /* ============================================================
@@ -1389,7 +1390,9 @@ function loadOnshapeRobot(p,reparse){
   let cad;
   const from=p.from==="urdf"?"URDF":"Onshape";
   try{ cad=cadFromOnshape(p,{up:OPTS.up, shift:OPTS.shift}); }
-  catch(e){ onshapeNote("Your robot came from "+from+", but it couldn't be built: "+esc(e.message)+(p.from==="urdf"?".":". Try the bookmark again; if it keeps failing, export a STEP and drop it."),"bad"); return false; }
+  catch(e){ onshapeNote("Your robot came from "+from+", but it couldn't be built: "+esc(e.message)+(p.from==="urdf"?".":". Try the bookmark again; if it keeps failing, export a STEP and drop it."),"bad");
+    if(p.from!=="urdf") OnshapeHelp.fail("Your robot arrived but couldn't be built: "+e.message+". Click the bookmark again; if it keeps failing, export a STEP from Onshape and use Open a file.");
+    return false; }
   if(p.from==="urdf"){ cad.source="urdf"; if(p.notes&&p.notes.length) cad.onshape.why=p.notes.concat(cad.onshape.why||[]); }
   LAST_STEP={name:p.name, text:"", onshape:p, label:p.name+" · from "+from};
   // a new robot drops the last one's joints; the same one re-read (a new up, a new centre) keeps them
@@ -1403,6 +1406,7 @@ function loadOnshapeRobot(p,reparse){
   $("#mateStatus").textContent=p.name+" · whole robot from "+from+" · "+n+" joint"+(n===1?"":"s"); $("#mateDrop").className="drop ok";
   $("#mateNote").innerHTML=(cad.onshape.why||[]).map(w=>"<li>"+esc(w)+"</li>").join("");
   const pill=$("#matePill"); if(pill){ pill.textContent=n+" joint"+(n===1?"":"s"); pill.className="pill ok"; }
+  if(p.from!=="urdf") OnshapeHelp.done(p.name, cad.solids.length, cad.mechs.filter(m=>m.fromMate).length, cad.onshape&&cad.onshape.kg);
   onshapeNote("<b>"+esc(p.name)+"</b> loaded "+(p.from==="urdf"?"from its URDF":"straight from Onshape")+": "+cad.solids.length+" parts with their colours"+
     (cad.onshape.kg?", "+cad.onshape.kg.toFixed(1)+" kg from your materials":"")+", and "+n+" joint"+(n===1?"":"s")+" from your "+(p.from==="urdf"?"joints":"mates")+". Load your code and press INIT.","ok");
   renderFrameNote&&renderFrameNote();
@@ -1410,6 +1414,78 @@ function loadOnshapeRobot(p,reparse){
   void rep;
   return true;
 }
+/* ============================================================
+   ONSHAPE, STEP BY STEP: the pop-up that sets up the "Send to SimBench"
+   bookmark and gets the robot, and the same pop-up showing progress when
+   the bookmark sends one (waitForOnshape).
+   ============================================================ */
+const OnshapeHelp={
+  mode:null,
+  init(){
+    const ov=$("#osOverlay"); if(!ov) return;
+    const mac=/Mac|iPhone|iPad/i.test((navigator.userAgentData&&navigator.userAgentData.platform)||navigator.platform||navigator.userAgent);
+    for(const id of ["osKey1","osKey2"]){ const k=$("#"+id); if(k) k.textContent=mac?"⌘ Cmd":"Ctrl"; }
+    const phone=matchMedia("(pointer:coarse)").matches&&!matchMedia("(any-pointer:fine)").matches;
+    $("#osPhone").hidden=!phone;
+    const href=onshapeBookmarklet(location.origin+location.pathname);
+    for(const a of $$(".bm-link")){
+      a.href=href;
+      // clicking it here does nothing useful: say so, right where they clicked
+      a.addEventListener("click",e=>{ e.preventDefault(); this.tip("Drag it, don't click it here: press and hold the yellow button, move it up onto your bookmarks bar and let go. It only works when you click it on your Onshape tab."); });
+      a.addEventListener("dragend",e=>{ const ok=e.dataTransfer&&e.dataTransfer.dropEffect!=="none";
+        if(ok){ store.set("ftcbench.bookmark","1"); this.tip("✓ If you see Send to SimBench on your bookmarks bar, you're set. Now steps 3 and 4."); } });
+    }
+    $("#osCopy").addEventListener("click",async()=>{
+      let ok=false;
+      try{ await navigator.clipboard.writeText(href); ok=true; }catch(e){
+        const t=document.createElement("textarea"); t.value=href; document.body.appendChild(t); t.select();
+        try{ ok=document.execCommand("copy"); }catch(x){} t.remove(); }
+      $("#osCopied").textContent=ok?"Copied. Now paste it as the bookmark's URL.":"Your browser blocked copying; drag the button instead.";
+    });
+    for(const b of $$("[data-os-open]")) b.addEventListener("click",()=>this.open());
+    $("#cadPick").addEventListener("click",()=>$("#cadFile").click());
+    $("#osClose").addEventListener("click",()=>this.close());
+    $("#osDone").addEventListener("click",()=>this.close());
+    $("#osShowSteps").addEventListener("click",()=>this.open());
+    $("#osSeeRobot").addEventListener("click",()=>{ this.close(); const nav=$('.tabs[data-tabs="left"]'); if(nav) selectTab(nav,"robot"); });
+    ov.addEventListener("click",e=>{ if(e.target===ov&&this.mode!=="busy") this.close(); });
+    addEventListener("keydown",e=>{ if(e.key==="Escape"&&!ov.hidden&&this.mode!=="busy") this.close(); });
+    this.chip();
+  },
+  view(guide){ $("#osGuide").hidden=!guide; $("#osProgress").hidden=guide; $("#osOverlay").hidden=false; },
+  open(){ this.mode="guide"; $("#osBmTip").hidden=true; this.view(true); const s=$(".os-sheet"); if(s) s.scrollTop=0; },
+  close(){ $("#osOverlay").hidden=true; this.mode=null; },
+  tip(t){ const p=$("#osBmTip"); if(!p) return; p.textContent=t; p.hidden=false; if($("#osOverlay").hidden) this.open(); },
+  meter(cls,frac){ const m=$("#osMeter"), f=$("#osMeterFill"); m.className="os-meter"+(cls?" "+cls:""); f.style.width=frac==null?"":Math.round(Math.max(.06,Math.min(1,frac))*100)+"%"; },
+  progress(text,done,total){
+    this.mode="busy"; this.view(false);
+    $("#osProgTitle").textContent="Getting your robot from Onshape";
+    $("#osProgText").textContent=text;
+    $("#osProgHint").textContent="Keep your Onshape tab open until your robot appears.";
+    $("#osSeeRobot").hidden=true; $("#osShowSteps").hidden=true;
+    const known=Number.isFinite(done)&&Number.isFinite(total)&&total>0;
+    this.meter(known?"":"busy",known?done/total:null);
+    clearTimeout(this.timer);
+    // the bookmark always answers (the robot, or an alert on the Onshape tab): if it goes quiet, say what to check
+    this.timer=setTimeout(()=>{ if(this.mode==="busy") this.fail("Nothing has come from Onshape for 3 minutes. Check your Onshape tab for a message, then click the bookmark again."); },180000);
+  },
+  done(name,parts,joints,kg){
+    clearTimeout(this.timer); this.mode="done"; this.view(false);
+    $("#osProgTitle").textContent="✓ "+name+" is here";
+    $("#osProgText").textContent=parts+" parts with their colours, "+joints+" joint"+(joints===1?"":"s")+" from your mates"+(kg?", "+kg.toFixed(1)+" kg":"")+".";
+    $("#osProgHint").textContent="You can close the Onshape tab. Next time, just click the bookmark again on your assembly.";
+    this.meter("ok",1); $("#osSeeRobot").hidden=false; $("#osShowSteps").hidden=true;
+  },
+  fail(msg){
+    clearTimeout(this.timer); this.mode="fail"; this.view(false);
+    $("#osProgTitle").textContent="Your robot didn't come through";
+    $("#osProgText").textContent=msg;
+    $("#osProgHint").textContent="The steps have a list of fixes under \u201cIt didn't work?\u201d.";
+    this.meter("bad",1); $("#osSeeRobot").hidden=true; $("#osShowSteps").hidden=false;
+  },
+  // the field's chip: while the sample robot is on the field, offer the team's own
+  chip(){ const c=$("#vpOnshape"); if(!c) return; let own=true; try{ own=ownRobot()||!!(CAD&&CAD.source==="onshape"); }catch(e){} c.hidden=own; },
+};
 /* This tab was opened by the bookmark: say we're ready, then take the robot.
    A second click reuses this tab and only changes its #hash: wait again then. */
 let ONSHAPE_WAIT=null;
@@ -1417,18 +1493,21 @@ addEventListener("hashchange",()=>{ if(/^#onshape-wait/.test(location.hash)) wai
 function waitForOnshape(){
   try{ history.replaceState(null,"",location.pathname+location.search); }catch(e){}
   onshapeNote("Reading your robot from Onshape … keep the Onshape tab open.");
+  OnshapeHelp.progress("Waiting for your Onshape tab …",null,null);
   if(ONSHAPE_WAIT) removeEventListener("message",ONSHAPE_WAIT);
   let got=false;
   const okOrigin=o=>/^https:\/\/([a-z0-9-]+\.)*onshape\.com$/i.test(o);
   addEventListener("message",ONSHAPE_WAIT=e=>{
     if(!okOrigin(e.origin)||!e.data) return;
     const d=e.data;
-    if(d.type==="simbench-progress"){ if(!got) onshapeNote(esc(String(d.text||"").slice(0,160))); return; }
+    if(d.type==="simbench-progress"){ if(!got){ const t=String(d.text||"").slice(0,160); onshapeNote(esc(t)); OnshapeHelp.progress(t,+d.done,+d.total); } return; }
     if(d.format!==ONSHAPE_FORMAT||got) return;
     got=true;
-    let p; try{ p=checkOnshapePayload(d); }catch(x){ onshapeNote("What came from Onshape couldn't be read: "+esc(x.message),"bad"); return; }
+    let p; try{ p=checkOnshapePayload(d); }catch(x){ onshapeNote("What came from Onshape couldn't be read: "+esc(x.message),"bad"); OnshapeHelp.fail("What came from Onshape couldn't be read: "+x.message); return; }
     removeEventListener("message",ONSHAPE_WAIT); ONSHAPE_WAIT=null;
-    if(p.geom) loadOnshapeRobot(p); else holdOnshape(p);
+    OnshapeHelp.progress("Building your robot …",1,1);
+    // let the pop-up draw before the build takes the main thread
+    setTimeout(()=>{ if(p.geom) loadOnshapeRobot(p); else { holdOnshape(p); OnshapeHelp.close(); } },30);
   });
   const ping=()=>{ if(got) return; try{ if(window.opener) window.opener.postMessage({type:"simbench-ready"},"*"); }catch(e){} setTimeout(ping,600); };
   ping();
@@ -1947,7 +2026,7 @@ function robotCheckAct(act,a){
     const h=document.querySelector(".cad-hint"); if(h){ h.textContent="Click the part "+a+" moves, then 'New joint from this part'"; h.classList.add("ask"); } return; }
   if(act==="guess"){ const f=$("#jointsFind"); if(f) f.click(); return; }
   if(act==="mates"){ const nav=$('.tabs[data-tabs="left"]'); if(nav) selectTab(nav,"robot");
-    const q=$("#onshapeQuick"); if(q){ q.scrollIntoView({block:"center"}); q.classList.add("flash"); setTimeout(()=>q.classList.remove("flash"),1600); } }
+    OnshapeHelp.open(); }
 }
 
 /* The automatic joint finder (src/autorig.js): a joint spec from the STEP's
@@ -2047,12 +2126,6 @@ function wireMates(){
     $("#mateDefLink").href=L.def; $("#mateFeatLink").href=L.features;
   });
   $("#mateClear").addEventListener("click",clearMates);
-  const bm=$("#mateBookmarklet");
-  if(bm){
-    bm.href=onshapeBookmarklet(location.origin+location.pathname);
-    bm.addEventListener("click",e=>{ e.preventDefault();
-      $("#bmNote").innerHTML="That one runs on your <b>Onshape</b> tab: drag it to your bookmarks bar (Ctrl+Shift+B shows the bar), then click it there with your robot's assembly open."; });
-  }
   $("#jointsDownload").addEventListener("click",downloadJoints);
   $("#jointsFind").addEventListener("click",()=>{ if(CAD) findJoints(CAD,false); });
   $("#jointsReset").addEventListener("click",()=>{
@@ -3090,7 +3163,7 @@ function proBoot(){
   $("#matchOn").addEventListener("change",e=>{ store.set("ftcbench.match",e.target.checked?"1":"0"); if(Online.inMatch()) return; if(Sim.phase!=="running") resetMatch(); else { Match.on=e.target.checked; if(!Match.on) resetMatch(); } });
   $("#matchSkill").addEventListener("change",e=>{ store.set("ftcbench.matchSkill",e.target.value); if(Online.inMatch()) return; if(Sim.phase!=="running") resetMatch(); else Match.skill=e.target.value; });
   $("#practice").addEventListener("change",e=>{ store.set("ftcbench.practice",e.target.checked?"1":"0"); updateClock(); });
-  NetUI.init(); SetupUI.init();
+  NetUI.init(); SetupUI.init(); OnshapeHelp.init();
 
   // code
   $("#addOpMode").addEventListener("click",()=>$("#codeFile").click());

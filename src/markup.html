@@ -160,10 +160,18 @@
       <div class="sec" data-sec="cad">
         <div class="sec-head"><h3>Robot CAD</h3><span class="spacer"></span><span class="mono dim" id="vpDims">—</span></div>
         <div class="drop ok" id="cadDrop" tabindex="0" role="button" aria-label="Load a STEP CAD file">
-          <div class="dt">Robot CAD <small>STEP · URDF · Onshape</small></div>
+          <div class="dt">Drop a robot file here <small>STEP · URDF · .onshape.json</small></div>
           <div class="ds" id="cadStatus">sample: fulll.step (measured)</div>
         </div>
         <input type="file" id="cadFile" accept=".step,.stp,.STEP,.STP,.urdf,.stl,.STL,.json" multiple hidden>
+        <div class="load-row">
+          <button class="load-btn os" type="button" data-os-open>
+            <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8.2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M6.2 10.4l2.6 2.6 5-5.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span><b>Get my robot from Onshape</b><small>Exact joints, step by step</small></span></button>
+          <button class="load-btn" type="button" id="cadPick">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 2.5h6.5L15 6v11.5H5z M11.5 2.5V6H15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+            <span><b>Open a file</b><small>STEP or URDF</small></span></button>
+        </div>
         <details class="fine"><summary>How the CAD was read</summary>
           <p class="hint" id="frameNote"></p>
           <p class="hint" id="exactNote"></p>
@@ -183,15 +191,8 @@
       <div class="sec" data-sec="mates">
         <div class="sec-head"><h3>Mates &amp; joints</h3><span class="pill" id="matePill">none</span><span class="spacer"></span>
           <button class="btn-sm" id="mateClear" type="button" hidden>Remove</button></div>
-        <p class="hint">A STEP has no joints, so they're guessed. Onshape's mates make every joint exact.</p>
-        <div class="onshape-quick" id="onshapeQuick">
-          <div class="oq-title">Your whole robot from Onshape, in one click</div>
-          <ol class="hint">
-            <li>Drag this to your bookmarks bar, once: <a class="bm-link" id="mateBookmarklet" href="#" draggable="true" title="Drag me to your bookmarks bar">Send to SimBench</a></li>
-            <li>Open your robot's assembly in Onshape and click it. SimBench opens with the parts, colours, mass and every mate as a joint. No STEP needed.</li>
-          </ol>
-          <p class="hint" id="bmNote">Uses your own Onshape sign-in. Nothing is uploaded, no API key.</p>
-        </div>
+        <p class="hint">A STEP has no joints, so they're guessed. A robot from Onshape brings its mates, so every joint is exact.
+          <button class="btn-sm primary" type="button" data-os-open id="onshapeQuick">How to get it from Onshape</button></p>
         <details class="mate-manual"><summary>Or by hand, with the assembly's URL</summary>
         <div class="form2">
           <span>Assembly URL</span>
@@ -393,6 +394,7 @@
           <div id="mech"></div>
         </div>
         <div class="vp-chips">
+          <button class="vp-tour vp-os" id="vpOnshape" type="button" data-os-open hidden><i aria-hidden="true"></i>Load your own robot from Onshape<span>exact joints</span></button>
           <button class="vp-tour vp-setup" id="vpSetup" type="button" hidden><i aria-hidden="true"></i>New robot: set it up once<span>4 quick checks</span></button>
           <button class="vp-tour" id="vpTour" type="button" hidden><i aria-hidden="true"></i>New here? Take the tour<span>1 min</span></button>
         </div>
@@ -530,6 +532,117 @@
         <button class="btn-sm primary" id="tourNext" type="button">Next</button>
       </div>
       <div class="tour-dots" id="tourDots" aria-hidden="true"></div>
+    </div>
+  </div>
+
+  <div class="overlay" id="osOverlay" hidden>
+    <div class="sheet os-sheet" role="dialog" aria-modal="true" aria-labelledby="osTitle">
+      <button class="sheet-x" id="osClose" type="button" aria-label="Close">×</button>
+
+      <div id="osGuide">
+        <h2 id="osTitle">Get your robot from Onshape</h2>
+        <p class="os-lead">Every part, its colour and weight, and <b>every joint from your mates</b>, straight from your Onshape assembly. Nothing to export, nothing uploaded, no account to make.</p>
+        <p class="os-warn" id="osPhone" hidden>This needs a computer (Chrome, Edge, Firefox or Safari). Bookmarks like this one can't run on a phone or tablet.</p>
+        <p class="os-once">Steps 1 and 2 are <b>once per computer</b>. After that, getting your robot is just steps 3 and 4.</p>
+
+        <ol class="os-steps">
+          <li class="os-step">
+            <span class="os-n">1</span>
+            <div class="os-body">
+              <h3>Show your bookmarks bar</h3>
+              <p>Press <kbd id="osKey1">Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>B</kbd>. A thin bar appears just under the address bar. <span class="dim">(Already there? Skip this.)</span></p>
+              <svg class="os-pic" viewBox="0 0 360 84" aria-hidden="true">
+                <rect x="1" y="1" width="358" height="82" rx="8" class="p-win"/>
+                <rect x="10" y="9" width="92" height="16" rx="5" class="p-tab"/><text x="20" y="21" class="p-t">SimBench</text>
+                <rect x="10" y="31" width="340" height="18" rx="9" class="p-addr"/><text x="22" y="44" class="p-t dim">app.ftc-simbench.com</text>
+                <rect x="6" y="55" width="348" height="22" rx="4" class="p-bar"/>
+                <text x="14" y="70" class="p-t acc">← your bookmarks bar shows up here</text>
+              </svg>
+            </div>
+          </li>
+          <li class="os-step">
+            <span class="os-n">2</span>
+            <div class="os-body">
+              <h3>Drag this button up onto that bar</h3>
+              <div class="os-drag"><a class="bm-link big" id="osBookmark" href="#" draggable="true" title="Drag me onto your bookmarks bar">★ Send to SimBench</a>
+                <span class="os-hand">Press, hold, drag it up, let go.</span></div>
+              <p>Don't click it here; it only works on your Onshape tab. You should now see <b>Send to SimBench</b> on your bookmarks bar.</p>
+              <p class="os-tip" id="osBmTip" hidden></p>
+              <details class="os-alt"><summary>Can't drag it? Add it by hand instead</summary>
+                <ol>
+                  <li><button class="btn-sm primary" type="button" id="osCopy">Copy the bookmark</button> <span class="dim" id="osCopied"></span></li>
+                  <li>Right-click an empty spot on your bookmarks bar and choose <b>Add page…</b> (Chrome, Edge) or <b>Add Bookmark…</b> (Firefox).</li>
+                  <li>Name: <b>Send to SimBench</b>. In the <b>URL</b> box, paste (<kbd id="osKey2">Ctrl</kbd>+<kbd>V</kbd>). Save.</li>
+                </ol>
+              </details>
+            </div>
+          </li>
+          <li class="os-step">
+            <span class="os-n">3</span>
+            <div class="os-body">
+              <h3>Open your robot's <u>assembly</u> in Onshape</h3>
+              <p>Sign in to Onshape, open your robot's document, and click the <b>Assembly</b> tab along the bottom. Not a Part Studio: the joints live in the assembly.</p>
+              <svg class="os-pic" viewBox="0 0 360 74" aria-hidden="true">
+                <rect x="1" y="1" width="358" height="72" rx="8" class="p-win"/>
+                <rect x="10" y="10" width="340" height="30" rx="4" class="p-canvas"/><text x="150" y="30" class="p-t dim">your robot</text>
+                <rect x="10" y="48" width="86" height="18" rx="3" class="p-tab"/><text x="18" y="61" class="p-t dim">Part Studio 1</text>
+                <rect x="102" y="48" width="86" height="18" rx="3" class="p-tab hi"/><text x="112" y="61" class="p-t">◈ Assembly 1</text>
+                <path d="M226 57 h-30 M202 51 l-6 6 6 6" class="p-arrow"/><text x="232" y="61" class="p-t acc">this one</text>
+              </svg>
+              <a class="btn-sm" href="https://cad.onshape.com/documents" target="_blank" rel="noopener">Open Onshape in a new tab ↗</a>
+            </div>
+          </li>
+          <li class="os-step">
+            <span class="os-n">4</span>
+            <div class="os-body">
+              <h3>Click <b>Send to SimBench</b> on your bookmarks bar</h3>
+              <p>A SimBench tab opens and reads your robot. <b>Keep the Onshape tab open</b> until your robot appears. A big robot takes about a minute.</p>
+              <svg class="os-pic" viewBox="0 0 360 52" aria-hidden="true">
+                <rect x="1" y="1" width="358" height="50" rx="8" class="p-win"/>
+                <rect x="6" y="10" width="348" height="22" rx="4" class="p-bar"/>
+                <rect x="12" y="13" width="112" height="16" rx="4" class="p-bm"/><text x="20" y="25" class="p-t ink">★ Send to SimBench</text>
+                <path d="M84 24 l0 16 4 -4 3 7 3 -1 -3 -7 6 0 z" class="p-cursor"/>
+                <text x="140" y="25" class="p-t dim">← click it while your assembly is open</text>
+              </svg>
+            </div>
+          </li>
+        </ol>
+
+        <details class="os-help"><summary>It didn't work?</summary>
+          <dl>
+            <dt>Nothing happened when I clicked it</dt>
+            <dd>Make sure the <b>Assembly</b> tab is open, not a Part Studio or a drawing, and that you clicked the bookmark on the bar (not one in a menu). Then click it again.</dd>
+            <dt>"Pop-up blocked" in the address bar</dt>
+            <dd>Click that icon, choose <b>Always allow pop-ups from cad.onshape.com</b>, and click the bookmark again. If the tab still can't open, the bookmark downloads your robot as a <code>.onshape.json</code> file. Drop that file here.</dd>
+            <dt>It says I'm not allowed (401 or 403)</dt>
+            <dd>Sign in to Onshape in this same browser. The document has to be yours or shared with you (view access is enough).</dd>
+            <dt>It's taking a long time</dt>
+            <dd>Every part studio is read once; a robot with 100 of them takes a minute or two. Leave both tabs open.</dd>
+            <dt>The bookmark isn't on my bar</dt>
+            <dd>Go back to step 1, or use <b>Can't drag it?</b> in step 2.</dd>
+            <dt>I use Safari</dt>
+            <dd>Press <kbd>⌘</kbd> + <kbd>Shift</kbd> + <kbd>B</kbd> to show the Favorites bar, and drag the button there.</dd>
+          </dl>
+        </details>
+
+        <div class="os-foot">
+          <span class="dim">Only reads, with your own sign-in. Your robot never leaves your computer.</span>
+          <span class="spacer"></span>
+          <button class="btn-sm primary" id="osDone" type="button">Got it</button>
+        </div>
+      </div>
+
+      <div id="osProgress" hidden>
+        <h2 id="osProgTitle">Getting your robot from Onshape</h2>
+        <div class="os-meter" id="osMeter"><i id="osMeterFill"></i></div>
+        <p class="os-prog" id="osProgText">Waiting for your Onshape tab …</p>
+        <p class="hint" id="osProgHint">Keep your Onshape tab open until your robot appears.</p>
+        <div class="os-foot">
+          <button class="btn-sm" id="osShowSteps" type="button">Show the steps</button>
+          <span class="spacer"></span>
+          <button class="btn-sm primary" id="osSeeRobot" type="button" hidden>See my robot</button>
+        </div>
+      </div>
     </div>
   </div>
 

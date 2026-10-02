@@ -29,7 +29,7 @@ function onshapeGrab(SB){
   /* open the tab now, while the click still counts; it says it's ready, then gets the robot */
   var w=window.open(SB+"#onshape-wait","ftcsimbench_onshape");
   var ready=false, payload=null, sent=false, failed=false;
-  var say=function(t){ try{ if(w&&!w.closed) w.postMessage({type:"simbench-progress",text:t},sbOrigin); }catch(e){} };
+  var say=function(t,d,n){ try{ if(w&&!w.closed) w.postMessage({type:"simbench-progress",text:t,done:d,total:n},sbOrigin); }catch(e){} };
   var send=function(){ if(sent||!ready||!payload) return; sent=true; try{ w.postMessage(payload,sbOrigin); }catch(e){ sent=false; save(); } };
   var save=function(){
     /* no SimBench tab, or it never answered: one file to drop into SimBench instead */
@@ -89,7 +89,7 @@ function onshapeGrab(SB){
         get(ps+"/tessellatedfaces"+q+"&outputFaceAppearances=true&outputFacetNormals=false&chordTolerance=0.0015&angleTolerance=0.35"),
         get(ps+"/massproperties"+q+"&massAsGroup=false").catch(function(){ return null; })
       ]).then(function(t){ geom[j.key]={parts:compact(t[0]),mass:mass(t[1])}; },function(){ geom[j.key]=null; })
-        .then(function(){ done++; say("Reading part shapes: "+done+" of "+jobs.length+" part studios …"); return one(); });
+        .then(function(){ done++; say("Reading part shapes: "+done+" of "+jobs.length+" part studios …",done,jobs.length); return one(); });
     };
     return Promise.all([one(),one(),one(),one()]).then(function(){
       payload={format:"ftc-simbench.onshape", v:2, name:name, url:location.href, asm:asm, features:features, geom:geom};
