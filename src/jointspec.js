@@ -192,7 +192,7 @@ const {applyJointSpec, jointSpecSelect, followQ, linkPin, sliderCrank, rodAngle,
       const cen=s=>{ const c=[0,0,0]; for(const p of s.pts) { c[0]+=p[0]; c[1]+=p[1]; c[2]+=p[2]; } return c.map(v=>v/(s.pts.length||1)); };
       const m={id:j.id, label:j.label||j.id, alias:j.label||j.id,
         kind:lin?"linear":(vertical?"revolute-yaw":"revolute-lift"),
-        axis, pivot, dir:1, parent, part:j.part||null, partName:j.partName||null,
+        axis, pivot, dir:Number.isFinite(j.dir)&&j.dir<0?-1:1, parent, part:j.part||null, partName:j.partName||null,
         hasActuator:!!(j.device||j.part), inferred:false, manual:false, leverOverride:null,
         cluster:members.map(i=>cen(solids[i])),
         fromMate:{name:j.label||j.id, type:lin?"SLIDER":"REVOLUTE", id:"spec:"+j.id}};
@@ -280,10 +280,13 @@ const {applyJointSpec, jointSpecSelect, followQ, linkPin, sliderCrank, rodAngle,
       const k=normJointKind(m.kind), lin=k==="linear", own=[];
       (group||[]).forEach((g,i)=>{ if(g===m.id) own.push(i); });
       // a guessed joint moves by dir, and a lift the other way about its axis
-      // (mechPose); written down, the axis carries that so nothing changes
+      // (mechPose); written down, the axis carries that so nothing changes. A
+      // mate joint keeps its axis (its limits, q0 and followers count along it)
+      // and a flip from the rig panel's ± is written as dir
       const sg=m.fromMate?1:(m.dir||1)*(k==="revolute-lift"?-1:1);
       const j={id:m.id, label:m.label||m.id, kind:lin?"slider":"revolute", axis:(m.axis||[0,0,1]).map(v=>+(v*sg).toFixed(5)),
         pivot:r3(m.pivot||[0,0,0]), parts:own.length?[{solid:own}]:[]};
+      if(m.fromMate&&m.dir<0) j.dir=-1;
       if(m.parent&&m.parent!=="chassis") j.parent=m.parent;
       if(m.part) j.part=m.part;
       if(m.limits) j.limits=m.limits.map(v=>v==null?null:+(lin?v*1000:v/DEG).toFixed(lin?4:6));

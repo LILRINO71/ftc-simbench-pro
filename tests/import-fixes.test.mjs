@@ -42,6 +42,23 @@ test('session: a robot whose joints came from a joint spec reloads as a joint sp
   assert.equal(back.session.cad.source, 'onshape', 'the robot still says where its parts came from');
 });
 
+test('joint spec: a mate joint flipped with the rig panel\'s ± stays flipped when its spec is written', () => {
+  const cad = E.cadFromOnshape(payload());
+  const arm = cad.mechs.find((m) => m.id === 'Arm Pivot'), lift = cad.mechs.find((m) => m.id === 'Lift Stage');
+  arm.dir = -1; lift.dir = -1;                   // the rig panel's ± on both
+  const spec = E.specFromCad(cad, cad.solids.map((s) => s.mech || 'chassis'), {});
+  const again = E.cadFromOnshape(payload());
+  E.applyJointSpec(again, spec);
+  const by = (id) => again.mechs.find((m) => m.id === id);
+  for (const revs of [0.05, -0.05, 0.6, -0.6]) {
+    const s = { kind: 'motor', revs, ticks: revs * 537.7, tpr: 537.7, act: 0, restPos: 0 };
+    assert.ok(Math.abs(E.mateJointQ(by('Arm Pivot'), s) - E.mateJointQ(arm, s)) < 1e-9, 'arm at ' + revs + ' turns: ' + E.mateJointQ(by('Arm Pivot'), s) + ' vs ' + E.mateJointQ(arm, s));
+    assert.ok(Math.abs(E.mateJointQ(by('Lift Stage'), s) - E.mateJointQ(lift, s)) < 1e-9, 'lift at ' + revs + ' turns');
+  }
+  // and an unflipped joint writes no dir at all
+  assert.equal(spec.joints.find((j) => j.id === 'Claw').dir, undefined);
+});
+
 test('session: part masses and colours from the CAD survive a save', () => {
   const cad = E.cadFromOnshape(payload());
   const back = E.unpackSession(E.packSession(E.sessionFromBench({ cad }))).session.cad;
