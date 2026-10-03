@@ -30,7 +30,7 @@ const EXPORTS = [
   'MATERIALS', 'hullVolume', 'partMass', 'massProps', 'inertiaOf',
   'driveFromCAD', 'DRIVE_KINDS', 'ikMatrix', 'fkFromIk', 'wheelSpeeds', 'chassisFromWheels',
   'Dyn', 'tractionLimit', 'motorTorque', 'wheelLoads', 'JoltMech', 'JOLT_LIB',
-  'onshapeApiLinks', 'onshapeGrab', 'onshapeRead', 'onshapeRef', 'onshapeFromLink', 'onshapeSignInState', 'onshapeBookmarklet', 'readOnshapeHash', 'checkOnshapePayload', 'ONSHAPE_FORMAT', 'parseOnshapeAssembly', 'applyMateLimits', 'matchOnshapeParts', 'applyOnshapeMates', 'mateQty',
+  'onshapeApiLinks', 'onshapeGrab', 'onshapeRead', 'onshapeGeomCache', 'onshapeRef', 'onshapeFromLink', 'onshapeSignInState', 'onshapeBookmarklet', 'readOnshapeHash', 'checkOnshapePayload', 'ONSHAPE_FORMAT', 'parseOnshapeAssembly', 'applyMateLimits', 'matchOnshapeParts', 'applyOnshapeMates', 'mateQty',
   'cadFromOnshape', 'cadFromUrdf', 'cadFromMjcf', 'mjcfToPayload', 'urdfToPayload', 'urdfStl', 'urdfXml', 'onshapeGeomKey', 'osColor', 'osCompactTess', 'osCompactMass',
   'rrDetect', 'rrParseHelpers', 'rrAttach', 'rrBuildPlan', 'rrSample', 'RRRuntime',
   'autoRig', 'ARActuators', 'ARSlides', 'ARCarry',

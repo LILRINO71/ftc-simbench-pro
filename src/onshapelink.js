@@ -70,18 +70,25 @@ function onshapeRead(host, ref, opt){
       var ver=i.documentVersion?"v/"+i.documentVersion:"m/"+i.documentMicroversion, key=i.documentId+"/"+ver+"/e/"+i.elementId+"|"+(i.configuration||"");
       if(seen[key]) return; seen[key]=1; jobs.push({key:key,i:i,ver:ver});
     }); });
-    var geom={}, done=0, at=0;
+    var geom={}, done=0, at=0, hits=0;
+    /* A part studio at a version or a microversion never changes, so what was
+       read once (opt.cache: {get(key), put(key, value)}, promises) is kept:
+       reading the same robot again costs two calls, not two per part studio. */
+    var cache=opt.cache||null;
     var one=function(){
       if(at>=jobs.length) return Promise.resolve();
       var j=jobs[at++], i=j.i, ps=host+"/api/partstudios/d/"+i.documentId+"/"+j.ver+"/e/"+i.elementId;
       var q="?configuration="+encodeURIComponent(i.configuration||"")+(i.documentId!==ref.did?"&linkDocumentId="+ref.did:"");
-      return Promise.all([
+      var fresh=function(){ return Promise.all([
         get(ps+"/tessellatedfaces"+q+"&outputFaceAppearances=true&outputFacetNormals=false&chordTolerance=0.0015&angleTolerance=0.35"),
         get(ps+"/massproperties"+q+"&massAsGroup=false").catch(function(){ return null; })
-      ]).then(function(t){ geom[j.key]={parts:compact(t[0]),mass:mass(t[1])}; },function(e){ if(e&&e.status===401) throw e; geom[j.key]=null; })
-        .then(function(){ done++; say("Reading part shapes: "+done+" of "+jobs.length+" part studios …",done,jobs.length); return one(); });
+      ]).then(function(t){ geom[j.key]={parts:compact(t[0]),mass:mass(t[1])}; if(cache) try{ Promise.resolve(cache.put(j.key,geom[j.key])).catch(function(){}); }catch(e){} },
+        function(e){ if(e&&e.status===401) throw e; geom[j.key]=null; }); };
+      var kept=cache?Promise.resolve().then(function(){ return cache.get(j.key); }).catch(function(){ return null; }):Promise.resolve(null);
+      return kept.then(function(hit){ if(hit&&hit.parts){ geom[j.key]=hit; hits++; return; } return fresh(); })
+        .then(function(){ done++; say("Reading part shapes: "+done+" of "+jobs.length+" part studios"+(hits?" ("+hits+" already here)":"")+" …",done,jobs.length); return one(); });
     };
-    return Promise.all([one(),one(),one(),one()]).then(function(){ return {asm:asm, features:features, geom:geom}; });
+    return Promise.all([one(),one(),one(),one()]).then(function(){ return {asm:asm, features:features, geom:geom, cached:hits}; });
   });
 }
 /* An Onshape document address: its host and the assembly it points at, or null. */
@@ -145,6 +152,28 @@ async function onshapeSignInState(){
     return {ready:!!j.ready, signedIn:!!j.signedIn};
   }catch(e){ return {ready:false, signedIn:false}; }
 }
+/* Part studios read before, kept in this browser (IndexedDB), by the key
+   onshapeRead uses: a document at a version or a microversion, which never
+   changes. At most CACHE_MAX of them; the oldest go first. Null where there's
+   no IndexedDB (a private window, Node). */
+const ONSHAPE_CACHE_MAX=400;
+function onshapeGeomCache(idb){
+  const I=idb||(typeof indexedDB!=="undefined"?indexedDB:null);
+  if(!I) return null;
+  let dbp=null, puts=0;
+  const db=()=>dbp||(dbp=new Promise((ok,no)=>{ const r=I.open("simbench-onshape",1);
+    r.onupgradeneeded=()=>r.result.createObjectStore("geom"); r.onsuccess=()=>ok(r.result); r.onerror=()=>no(r.error); }));
+  const tx=(mode,f)=>db().then(d=>new Promise((ok,no)=>{ const t=d.transaction("geom",mode), q=f(t.objectStore("geom"));
+    t.oncomplete=()=>ok(q&&q.result); t.onerror=()=>no(t.error); t.onabort=()=>no(t.error); }));
+  const prune=()=>tx("readwrite",s=>{ const all=[]; const c=s.openCursor();
+    c.onsuccess=()=>{ const cur=c.result; if(cur){ all.push([cur.key,(cur.value&&cur.value.at)||0]); cur.continue(); }
+      else if(all.length>ONSHAPE_CACHE_MAX){ all.sort((a,b)=>a[1]-b[1]); for(const [k] of all.slice(0,all.length-Math.floor(ONSHAPE_CACHE_MAX*0.75))) s.delete(k); } };
+    return null; });
+  return {
+    get:k=>tx("readonly",s=>s.get(k)).then(v=>v&&v.parts?v:null),
+    put:(k,v)=>tx("readwrite",s=>s.put(Object.assign({at:Date.now()},v),k)).then(()=>{ if(++puts%50===0) return prune(); })
+  };
+}
 /* The whole robot from a pasted assembly address, read through the sign-in.
    Resolves to the same payload the bookmark sends. */
 async function onshapeFromLink(href, say){
@@ -154,7 +183,7 @@ async function onshapeFromLink(href, say){
   const denied="Onshape says you can't read it: sign in again, and make sure the document is yours or shared with you";
   let name="";
   try{ const r=await fetch(host+"/api/documents/"+ref.did,{credentials:"same-origin",headers:{Accept:"application/json"}}); if(r.ok) name=String((await r.json()).name||""); }catch(e){}
-  const r=await onshapeRead(host, ref, {cred:"same-origin", say, denied});
+  const r=await onshapeRead(host, ref, {cred:"same-origin", say, denied, cache:onshapeGeomCache()});
   return {format:ONSHAPE_FORMAT, v:2, name:name||"Onshape assembly", url:String(href).trim(), asm:r.asm, features:r.features, geom:r.geom};
 }
 
