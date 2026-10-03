@@ -131,3 +131,25 @@ test('rigid physics: pinned on a wall, the drive encoders stop counting', () => 
   assert.ok(Math.abs(b[0] - a[0]) <= 15 && Math.abs(b[1] - a[1]) <= 15, `a second on the wall counted ${b[0] - a[0]} and ${b[1] - a[1]} ticks`);
   assert.ok(Math.abs(F.Sim.env().device('leftDrive', 'getVelocity')) < 15, 'and getVelocity reads still');
 });
+
+/* ---- a slide's hard stops are in the joint's own direction ---- */
+
+test('a slide whose motor runs it backwards (dir -1) travels to its limit and stops there', () => {
+  // the stop compared ticks x m/tick without the joint's dir, while the joint's
+  // value (mateJointQ, the view, the centre of mass) multiplies by it: with
+  // limits [0, 0.10] and dir -1 the slide could never visibly move
+  const slide = (cad) => Object.assign(cad.mechs.find((x) => x.id === 'Arm'),
+    { kind: 'linear', axis: [0, 0, 1], limits: [0, 0.10], dir: -1, mmPerTick: 0.1 });
+  const s = oneMotor('lift.setPower(gamepad1.a ? -0.5 : (gamepad1.b ? 0.5 : 0));', { mech: 'Arm', cadHook: slide });
+  const m = s.mech, q = () => E.mateJointQ(m, s);
+  E.Sim.pad[1].a = true;                                  // negative power: out along the joint
+  run(E, 0.3);
+  assert.ok(q() > 0.01, `it moves out: ${(q() * 1000).toFixed(1)} mm`);
+  run(E, 3);
+  assert.ok(Math.abs(q() - 0.10) < 1e-6, `and stops at the 100 mm limit: ${(q() * 1000).toFixed(2)} mm`);
+  assert.ok(Math.abs(s.ticks * 0.1 / 1000 * -1 - 0.10) < 1e-6, 'the motor stopped there too, not past it');
+  assert.ok(s.stalled, 'held against the stop');
+  E.Sim.pad[1].a = false; E.Sim.pad[1].b = true;          // and back in, to the other stop
+  run(E, 3);
+  assert.ok(Math.abs(q()) < 1e-6 && Math.abs(s.ticks) < 1e-6, `back at 0: ${(q() * 1000).toFixed(2)} mm, ${s.ticks} ticks`);
+});
