@@ -283,15 +283,20 @@ const {sessionFromBench, packSession, unpackSession} = (function(){
     };
   }
 
+  /* Numbers are also held to what is physically there: a robot on the field
+     (half of its 12 ft, src/field.js Field.half), a heading in -pi..pi. A value
+     already in range comes back exactly as it was. */
+  const FIELD_HALF = 1.83;
+  const wrapPi = a => (a >= -Math.PI && a <= Math.PI) ? a : a - 2 * Math.PI * Math.round(a / (2 * Math.PI));
   const readPose = (v, C) => ({
-    x: num(at(v, "x"), 0, C, "pose.x"),        // metres, full precision: a pose must come back exactly
-    y: num(at(v, "y"), 0, C, "pose.y"),
-    h: num(at(v, "h"), 0, C, "pose.h")         // radians
+    x: clamp(num(at(v, "x"), 0, C, "pose.x"), -FIELD_HALF, FIELD_HALF),   // metres, full precision: a pose must come back exactly
+    y: clamp(num(at(v, "y"), 0, C, "pose.y"), -FIELD_HALF, FIELD_HALF),
+    h: wrapPi(num(at(v, "h"), 0, C, "pose.h"))                             // radians
   });
 
   const readOpts = (v, C) => ({
-    payloadKg: num(at(v, "payloadKg"), 0.18, C, "opts.payloadKg"),
-    duty: num(at(v, "duty"), 0.3, C, "opts.duty"),
+    payloadKg: clamp(num(at(v, "payloadKg"), 0.18, C, "opts.payloadKg"), 0, 20),
+    duty: clamp(num(at(v, "duty"), 0.3, C, "opts.duty"), 0, 1),
     trust: oneOf(at(v, "trust"), ["code", "cad"], "code"),
     front: oneOf(at(v, "front"), ["+x", "+y", "-x", "-y"], "+x"),
     baseModel: oneOf(at(v, "baseModel"), ["auto", "show", "hide"], "auto"),
@@ -310,10 +315,10 @@ const {sessionFromBench, packSession, unpackSession} = (function(){
     shooter: str(at(c, "shooter"), C, "shot shooter"),
     feeder: str(at(c, "feeder"), C, "shot feeder"),
     motorId: str(at(c, "motorId"), C, "shot motor"),
-    hoodDeg: num(at(c, "hoodDeg"), 75, C, "shot hoodDeg"),
-    h0In: num(at(c, "h0In"), 16, C, "shot h0In"),
-    wheelMm: num(at(c, "wheelMm"), 96, C, "shot wheelMm"),
-    gear: num(at(c, "gear"), 1, C, "shot gear"),
+    hoodDeg: clamp(num(at(c, "hoodDeg"), 75, C, "shot hoodDeg"), 0, 90),
+    h0In: clamp(num(at(c, "h0In"), 16, C, "shot h0In"), 4, 30),
+    wheelMm: clamp(num(at(c, "wheelMm"), 96, C, "shot wheelMm"), 30, 200),
+    gear: clamp(num(at(c, "gear"), 1, C, "shot gear"), 0.1, 10),
     mountDeg: num(at(c, "mountDeg"), 0, C, "shot mountDeg"),
     ball: str(at(c, "ball"), C, "shot ball") || "pollen",
     type: str(at(c, "type"), C, "shot type") || "single",
@@ -321,7 +326,7 @@ const {sessionFromBench, packSession, unpackSession} = (function(){
   };
   const readShots = (v, C) => ({
     seed: int(at(v, "seed"), 7, C, "shots.seed"),
-    spreadScale: num(at(v, "spreadScale"), 1, C, "shots.spreadScale"),
+    spreadScale: clamp(num(at(v, "spreadScale"), 1, C, "shots.spreadScale"), 0, 5),
     fired: Math.max(0, int(at(v, "fired"), 0, C, "shots.fired")),
     scored: Math.max(0, int(at(v, "scored"), 0, C, "shots.scored")),
     cfg: readShotCfg(at(v, "cfg"), C)
