@@ -281,6 +281,30 @@ test('a CAD with no solids keeps its point cloud instead', () => {
     'flat integers in tenths of a millimetre');
 });
 
+test('numbers out of any physical range are clamped: no 1e9 kg payload, no robot off the field', () => {
+  const raw = JSON.parse(E.packSession(E.sessionFromBench(bench())));
+  Object.assign(raw.opts, { payloadKg: 1e9, duty: -3, mu: 50, startPose: { x: -40, y: 7, h: 100 } });
+  raw.chassis = { x: 1e6, y: -1e6, h: -7 };
+  Object.assign(raw.shots, { spreadScale: 1e9 });
+  Object.assign(raw.shots.cfg, { wheelMm: 1e5, gear: 0, hoodDeg: 400, h0In: -2 });
+  const s = E.unpackSession(JSON.stringify(raw)).session;
+  assert.equal(s.opts.payloadKg, 20); assert.equal(s.opts.duty, 0); assert.equal(s.opts.mu, 2);
+  assert.deepEqual([s.chassis.x, s.chassis.y], [1.83, -1.83], 'on the field (half of 12 ft)');
+  assert.deepEqual([s.opts.startPose.x, s.opts.startPose.y], [-1.83, 1.83]);
+  const wrapped = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+  assert.ok(Math.abs(s.opts.startPose.h - wrapped(100)) < 1e-12 && Math.abs(s.chassis.h - wrapped(-7)) < 1e-12, 'headings into -pi..pi');
+  assert.equal(s.shots.spreadScale, 5);
+  assert.deepEqual([s.shots.cfg.wheelMm, s.shots.cfg.gear, s.shots.cfg.hoodDeg, s.shots.cfg.h0In], [200, 0.1, 90, 4]);
+  const low = JSON.parse(JSON.stringify(raw));
+  Object.assign(low.opts, { mu: 0 }); Object.assign(low.shots.cfg, { wheelMm: 1, gear: 99, hoodDeg: -5, h0In: 99 });
+  const t = E.unpackSession(JSON.stringify(low)).session;
+  assert.equal(t.opts.mu, 0.05);
+  assert.deepEqual([t.shots.cfg.wheelMm, t.shots.cfg.gear, t.shots.cfg.hoodDeg, t.shots.cfg.h0In], [30, 10, 0, 30]);
+  // and values in range come back exactly as they were
+  const b = bench(), back = E.unpackSession(E.packSession(E.sessionFromBench(b))).session;
+  assert.deepEqual(back.chassis, b.chassis); assert.deepEqual(back.opts.startPose, b.opts.startPose); assert.deepEqual(back.shots.cfg, b.shots.cfg);
+});
+
 // The rig panel's own document, shaped as exportRig() in src/app.js writes it.
 function rigOf(b) {
   return { format: 'ftc-sim-bench.rig', version: 1, cad: 'sample', opmode: 'WORKSHOP', trust: 'cad', payloadKg: 0.3, duty: 0.4,
