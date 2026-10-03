@@ -2397,7 +2397,8 @@ const NetUI={
     const rows=F.stats.map(s=>`<tr class="${netAl(s.slot)}"><td>${esc(s.name)}</td><td class="n">${s.fired}</td><td class="n">${s.scored}</td></tr>`).join("");
     setHTML($("#onpFinal"),`<div class="onp-final"><div class="red"><b>${r}</b><small>RED</small></div><div class="blue"><b>${b}</b><small>BLUE</small></div></div>`+
       `<p class="onp-verdict">${esc(verdict)}</p><table class="onp-stats"><tr><th>Robot</th><th class="n">Shots</th><th class="n">In</th></tr>${rows}</table>`+
-      (Online.role==="host"?"":`<p class="onp-wait">The host can start another match with everyone in the same places.</p>`));
+      (Online.role==="host"?"":Online.hostGone?`<p class="onp-wait">The host has left, so there's no next match here. Leave the match to drive on your own.</p>`:
+        `<p class="onp-wait">The host can start another match with everyone in the same places.</p>`));
     $("#onpAgain").hidden=Online.role!=="host";
   },
   renderChat(){

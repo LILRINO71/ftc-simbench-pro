@@ -269,6 +269,23 @@ test('online: the host leaving ends it for the guest, with a reason', () => {
   assert.ok(G.events.some((e) => e.what === 'error'));
 });
 
+test('online: the host leaving after the final buzzer leaves everyone the final score', () => {
+  const hub = loadWithField().netLoopback();
+  const { H, G } = twoInAMatch(hub, 'Autonomous');
+  run(hub, [H, G], 3 + 30.5);
+  assert.equal(G.O.state, 'done');
+  const final = structuredClone(G.O.final);
+  H.O.leave(); hub.flush();
+  assert.equal(G.O.state, 'done', 'still the end of the match');
+  assert.deepEqual(G.O.final, final, 'the result stays');
+  assert.ok(G.O.hostGone);
+  assert.equal(G.O.room, null, 'out of the room: there is nobody to play again with');
+  run(hub, [G], 0.2);                                                         // and nothing breaks
+  G.O.leave();
+  assert.equal(G.O.state, 'off');
+  assert.ok(!G.O.hostGone && !G.O.final);
+});
+
 test('online: peer ids like __proto__, constructor and toString are only ever ordinary keys', () => {
   const hub = loadWithField().netLoopback();
   const H = computer(hub, 'host');
