@@ -290,6 +290,37 @@ function urdfPlace(T,O,sc){
     out[k]=r[0][0]*x+r[0][1]*y+r[0][2]*z+t[0]; out[k+1]=r[1][0]*x+r[1][1]*y+r[1][2]*z+t[1]; out[k+2]=r[2][0]*x+r[2][1]*y+r[2][2]*z+t[2]; }
   return out;
 }
+/* How many triangles a mesh holds, without reading it: the STL header, the OBJ's
+   face lines, the glTF's accessors. Null when it would take a full read (DAE). */
+function urdfMeshCount(fname,buf){
+  const ext=(/\.([a-z0-9]+)$/i.exec(String(fname||""))||[,""])[1].toLowerCase(), u8=urdfU8(buf);
+  if(ext==="stl"){
+    if(u8.length>=84){ const n=new DataView(u8.buffer,u8.byteOffset,u8.byteLength).getUint32(80,true); if(u8.length===84+n*50) return n; }
+    const t=urdfText(u8); let n=0, i=-1; while((i=t.indexOf("facet normal",i+1))>=0) n++; return n;
+  }
+  if(ext==="obj"){ const t=urdfText(u8); let n=0; for(const line of t.split(/\r?\n/)) if(line.charCodeAt(0)===102&&(line.charCodeAt(1)===32||line.charCodeAt(1)===9)){ const k=line.trim().split(/\s+/).length-1; n+=Math.max(1,k-2); } return n; }
+  if(ext==="gltf"||ext==="glb"){
+    try{
+      const dv=new DataView(u8.buffer,u8.byteOffset,u8.byteLength);
+      const json=dv.getUint32(0,true)===0x46546C67?JSON.parse(new TextDecoder().decode(u8.subarray(20,20+dv.getUint32(12,true)))):JSON.parse(urdfText(u8));
+      let n=0; for(const m of json.meshes||[]) for(const p of m.primitives||[]){ const a=json.accessors[Number.isInteger(p.indices)?p.indices:(p.attributes||{}).POSITION]; if(a) n+=Math.floor(a.count/3); }
+      return n;
+    }catch(e){ return null; }
+  }
+  return null;
+}
+/* a closed mesh's volume (the divergence theorem over its triangles), in the mesh's units */
+function urdfVolume(T){
+  let v=0;
+  for(let k=0;k<T.length;k+=9){ const ax=T[k],ay=T[k+1],az=T[k+2], bx=T[k+3],by=T[k+4],bz=T[k+5], cx=T[k+6],cy=T[k+7],cz=T[k+8];
+    v+=ax*(by*cz-bz*cy)+ay*(bz*cx-bx*cz)+az*(bx*cy-by*cx); }
+  return Math.abs(v)/6;
+}
+/* A part with no material in Onshape is exported with a density of 1 kg/m³ (its
+   "mass" is its volume in m³). Its real mass is its volume times what it's made
+   of: aluminium unless the name or part number says steel, plastic, rubber, a motor. */
+const URDF_DENSITY={fastener:7850, motor:2000, servo:1500, wheel:1100, electronics:1200, clear:1200, printed:500, belt:1200, metal:2700};
+function urdfDensity(name,pn){ const k=typeof solidKind==="function"?solidKind(name,pn):"metal"; return URDF_DENSITY[k]||URDF_DENSITY.metal; }
 /* How many triangles a part may keep: a whole robot stays near a million placed
    triangles, which a Chromebook's tab and GPU carry; one part never below 600. */
 function urdfTriBudget(meshLinks,total){ return Math.max(600,Math.min(5000,Math.round((total||1.2e6)/Math.max(1,meshLinks)))); }
@@ -352,9 +383,36 @@ function urdfToPayload(text,files,name,opts){
     }
     return null;
   };
+  // The robot keeps about a million placed triangles (less on a small device), shared
+  // out by size: every mesh's count is read from its header first, and each gets the
+  // share its placements are of the whole, never under 600. A tyre of 700,000 keeps
+  // tens of thousands; a screw of 8 keeps 8.
+  // two million on a desktop (the app passes a smaller device's own allowance, src/tier.js)
+  const total=opts.triangles>0?opts.triangles:2e6;
+  const placed=new Map(), countOf=new Map();
+  for(const l of links) for(const v of urdfKids(l,"visual")){
+    const g=urdfKid(v,"geometry"), sh=g&&g.kids[0]; if(!sh||sh.tag!=="mesh") continue;
+    const key=resolve(sh.attrs.filename); if(key==null) continue;
+    if(!countOf.has(key)){ const f=key[0]==="#"?fileByBase[key.slice(1)]:fileByPath[key]; let n=null; try{ n=urdfMeshCount(base(sh.attrs.filename),f); }catch(e){} countOf.set(key,n); }
+    placed.set(key,(placed.get(key)||0)+1);
+  }
+  let sum=0; for(const [k,n] of countOf) sum+=(n||0)*(placed.get(k)||1);
+  const family=new Map();                                  // mesh -> triangles for all its copies together
+  if(sum>total){
+    let pool=[...countOf.keys()].filter(k=>countOf.get(k)!=null), left=total;
+    for(let pass=0;pass<8&&pool.length;pass++){
+      const W=pool.reduce((s,k)=>s+countOf.get(k)*(placed.get(k)||1),0)||1;
+      const capped=[];
+      for(const k of pool){ const n=countOf.get(k), c=placed.get(k)||1, want=left*n*c/W, cap=Math.min(n*c, total*0.3, c*total/8);
+        if(want>=cap){ family.set(k,cap); capped.push(k); } }
+      if(!capped.length){ for(const k of pool) family.set(k,left*countOf.get(k)*(placed.get(k)||1)/W); break; }
+      for(const k of capped) left-=family.get(k);
+      pool=pool.filter(k=>!capped.includes(k));
+    }
+  }
+  const budgetOf=key=>{ if(opts.triBudget>0) return opts.triBudget; const n=countOf.get(key); if(sum<=total||n==null) return Infinity;
+    return Math.max(600,Math.floor((family.get(key)||0)/(placed.get(key)||1))); };
   // each mesh file read once, however many links share it, and cut down to its budget
-  const meshLinks=links.filter(l=>urdfKids(l,"visual").some(v=>{ const g=urdfKid(v,"geometry"); return g&&g.kids[0]&&g.kids[0].tag==="mesh"; })).length;
-  const budget=opts.triBudget>0?opts.triBudget:urdfTriBudget(meshLinks,opts.triangles);
   const meshCache=new Map(); let triIn=0, triOut=0, cut=0;
   const loadMesh=fname=>{
     const key=resolve(fname), b=base(fname);
@@ -364,30 +422,36 @@ function urdfToPayload(text,files,name,opts){
     let r;
     if(!URDF_MESH_EXT.test(b)) r={miss:b+" (only STL, OBJ, glTF, GLB and DAE are read)"};
     else { try{ const t=urdfMesh(b,f,fileByBase);
-      if(t&&t.length>=9){ const d=urdfDecimate(t,budget); triIn+=t.length/9; triOut+=d.length/9; if(d.length<t.length) cut++; r={tri:d,key}; }
+      if(t&&t.length>=9){ const d=urdfDecimate(t,budgetOf(key)); triIn+=t.length/9; triOut+=d.length/9; if(d.length<t.length) cut++; r={tri:d,key,vol:urdfVolume(t)}; }
       else r={miss:b+" (no triangles in it)"}; }catch(e){ r={miss:b+" ("+(e&&e.message||e)+")"}; } }
     meshCache.set(key,r); return r;
   };
   const kgOf=l=>{ const inertial=urdfKid(l,"inertial"), mass=inertial&&urdfKid(inertial,"mass"); return mass?+mass.attrs.value:NaN; };
   // Onshape's dummy links: a loop's second attachment ("<part>__1__loop_closure"), and
   // the in-between links of a cylindrical or planar mate. None is a part.
-  const loopDummy=new Map();
+  const loopDummy=new Map(), dropped=new Set();
+  const shapeless=l=>!urdfKids(l,"visual").length;
   for(const l of links){
     const n=l.attrs.name||""; if(!/_loop_closure$/i.test(n)) continue;
     const stem=n.replace(/_loop_closure$/i,"");
     const cands=[stem, stem.replace(/__\d+_$/,""), stem.replace(/__\d+__\d+$/,""), stem.replace(/_\d+$/,"")];
     const real=cands.find(c=>c!==n&&byName.has(c)&&!/_loop_closure$/i.test(c));
-    if(real) loopDummy.set(n,real); else notes.push("\""+n+"\" closes a loop onto a part this file doesn't name; that closure is left out.");
+    if(real) loopDummy.set(n,real); else dropped.add(n);
   }
-  const shapeless=l=>!urdfKids(l,"visual").length;
+  // a dummy named after the mate itself ("parallel_5_loop_closure": a parallel mate
+  // closing a loop) stands for no part the file names: it and its joints are left out
+  for(const l of links){ const n=l.attrs.name||""; if(dropped.has(n)) continue;
+    if(/_loop_closure(_\d+)?$/i.test(n)&&!loopDummy.has(n)&&shapeless(l)) dropped.add(n); }
+  if(dropped.size) notes.push(dropped.size+" loop-closing dumm"+(dropped.size===1?"y":"ies")+" from mates that close a loop onto no named part (a parallel mate's) "+(dropped.size===1?"is":"are")+" left out; the loop is driven through its first joint.");
   const jointsIn=new Map(), jointsOut=new Map();
   for(const j of joints){ const p=(urdfKid(j,"parent")||{attrs:{}}).attrs.link, c=(urdfKid(j,"child")||{attrs:{}}).attrs.link; if(p) (jointsOut.get(p)||jointsOut.set(p,[]).get(p)).push(j); if(c) (jointsIn.get(c)||jointsIn.set(c,[]).get(c)).push(j); }
   // a shapeless, massless link between exactly two moving joints on one axis is a
   // cylindrical mate split in two: one mate, from the outer parent to the final child
   const through=new Map();                               // dummy link -> {outer joint in, joint out}
   for(const l of links){
-    const n=l.attrs.name; if(!shapeless(l)||kgOf(l)>1e-4||n===root.attrs.name||loopDummy.has(n)) continue;
-    if(!onshape&&!/^cylindrical_\d+_\d+$/i.test(n)) continue;
+    const n=l.attrs.name; if(!shapeless(l)||kgOf(l)>1e-4||n===root.attrs.name||loopDummy.has(n)||dropped.has(n)) continue;
+    if(!onshape&&!/^cylindrical_\d+(_\d+)*$/i.test(n)) continue;
+    if(/^(planar|parallel)_/i.test(n)) continue;
     const ins=jointsIn.get(n)||[], outs=jointsOut.get(n)||[];
     if(ins.length!==1||outs.length!==1) continue;
     const a=ins[0], b=outs[0], ta=a.attrs.type||"fixed", tb=b.attrs.type||"fixed";
@@ -396,17 +460,19 @@ function urdfToPayload(text,files,name,opts){
     const la=Math.hypot(...axA)||1, lb=Math.hypot(...axB)||1, dot=(axA[0]*axB[0]+axA[1]*axB[1]+axA[2]*axB[2])/(la*lb);
     if(Math.abs(dot)>0.999&&((ta==="prismatic")!==(tb==="prismatic"))) through.set(n,{a,b});
   }
-  const planar=new Set();                                 // Onshape's planar mate: dummies named planar_N_M
-  for(const l of links){ const n=l.attrs.name||""; if(/^planar_\d+_\d+$/i.test(n)&&shapeless(l)) planar.add(n); }
+  // Onshape's planar and parallel mates: chains of dummies (planar_N_M, parallel_N, parallel_N_M)
+  // on slides and a turn; the bench holds the part where it was drawn
+  const planar=new Set();
+  for(const l of links){ const n=l.attrs.name||""; if(/^(planar|parallel)_\d+(_\d+)*$/i.test(n)&&shapeless(l)&&!dropped.has(n)) planar.add(n); }
 
   const instances=[], occurrences=[], geom={}, idOf=new Map();
-  let tinyMass=0; const tinyNames=[];
+  let tinyMass=0, kgEst=0; const tinyNames=[];
   links.forEach((l,i)=>{
     const nm=l.attrs.name||("link"+i);
-    if(loopDummy.has(nm)||through.has(nm)) return;         // not parts: handled as mates below
+    if(loopDummy.has(nm)||through.has(nm)||dropped.has(nm)) return;   // not parts: mates, or left out
     const id="L"+i; idOf.set(nm,id);
     const display=onshape?urdfPrettyName(nm):nm, pn=urdfPartNumber(nm);
-    let color=null, key=null, tri=null;
+    let color=null, key=null, tri=null, volOf=null;
     const visuals=urdfKids(l,"visual");
     for(const v of visuals){ const mat=urdfKid(v,"material"); if(mat&&!color){ const c=urdfKid(mat,"color"); color=c?urdfNums(c.attrs.rgba,3,null):(materials[mat.attrs.name]||null); } }
     const one=visuals.length===1?visuals[0]:null, oneG=one&&urdfKid(one,"geometry"), oneShape=oneG&&oneG.kids[0];
@@ -420,6 +486,7 @@ function urdfToPayload(text,files,name,opts){
         key=urdfHash(r.key+"|"+sc.join(",")+"|"+O.r.flat().map(x=>x.toFixed(6)).join(",")+"|"+O.t.map(x=>x.toFixed(6)).join(",")+"|"+(color?color.join(","):""));
         const had=geom["URDF/m/MV/e/E"+key+"|default"];
         tri=had?had.parts.P.tri:urdfPlace(r.tri,O,sc);
+        volOf=r.vol*Math.abs(sc[0]*sc[1]*sc[2]);
       }
     } else {
       const parts=[]; let total=0;
@@ -431,21 +498,27 @@ function urdfToPayload(text,files,name,opts){
         parts.push(T); total+=T.length;
       }
       tri=new Float32Array(total); let o=0; for(const T of parts){ tri.set(T,o); o+=T.length; }
+      if(tri.length) volOf=urdfVolume(tri);
     }
-    let kg=kgOf(l);
-    // Onshape writes a near-zero mass for a part with no material; that's no mass
-    if(Number.isFinite(kg)&&kg>0&&kg<1e-4&&tri.length){ tinyMass++; if(tinyNames.length<5) tinyNames.push(display); kg=NaN; }
+    let kg=kgOf(l), est=false;
+    // Onshape gives a part with no material a density of 1 kg/m³, so its "mass" is its
+    // volume: that part is weighed from its shape instead, as what its name says it is
+    if(tri.length&&(!Number.isFinite(kg)||kg<=0||(volOf!=null&&kg/volOf<50))){
+      if(volOf>1e-9&&(Number.isFinite(kg)&&kg>0||onshape)){ if(Number.isFinite(kg)&&kg>0){ tinyMass++; if(tinyNames.length<5) tinyNames.push(display); } kg=volOf*urdfDensity(display,pn); est=true; kgEst+=kg; }
+      else if(onshape){ kg=0.001; est=true; }                 // a decal, a sticker: a gram
+      else kg=NaN;
+    }
     const hasKg=Number.isFinite(kg)&&kg>0;
     let eid=key?"E"+key:"E"+i;
     let gk="URDF/m/MV/e/"+eid+"|default";
     if(key&&geom[gk]){ const had=geom[gk].mass.P; if((had?had.kg:null)!==(hasKg?kg:null)){ eid+="m"+urdfHash(String(kg)); gk="URDF/m/MV/e/"+eid+"|default"; } }
     const pid=key?"P":"P"+i;
-    if(tri.length&&!geom[gk]) geom[gk]={parts:{[pid]:{name:display,tri,color}}, mass:hasKg?{[pid]:{kg}}:{}};
+    if(tri.length&&!geom[gk]) geom[gk]={parts:{[pid]:{name:display,tri,color}}, mass:hasKg?{[pid]:est?{kg,est:true}:{kg}}:{}};
     instances.push({id,name:display,type:"Part",suppressed:false,documentId:"URDF",elementId:eid,configuration:"default",documentMicroversion:"MV",partId:pid,
       partNumber:pn, shapeless:!tri.length});
     if(W.has(nm)) occurrences.push({path:[id],transform:urdfT16(W.get(nm)),fixed:nm===root.attrs.name,hidden:false});
   });
-  if(tinyMass) notes.push(tinyMass+" part"+(tinyMass===1?" came":"s came")+" with almost no mass ("+tinyNames.join(", ")+(tinyMass>5?" …":"")+"): Onshape writes that for a part with no material, so the bench weighs them by their shape instead.");
+  if(tinyMass) notes.push(tinyMass+" part"+(tinyMass===1?" has":"s have")+" no material in Onshape ("+tinyNames.join(", ")+(tinyMass>5?" …":"")+"), so "+(tinyMass===1?"it's":"they're")+" weighed from "+(tinyMass===1?"its":"their")+" shape"+(tinyMass===1?"":"s")+": about "+kgEst.toFixed(1)+" kg as aluminium, or steel, plastic, rubber or a motor where the name says so. Give them materials for exact masses.");
   if(cut) notes.push(cut+" mesh"+(cut===1?" was":"es were")+" simplified for the browser ("+(triIn/1e6).toFixed(1)+"M triangles down to "+(triOut/1e6).toFixed(2)+"M): the shapes draw a little coarser; the joints, placements and masses are exact.");
 
   // joints as mates: the joint frame, z along its axis, in each end's own frame
@@ -479,7 +552,7 @@ function urdfToPayload(text,files,name,opts){
   joints.forEach((j,k)=>{
     if(done.has(j)) return;
     const p=(urdfKid(j,"parent")||{attrs:{}}).attrs.link, c=(urdfKid(j,"child")||{attrs:{}}).attrs.link;
-    if(!W.has(p)||!W.has(c)) return;
+    if(!W.has(p)||!W.has(c)||dropped.has(p)||dropped.has(c)) return;
     const type=j.attrs.type||"fixed", id="J"+k, nm=j.attrs.name||id;
     const ax=urdfNums((urdfKid(j,"axis")||{attrs:{}}).attrs.xyz,3,[1,0,0]);
     // a loop closure: the dummy stands for a real part; the mate pins the parent to it
@@ -505,7 +578,7 @@ function urdfToPayload(text,files,name,opts){
     // Onshape's planar mate: two dummies and three joints; held where it's drawn
     if(planar.has(c)||planar.has(p)){
       if(!idOf.has(p)||!idOf.has(c)) return;
-      if(!planarSaid){ planarSaid=true; notes.push("A planar mate ("+nm.replace(/_\d+_\d+$/,"")+") is held where it was drawn; the bench simulates turns and slides."); }
+      if(!planarSaid){ planarSaid=true; notes.push("A "+(/^parallel/i.test(nm)?"parallel":"planar")+" mate ("+nm.replace(/(_\d+)+$/,"")+") is held where it was drawn; the bench simulates turns and slides."); }
       emit(id,nm,"FASTENED",p,c,frameOf(ax)); return;
     }
     if(!idOf.has(p)||!idOf.has(c)) return;

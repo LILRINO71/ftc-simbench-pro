@@ -31,7 +31,7 @@ const EXPORTS = [
   'driveFromCAD', 'DRIVE_KINDS', 'ikMatrix', 'fkFromIk', 'wheelSpeeds', 'chassisFromWheels',
   'Dyn', 'tractionLimit', 'motorTorque', 'wheelLoads', 'JoltMech', 'JOLT_LIB',
   'onshapeApiLinks', 'onshapeGrab', 'onshapeRead', 'onshapeGeomCache', 'onshapeRef', 'onshapeFromLink', 'onshapeSignInState', 'onshapeBookmarklet', 'readOnshapeHash', 'checkOnshapePayload', 'ONSHAPE_FORMAT', 'parseOnshapeAssembly', 'applyMateLimits', 'matchOnshapeParts', 'applyOnshapeMates', 'mateQty',
-  'cadFromOnshape', 'cadFromUrdf', 'cadFromMjcf', 'mjcfToPayload', 'urdfObj', 'urdfGltf', 'urdfGltfScene', 'urdfDae', 'urdfMesh', 'urdfPartNumber', 'urdfPrettyName', 'urdfDecimate', 'urdfTriBudget', 'gltfToPayload', 'robotFromZip', 'ZIP_ROBOT_CAPS', 'MATE_DEFAULT_NAME', 'urdfToPayload', 'urdfStl', 'urdfXml', 'onshapeGeomKey', 'osColor', 'osCompactTess', 'osCompactMass',
+  'cadFromOnshape', 'cadFromUrdf', 'cadFromMjcf', 'mjcfToPayload', 'urdfObj', 'urdfGltf', 'urdfGltfScene', 'urdfDae', 'urdfMesh', 'urdfPartNumber', 'urdfPrettyName', 'urdfDecimate', 'urdfTriBudget', 'urdfMeshCount', 'urdfVolume', 'urdfDensity', 'gltfToPayload', 'robotFromZip', 'ZIP_ROBOT_CAPS', 'MATE_DEFAULT_NAME', 'urdfToPayload', 'urdfStl', 'urdfXml', 'onshapeGeomKey', 'osColor', 'osCompactTess', 'osCompactMass',
   'rrDetect', 'rrParseHelpers', 'rrAttach', 'rrBuildPlan', 'rrSample', 'RRRuntime',
   'autoRig', 'ARActuators', 'ARSlides', 'ARCarry',
   'SIMBOT_FORMAT', 'SIMBOT_VERSION', 'simbotFromCad', 'simbotPack', 'simbotUnpack', 'cadFromSimbot', 'validateRobot', 'zipWrite', 'zipRead', 'glbWrite', 'glbRead', 'sbCrc32', 'SIMBOT_CAPS', 'mateNameHint',

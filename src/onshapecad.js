@@ -75,6 +75,29 @@ function osCompactMass(mp){
 /* The CAD object, from a bookmark payload {name, asm, features, geom}.
    geom: key -> {parts: partId -> {name, tri, color}, mass: partId -> {kg, com}}
    (or the raw API responses as {tess, mass}). */
+/* Normals for lighting: a corner's normal is the mean of the normals of the faces that
+   meet at its vertex and lie within the crease angle of its own face, so a cylinder
+   shades smoothly while a box keeps its edges. pos and nor are flat xyz triples; nor
+   holds each face's flat normal on the way in and the smoothed ones on the way out. */
+function osSmoothNormals(pos,nor,creaseDeg){
+  const nv=pos.length/3, nf=nv/3|0; if(nf<2) return;
+  const cosC=Math.cos((creaseDeg||35)*Math.PI/180);
+  // vertices that share a position (to 10 µm) share their faces
+  const at=new Map(), vid=new Int32Array(nv); let nu=0;
+  for(let v=0;v<nv;v++){ const k=Math.round(pos[3*v]*1e5)+","+Math.round(pos[3*v+1]*1e5)+","+Math.round(pos[3*v+2]*1e5); let id=at.get(k); if(id==null){ id=nu++; at.set(k,id); } vid[v]=id; }
+  const count=new Int32Array(nu+1); for(let v=0;v<nv;v++) count[vid[v]+1]++;
+  for(let i=0;i<nu;i++) count[i+1]+=count[i];
+  const faces=new Int32Array(nv), fill=count.slice(0,nu);
+  for(let v=0;v<nv;v++) faces[fill[vid[v]]++]=v/3|0;
+  const out=new Float32Array(nv*3);
+  for(let v=0;v<nv;v++){
+    const f=v/3|0, fx=nor[9*f], fy=nor[9*f+1], fz=nor[9*f+2]; let sx=0, sy=0, sz=0;
+    const id=vid[v]; for(let q=count[id];q<count[id+1];q++){ const g=faces[q], gx=nor[9*g], gy=nor[9*g+1], gz=nor[9*g+2];
+      if(fx*gx+fy*gy+fz*gz>=cosC){ sx+=gx; sy+=gy; sz+=gz; } }
+    const L=Math.hypot(sx,sy,sz); if(L>1e-9){ out[3*v]=sx/L; out[3*v+1]=sy/L; out[3*v+2]=sz/L; } else { out[3*v]=fx; out[3*v+1]=fy; out[3*v+2]=fz; }
+  }
+  nor.set(out);
+}
 function cadFromOnshape(p,opts){
   opts=opts||{};
   const A=p.asm;
@@ -92,7 +115,7 @@ function cadFromOnshape(p,opts){
     return i; };
   const solids=[], P=[], missing=new Set(), why=[];
   const mn=[Infinity,Infinity,Infinity], mx=[-Infinity,-Infinity,-Infinity];
-  let kgSum=0, kgParts=0, nOcc=0;
+  let kgSum=0, kgParts=0, kgEstSum=0, kgEstParts=0, nOcc=0;
   for(const o of A.rootAssembly.occurrences||[]){
     if(o.hidden) continue;
     const inst=instAt(o.path);
@@ -131,7 +154,7 @@ function cadFromOnshape(p,opts){
       // the shape once, in its Part Studio's frame, and where this copy sits: a
       // robot package (src/simbot.js) stores eight identical channels as one mesh
       inst:{key:key+"#"+inst.partId, local:tri, M:[T[0],T[1],T[2],T[3], T[4],T[5],T[6],T[7], T[8],T[9],T[10],T[11], 0,0,0,1]}};
-    if(mass){ sd.kg=mass.kg; kgSum+=mass.kg; kgParts++; }
+    if(mass){ sd.kg=mass.kg; if(mass.est){ sd.kgEst=true; kgEstSum+=mass.kg; kgEstParts++; } else { kgSum+=mass.kg; kgParts++; } }
     for(const q of sd.pts) P.push(q);
     solids.push(sd);
   }
@@ -153,14 +176,15 @@ function cadFromOnshape(p,opts){
       // in place: the frame is rigid, so no second copy of the robot is needed
       for(let k=0;k<pos.length;k+=3){ const a=F.toRobot([pos[k],pos[k+1],pos[k+2]]), b=F.dirToRobot([nor[k],nor[k+1],nor[k+2]]);
         pos[k]=a[0]; pos[k+1]=a[1]; pos[k+2]=a[2]; nor[k]=b[0]; nor[k+1]=b[1]; nor[k+2]=b[2]; }
-      s.tri={pos,nor}; s.keepTri=true; delete s.rawTri; }
-  } else for(const s of solids){ s.tri=s.rawTri; s.keepTri=true; delete s.rawTri; }
+      s.tri={pos,nor}; s.keepTri=true; delete s.rawTri; osSmoothNormals(pos,nor,35); }
+  } else for(const s of solids){ s.tri=s.rawTri; s.keepTri=true; delete s.rawTri; osSmoothNormals(s.tri.pos,s.tri.nor,35); }
   const counts=new Map();
   for(const s of solids){ const e=counts.get(s.name)||{name:s.name,part:s.part,n:0,kind:"struct"}; e.n++; counts.set(s.name,e); }
   const parts=[...counts.values()].map(e=>{ const hw=typeof hwFromPart==="function"?hwFromPart(e.part,e.name):null; return Object.assign(e,{kind:hw?hw.kind:"struct"}); });
   const cad={name:p.name||"Onshape robot", units:"METRE", points:P, pointCount:P.length, solids, bbox:{min:mn,max:mx}, parts, mechs:[], placements:[], frame, occs:[],
-    source:"onshape", onshape:{url:p.url||null, parts:nOcc, withShape:solids.length, kg:kgParts?kgSum:null, kgParts}};
-  if(kgParts) why.push("Mass from Onshape's materials: "+kgSum.toFixed(2)+" kg over "+kgParts+" of "+solids.length+" parts.");
+    source:"onshape", onshape:{url:p.url||null, parts:nOcc, withShape:solids.length, kg:kgParts?kgSum:null, kgParts, kgEst:kgEstParts?kgEstSum:null, kgEstParts}};
+  if(kgParts) why.push("Mass from Onshape's materials: "+kgSum.toFixed(2)+" kg over "+kgParts+" of "+solids.length+" parts"+(kgEstParts?"; "+kgEstSum.toFixed(2)+" kg more weighed from the shapes of "+kgEstParts+" parts with no material.":"."));
+  else if(kgEstParts) why.push("No part has a material in Onshape: "+kgEstSum.toFixed(2)+" kg weighed from the shapes of "+kgEstParts+" parts.");
   // the joints: the mates, onto parts that are Onshape's own, so all of them match
   const rep=applyOnshapeMates(cad,A,{features:p.features||null});
   cad.onshape.report=rep; cad.onshape.why=why.concat(rep.why||[]);
