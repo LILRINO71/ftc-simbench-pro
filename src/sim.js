@@ -335,6 +335,7 @@ const Sim={
      slew and the joints' stops. tick() runs it; so does INIT, when an OpMode
      busy-waits for a mechanism to arrive (src/jvmrun.js drain) */
   stepDevices(dt){
+    const wheeled=this.rigidDrive();
     for(const name in this.dev){
       const s=this.dev[name];
       if(s.kind==="motor"){
@@ -366,6 +367,9 @@ const Sim={
           if(up&&Math.sign(act)===up&&slideHoldNm(s,this.opts)>s.spec.stallNm*(this.opts.duty||1)){ act=0; s.stalled=true; }
         }
         s.act=act;
+        // a drive motor under the chassis physics: its encoder counts what its
+        // wheel really turns, after the step (stepRigid), not free speed x power
+        if(wheeled&&wheeled.indexOf(name)>=0) continue;
         const prev=s.ticks;
         /* a drive motor's encoder counts what its wheel did, not its free speed:
            rigid physics sets it from the wheel's own spin (stepRigid), and the
@@ -492,6 +496,7 @@ const Sim={
       }
       this.vel={x:(this.chassis.x-x0)/dt, y:(this.chassis.y-y0)/dt};
       this.stopAgainst(this.chassis.x-xi, this.chassis.y-yi);
+      this.driveEncoders(dt);
       return;
     }
     // Kinematic mode for anything that isn't a left/right base: forward
@@ -571,6 +576,31 @@ const Sim={
     this.chassis.h += st.omega*dt;
     this.slipping=(st.slip||[]).some(k=>Math.abs(k)>0.3);
   },
+  /* Each drive encoder from its wheel's own speed, through the gearing, with
+     the mounting and setDirection undone (wheelCmd's signs are their own
+     inverses) so it counts in the code's frame, up under positive power. Run
+     after the walls have had their say: a robot pinned on one reads still, a
+     wheel spinning on the tiles counts. */
+  driveEncoders(dt){
+    const W=this.rig.drive.wheels, wo=(this.dstate&&this.dstate.wheelOmega)||[], mine=this.rigidDrive()||[], seen=new Set();
+    this.rig.devs.forEach((n,i)=>{
+      const s=this.dev[n]; if(mine.indexOf(n)<0||seen.has(n)) return; seen.add(n);
+      const gr=Math.abs(+(Array.isArray(this.rig.gear)?this.rig.gear[i]:this.rig.gear))||1;
+      const sign=(s.reversed?-1:1)*((W[i]&&W[i].mount)===-1?-1:1);
+      const prev=s.ticks;
+      s.revs+=(wo[i]||0)*gr/(2*Math.PI)*dt*sign;
+      s.ticks=s.revs*s.tpr;
+      s.vel=(s.ticks-prev)/dt;
+    });
+  },
+  /* The drive motors whose encoders the chassis physics turns, or null when
+     the chassis glides kinematically (the same test driveChassis makes). A
+     motor mapped to a mechanism keeps the mechanism's model and its stops,
+     even when the drivetrain finder counted it as a wheel. */
+  rigidDrive(){
+    if(!(this.rig&&this.physics!=="kinematic"&&this.drivetrain&&this.drivetrain.ok)) return null;
+    return this.rig.devs.filter(n=>{ const s=this.dev[n]; return s&&s.kind==="motor"&&!s.mech; });
+  },
 
   /* A wall stops a robot, it doesn't throw it back. (px,py) is how far the
      field had to push to get the robot out of something, so it points out of
@@ -586,7 +616,17 @@ const Sim={
     let wx=v.x*c-v.y*s, wy=v.x*s+v.y*c;              // chassis frame -> world
     const into=wx*nx+wy*ny;
     if(into<0){ wx-=into*nx; wy-=into*ny; }          // only the part driving in
-    this.dstate.v={x:wx*c+wy*s, y:-wx*s+wy*c};
+    const nv={x:wx*c+wy*s, y:-wx*s+wy*c}, dvx=nv.x-v.x, dvy=nv.y-v.y;
+    this.dstate.v=nv;
+    // the wall stops the ground under each wheel too: a wheel keeps its slip
+    // against the ground, so one that was rolling stops with the robot and one
+    // that was spinning keeps spinning. Left alone, every wheel spun on as if
+    // the robot had driven through the wall, and its encoder counted it.
+    const r=this.rig, wo=this.dstate.wheelOmega;
+    if(!r||!wo||!(Math.abs(dvx)+Math.abs(dvy)>0)) return;
+    const ik=ikMatrix(r.drive.kind,r.drive.wheels);
+    this.dstate.wheelOmega=wo.map((o,i)=>{ const w=r.drive.wheels[i], k=ik[i];
+      return w&&k&&w.r>0?o+(k[0]*dvx+k[1]*dvy)/w.r:o; });
   }
 };
 
