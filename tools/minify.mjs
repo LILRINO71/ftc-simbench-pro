@@ -183,8 +183,20 @@ function hideStrings(src) {
   const toks = tokenize(src);
   const table = [];
   const index = new Map();
+  // a directive prologue ("use strict";) stays where it is, as written: hidden
+  // in the table or behind the prelude it would be an expression, not a directive
+  const gap = (t) => t && (t.t === 'ws' || t.t === 'lc' || t.t === 'bc');
+  let body = 0;
+  for (let k = 0; ; ) {
+    while (gap(toks[k])) k++;
+    if (!toks[k] || toks[k].t !== 'str') break;
+    let s = k + 1; while (gap(toks[s])) s++;
+    if (!toks[s] || toks[s].t !== 'punc' || toks[s].v !== ';') break;
+    body = k = s + 1;
+  }
+  const head = toks.slice(0, body).map((t) => t.v).join('');
   let out = '';
-  for (let i = 0; i < toks.length; i++) {
+  for (let i = body; i < toks.length; i++) {
     const t = toks[i];
     if (t.t !== 'str') { out += t.v; continue; }
     const nextTok = toks[i + 1];
@@ -204,7 +216,7 @@ function hideStrings(src) {
   if (!table.length) return src;
   const enc = Buffer.from(JSON.stringify(table), 'utf8').toString('base64');
   const prelude = 'var _st=JSON.parse(typeof atob==="function"?decodeURIComponent(escape(atob("' + enc + '"))):Buffer.from("' + enc + '","base64").toString("utf8"));function _s(i){return _st[i]}\n';
-  return prelude + out;
+  return head + prelude + out;
 }
 
 /* The value a JS string literal denotes, or null when this pass can't be sure.
