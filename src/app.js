@@ -2484,7 +2484,7 @@ const Perf={ema:16.7, t:0, pr:Math.min(devicePixelRatio||1,2), downAt:-1e9, quie
     if(!(fd>0&&fd<250)||now<this.quietTo) return;
     this.ema+=(fd-this.ema)*0.05;
     if(now-this.t<2000) return; this.t=now;
-    const cap=Math.min(devicePixelRatio||1,2), min=Math.min(cap,0.75);
+    const cap=Math.min(devicePixelRatio||1,View.tier?View.tier.budget.pixelRatio:2), min=Math.min(cap,0.75);
     if(this.ema>26){
       // the passes (ambient occlusion above all) cost the most and are missed least: off first,
       // then fewer pixels, then the robot's light copy
@@ -2943,6 +2943,7 @@ function boot(){
   Shots.alliance=View.alliance=al==="blue"?"blue":"red";
   ShotUI.arc=store.get("ftcbench.arc","1")!=="0"; $("#arcToggle").checked=ShotUI.arc;
   View.init($("#viewport"));
+  Perf.pr=Math.min(devicePixelRatio||1,View.tier.budget.pixelRatio);
   View.setView("iso");
   initTabs(); initCollapsibles(); initRails();
   Editor.init(); Pads.init();

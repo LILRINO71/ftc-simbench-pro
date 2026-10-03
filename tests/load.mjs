@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { buildRobot } from '../tools/stepgen.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const ENGINE = ['hardware', 'samples', 'step', 'hull', 'inertia', 'expr', 'jvm', 'jvmlib', 'jvmprelude', 'jvmrun', 'java', 'roadrunner', 'mapping', 'robotconfig', 'compare', 'analyze', 'drivetrain', 'frame', 'mates', 'onshapelink', 'onshapecad', 'meshfiles', 'urdf', 'jointspec', 'jointsheet', 'autorig-lib', 'autorig', 'robotcheck', 'bind', 'dynamics', 'field', 'shots', 'match', 'robotlite', 'net', 'controllers', 'session', 'mathdoc', 'gitimport', 'onboarding', 'sim'];
+const ENGINE = ['hardware', 'samples', 'step', 'hull', 'inertia', 'expr', 'jvm', 'jvmlib', 'jvmprelude', 'jvmrun', 'java', 'roadrunner', 'mapping', 'robotconfig', 'compare', 'analyze', 'drivetrain', 'frame', 'mates', 'onshapelink', 'onshapecad', 'meshfiles', 'urdf', 'jointspec', 'jointsheet', 'autorig-lib', 'autorig', 'robotcheck', 'bind', 'dynamics', 'field', 'shots', 'match', 'robotlite', 'net', 'controllers', 'session', 'mathdoc', 'gitimport', 'onboarding', 'sim', 'tier'];
 const EXPORTS = [
   'Field', 'Shots', 'IN', 'TIP_GRAMS', 'FRONTS', 'footprintOf', 'capsulePush', 'nearestMotorId', 'SHOOTER_JAVA',
   'convexHull', 'boxCorners', 'solidTriangles', 'thinPoints', 'solidKind', 'sampleSolids', 'robotBase', 'makeRng',
@@ -38,7 +38,7 @@ const EXPORTS = [
   'FTCSIM_MAGIC', 'packSession', 'unpackSession', 'sessionFromBench',
   'mathReport', 'mathText', 'mathMarkdown',
   'parseRepoRef', 'rawUrlsFor', 'pickOpModes', 'javaLooksLikeOpMode',
-  'TOUR', 'statusOf', 'STATUS_RANK',
+  'TOUR', 'statusOf', 'STATUS_RANK', 'deviceTier', 'TIER_BUDGETS',
 ];
 
 function engineSource() {

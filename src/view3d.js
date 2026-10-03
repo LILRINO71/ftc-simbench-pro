@@ -47,10 +47,13 @@ const View={
     this.el=el;
     this.scene=new THREE.Scene();
     this.cam=new THREE.PerspectiveCamera(42,1,0.01,200);
-    this.ren=new THREE.WebGLRenderer({antialias:true, powerPreference:"high-performance", stencil:false});
-    this.ren.setPixelRatio(Math.min(devicePixelRatio,2));
+    // how much this machine can draw, decided before the first frame (src/tier.js)
+    this.tier=this.readTier();
+    const B=this.tier.budget;
+    this.ren=new THREE.WebGLRenderer({antialias:B.tier>0, powerPreference:"high-performance", stencil:false});
+    this.ren.setPixelRatio(Math.min(devicePixelRatio,B.pixelRatio));
     this.ren.setClearColor(0x000000,0);
-    this.ren.shadowMap.enabled=true;
+    this.ren.shadowMap.enabled=B.shadows>0;
     this.ren.shadowMap.type=THREE.PCFShadowMap;            // PCFSoft is gone in r186; the sun's radius softens PCF
     // a camera's colour pipeline: light adds up in linear space, then a filmic curve
     // keeps white parts in the sun from blowing out and the shadows from going black
@@ -62,12 +65,13 @@ const View={
     // light in physical units (three r155+): a bright hall, a warm key light, a cool fill
     this.hemi=new THREE.HemisphereLight(0xfff3dc,0x3a362f,1.4); this.scene.add(this.hemi);
     const sun=new THREE.DirectionalLight(0xfff1df,5.2); this.sun=sun;
-    sun.position.set(-2.2,5.5,3.0); sun.castShadow=true;
-    sun.shadow.mapSize.set(2048,2048);
+    sun.position.set(-2.2,5.5,3.0); sun.castShadow=B.shadows>0;
+    sun.shadow.mapSize.set(B.shadows||512,B.shadows||512);
+    if(B.lite) this.lowGfx=true;             // the robot's light copy from the start
     // the shadow box follows the robot (render()): 2048 pixels over 3.6 m instead of
     // the whole 6.4 m around the field, so the robot's own shadows come out crisp
     const sc=sun.shadow.camera; sc.left=-1.8; sc.right=1.8; sc.top=1.8; sc.bottom=-1.8; sc.near=1; sc.far=14;
-    sun.shadow.bias=-0.0003; sun.shadow.normalBias=0.02; sun.shadow.radius=4;
+    sun.shadow.bias=-0.0003; sun.shadow.normalBias=0.02; sun.shadow.radius=B.shadows<2048?1:4;
     this.sunOff=sun.position.clone();
     this.scene.add(sun); this.scene.add(sun.target);
     // a cool fill from the other side: what the sun leaves in shade still shows its shape
@@ -77,7 +81,8 @@ const View={
     this.world=new THREE.Group(); this.scene.add(this.world);
     this.ray=new THREE.Raycaster();
     this.theta=-0.7; this.phi=1.15; this.rad=0.95; this.size=0.5;
-    this.post=this.makePost(); this.postOn=true;
+    // the ambient-occlusion passes only where the tier can afford them (a tier-0 Chromebook draws plain)
+    this.post=B.tier>0?this.makePost():null; this.postOn=B.tier>0;
     this.bind(); this.resize();
   },
   /* Post-processing: ambient occlusion (GTAO) grounds the robot on the tiles and
@@ -108,6 +113,25 @@ const View={
     let S=cam===this.cam?P.field:P.cad;
     if(!S||S.cam!==cam){ S=P.mk(cam); if(cam===this.cam) P.field=S; else P.cad=S; S.c.setSize(this.el.clientWidth||1,this.el.clientHeight||1); }
     S.c.render();
+  },
+  /* The machine, as the browser describes it: memory, cores, and the GPU's own
+     name (asked of a throwaway WebGL context, so the real renderer can be built
+     to fit). ?tier=0|1|2, or a tier saved in this browser, overrides. */
+  readTier(){
+    let renderer="", webgl2=null;
+    try{
+      const c=document.createElement("canvas"), gl=c.getContext("webgl2")||c.getContext("webgl");
+      webgl2=!!(gl&&typeof WebGL2RenderingContext!=="undefined"&&gl instanceof WebGL2RenderingContext);
+      if(gl){ const ext=gl.getExtension("WEBGL_debug_renderer_info"); renderer=String(gl.getParameter(ext?ext.UNMASKED_RENDERER_WEBGL:gl.RENDERER)||"");
+        const lose=gl.getExtension("WEBGL_lose_context"); if(lose) lose.loseContext(); }
+    }catch(e){}
+    let override=null;
+    try{ const q=new URLSearchParams(location.search).get("tier"), s=localStorage.getItem("ftcbench.tier"), v=q!=null?q:s;
+      if(v!=null&&/^[012]$/.test(v)) override=+v; }catch(e){}
+    const t=deviceTier({memoryGB:navigator.deviceMemory, cores:navigator.hardwareConcurrency, renderer, webgl2,
+      mobile:/Mobi|Android/i.test(navigator.userAgent||""), override});
+    try{ console.info("bench: drawing tier "+t.tier+" — "+t.why); }catch(e){}
+    return t;
   },
   /* Drag the robot to move it, shift- or right-drag to turn it; drag
      anywhere else to orbit, wheel to zoom. */
