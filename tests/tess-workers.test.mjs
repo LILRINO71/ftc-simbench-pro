@@ -40,6 +40,27 @@ function fakeWorkers(stopAt) {
   };
 }
 
+// a worker that can never start: importScripts fails (offline, a CSP), so every job errors
+class DeadWorker {
+  constructor() { this.onmessage = null; this.onerror = null; }
+  postMessage() { setTimeout(() => this.onerror && this.onerror({ message: 'importScripts failed', preventDefault() {} }), 1); }
+  terminate() {}
+}
+
+/* Tess.run (the whole-file path) never told its worker which job it had, so
+   the worker's onerror couldn't fail that job: it hung until the 120 s
+   timeout and never fell back to the page thread. */
+test('exact geometry: a worker that fails to start fails its whole-file job at once, and it falls back', async () => {
+  const M = load(DeadWorker);
+  let onPage = 0;
+  M.Tess.mainThread = () => { onPage++; return Promise.resolve({ success: true, meshes: [], from: 'page' }); };
+  const t0 = Date.now();
+  const res = await M.Tess.run('ISO-10303-21;', 3000);
+  assert.equal(res.from, 'page', 'meshed by the fallback');
+  assert.equal(onPage, 1);
+  assert.ok(Date.now() - t0 < 1500, `took ${Date.now() - t0} ms: the job waited for the timeout`);
+});
+
 test('exact geometry: one worker stopping costs one part, and nothing is meshed on the page thread', async () => {
   const M = load(fakeWorkers(3));
   const text = buildRobot('mecanum-zup').text;
