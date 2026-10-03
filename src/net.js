@@ -187,6 +187,7 @@ const Online={
   remote:netMap(),       // the other drivers' robots as last heard
   slots:null, seed:1, startAt:0, started:false, lastStart:null, fieldKey:null,
   ads:netMap(), chat:[], marks:[], score:null, final:null, why:null,
+  hostGone:false,        // the host left after the final buzzer: the result stays, the room is gone
   offset:0, rtt:0, syncs:[], acc:null, fid:0, heard:netMap(),
   // robots' light copies: mine (packed, and its hash), every one heard of by hash, and whose is whose
   model:null, models:netMap(), modelOf:netMap(), asked:netMap(), shown:netMap(), jointsOf:null,
@@ -238,7 +239,7 @@ const Online={
 
   /* ---- hosting and joining ---- */
   reset(){
-    this.state="off"; this.role=null; this.code=null; this.pub=false; this.hostId=null; this.why=null;
+    this.state="off"; this.role=null; this.code=null; this.pub=false; this.hostId=null; this.why=null; this.hostGone=false;
     this.players=netMap(); this.remote=netMap(); this.slots=null; this.started=false; this.score=null; this.final=null;
     this.chat=[]; this.marks=[]; this.syncs=[]; this.offset=0; this.rtt=0; this.heard=netMap(); this.lastStart=null; this.fieldKey=null;
     this.modelOf=netMap(); this.asked=netMap(); this.shown=netMap(); this.pend=[];
@@ -305,8 +306,16 @@ const Online={
       delete this.players[id]; delete this.remote[id];
       if(this.inMatch()&&typeof Match!=="undefined") Match.note(p.name+" left the match",p.slot?netAl(p.slot):null);
       this.sendRoster();
-    }else if(id===this.hostId&&this.state!=="joining") this.lost("The host left, so the match is over.");
+    }else if(id===this.hostId&&this.state==="done") this.hostLeft();
+    else if(id===this.hostId&&this.state!=="joining") this.lost("The host left, so the match is over.");
     else if(this.players[id]){ delete this.remote[id]; }
+  },
+  /* The host left after the final buzzer: out of the room (nobody is left to
+     start another), but the result stays until this player leaves too. */
+  hostLeft(){
+    if(this.room){ try{ this.room.leave(); }catch(e){} this.room=null; }
+    this.hostGone=true;
+    this.emit("room");
   },
 
   /* ---- messages ---- */
