@@ -257,6 +257,7 @@ const Sim={
         const s=this.dev[st.obj];
         if(this.timers[st.obj]!==undefined){ if(st.meth==="reset") this.timers[st.obj]=this.t; }
         else if(s&&st.meth==="setDirection") s.reversed=/REVERSE/i.test(st.raw||"");
+        else if(s&&st.meth==="setZeroPowerBehavior"){ const z=/\b(FLOAT|BRAKE)\b/.exec(st.raw||""); if(z) s.zpb=z[1]; }
         else if(s&&st.meth==="setTargetPosition") s.target=evalNode(st.args[0],env);
         else if(s&&st.meth==="setMode"){
           const raw=st.raw||"";
@@ -563,7 +564,9 @@ const Sim={
     this.steerModules();
     const W=this.rig.drive.wheels;
     const cmd=this.rig.devs.map((n,i)=>this.wheelCmd(n,W[i]&&W[i].mount));
-    const st=Dyn.step(this.dstate,cmd,this.rig,dt);
+    // setZeroPowerBehavior(FLOAT): at zero power that wheel coasts instead of braking
+    const coast=this.rig.devs.map(n=>{ const s=this.dev[n]; return !!(s&&s.zpb==="FLOAT"); });
+    const st=Dyn.step(this.dstate,cmd,this.rig,dt,coast);
     this.dstate=st;
     // the drive encoders are counted from the wheels' spin in driveEncoders, after the walls
     const c=Math.cos(this.chassis.h), s=Math.sin(this.chassis.h);
