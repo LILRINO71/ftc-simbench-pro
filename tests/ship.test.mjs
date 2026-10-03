@@ -59,6 +59,25 @@ test('minifier: a regex inside ${} is a regex, not the start of a string', () =>
   assert.doesNotThrow(() => new Function(min), 'minified app.js compiles');
 });
 
+/* A comment and the whitespace around it are one gap. The old pass looked at
+   each whitespace run alone: the space before `// c` became a space, and the
+   newline after it was then dropped because the previous kept token was that
+   space, not the code before it. */
+test('minifier: the newline after a same-line comment is kept where ASI needs it', () => {
+  const cases = [
+    ['return // c', '(function () {\n  return // c\n  5\n})()', undefined],
+    ['let after a comment', '(function () {\n  let a = 1\n  let b = a // c\n  let d = 2\n  return b + d\n})()', 3],
+    ['a block comment with a line break', '(function () {\n  return /* a\n b */ 5\n})()', undefined],
+    ['a comment between two words', '(() => typeof/**/1)()', 'number'],
+  ];
+  for (const [what, src, want] of cases) {
+    assert.deepEqual(run(src), want, `${what}: the case itself`);
+    const min = minifyJS(src);
+    let got; assert.doesNotThrow(() => { got = run(min); }, `${what}: minified to ${min}`);
+    assert.deepEqual(got, want, `${what}: minified to ${min}`);
+  }
+});
+
 test('minifier: comments go, code does not', () => {
   const src = '// header\nconst a = 1; /* inline */ const b = 2;\n// trailing\nconst c = `x /* not a comment */ y`;\n';
   const min = minifyJS(src);

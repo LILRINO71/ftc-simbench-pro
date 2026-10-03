@@ -140,19 +140,26 @@ function needsSpace(a, b) {
   return false;
 }
 
+// LF, CR and the two Unicode line terminators (U+2028, U+2029)
+const LINE_BREAK = new RegExp('[\\n\\r' + String.fromCharCode(0x2028, 0x2029) + ']');
+
 export function minifyJS(src, opts = {}) {
   const toks = tokenize(src);
   const kept = [];
+  const gap = (t) => t.t === 'ws' || t.t === 'lc' || t.t === 'bc';
   for (let i = 0; i < toks.length; i++) {
     const t = toks[i];
-    if (t.t === 'bc' || t.t === 'lc') continue;
-    if (t.t === 'ws') {
-      const prev = kept[kept.length - 1];
-      let next = null;
-      for (let j = i + 1; j < toks.length; j++) { const u = toks[j]; if (u.t !== 'ws' && u.t !== 'lc' && u.t !== 'bc') { next = u; break; } }
+    if (gap(t)) {
+      // the whole run of whitespace and comments between two tokens is one gap:
+      // `a // c\nb` has its newline after the comment, and a block comment with
+      // a line break in it is a line break to ASI
+      let j = i, nl = false;
+      for (; j < toks.length && gap(toks[j]); j++) if (toks[j].t !== 'lc' && LINE_BREAK.test(toks[j].v)) nl = true;
+      const prev = kept[kept.length - 1], next = toks[j];
+      i = j - 1;
       if (!prev || !next) continue;
       // a newline only matters where ASI could fire; everything else is layout
-      if (t.v.includes('\n') && CAN_END_STATEMENT(prev)) kept.push({ t: 'nl', v: '\n' });
+      if (nl && CAN_END_STATEMENT(prev)) kept.push({ t: 'nl', v: '\n' });
       else if (needsSpace(prev, next)) kept.push({ t: 'sp', v: ' ' });
       continue;
     }
