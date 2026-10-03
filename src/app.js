@@ -2515,7 +2515,8 @@ function frame(now){
     $("#vpPose").textContent=poseText(c)+(Sim.bump?` · against the ${Sim.bump}`:zone&&/LOADING|HIVE/.test(zone)?` · ${zone}`:"");
     shotTick(now);
     const lp=$("#loopPill");
-    lp.textContent=Sim.phase==="running"?Sim.t.toFixed(1)+" s · 50 Hz":Sim.phase; lp.className="pill"+(Sim.phase==="running"?" live":"");
+    lp.textContent=Sim.phase==="running"?Sim.t.toFixed(1)+" s · 50 Hz"+LoopTime.text():Sim.phase; lp.className="pill"+(Sim.phase==="running"?(LoopTime.slow()?" warnp":" live"):"");
+    lp.title=LoopTime.slow()?"Each 20 ms tick takes "+Math.round(LoopTime.ms)+" ms on this computer, so the robot runs slower than real time. Lighter graphics (fewer shadows) or closing other tabs helps.":"";
     $$(".bindrow").forEach(r=>r.classList.toggle("active",!!Sim.pad[activePad][r.dataset.btn]));
     MathTab.tick(); if(slowN++%5===0) Status.render(); NetUI.slow();
   }); }
@@ -2527,9 +2528,14 @@ function frame(now){
 // the frames are gone: a worker's timers aren't slowed that way. The mechanisms
 // the others see are posed ten times a second meanwhile.
 let bgViewT=0;
+/* How long one 20 ms tick of the team's code and the physics takes on this
+   computer, like the loop time a Control Hub reports: past ~12 ms a slow
+   machine starts to fall behind real time. */
+const LoopTime={ms:0, add(v){ if(Number.isFinite(v)) this.ms=this.ms?this.ms+(v-this.ms)*0.05:v; },
+  text(){ return this.ms>=0.05?" · loop "+(this.ms<10?this.ms.toFixed(1):Math.round(this.ms))+" ms":""; }, slow(){ return this.ms>12; }};
 /* The sim and the online match in fixed 20 ms steps, as many as are due (at most max). */
 function stepFixed(max){
-  let n=0; while(acc>=0.02&&n++<max){ Sim.tick(0.02); Online.step(0.02,Sim); acc-=0.02; }
+  let n=0; while(acc>=0.02&&n++<max){ const t0=performance.now(); Sim.tick(0.02); LoopTime.add(performance.now()-t0); Online.step(0.02,Sim); acc-=0.02; }
   if(acc>0.5) acc=0;
 }
 function backgroundStep(){
