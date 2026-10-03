@@ -74,6 +74,25 @@ test('mates: onshape-to-robot names: dof_<name> names the joint, _inv turns its 
   assert.equal(m.alias, 'dof_lift_inv', 'the mate keeps its own name for matching');
 });
 
+test('mates: an _inv mate in a relation: the follower still moves the way Onshape moves it', () => {
+  const plain = E.cadFromOnshape(payload());
+  const by = (cad, name) => cad.mechs.find((m) => m.fromMate && m.fromMate.name === name);
+  // the physical motion of the carriage per metre of the stage: its axis times its ratio, along the stage's axis
+  const along = (cad, stage, car) => { const s = by(cad, stage), c = by(cad, car); return dot(c.axis, s.axis) * c.couple.ratio; };
+  const want = along(plain, 'Lift Stage', 'Lift Carriage');
+  assert.ok(Math.abs(want - 1) < 1e-9, 'plain: the carriage rides up with the stage');
+  for (const [stage, car] of [['Lift Stage', 'dof_carriage_inv'], ['dof_lift_inv', 'Lift Carriage'], ['dof_lift_inv', 'dof_carriage_inv']]) {
+    const p = payload();
+    for (const f of mateFeatures(p.asm)) {
+      if (f.featureData && f.featureData.name === 'Lift Stage') f.featureData.name = stage;
+      if (f.featureData && f.featureData.name === 'Lift Carriage') f.featureData.name = car;
+    }
+    const cad = E.cadFromOnshape(p);
+    assert.ok(by(cad, car).couple, car + ' follows ' + stage);
+    assert.ok(Math.abs(along(cad, stage, car) - want) < 1e-9, stage + ' / ' + car + ': ratio ' + by(cad, car).couple.ratio);
+  }
+});
+
 test('mapping: a device named exactly as its mate wins over a looser match', () => {
   const cad = E.cadFromOnshape(payload());
   const devs = [
