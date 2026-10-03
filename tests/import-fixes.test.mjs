@@ -94,6 +94,34 @@ test('mates: a relation that names a mate the bench does not simulate is reporte
   assert.match(issue.text, /Gear 9/);
 });
 
+test('mates: a subassembly used twice: each copy\'s relation couples its own joints, and each copy gets its limits', () => {
+  const p = payload(), root = p.asm.rootAssembly;
+  // a second lift, 250 mm to the side, bolted to the frame the way the first is
+  const lift = root.instances.find((i) => /^Lift/.test(i.name));
+  root.instances.push(Object.assign({}, lift, { id: 'ILIFT2', name: 'Lift <2>' }));
+  for (const o of root.occurrences.filter((x) => x.path[0] === lift.id)) {
+    const c = JSON.parse(JSON.stringify(o)); c.path[0] = 'ILIFT2'; c.transform[7] += 0.25; root.occurrences.push(c);
+  }
+  const bolt = JSON.parse(JSON.stringify(root.features.find((f) => f.featureData.name === 'Fastened 1')));
+  bolt.id = 'F0b'; bolt.featureData.name = 'Fastened 1b';
+  for (const e of bolt.featureData.matedEntities) if (e.matedOccurrence[0] === lift.id) e.matedOccurrence[0] = 'ILIFT2';
+  root.features.push(bolt);
+  const cad = E.cadFromOnshape(p);
+  const copyOf = (m) => cad.solids.find((s) => s.mech === m.id).osPath.split('/')[0];
+  const stages = cad.mechs.filter((m) => m.fromMate && m.fromMate.name === 'Lift Stage');
+  const carriages = cad.mechs.filter((m) => m.fromMate && m.fromMate.name === 'Lift Carriage');
+  assert.equal(stages.length, 2); assert.equal(carriages.length, 2);
+  assert.deepEqual(new Set(carriages.map(copyOf)), new Set([lift.id, 'ILIFT2']), 'one carriage in each copy');
+  for (const c of carriages) {
+    assert.ok(c.couple, c.id + ' follows its stage');
+    const s = stages.find((x) => x.id === c.couple.to);
+    assert.ok(s, c.id + ' follows ' + c.couple.to);
+    assert.equal(copyOf(s), copyOf(c), c.id + ' follows the stage in its own copy');
+  }
+  for (const s of stages) assert.deepEqual(s.limits && s.limits.map((v) => +v.toFixed(6)), [0, 0.28], s.id + ' has its limits');
+  assert.ok(!cad.mates.issues.some((i) => i.code === 'relation-dangling'), JSON.stringify(cad.mates.issues));
+});
+
 test('mates: a mate that closes a loop is kept as a loop closure with the point it pins', () => {
   const p = payload();
   const arm = p.asm.rootAssembly.features.find((f) => f.featureData && f.featureData.name === 'Arm Pivot');
