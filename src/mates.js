@@ -66,15 +66,27 @@ const mateKey=s=>String(s||"").replace(/\s*<\d+>\s*$/,"").replace(/\s+/g," ").tr
 const pathKey=p=>(p||[]).join("/");
 
 /* ---- quantity expressions from the features endpoint: "18 in", "-90 deg",
-   "0.3 m", "25.4*mm". Metres and radians out; NaN if unreadable. */
+   "0.3 m", "25.4*mm", "+1e+2 millimetres". Metres and radians out; NaN if
+   unreadable. A parameter whose expression can't be read here (a variable,
+   a formula) falls back to its own number, value (in its units, else
+   metres or radians). */
+const MATE_UNITS={"":1, m:1, meter:1, meters:1, metre:1, metres:1,
+  mm:0.001, millimeter:0.001, millimeters:0.001, millimetre:0.001, millimetres:0.001,
+  cm:0.01, centimeter:0.01, centimeters:0.01, centimetre:0.01, centimetres:0.01,
+  in:0.0254, inch:0.0254, inches:0.0254, ft:0.3048, foot:0.3048, feet:0.3048, yd:0.9144, yard:0.9144, yards:0.9144,
+  rad:1, radian:1, radians:1, deg:Math.PI/180, degree:Math.PI/180, degrees:Math.PI/180};
 function mateQty(e){
-  if(e&&typeof e==="object") e=e.expression!=null?e.expression:(e.value!=null?e.value:"");
-  const m=/^\s*(-?[\d.]+(?:e-?\d+)?)\s*\*?\s*([a-z]*)\s*$/i.exec(String(e==null?"":e));
+  if(e&&typeof e==="object"){
+    const v=mateQty(e.expression);
+    if(Number.isFinite(v)) return v;
+    if(typeof e.value==="string") return mateQty(e.value);
+    const k=MATE_UNITS[String(e.units||"").trim().toLowerCase()];
+    return typeof e.value==="number"&&Number.isFinite(e.value)&&k!=null?e.value*k:NaN;
+  }
+  const m=/^\s*([+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?)\s*\*?\s*([a-z]*)\s*$/i.exec(String(e==null?"":e));
   if(!m) return NaN;
-  const v=+m[1], u=m[2].toLowerCase();
-  const k={"":1, m:1, meter:1, meters:1, mm:0.001, millimeter:0.001, cm:0.01, in:0.0254, inch:0.0254, ft:0.3048,
-           rad:1, radian:1, deg:Math.PI/180, degree:Math.PI/180}[u];
-  return k==null?NaN:v*k;
+  const k=MATE_UNITS[m[2].toLowerCase()];
+  return k==null?NaN:+m[1]*k;
 }
 
 /* ---- read the assembly definition. Mates in a subassembly are written
@@ -102,14 +114,17 @@ function parseOnshapeAssembly(json){
         // some API versions carry the limits on the mate itself
         const L=d.limits||d.mateLimits;
         if(L) m.limits=L;
-        mates.push(m); featById.set(f.id,m);
+        // a subassembly used twice has the same feature ids in each copy
+        mates.push(m); if(!featById.has(f.id)) featById.set(f.id,[]); featById.get(f.id).push(m);
       }else if(f.featureType==="mateRelation"){
         const ids=[]; const grab=x=>{ if(!x) return; if(Array.isArray(x)) return x.forEach(grab);
           if(typeof x==="object"){ if(typeof x.featureId==="string") ids.push(x.featureId); for(const k in x) if(typeof x[k]==="object") grab(x[k]); } };
         grab(d.mates||d.mateIds||d.matedEntities);
+        // relationOffset: a URDF mimic's offset (src/urdf.js), the follower's own m or rad
         relations.push({name:d.name||"relation", type:String(d.relationType||"").toUpperCase(), ids,
                         ratio:+(d.relationRatio!=null?d.relationRatio:(d.ratio!=null?d.ratio:NaN)),
-                        length:+(d.relationLength!=null?d.relationLength:NaN), reverse:!!d.reverseDirection, prefix});
+                        length:+(d.relationLength!=null?d.relationLength:NaN), reverse:!!d.reverseDirection, prefix,
+                        offset:+(d.relationOffset!=null?d.relationOffset:0)});
       }else if(f.featureType==="mateGroup"){
         const occ=(d.occurrences||[]).map(o=>prefix.concat(Array.isArray(o)?o:(o.occurrence||[])));
         if(occ.length>1) groups.push({name:d.name||"group", occ});
@@ -144,23 +159,53 @@ function parseOnshapeAssembly(json){
   return {inst, occ, parts, mates, relations, groups, featById, why};
 }
 
-/* Mate limits live in the assembly's features (GET …/assemblies/…/features).
-   Read whatever form they come in: limitsEnabled plus limitAxialZMin/Max for
-   a slider, limitRotationMin/Max for a revolute. */
+/* Mate limits live in the assembly's features (GET …/assemblies/…/features),
+   under the names Onshape gives them (onshape-to-robot reads the same):
+   limitsEnabled, then limitZMin/limitZMax along a slider and
+   limitAxialZMin/limitAxialZMax about a revolute's axis (a cylindrical or
+   pin-slot mate is simulated as that turn, so it reads those too). The names
+   SimBench's own fixtures once wrote (limitAxialZ for a slider, limitRotation
+   for a turn) are still read after them. A limit Onshape leaves empty
+   (isNull) is open. */
 function applyMateLimits(A,featuresJson){
   let n=0;
   const list=(featuresJson&&(featuresJson.features||featuresJson))||[];
   for(const f of (Array.isArray(list)?list:[])){
     const msg=f&&(f.message||f);
     const fid=msg&&(msg.featureId||msg.id); if(!fid) continue;
-    const m=A.featById.get(fid); if(!m) continue;
+    const ms=A.featById.get(fid); if(!ms||!ms.length) continue;   // every copy of the mate
     const P={};
     for(const p of (msg.parameters||[])){ const q=p&&(p.message||p); if(q&&q.parameterId) P[q.parameterId]=q; }
     if(P.limitsEnabled&&P.limitsEnabled.value===false) continue;
-    const lo=mateQty(P.limitAxialZMin||P.limitRotationMin), hi=mateQty(P.limitAxialZMax||P.limitRotationMax);
-    if(Number.isFinite(lo)||Number.isFinite(hi)){ m.limits=[lo,hi]; n++; }
+    const one=names=>{ for(const k of names) if(P[k]) return P[k].isNull===true?NaN:mateQty(P[k]); return NaN; };
+    const lin=ms[0].type==="SLIDER";
+    const lo=one(lin?["limitZMin","limitAxialZMin"]:["limitAxialZMin","limitRotationMin"]);
+    const hi=one(lin?["limitZMax","limitAxialZMax"]:["limitAxialZMax","limitRotationMax"]);
+    if(Number.isFinite(lo)||Number.isFinite(hi)){ for(const m of ms) m.limits=[lo,hi]; n++; }
   }
   return n;
+}
+
+/* Where a moving mate was drawn, measured from its zero (where its two
+   connectors meet), the way its limits are: the child end against the parent
+   end, metres along the parent connector's z for a slider, radians
+   right-handed about it for a turn. 0 when an end has no placement. */
+function mateDrawnValue(m,parentEnd,occ){
+  const P=m.ends[parentEnd], C=m.ends[1-parentEnd];
+  const op=P&&occ.get(pathKey(P.path)), oc=C&&occ.get(pathKey(C.path));
+  if(!op||!oc) return 0;
+  const Wp=mMul(op.T,P.cs), Wc=mMul(oc.T,C.cs);
+  const d=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+  const n=Math.hypot(Wp.r[2][0],Wp.r[2][1],Wp.r[2][2]); if(!(n>1e-12)) return 0;
+  const z=Wp.r[2].map(v=>v/n);
+  let v;
+  if(m.type==="SLIDER") v=d([Wc.t[0]-Wp.t[0],Wc.t[1]-Wp.t[1],Wc.t[2]-Wp.t[2]],z);
+  else{
+    const flat=a=>{ const k=d(a,z); return [a[0]-k*z[0],a[1]-k*z[1],a[2]-k*z[2]]; };
+    const a=flat(Wp.r[0]), b=flat(Wc.r[0]);
+    v=Math.atan2(d([a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]],z),d(a,b));
+  }
+  return Number.isFinite(v)&&Math.abs(v)>1e-9?v:0;   // drawn at zero, to rounding
 }
 
 /* ---- Onshape part occurrences -> STEP solids, by placement.
@@ -384,6 +429,12 @@ function applyOnshapeMates(cad,json,opts){
              fromMate:{name:j.m.name, type:t, id:j.m.fid}};
     if(j.m.limits){
       let lo=Array.isArray(j.m.limits)?j.m.limits[0]:mateQty(j.m.limits.min), hi=Array.isArray(j.m.limits)?j.m.limits[1]:mateQty(j.m.limits.max);
+      // Onshape counts a limit from the mate's zero, where its two connectors
+      // meet; the bench counts q from the pose the CAD was drawn in. A carriage
+      // drawn 100 mm up a 0-300 mm rail has 100 mm down and 200 mm up left.
+      const v0=mateDrawnValue(j.m,j.parentEnd,A.occ);
+      if(Number.isFinite(lo)) lo-=v0;
+      if(Number.isFinite(hi)) hi-=v0;
       // an axis turned round runs the same travel the other way
       if(inv){ const a=lo; lo=Number.isFinite(hi)?-hi:hi; hi=Number.isFinite(a)?-a:a; }
       if(Number.isFinite(lo)||Number.isFinite(hi)) m.limits=[Number.isFinite(lo)?lo:null, Number.isFinite(hi)?hi:null];
@@ -401,19 +452,28 @@ function applyOnshapeMates(cad,json,opts){
   // parents: the joint whose child body this joint hangs from
   for(const j of joints){ const m=mechOf.get(j.child); if(!m) continue; const pm=mechOf.get(j.parent); if(pm) m.parent=pm.id; }
 
-  // relations: one joint driven through another (a cascade slide, a gear pair, a rack)
-  const byFid=new Map(); for(const [b,m] of mechOf) byFid.set(m.fromMate.id,m);
+  // relations: one joint driven through another (a cascade slide, a gear pair, a rack).
+  // Mates are keyed by where they sit ("path#featureId"): a subassembly used
+  // twice has the same feature ids in each copy, and each copy's relation
+  // ties that copy's own joints
+  const byKey=new Map();
+  for(const j of joints){ const m=mechOf.get(j.child); if(m&&m.fromMate.id===j.m.fid) byKey.set(j.m.id,m); }
   for(const r of A.relations){
-    const ms=r.ids.map(id=>byFid.get(id)).filter(Boolean);
+    const pre=pathKey(r.prefix)+"#";
+    const ms=r.ids.map(id=>byKey.get(pre+id)).filter(Boolean);
     if(ms.length!==2){
       issues.push({sev:"warn", code:"relation-dangling", text:"The "+(r.type?r.type.toLowerCase().replace(/_/g," ")+" ":"")+"relation \""+r.name+"\" ties "+(ms.length?"only one joint":"no joint")+
         " the bench simulates (a mate it names is suppressed, fastened, or a wheel), so it does nothing here."});
       continue;
     }
     const k=r.type==="RACK_AND_PINION"||r.type==="SCREW"?(Number.isFinite(r.length)?r.length/(2*Math.PI):NaN)
-           :(Number.isFinite(r.ratio)&&r.ratio!==0?r.ratio:1);
+           :(Number.isFinite(r.ratio)?r.ratio:1);       // a ratio of 0 (a URDF mimic held still) is 0
     if(!Number.isFinite(k)) continue;
-    ms[1].couple={to:ms[0].id, ratio:(r.reverse?-1:1)*k, via:r.type.toLowerCase().replace(/_/g," ")};
+    // an _inv mate's axis was turned round, so its value runs the other way:
+    // the ratio turns round once for each end that was, the offset with the follower
+    const inv=m=>mateNameHint(m.fromMate.name).inv?-1:1;
+    ms[1].couple={to:ms[0].id, ratio:(r.reverse?-1:1)*inv(ms[0])*inv(ms[1])*k||0, via:r.type.toLowerCase().replace(/_/g," ")};
+    if(Number.isFinite(r.offset)&&r.offset) ms[1].couple.offset=inv(ms[1])*r.offset;
     why.push("\""+ms[1].id+"\" follows \""+ms[0].id+"\" through a "+r.type.toLowerCase().replace(/_/g," ")+" relation (ratio "+(+k.toFixed(4))+").");
   }
 

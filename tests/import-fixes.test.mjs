@@ -42,6 +42,23 @@ test('session: a robot whose joints came from a joint spec reloads as a joint sp
   assert.equal(back.session.cad.source, 'onshape', 'the robot still says where its parts came from');
 });
 
+test('joint spec: a mate joint flipped with the rig panel\'s ± stays flipped when its spec is written', () => {
+  const cad = E.cadFromOnshape(payload());
+  const arm = cad.mechs.find((m) => m.id === 'Arm Pivot'), lift = cad.mechs.find((m) => m.id === 'Lift Stage');
+  arm.dir = -1; lift.dir = -1;                   // the rig panel's ± on both
+  const spec = E.specFromCad(cad, cad.solids.map((s) => s.mech || 'chassis'), {});
+  const again = E.cadFromOnshape(payload());
+  E.applyJointSpec(again, spec);
+  const by = (id) => again.mechs.find((m) => m.id === id);
+  for (const revs of [0.05, -0.05, 0.6, -0.6]) {
+    const s = { kind: 'motor', revs, ticks: revs * 537.7, tpr: 537.7, act: 0, restPos: 0 };
+    assert.ok(Math.abs(E.mateJointQ(by('Arm Pivot'), s) - E.mateJointQ(arm, s)) < 1e-9, 'arm at ' + revs + ' turns: ' + E.mateJointQ(by('Arm Pivot'), s) + ' vs ' + E.mateJointQ(arm, s));
+    assert.ok(Math.abs(E.mateJointQ(by('Lift Stage'), s) - E.mateJointQ(lift, s)) < 1e-9, 'lift at ' + revs + ' turns');
+  }
+  // and an unflipped joint writes no dir at all
+  assert.equal(spec.joints.find((j) => j.id === 'Claw').dir, undefined);
+});
+
 test('session: part masses and colours from the CAD survive a save', () => {
   const cad = E.cadFromOnshape(payload());
   const back = E.unpackSession(E.packSession(E.sessionFromBench({ cad }))).session.cad;
@@ -74,6 +91,25 @@ test('mates: onshape-to-robot names: dof_<name> names the joint, _inv turns its 
   assert.equal(m.alias, 'dof_lift_inv', 'the mate keeps its own name for matching');
 });
 
+test('mates: an _inv mate in a relation: the follower still moves the way Onshape moves it', () => {
+  const plain = E.cadFromOnshape(payload());
+  const by = (cad, name) => cad.mechs.find((m) => m.fromMate && m.fromMate.name === name);
+  // the physical motion of the carriage per metre of the stage: its axis times its ratio, along the stage's axis
+  const along = (cad, stage, car) => { const s = by(cad, stage), c = by(cad, car); return dot(c.axis, s.axis) * c.couple.ratio; };
+  const want = along(plain, 'Lift Stage', 'Lift Carriage');
+  assert.ok(Math.abs(want - 1) < 1e-9, 'plain: the carriage rides up with the stage');
+  for (const [stage, car] of [['Lift Stage', 'dof_carriage_inv'], ['dof_lift_inv', 'Lift Carriage'], ['dof_lift_inv', 'dof_carriage_inv']]) {
+    const p = payload();
+    for (const f of mateFeatures(p.asm)) {
+      if (f.featureData && f.featureData.name === 'Lift Stage') f.featureData.name = stage;
+      if (f.featureData && f.featureData.name === 'Lift Carriage') f.featureData.name = car;
+    }
+    const cad = E.cadFromOnshape(p);
+    assert.ok(by(cad, car).couple, car + ' follows ' + stage);
+    assert.ok(Math.abs(along(cad, stage, car) - want) < 1e-9, stage + ' / ' + car + ': ratio ' + by(cad, car).couple.ratio);
+  }
+});
+
 test('mapping: a device named exactly as its mate wins over a looser match', () => {
   const cad = E.cadFromOnshape(payload());
   const devs = [
@@ -92,6 +128,57 @@ test('mates: a relation that names a mate the bench does not simulate is reporte
   const issue = cad.mates.issues.find((i) => i.code === 'relation-dangling');
   assert.ok(issue, JSON.stringify(cad.mates.issues));
   assert.match(issue.text, /Gear 9/);
+});
+
+test('mates: a subassembly used twice: each copy\'s relation couples its own joints, and each copy gets its limits', () => {
+  const p = payload(), root = p.asm.rootAssembly;
+  // a second lift, 250 mm to the side, bolted to the frame the way the first is
+  const lift = root.instances.find((i) => /^Lift/.test(i.name));
+  root.instances.push(Object.assign({}, lift, { id: 'ILIFT2', name: 'Lift <2>' }));
+  for (const o of root.occurrences.filter((x) => x.path[0] === lift.id)) {
+    const c = JSON.parse(JSON.stringify(o)); c.path[0] = 'ILIFT2'; c.transform[7] += 0.25; root.occurrences.push(c);
+  }
+  const bolt = JSON.parse(JSON.stringify(root.features.find((f) => f.featureData.name === 'Fastened 1')));
+  bolt.id = 'F0b'; bolt.featureData.name = 'Fastened 1b';
+  for (const e of bolt.featureData.matedEntities) if (e.matedOccurrence[0] === lift.id) e.matedOccurrence[0] = 'ILIFT2';
+  root.features.push(bolt);
+  const cad = E.cadFromOnshape(p);
+  const copyOf = (m) => cad.solids.find((s) => s.mech === m.id).osPath.split('/')[0];
+  const stages = cad.mechs.filter((m) => m.fromMate && m.fromMate.name === 'Lift Stage');
+  const carriages = cad.mechs.filter((m) => m.fromMate && m.fromMate.name === 'Lift Carriage');
+  assert.equal(stages.length, 2); assert.equal(carriages.length, 2);
+  assert.deepEqual(new Set(carriages.map(copyOf)), new Set([lift.id, 'ILIFT2']), 'one carriage in each copy');
+  for (const c of carriages) {
+    assert.ok(c.couple, c.id + ' follows its stage');
+    const s = stages.find((x) => x.id === c.couple.to);
+    assert.ok(s, c.id + ' follows ' + c.couple.to);
+    assert.equal(copyOf(s), copyOf(c), c.id + ' follows the stage in its own copy');
+  }
+  for (const s of stages) assert.deepEqual(s.limits && s.limits.map((v) => +v.toFixed(6)), [0, 0.28], s.id + ' has its limits');
+  assert.ok(!cad.mates.issues.some((i) => i.code === 'relation-dangling'), JSON.stringify(cad.mates.issues));
+});
+
+test('onshape: each part\'s placement (occT) holds its axes the way the STEP parser does, so a reader lines parts up by it', () => {
+  const p = payload();
+  // the robot turned 90 degrees, so no part's turn is its own transpose
+  for (const o of p.asm.rootAssembly.occurrences) {
+    const T = o.transform;
+    o.transform = [-T[4], -T[5], -T[6], -T[7], T[0], T[1], T[2], T[3], T[8], T[9], T[10], T[11], 0, 0, 0, 1];
+  }
+  const cad = E.cadFromOnshape(p);
+  const T = new Map(p.asm.rootAssembly.occurrences.map((o) => [o.path.join('/'), o.transform]));
+  for (const s of cad.solids) {
+    const M = T.get(s.osPath);
+    // r[k] is the part's own k axis in the world: column k of Onshape's row-major 4x4
+    const same = (a, b) => a.length === 3 && a.every((v, i) => Math.abs(v - b[i]) < 1e-12);
+    for (let k = 0; k < 3; k++) assert.ok(same(s.occT.r[k], [M[k], M[4 + k], M[8 + k]]), s.name + ' axis ' + k + ': ' + s.occT.r[k]);
+    assert.ok(same(s.occT.t, [M[3], M[7], M[11]]));
+  }
+  // matching by placement (what a STEP import does) finds every part
+  for (const s of cad.solids) delete s.osPath;
+  const A = E.parseOnshapeAssembly(p.asm);
+  const { map } = E.matchOnshapeParts(A, cad, []);
+  assert.equal(map.size, A.parts.length);
 });
 
 test('mates: a mate that closes a loop is kept as a loop closure with the point it pins', () => {

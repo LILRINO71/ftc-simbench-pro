@@ -204,7 +204,10 @@ const {sessionFromBench, packSession, unpackSession} = (function(){
       limits: limits(m, /^(linear|linear-slide|prismatic)$/.test(str(at(m, "kind"), C, "mech kind") || "")),
       couple: isObj(at(m, "couple")) ? {to: str(at(at(m, "couple"), "to"), C, "mech couple"),
         ratio: qd(num(at(at(m, "couple"), "ratio"), 1, C, "mech couple ratio")), via: str(at(at(m, "couple"), "via"), C, "mech couple via"),
-        link: readLink(at(at(m, "couple"), "link"), C)} : null,
+        link: readLink(at(at(m, "couple"), "link"), C),
+        // a URDF mimic's offset: metres for a slide (mm on file), radians for a turn
+        offset: at(at(m, "couple"), "offset") == null ? null : (/^(linear|linear-slide|prismatic)$/.test(str(at(m, "kind"), C, "mech kind") || "")
+          ? C.s(num(at(at(m, "couple"), "offset"), 0, C, "mech couple offset")) : qd(num(at(at(m, "couple"), "offset"), 0, C, "mech couple offset")))} : null,
       restPos: at(m, "restPos") == null ? null : Math.max(0, Math.min(1, num(at(m, "restPos"), 0.5, C, "mech restPos"))),
       q0: at(m, "q0") == null ? null : num(at(m, "q0"), 0, C, "mech q0"),
       mmPerTick: at(m, "mmPerTick") == null ? null : num(at(m, "mmPerTick"), 0, C, "mech mmPerTick"),
@@ -214,6 +217,7 @@ const {sessionFromBench, packSession, unpackSession} = (function(){
     }));
     for(const m of mechs){ if(!m.limits) delete m.limits; if(!m.couple) delete m.couple; if(!m.fromMate) delete m.fromMate; if(!m.alias) delete m.alias;
       if(m.couple&&!m.couple.link) delete m.couple.link;
+      if(m.couple&&!m.couple.offset) delete m.couple.offset;
       for(const k of ["restPos", "q0", "mmPerTick", "gear"]) if(m[k] == null || (k !== "restPos" && k !== "q0" && !(m[k] > 0))) delete m[k]; }
     for(const s of solids){ if(!s.mech) delete s.mech; if(!(s.kg > 0)) delete s.kg; if(!s.color) delete s.color; }
     const mt = at(v, "mates");
@@ -427,7 +431,8 @@ const {sessionFromBench, packSession, unpackSession} = (function(){
       part: m.part, partName: m.partName, hasActuator: m.hasActuator, manual: m.manual, inferred: m.inferred,
       alias: m.alias || null,
       limits: m.limits ? m.limits.map(v => !Number.isFinite(v) ? null : (/^(linear|linear-slide|prismatic)$/.test(m.kind) ? mmI(v) : v)) : null,
-      couple: m.couple ? {to: m.couple.to, ratio: m.couple.ratio, via: m.couple.via || null, link: encLink(m.couple.link)} : null,
+      couple: m.couple ? {to: m.couple.to, ratio: m.couple.ratio, via: m.couple.via || null, link: encLink(m.couple.link),
+        offset: Number.isFinite(m.couple.offset) && m.couple.offset ? (/^(linear|linear-slide|prismatic)$/.test(m.kind) ? mmI(m.couple.offset) : m.couple.offset) : null} : null,
       fromMate: m.fromMate ? {name: m.fromMate.name, type: m.fromMate.type, id: m.fromMate.id} : null,
       // a joint spec's numbers (src/jointspec.js)
       restPos: Number.isFinite(m.restPos) ? m.restPos : null, q0: Number.isFinite(m.q0) ? m.q0 : null,

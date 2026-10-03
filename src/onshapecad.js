@@ -121,8 +121,10 @@ function cadFromOnshape(p,opts){
     const raw=inst.name||body.name||"", nm=String(raw).replace(/\s*<\d+>\s*$/,"");
     const pn=/(\d{4}-\d{4}-\d{1,4}|REV-\d{2}-\d{4})/.exec((inst.partNumber||"")+" "+raw);
     const mass=G.mass&&G.mass[inst.partId];
+    // occT in the parser's convention (src/step.js, osT in src/mates.js): r[k] is
+    // the part's own k axis in the world, a column of Onshape's row-major R
     const sd={name:nm, part:pn?pn[1]:null, kind:solidKind(nm,pn?pn[1]:null), size, pts:thinPoints(pts.length>=4?pts:pts.concat(pts),120),
-      rawTri:{pos,nor}, color:osColor(body.color), occT:{r:R.map(r=>r.slice()), t:t.slice()}, osPath:o.path.join("/"),
+      rawTri:{pos,nor}, color:osColor(body.color), occT:{r:[0,1,2].map(k=>[R[0][k],R[1][k],R[2][k]]), t:t.slice()}, osPath:o.path.join("/"),
       // the shape once, in its Part Studio's frame, and where this copy sits: a
       // robot package (src/simbot.js) stores eight identical channels as one mesh
       inst:{key:key+"#"+inst.partId, local:tri, M:[T[0],T[1],T[2],T[3], T[4],T[5],T[6],T[7], T[8],T[9],T[10],T[11], 0,0,0,1]}};

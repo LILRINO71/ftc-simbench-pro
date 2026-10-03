@@ -33,8 +33,10 @@ const R = (() => {
 })();
 
 /* Onshape: the token endpoint and the API, answering only with the right bearer token */
-function onshape({ expiresIn = 3600 } = {}) {
-  const o = { calls: [], tokenForms: [], issued: 0, live: new Set() };
+// rotate: a refresh token works once, as Onshape's do. tokenDown: the token
+// endpoint answers renewals with that status, or 'network' for no answer at all.
+function onshape({ expiresIn = 3600, rotate = false } = {}) {
+  const o = { calls: [], tokenForms: [], issued: 0, live: new Set(), usedRt: new Set(), tokenDown: null };
   const issue = () => { const a = 'at-' + (++o.issued); o.live.add(a); return { access_token: a, refresh_token: 'rt-' + o.issued, expires_in: expiresIn, token_type: 'Bearer' }; };
   o.fetch = async (u, init = {}) => {
     u = String(u);
@@ -43,7 +45,10 @@ function onshape({ expiresIn = 3600 } = {}) {
       o.tokenForms.push(f);
       if (f.client_id !== ENV.ONSHAPE_CLIENT_ID || f.client_secret !== ENV.ONSHAPE_CLIENT_SECRET) return new Response('{}', { status: 401 });
       if (f.grant_type === 'authorization_code' && f.code === 'good-code' && f.redirect_uri === SITE + '/onshape/callback') return Response.json(issue());
-      if (f.grant_type === 'refresh_token' && /^rt-/.test(f.refresh_token)) return Response.json(issue());
+      if (f.grant_type === 'refresh_token' && o.tokenDown === 'network') throw new TypeError('fetch failed');
+      if (f.grant_type === 'refresh_token' && o.tokenDown) return new Response('<html>busy</html>', { status: o.tokenDown });
+      if (f.grant_type === 'refresh_token' && rotate && o.usedRt.has(f.refresh_token)) return Response.json({ error: 'invalid_grant' }, { status: 400 });
+      if (f.grant_type === 'refresh_token' && /^rt-/.test(f.refresh_token)) { o.usedRt.add(f.refresh_token); return Response.json(issue()); }
       return new Response('{}', { status: 400 });
     }
     assert.ok(u.startsWith('https://cad.onshape.com/api/'), 'only Onshape\'s API: ' + u);
@@ -173,6 +178,57 @@ test('sign in with Onshape: a token that ran out is renewed without signing in a
   os2.live.clear();
   assert.equal((await b2.go(`/onshape/api/documents/${D}`)).status, 200);
   assert.deepEqual(os2.calls.map((c) => c.auth), ['Bearer at-1', 'Bearer at-2']);
+});
+
+test('sign in with Onshape: calls side by side with a token about to run out: one renews it, the rest still go through, and the team stays signed in', async () => {
+  const os = onshape({ expiresIn: 30, rotate: true }), b = browser(os);
+  await b.signIn();
+  const paths = [`documents/${D}`, `assemblies/d/${D}/w/${W}/e/${EL}`, `assemblies/d/${D}/w/${W}/e/${EL}/features`];
+  // the page reads four part studios at once, every one carrying the same cookie
+  const res = await Promise.all(paths.map((p) => b.go('/onshape/api/' + p)));
+  assert.deepEqual(res.map((r) => r.status), [200, 200, 200], 'no call is refused because another one renewed the token first');
+  assert.equal(os.tokenForms.filter((f) => f.grant_type === 'refresh_token').length, 3, 'each tried to renew');
+  assert.equal(os.usedRt.size, 1, 'one renewal worked; Onshape refused the reused refresh token');
+  assert.ok(b.jar.sb_os, 'still signed in');
+  assert.equal((await b.go(`/onshape/api/documents/${D}`)).status, 200, 'and the next call works');
+  // the whole robot, read the way the page reads it, with a token that keeps running out
+  const p = E.checkOnshapePayload(await onPage(b, () => E.onshapeFromLink(LINK, () => {})));
+  assert.equal(E.cadFromOnshape(p).solids.length, R.truth.leafParts);
+  assert.ok(b.jar.sb_os);
+});
+
+test('sign in with Onshape: Onshape\'s token server down or unreachable never signs the team out', async () => {
+  for (const down of [503, 'network']) {
+    const os = onshape({ expiresIn: 30 }), b = browser(os);
+    await b.signIn();
+    const cookie = b.jar.sb_os;
+    os.tokenDown = down;
+    // the token hasn't run out yet: the call goes through with it
+    const r1 = await b.go(`/onshape/api/documents/${D}`);
+    assert.equal(r1.status, 200, down + ': the token still works');
+    assert.equal(b.jar.sb_os, cookie, down + ': the sign-in is kept');
+    // Onshape refuses it and it can't be renewed: try again later, still signed in
+    os.live.clear();
+    const r2 = await b.go(`/onshape/api/documents/${D}`);
+    assert.equal(r2.status, 503, down + ': the page is told to try again, not to sign in again');
+    assert.ok(+r2.headers.get('Retry-After') > 0);
+    assert.equal(b.jar.sb_os, cookie, down + ': the sign-in is kept');
+    // back up: renewed, and on with the new token
+    os.tokenDown = null;
+    assert.equal((await b.go(`/onshape/api/documents/${D}`)).status, 200);
+    assert.notEqual(b.jar.sb_os, cookie);
+  }
+});
+
+test('sign in with Onshape: a renewal refused while the token is refused too: the page asks to sign in again, but a sign-in another call just renewed is not wiped', async () => {
+  const os = onshape({ rotate: true }), b = browser(os);
+  await b.signIn();
+  const cookie = b.jar.sb_os;
+  os.live.clear(); os.usedRt.add('rt-1');      // the token and its refresh token both refused
+  const r = await b.go(`/onshape/api/documents/${D}`);
+  assert.equal(r.status, 401);
+  assert.equal((await r.json()).error, 'signed-out');
+  assert.equal(b.jar.sb_os, cookie, 'no Max-Age=0 that could land after, and wipe, a cookie another call just renewed');
 });
 
 test('sign in with Onshape: signed out, the page is told so (401) and the pop-up asks to sign in again', async () => {

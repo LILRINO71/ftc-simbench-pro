@@ -64,17 +64,23 @@ function cookies(req) {
 const setCookie = (name, value, maxAge) => `${name}=${value}; Path=/onshape; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}`;
 const json = (obj, status = 200, headers = {}) => new Response(JSON.stringify(obj), { status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store", ...headers } });
 
-/* the token from Onshape, by code or by refresh token */
+/* the token from Onshape, by code or by refresh token: {t}, or {why} when
+   there is none: "denied" (Onshape refused the code or the refresh token: a
+   stale one, or one already used) or "transient" (the token server busy,
+   down or unreachable, or an answer that isn't a token) */
 async function token(env, fetchImpl, form) {
-  const r = await fetchImpl(OAUTH + "/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
-    body: new URLSearchParams({ ...form, client_id: env.ONSHAPE_CLIENT_ID, client_secret: env.ONSHAPE_CLIENT_SECRET }).toString(),
-  });
-  if (!r.ok) return null;
+  let r;
+  try {
+    r = await fetchImpl(OAUTH + "/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+      body: new URLSearchParams({ ...form, client_id: env.ONSHAPE_CLIENT_ID, client_secret: env.ONSHAPE_CLIENT_SECRET }).toString(),
+    });
+  } catch (e) { return { why: "transient" }; }
+  if (!r.ok) return { why: r.status >= 500 || r.status === 429 ? "transient" : "denied" };
   const t = await r.json().catch(() => null);
-  if (!t || !t.access_token) return null;
-  return { a: t.access_token, r: t.refresh_token || form.refresh_token || null, e: Date.now() + (Number(t.expires_in) > 0 ? t.expires_in : 3600) * 1000 };
+  if (!t || !t.access_token) return { why: "transient" };
+  return { t: { a: t.access_token, r: t.refresh_token || form.refresh_token || null, e: Date.now() + (Number(t.expires_in) > 0 ? t.expires_in : 3600) * 1000 } };
 }
 
 /* the little page Onshape sends the team back to: tell the SimBench tab, then close */
@@ -115,10 +121,10 @@ export async function handle(request, env, fetchImpl = fetch) {
     const code = url.searchParams.get("code"), state = url.searchParams.get("state");
     if (url.searchParams.get("error")) return backPage(false, "you chose not to allow it (" + url.searchParams.get("error").slice(0, 60) + ")");
     if (!code || !state || state !== jar[STATE]) return backPage(false, "the sign-in link was stale. Click Sign in with Onshape again");
-    const t = await token(env, fetchImpl, { grant_type: "authorization_code", code, redirect_uri: url.origin + "/onshape/callback" });
-    if (!t) return backPage(false, "Onshape didn't hand over the sign-in. Click Sign in with Onshape again");
+    const got = await token(env, fetchImpl, { grant_type: "authorization_code", code, redirect_uri: url.origin + "/onshape/callback" });
+    if (!got.t) return backPage(false, "Onshape didn't hand over the sign-in. Click Sign in with Onshape again");
     const res = backPage(true);
-    res.headers.append("Set-Cookie", setCookie(COOKIE, await seal(env, t), 60 * 60 * 24 * 30));
+    res.headers.append("Set-Cookie", setCookie(COOKIE, await seal(env, got.t), 60 * 60 * 24 * 30));
     res.headers.append("Set-Cookie", setCookie(STATE, "", 0));
     return res;
   }
@@ -132,15 +138,33 @@ export async function handle(request, env, fetchImpl = fetch) {
     if (request.method !== "GET") return json({ error: "method", message: "SimBench only reads from Onshape." }, 405);
     const path = route.slice(4);
     if (!ALLOWED.test(path)) return json({ error: "path", message: "SimBench doesn't read that from Onshape." }, 403);
+    const signedOut = (headers) => json({ error: "signed-out", message: "Sign in with Onshape again." }, 401, headers);
     let t = jar[COOKIE] ? await unseal(env, jar[COOKIE]) : null;
-    const signedOut = () => json({ error: "signed-out", message: "Sign in with Onshape again." }, 401, { "Set-Cookie": setCookie(COOKIE, "", 0) });
-    if (!t) return signedOut();
-    let fresh = false;
-    const refresh = async () => { if (!t.r) return false; const n = await token(env, fetchImpl, { grant_type: "refresh_token", refresh_token: t.r }); if (!n) return false; t = n; fresh = true; return true; };
-    if (t.e < Date.now() + 60000 && !(await refresh())) return signedOut();
+    // no cookie, or one that isn't ours (or was edited): signed out, and a bad cookie goes
+    if (!t) return signedOut(jar[COOKIE] ? { "Set-Cookie": setCookie(COOKIE, "", 0) } : {});
+    /* Renewing the token. The page makes its calls side by side, each with the
+       same cookie, so when the token runs out they all renew at once, and
+       Onshape takes each refresh token only once: all but the first renewal
+       are refused. So a renewal that fails never clears the cookie (the call
+       that renewed is setting the new one, and a Max-Age=0 landing after it
+       would sign the team out), and the call is still made with the token the
+       cookie has, which is often still good. A token server that is down or
+       unreachable is "try again", never "sign in again". */
+    const fromCookie = t;
+    let fresh = false, failed = null;
+    const renew = async () => {
+      if (!fromCookie.r) { failed = "denied"; return false; }
+      const n = await token(env, fetchImpl, { grant_type: "refresh_token", refresh_token: fromCookie.r });
+      if (!n.t) { failed = n.why; return false; }
+      t = n.t; fresh = true; return true;
+    };
+    if (t.e < Date.now() + 60000) await renew();              // about to run out
     const call = () => fetchImpl(API + path + url.search, { headers: { Authorization: "Bearer " + t.a, Accept: "application/json" } });
     let r = await call();
-    if (r.status === 401 && !fresh) { if (!(await refresh())) return signedOut(); r = await call(); }
+    // refused: renew once and call again, unless a renewal already failed or the token is new
+    if (r.status === 401 && !fresh && !failed && await renew()) r = await call();
+    if (r.status === 401 && failed === "transient") return json({ error: "busy", message: "Onshape's sign-in server didn't answer. Trying again." }, 503, { "Retry-After": "2" });
+    if (r.status === 401 && failed) return signedOut();
     const headers = new Headers({ "Content-Type": r.headers.get("Content-Type") || "application/json", "Cache-Control": "no-store" });
     const ra = r.headers.get("Retry-After"); if (ra) headers.set("Retry-After", ra);
     if (fresh) headers.append("Set-Cookie", setCookie(COOKIE, await seal(env, t), 60 * 60 * 24 * 30));

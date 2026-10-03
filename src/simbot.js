@@ -371,7 +371,9 @@ const {simbotFromCad, simbotPack, simbotUnpack, cadFromSimbot, validateRobot, zi
     spec.constraints=[];
     for(const j of spec.joints){
       const f=j.follows; if(!f||f.linkage) continue;
-      spec.constraints.push({type:f.via&&f.via!=="ratio"?f.via:"ratio", leader:f.joint, follower:j.id, ratio:f.ratio});
+      const c={type:f.via&&f.via!=="ratio"?f.via:"ratio", leader:f.joint, follower:j.id, ratio:f.ratio};
+      if(f.offset) c.offset=f.offset;                         // mm or degrees, as the spec writes it
+      spec.constraints.push(c);
       delete j.follows;
     }
     const mmv=v=>v.map(x=>+(x*1000).toFixed(3));

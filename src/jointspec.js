@@ -80,12 +80,14 @@ const {applyJointSpec, jointSpecSelect, followQ, linkPin, sliderCrank, rodAngle,
     return ang(perp(sub(L.pin,L.crankPin)),perp(sub(C,linkPin(L,q))))-q*dot(ax,L.crankAxis);
   }
   /* A follower's value from the joints that drive it. get(id) is a joint's
-     drawn value — radians for a turn, metres for a slide — or null. */
+     drawn value — radians for a turn, metres for a slide — or null. A ratio
+     follower sits at q*ratio+offset (offset: a URDF mimic's, in the
+     follower's own metres or radians). */
   function followQ(m,get){
     const c=m.couple; if(!c) return null;
     const q=get(c.to); if(q==null) return null;
     const L=c.link;
-    if(!L) return q*(Number.isFinite(c.ratio)?c.ratio:1);
+    if(!L) return q*(Number.isFinite(c.ratio)?c.ratio:1)+(Number.isFinite(c.offset)?c.offset:0);
     if(c.via==="slider-crank") return sliderCrank(L,q);
     if(c.via==="rod"){ const e=get(L.slider); return rodAngle(L,q,e==null?0:e,m.axis); }
     if(c.via==="four-bar") return fourBarAngle(L,q,m.axis);
@@ -148,16 +150,28 @@ const {applyJointSpec, jointSpecSelect, followQ, linkPin, sliderCrank, rodAngle,
       box.every((r,k)=>!r||(p.c[k]>=r[0]&&p.c[k]<=r[1]))).map(p=>p.i);
   }
 
+  // a follower's offset on file (mm for a slide, degrees for a turn) in metres or radians; 0 for none
+  const offsetOf=(m,v)=>Number.isFinite(v)&&v?(normJointKind(m.kind)==="linear"?v/1000:v*DEG):0;
+
   /* ---- the spec -> the bench's mechanisms ---- */
   function applyJointSpec(cad,spec){
     if(!spec||spec.format!==JOINT_SPEC_FORMAT) throw new Error("not a joint spec (format "+JOINT_SPEC_FORMAT+")");
     const joints=Array.isArray(spec.joints)?spec.joints:[];
     const ids=new Set(), why=[];
+    // part picks are a list of objects; checked before anything is changed
+    const picks=(list,who)=>{
+      if(list==null) return;
+      if(!Array.isArray(list)) throw new Error(who+": \"parts\" must be a list of part picks, like [{\"in\": \"Arm/\"}], not "+(typeof list==="object"?"an object":JSON.stringify(list).slice(0,60)));
+      for(const sel of list) if(!sel||typeof sel!=="object"||Array.isArray(sel))
+        throw new Error(who+": each part pick is an object, like {\"in\": \"Arm/\"} or {\"solid\": [3, 4]}, not "+JSON.stringify(sel).slice(0,60));
+    };
     for(const j of joints){
       if(!j||typeof j.id!=="string"||!j.id) throw new Error("every joint needs an id");
       if(ids.has(j.id)) throw new Error("two joints are called \""+j.id+"\"");
       ids.add(j.id);
+      picks(j.parts,"\""+j.id+"\"");
     }
+    for(const a of Array.isArray(spec.assign)?spec.assign:[]) picks(a&&a.parts,"the hand fix for \""+(a&&a.joint)+"\"");
     const info=partInfo(cad), solids=cad.solids||[];
     for(const s of solids) delete s.mech;         // a spec or mates applied before this one
     // parts: a later joint's pick wins, so a child can take parts out of its parent's
@@ -177,7 +191,8 @@ const {applyJointSpec, jointSpecSelect, followQ, linkPin, sliderCrank, rodAngle,
     }
     const mechs=[], byId=new Map();
     for(const j of joints){
-      const lin=/^(slider|linear|prismatic)$/i.test(j.kind||"");
+      // "slider", or any of the bench's names for a slide (normJointKind: linear, prismatic, linear-slide)
+      const kn=String(j.kind||"").toLowerCase(), lin=kn==="slider"||normJointKind(kn)==="linear";
       const axis=unit(Array.isArray(j.axis)?j.axis:[0,0,1]);
       const pivot=mm(j.pivot)||[0,0,0];
       const parent=j.parent&&ids.has(j.parent)?j.parent:"chassis";
@@ -187,7 +202,7 @@ const {applyJointSpec, jointSpecSelect, followQ, linkPin, sliderCrank, rodAngle,
       const cen=s=>{ const c=[0,0,0]; for(const p of s.pts) { c[0]+=p[0]; c[1]+=p[1]; c[2]+=p[2]; } return c.map(v=>v/(s.pts.length||1)); };
       const m={id:j.id, label:j.label||j.id, alias:j.label||j.id,
         kind:lin?"linear":(vertical?"revolute-yaw":"revolute-lift"),
-        axis, pivot, dir:1, parent, part:j.part||null, partName:j.partName||null,
+        axis, pivot, dir:Number.isFinite(j.dir)&&j.dir<0?-1:1, parent, part:j.part||null, partName:j.partName||null,
         hasActuator:!!(j.device||j.part), inferred:false, manual:false, leverOverride:null,
         cluster:members.map(i=>cen(solids[i])),
         fromMate:{name:j.label||j.id, type:lin?"SLIDER":"REVOLUTE", id:"spec:"+j.id}};
@@ -221,9 +236,16 @@ const {applyJointSpec, jointSpecSelect, followQ, linkPin, sliderCrank, rodAngle,
       }else if(f.linkage==="four-bar"){
         const link={crankPivot:L.pivot, crankAxis:L.axis, crankPin:mm(f.crankPin), pin:mm(f.pin), ground:mm(f.ground), role:f.role==="rocker"?"rocker":"coupler"};
         if(!link.crankPin||!link.pin||!link.ground){ why.push("\""+j.id+"\": a four-bar needs crankPin, pin and ground."); continue; }
-        link.rod=Math.hypot(...sub(link.crankPin,link.pin)); link.rocker=Math.hypot(...sub(link.ground,link.pin));
+        // fourBarPin solves in the plane square to the crank's axis, so the
+        // links are measured there too: pins set apart along the axis (a
+        // coupler beside the crank) would otherwise move the linkage at rest
+        const flat=v=>{ const d=sub(v,mul(L.axis,dot(L.axis,v))); return Math.hypot(d[0],d[1],d[2]); };
+        link.rod=flat(sub(link.crankPin,link.pin)); link.rocker=flat(sub(link.ground,link.pin));
         m.couple={to:L.id, ratio:1, via:"four-bar", link};
-      }else m.couple={to:L.id, ratio:Number.isFinite(f.ratio)?f.ratio:1, via:f.via||"ratio"};
+      }else{
+        m.couple={to:L.id, ratio:Number.isFinite(f.ratio)?f.ratio:1, via:f.via||"ratio"};
+        const off=offsetOf(m,f.offset); if(off) m.couple.offset=off;
+      }
     }
     // version 2 (a robot package's joints.json): the couplings and the mates
     // that close loops, as a list of constraints
@@ -234,7 +256,8 @@ const {applyJointSpec, jointSpecSelect, followQ, linkPin, sliderCrank, rodAngle,
         const F=byId.get(c.follower), L=byId.get(c.leader);
         if(!F||!L||F===L){ why.push("A "+c.type+" constraint names \""+(c.follower||"?")+"\" and \""+(c.leader||"?")+"\"; one isn't a joint here."); continue; }
         if(F.couple){ why.push("\""+F.id+"\" already follows \""+F.couple.to+"\"; the "+c.type+" constraint to \""+L.id+"\" is ignored."); continue; }
-        F.couple={to:L.id, ratio:Number.isFinite(c.ratio)&&c.ratio!==0?c.ratio:1, via:c.type.toLowerCase()};
+        F.couple={to:L.id, ratio:Number.isFinite(c.ratio)?c.ratio:1, via:c.type.toLowerCase()};     // a ratio of 0 holds it still
+        const off=offsetOf(F,c.offset); if(off) F.couple.offset=off;
       }else if(c.type==="loop"){
         const end=x=>x==="chassis"||ids.has(x)?x:null, a=end(c.a), b=end(c.b), p=mm(c.point);
         if(a==null||b==null||a===b||!p){ why.push("A loop closure \""+(c.name||"?")+"\" doesn't name two joints and a point; it's ignored."); continue; }
@@ -271,10 +294,13 @@ const {applyJointSpec, jointSpecSelect, followQ, linkPin, sliderCrank, rodAngle,
       const k=normJointKind(m.kind), lin=k==="linear", own=[];
       (group||[]).forEach((g,i)=>{ if(g===m.id) own.push(i); });
       // a guessed joint moves by dir, and a lift the other way about its axis
-      // (mechPose); written down, the axis carries that so nothing changes
+      // (mechPose); written down, the axis carries that so nothing changes. A
+      // mate joint keeps its axis (its limits, q0 and followers count along it)
+      // and a flip from the rig panel's ± is written as dir
       const sg=m.fromMate?1:(m.dir||1)*(k==="revolute-lift"?-1:1);
       const j={id:m.id, label:m.label||m.id, kind:lin?"slider":"revolute", axis:(m.axis||[0,0,1]).map(v=>+(v*sg).toFixed(5)),
         pivot:r3(m.pivot||[0,0,0]), parts:own.length?[{solid:own}]:[]};
+      if(m.fromMate&&m.dir<0) j.dir=-1;
       if(m.parent&&m.parent!=="chassis") j.parent=m.parent;
       if(m.part) j.part=m.part;
       if(m.limits) j.limits=m.limits.map(v=>v==null?null:+(lin?v*1000:v/DEG).toFixed(lin?4:6));
@@ -283,7 +309,8 @@ const {applyJointSpec, jointSpecSelect, followQ, linkPin, sliderCrank, rodAngle,
       const dv=Object.keys(devices||{}).filter(d=>devices[d]===m.id); if(dv.length) j.device=dv.length===1?dv[0]:dv;
       if(m.continuous) j.continuous=true;
       // the relation's kind (gear, rack and pinion, linear) is kept, not just its ratio
-      if(m.couple&&!m.couple.link){ j.follows={joint:m.couple.to, ratio:m.couple.ratio}; if(m.couple.via&&m.couple.via!=="ratio") j.follows.via=m.couple.via; }
+      if(m.couple&&!m.couple.link){ j.follows={joint:m.couple.to, ratio:m.couple.ratio}; if(m.couple.via&&m.couple.via!=="ratio") j.follows.via=m.couple.via;
+        if(Number.isFinite(m.couple.offset)&&m.couple.offset) j.follows.offset=+(lin?m.couple.offset*1000:m.couple.offset/DEG).toFixed(lin?4:6); }
       else if(m.couple&&m.couple.link){ const L=m.couple.link; j.follows={joint:m.couple.to, linkage:m.couple.via, crankPin:r3(L.crankPin), pin:r3(L.pin)};
         if(L.slider) j.follows.slider=L.slider;
         if(L.ground){ j.follows.ground=r3(L.ground); j.follows.role=L.role; } }

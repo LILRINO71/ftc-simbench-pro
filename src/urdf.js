@@ -157,15 +157,20 @@ function urdfToPayload(text,files,name){
     if(lim&&type!=="continuous"&&(lim.attrs.lower!=null||lim.attrs.upper!=null)){
       const lo=+lim.attrs.lower||0, hi=+lim.attrs.upper||0, lin=mateType==="SLIDER";
       const q=v=>lin?(v*1000)+" mm":(v*180/Math.PI)+" deg";
+      // named as Onshape's features list names them (src/mates.js applyMateLimits)
       limitsOut.push({message:{featureId:id,name:nm,parameters:[{message:{parameterId:"limitsEnabled",value:true}},
-        {message:{parameterId:lin?"limitAxialZMin":"limitRotationMin",expression:q(lo)}},{message:{parameterId:lin?"limitAxialZMax":"limitRotationMax",expression:q(hi)}}]}});
+        {message:{parameterId:lin?"limitZMin":"limitAxialZMin",expression:q(lo)}},{message:{parameterId:lin?"limitZMax":"limitAxialZMax",expression:q(hi)}}]}});
     }
+    // a mimic joint sits at multiplier * leader + offset (offset in its own m or rad);
+    // a multiplier of 0 is a real 0
     const mm=urdfKid(j,"mimic");
-    if(mm) mimic.push({joint:mm.attrs.joint, id, ratio:mm.attrs.multiplier!=null?+mm.attrs.multiplier:1});
+    if(mm){ const k=mm.attrs.multiplier!=null?+mm.attrs.multiplier:1, off=mm.attrs.offset!=null?+mm.attrs.offset:0;
+      mimic.push({joint:mm.attrs.joint, id, ratio:Number.isFinite(k)?k:1, offset:Number.isFinite(off)?off:0}); }
   });
   const fid=new Map(); features.forEach(f=>fid.set(f.featureData.name,f.id));
+  // relationOffset isn't Onshape's: src/mates.js reads it for a URDF's mimic
   for(const r of mimic){ const leader=fid.get(r.joint); if(!leader) continue;
-    features.push({id:"R"+r.id,suppressed:false,featureType:"mateRelation",featureData:{name:"mimic "+r.joint,relationType:"LINEAR",mates:[{featureId:leader},{featureId:r.id}],relationRatio:r.ratio,reverseDirection:false}}); }
+    features.push({id:"R"+r.id,suppressed:false,featureType:"mateRelation",featureData:{name:"mimic "+r.joint,relationType:"LINEAR",mates:[{featureId:leader},{featureId:r.id}],relationRatio:r.ratio,relationOffset:r.offset,reverseDirection:false}}); }
   const asm={rootAssembly:{documentId:"URDF",elementId:"EROOT",configuration:"default",fullConfiguration:"default",documentMicroversion:"MV",instances,occurrences,features,patterns:[]},subAssemblies:[],parts:[]};
   const note=missingMesh.size?["Meshes not found with the URDF (drop them together): "+[...missingMesh].slice(0,6).join(", ")]:[];
   return {format:typeof ONSHAPE_FORMAT==="string"?ONSHAPE_FORMAT:"ftc-simbench.onshape", name:name||robot.attrs.name||"URDF robot", url:"", asm, features:{features:limitsOut}, geom, notes:note, from:"urdf"};

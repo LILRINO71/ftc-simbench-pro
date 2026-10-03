@@ -52,6 +52,77 @@ test('mate limits come through in metres and radians', () => {
   assert.ok(Number.isNaN(E.mateQty('banana')));
 });
 
+test('mate limits are read by the names Onshape gives them: limitZ along a slider, limitAxialZ about a revolute', () => {
+  // the features list as GET …/assemblies/…/features returns it (and onshape-to-robot reads it)
+  const qty = (id, expression) => ({ typeName: 'BTMParameterNullableQuantity', message: { parameterId: id, expression, isNull: false } });
+  const mate = (featureId, name, params) => ({ typeName: 'BTMMate', message: { featureType: 'mate', featureId, name,
+    parameters: [{ typeName: 'BTMParameterBoolean', message: { parameterId: 'limitsEnabled', value: true } }, ...params] } });
+  const features = { features: [
+    mate('F1', 'Lift Stage', [qty('limitZMin', '0 mm'), qty('limitZMax', '280 mm')]),
+    mate('F3', 'Arm Pivot', [qty('limitAxialZMin', '-90 deg'), qty('limitAxialZMax', '120 deg')]),
+    // a slider with only its top set: the other end is open
+    mate('F2', 'Lift Carriage', [{ typeName: 'BTMParameterNullableQuantity', message: { parameterId: 'limitZMin', isNull: true, expression: '', value: 0 } }, qty('limitZMax', '10 in')])
+  ] };
+  const cad = fresh();
+  E.applyOnshapeMates(cad, R.onshape.assembly, { features });
+  const by = (id) => cad.mechs.find((m) => m.id === id);
+  assert.ok(by('Lift Stage').limits, 'a slider\'s limitZMin/limitZMax are its travel');
+  assert.deepEqual(by('Lift Stage').limits.map((v) => +v.toFixed(6)), [0, 0.28]);
+  assert.ok(Math.abs(by('Arm Pivot').limits[0] + Math.PI / 2) < 1e-9 && Math.abs(by('Arm Pivot').limits[1] - 120 * Math.PI / 180) < 1e-9);
+  assert.deepEqual(by('Lift Carriage').limits.map((v) => v == null ? v : +v.toFixed(6)), [null, 0.254], 'a limit Onshape leaves empty stays open');
+  // the corpus writes them the same way
+  const names = R.onshape.features.features.flatMap((f) => f.message.parameters.map((p) => p.message.parameterId));
+  assert.ok(names.includes('limitZMin') && names.includes('limitAxialZMax'), names.join());
+  assert.ok(!names.includes('limitRotationMin'), 'no names Onshape never writes');
+  // the names older SimBench fixtures used still read
+  const old = { features: [mate('F1', 'Lift Stage', [qty('limitAxialZMin', '0 mm'), qty('limitAxialZMax', '0.2 m')]), mate('F3', 'Arm Pivot', [qty('limitRotationMin', '-1 rad'), qty('limitRotationMax', '1 rad')])] };
+  const c2 = fresh();
+  E.applyOnshapeMates(c2, R.onshape.assembly, { features: old });
+  assert.deepEqual(c2.mechs.find((m) => m.id === 'Lift Stage').limits.map((v) => +v.toFixed(6)), [0, 0.2]);
+  assert.deepEqual(c2.mechs.find((m) => m.id === 'Arm Pivot').limits, [-1, 1]);
+});
+
+test('a mate drawn away from its zero: its limits count from where the connectors meet, not from where it was drawn', () => {
+  const A = clone(R.onshape.assembly);
+  const feats = [A.rootAssembly, ...A.subAssemblies].flatMap((a) => a.features || []);
+  const named = (n) => feats.find((f) => f.featureData && f.featureData.name === n).featureData;
+  // the stage drawn 100 mm up its rail: its connector sits 100 mm above the rail's
+  const stage = named('Lift Stage').matedEntities[1].matedCS;
+  stage.origin[2] += 0.100;
+  // the arm drawn turned 0.5 rad about its pivot: its connector's x turned that much
+  const arm = named('Arm Pivot').matedEntities[1].matedCS, t = 0.5;
+  const x = arm.xAxis, y = arm.yAxis;
+  arm.xAxis = x.map((v, k) => v * Math.cos(t) + y[k] * Math.sin(t));
+  arm.yAxis = y.map((v, k) => v * Math.cos(t) - x[k] * Math.sin(t));
+  const cad = fresh();
+  E.applyOnshapeMates(cad, A, { features: R.onshape.features });
+  const by = (id) => cad.mechs.find((m) => m.id === id);
+  // Onshape says 0 to 280 mm: from the drawn pose that is 100 mm down to 180 mm up
+  assert.deepEqual(by('Lift Stage').limits.map((v) => +v.toFixed(6)), [-0.1, 0.18]);
+  const L = by('Arm Pivot').limits;
+  assert.ok(Math.abs(L[0] - (-Math.PI / 2 - t)) < 1e-9 && Math.abs(L[1] - (2.1 - t)) < 1e-9, 'arm limits ' + L);
+  // driven all the way up, the stage stops at 280 mm from the mate's zero, not 380
+  const up = E.mateJointQ(by('Lift Stage'), { kind: 'motor', ticks: 1e6, tpr: 537.7, act: 0, restPos: 0 });
+  assert.ok(Math.abs(up - 0.18) < 1e-9, 'stops 180 mm above where it was drawn: ' + up);
+  // and a mate drawn at its zero keeps its limits as they are
+  assert.deepEqual(by('Lift Carriage').limits.map((v) => +v.toFixed(6)), [0, 0.27]);
+});
+
+test('mate quantities in every unit Onshape writes, and the number behind an expression it can\'t read', () => {
+  const near = (e, v) => assert.ok(Math.abs(E.mateQty(e) - v) < 1e-12, JSON.stringify(e) + ' -> ' + E.mateQty(e) + ', not ' + v);
+  near('3 yd', 3 * 0.9144); near('2 yards', 2 * 0.9144); near('1 yard', 0.9144);
+  near('10 centimeters', 0.1); near('10 centimetre', 0.1); near('1 centimeter', 0.01);
+  near('25 millimetres', 0.025); near('25 millimetre', 0.025); near('25 millimeters', 0.025);
+  near('1 foot', 0.3048); near('2 feet', 0.6096); near('3 inches', 3 * 0.0254); near('2 metres', 2);
+  near('90 degrees', Math.PI / 2); near('2 radians', 2);
+  near('+5 mm', 0.005); near('1e+2 mm', 0.1); near('1.5E-1 m', 0.15); near('.5 in', 0.0127);
+  // a variable or a formula: the parameter's own number (metres or radians), when it has one
+  near({ expression: '#liftTop', value: 0.3 }, 0.3);
+  near({ expression: '2 * #reach', value: 12, units: 'inch' }, 12 * 0.0254);
+  assert.ok(Number.isNaN(E.mateQty({ expression: '#liftTop' })), 'no number at all: unread');
+  assert.ok(Number.isNaN(E.mateQty('12 furlongs')));
+});
+
 test('a STEP exported under another placement still lines up (the global offset is found)', () => {
   const cad = fresh();
   const A = clone(R.onshape.assembly);

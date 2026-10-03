@@ -634,12 +634,14 @@ function onshapeAssembly(top, R) {
       documentMicroversion: 'MV', instances: instList(a), features: features.get(a.uid), patterns: [] })),
     parts: []
   };
-  // mate limits, the way the features endpoint gives them
+  // mate limits, the way the features endpoint gives them: limitZ along a
+  // slider, limitAxialZ about a revolute (onshape-to-robot reads the same names)
   const q = (m, v) => m.type === 'SLIDER' ? (v * 1000) + ' mm' : (v * 180 / Math.PI) + ' deg';
-  const features2 = { features: R.mates.filter((m) => m.limits).map((m) => ({ message: { featureId: idOf.get(m.name).id, name: m.name, parameters: [
-    { message: { parameterId: 'limitsEnabled', value: true } },
-    { message: { parameterId: m.type === 'SLIDER' ? 'limitAxialZMin' : 'limitRotationMin', expression: q(m, m.limits[0]) } },
-    { message: { parameterId: m.type === 'SLIDER' ? 'limitAxialZMax' : 'limitRotationMax', expression: q(m, m.limits[1]) } }
+  const lim = (m, end) => ({ typeName: 'BTMParameterNullableQuantity',
+    message: { parameterId: (m.type === 'SLIDER' ? 'limitZ' : 'limitAxialZ') + end, expression: q(m, m.limits[end === 'Min' ? 0 : 1]), isNull: false } });
+  const features2 = { features: R.mates.filter((m) => m.limits).map((m) => ({ typeName: 'BTMMate', message: { featureType: 'mate', featureId: idOf.get(m.name).id, name: m.name, parameters: [
+    { typeName: 'BTMParameterBoolean', message: { parameterId: 'limitsEnabled', value: true } },
+    lim(m, 'Min'), lim(m, 'Max')
   ] } })) };
   return { assembly, features: features2, geom: onshapeGeom(top) };
 }
