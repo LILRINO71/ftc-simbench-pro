@@ -304,7 +304,7 @@ const CadView={
     const j0=this.sel[0], si=asg?asg.solid[j0]:-1, s=si>=0?cad.solids[si]:null;
     // mass of the selection: each matched part once
     const solids=new Set(); for(const j of this.sel){ const i=asg?asg.solid[j]:-1; if(i>=0) solids.add(i); }
-    let kg=0, vendor=0; for(const i of solids){ const pm=partMass(cad.solids[i]); kg+=pm.kg; if(pm.how==="vendor") vendor++; }
+    let kg=0, vendor=0; for(const i of solids){ const pm=partMass(cad.solids[i]); kg+=pm.kg; if(pm.how==="vendor"||pm.how==="cad") vendor++; }
     // bounding size of the selection, canonical metres
     const M=frameM(cad), mn=[Infinity,Infinity,Infinity], mx=[-Infinity,-Infinity,-Infinity];
     for(const j of this.sel){ const b=tessBox(res.meshes[j].attributes.position.array,M); for(let k=0;k<3;k++){ mn[k]=Math.min(mn[k],b.min[k]); mx[k]=Math.max(mx[k],b.max[k]); } }

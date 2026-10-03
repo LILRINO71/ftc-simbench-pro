@@ -163,6 +163,11 @@ function partMass(solid, opts){
   opts = opts || {};
   const pts = (solid && solid.pts) || [];
   const vol = hullVolume(pts);
+  // a mass the CAD itself carries (Onshape's materials, a URDF <inertial>, a
+  // robot package) is a measurement of this part; every estimate below is not
+  const own = solid && solid.kg;
+  if(opts.cad !== false && typeof own === "number" && Number.isFinite(own) && own > 0)
+    return {kg:own, how:"cad", density:(vol>0 ? own/vol : 0), fill:1, volume:vol, why:"mass from the CAD's own material"};
   if(opts.vendor !== false){
     const v = vendorMassFor(solid, vol);
     // density here is the back-computed effective density, for display only
@@ -256,7 +261,7 @@ function massProps(cad, opts){
     const pm = partMass(s, opts), b = massBoxOf(s.pts || []);
     parts.push({name:s.name || "part", kg:pm.kg, how:pm.how});
     items.push({kg:pm.kg, com:{x:b.c[0], y:b.c[1], z:b.c[2]}, box:{L:b.L, W:b.W, H:b.H}});
-    if(pm.how === "vendor") vendorKg += pm.kg;
+    if(pm.how === "vendor" || pm.how === "cad") vendorKg += pm.kg;
     const top = b.c[2] + b.H/2; if(top > zTop) zTop = top;
   }
   if(!Number.isFinite(zTop)) zTop = 0;

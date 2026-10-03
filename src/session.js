@@ -154,6 +154,12 @@ const {sessionFromBench, packSession, unpackSession} = (function(){
       if(!(L.rocker > 0)) return null; }
     return L.crankPivot && L.crankPin && L.pin && L.rod > 0 ? L : null;
   }
+  const colour = (a, C) => {
+    if(!Array.isArray(a) || a.length < 3) return null;
+    const c = a.slice(0, 3);
+    if(!c.every(x => typeof x === "number" && fin(x))){ if(C.strict) fail("bad-number", "a part colour is not three finite numbers"); return null; }
+    return c.map(x => Math.round(Math.max(0, Math.min(1, x)) * 1000) / 1000);
+  };
   function readCad(v, C){
     if(!isObj(v)) return null;
     const bb = at(v, "bbox");
@@ -162,7 +168,10 @@ const {sessionFromBench, packSession, unpackSession} = (function(){
       kind: str(at(s, "kind"), C, "solid kind") || "metal",
       size: C.s(num(at(s, "size"), 0, C, "solid size")),
       pts: points(at(s, "pts"), C.caps.maxPointsPerSolid, C, "solid " + i + " points"),
-      mech: str(at(s, "mech"), C, "solid joint")              // set by an Onshape mate import
+      mech: str(at(s, "mech"), C, "solid joint"),             // set by an Onshape mate import
+      // the CAD's own mass and colour (Onshape materials, a URDF): kg, and 0..1 RGB
+      kg: at(s, "kg") == null ? null : num(at(s, "kg"), 0, C, "solid kg"),
+      color: colour(at(s, "color"), C)
     }));
     // a joint's travel limits: metres for a slide (mm on file), radians for a turn
     const limits = (m, lin) => {
@@ -204,10 +213,13 @@ const {sessionFromBench, packSession, unpackSession} = (function(){
     for(const m of mechs){ if(!m.limits) delete m.limits; if(!m.couple) delete m.couple; if(!m.fromMate) delete m.fromMate; if(!m.alias) delete m.alias;
       if(m.couple&&!m.couple.link) delete m.couple.link;
       for(const k of ["restPos", "q0", "mmPerTick", "gear"]) if(m[k] == null || (k !== "restPos" && k !== "q0" && !(m[k] > 0))) delete m[k]; }
-    for(const s of solids) if(!s.mech) delete s.mech;
+    for(const s of solids){ if(!s.mech) delete s.mech; if(!(s.kg > 0)) delete s.kg; if(!s.color) delete s.color; }
     const mt = at(v, "mates");
+    const source = oneOf(at(v, "source"), ["onshape", "urdf", "mjcf", "simbot"], null);
     return {
       name: str(at(v, "name"), C, "cad.name"),
+      // where the robot came from: an Onshape or URDF robot's parts and joints are exact
+      source: source,
       units: oneOf(at(v, "units"), ["METRE", "MILLIMETRE"], "METRE"),
       pointCount: Math.max(0, int(at(v, "pointCount"), 0, C, "cad.pointCount")),
       bbox: {
@@ -222,7 +234,10 @@ const {sessionFromBench, packSession, unpackSession} = (function(){
       })),
       mechs: mechs,
       solids: solids,
-      mates: isObj(mt) ? {source: oneOf(at(mt, "source"), ["onshape"], "onshape"),
+      // where the joints came from decides whether the robot check calls them exact:
+      // a joint spec or the automatic finder must come back as what it was
+      mates: isObj(mt) ? {source: oneOf(at(mt, "source"), ["onshape", "spec"], "spec"),
+        auto: bool(at(mt, "auto")), exact: bool(at(mt, "exact")), name: str(at(mt, "name"), C, "mates.name"),
         joints: Math.max(0, int(at(mt, "joints"), 0, C, "mates.joints")), matched: Math.max(0, int(at(mt, "matched"), 0, C, "mates.matched")),
         parts: Math.max(0, int(at(mt, "parts"), 0, C, "mates.parts")), loops: Math.max(0, int(at(mt, "loops"), 0, C, "mates.loops")),
         why: list(at(mt, "why"), 64, C, "mates.why").map(w => str(w, C, "mates note") || "")} : null,
@@ -338,7 +353,7 @@ const {sessionFromBench, packSession, unpackSession} = (function(){
     pin: vecI(L.pin), slideAxis: L.slideAxis || null, rod: mmI(L.rod), slider: L.slider || null,
     ground: L.ground ? vecI(L.ground) : null, rocker: L.rocker ? mmI(L.rocker) : null, role: L.role || null};
   const encCad = cad => !cad ? null : {
-    name: cad.name, units: cad.units, pointCount: cad.pointCount,
+    name: cad.name, source: cad.source || null, units: cad.units, pointCount: cad.pointCount,
     bbox: {min: vecI(cad.bbox.min), max: vecI(cad.bbox.max)},
     parts: cad.parts.map(p => ({name:p.name, part:p.part, n:p.n, kind:p.kind})),
     mechs: cad.mechs.map(m => ({
@@ -355,8 +370,10 @@ const {sessionFromBench, packSession, unpackSession} = (function(){
       restPos: Number.isFinite(m.restPos) ? m.restPos : null, q0: Number.isFinite(m.q0) ? m.q0 : null,
       mmPerTick: Number.isFinite(m.mmPerTick) ? m.mmPerTick : null, gear: Number.isFinite(m.gear) ? m.gear : null
     })),
-    solids: cad.solids.map(s => ({name:s.name, part:s.part, kind:s.kind, size:mmI(s.size), pts:flat(s.pts), mech:s.mech || null})),
-    mates: cad.mates ? {source: cad.mates.source, joints: cad.mates.joints, matched: cad.mates.matched,
+    solids: cad.solids.map(s => ({name:s.name, part:s.part, kind:s.kind, size:mmI(s.size), pts:flat(s.pts), mech:s.mech || null,
+      kg: s.kg > 0 ? s.kg : null, color: s.color || null})),
+    mates: cad.mates ? {source: cad.mates.source, auto: !!cad.mates.auto, exact: !!cad.mates.exact, name: cad.mates.name || null,
+      joints: cad.mates.joints, matched: cad.mates.matched,
       parts: cad.mates.parts, loops: cad.mates.loops, why: cad.mates.why} : null,
     placements: cad.placements.map(p => ({nauo:p.nauo, parent:p.parent, child:p.child, loc:vecI(p.loc), axis:p.axis})),
     points: cad.points ? flat(cad.points) : null

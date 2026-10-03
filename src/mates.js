@@ -308,8 +308,14 @@ function applyOnshapeMates(cad,json,opts){
       joints.push({m:e.m, parent:b, child:other, parentEnd:e.ba===b?0:1});
     }
   }
+  // what a person should look at, as data (src/simbot.js validateRobot reads these)
+  const issues=[];
   const floating=new Set(keys.map((k,i)=>bodyOf(i)).filter(b=>!seen.has(b)));
-  if(floating.size) why.push(floating.size+" bod"+(floating.size===1?"y is":"ies are")+" attached by no mate path to the chassis; "+(floating.size===1?"it rides":"they ride")+" with the chassis.");
+  if(floating.size){
+    why.push(floating.size+" bod"+(floating.size===1?"y is":"ies are")+" attached by no mate path to the chassis; "+(floating.size===1?"it rides":"they ride")+" with the chassis.");
+    const names=[]; for(const b of floating) for(const i of keys.map((k,q)=>q).filter(q=>bodyOf(q)===b)){ if(names.length<8) names.push(A.parts[i].name||"part"); }
+    issues.push({sev:"warn", code:"floating", text:floating.size+" rigid bod"+(floating.size===1?"y has":"ies have")+" no mate tying "+(floating.size===1?"it":"them")+" to the chassis ("+names.join(", ")+"). Mate "+(floating.size===1?"it":"them")+" in Onshape, or "+(floating.size===1?"it rides":"they ride")+" with the frame.", parts:names});
+  }
   if(loops.length) why.push(loops.length+" mate"+(loops.length===1?" closes a loop":"s close loops")+" (a linkage: "+loops.slice(0,3).map(e=>"\""+e.m.name+"\"").join(", ")+"). The bench drives each loop through its first joint and holds the rest rigid, so a four-bar's coupler moves with that link.");
 
   // ---- to the canonical frame the rest of the bench works in
@@ -347,9 +353,13 @@ function applyOnshapeMates(cad,json,opts){
     const L=Math.hypot(axis[0],axis[1],axis[2])||1; axis=axis.map(v=>v/L);
     const t=j.m.type;
     const lin=t==="SLIDER";
+    // onshape-to-robot's naming, for teams already using it: dof_<name> names the
+    // joint, and a trailing _inv turns its axis (and so its travel) the other way
+    const hint=mateNameHint(j.m.name), inv=hint.inv;
+    if(inv) axis=axis.map(v=>-v);
     const vertical=Math.abs(axis[0]*up[0]+axis[1]*up[1]+axis[2]*up[2])>0.7;
     const kind=lin?"linear":(t==="REVOLUTE"||t==="PIN_SLOT"||t==="CYLINDRICAL")?(vertical?"revolute-yaw":"revolute-lift"):"fixed";
-    const named=MATE_DEFAULT_NAME.test(j.m.name)?nameOfBody(j.child):j.m.name;
+    const named=MATE_DEFAULT_NAME.test(hint.name)?nameOfBody(j.child):hint.name;
     const members=bodySolids(j.child);
     // reach: centroid of everything this joint carries, itself and downstream
     const carried=[]; const collect=b=>{ carried.push(...bodySolids(b)); for(const k of joints) if(k.parent===b) collect(k.child); };
@@ -373,12 +383,17 @@ function applyOnshapeMates(cad,json,opts){
              cluster:carried.map(si=>solids[si].pts.reduce((a,p)=>[a[0]+p[0],a[1]+p[1],a[2]+p[2]],[0,0,0]).map(v=>v/solids[si].pts.length)),
              fromMate:{name:j.m.name, type:t, id:j.m.fid}};
     if(j.m.limits){
-      const lo=Array.isArray(j.m.limits)?j.m.limits[0]:mateQty(j.m.limits.min), hi=Array.isArray(j.m.limits)?j.m.limits[1]:mateQty(j.m.limits.max);
-      if(Number.isFinite(lo)||Number.isFinite(hi)) m.limits=[lo,hi];
+      let lo=Array.isArray(j.m.limits)?j.m.limits[0]:mateQty(j.m.limits.min), hi=Array.isArray(j.m.limits)?j.m.limits[1]:mateQty(j.m.limits.max);
+      // an axis turned round runs the same travel the other way
+      if(inv){ const a=lo; lo=Number.isFinite(hi)?-hi:hi; hi=Number.isFinite(a)?-a:a; }
+      if(Number.isFinite(lo)||Number.isFinite(hi)) m.limits=[Number.isFinite(lo)?lo:null, Number.isFinite(hi)?hi:null];
     }
     if(t==="CYLINDRICAL") why.push("\""+j.m.name+"\" is cylindrical (turns and slides); it's simulated as the turn.");
     if(t==="PIN_SLOT") why.push("\""+j.m.name+"\" is a pin-slot; it's simulated as the pin's turn.");
-    if(kind==="fixed") why.push("\""+j.m.name+"\" is a "+t.toLowerCase().replace("_","-")+" mate, which the bench doesn't simulate; it's held where it was drawn.");
+    if(kind==="fixed"){
+      why.push("\""+j.m.name+"\" is a "+t.toLowerCase().replace("_","-")+" mate, which the bench doesn't simulate; it's held where it was drawn.");
+      issues.push({sev:"warn", code:"unsupported-mate", joint:m.id, text:"\""+j.m.name+"\" is a "+t.toLowerCase().replace("_","-")+" mate. The bench holds it where it was drawn; use revolute, slider or cylindrical mates for anything that moves."});
+    }
     mechOf.set(j.child,m);
     for(const si of members) solids[si].mech=m.id;
     mechs.push(m);
@@ -390,7 +405,11 @@ function applyOnshapeMates(cad,json,opts){
   const byFid=new Map(); for(const [b,m] of mechOf) byFid.set(m.fromMate.id,m);
   for(const r of A.relations){
     const ms=r.ids.map(id=>byFid.get(id)).filter(Boolean);
-    if(ms.length!==2) continue;
+    if(ms.length!==2){
+      issues.push({sev:"warn", code:"relation-dangling", text:"The "+(r.type?r.type.toLowerCase().replace(/_/g," ")+" ":"")+"relation \""+r.name+"\" ties "+(ms.length?"only one joint":"no joint")+
+        " the bench simulates (a mate it names is suppressed, fastened, or a wheel), so it does nothing here."});
+      continue;
+    }
     const k=r.type==="RACK_AND_PINION"||r.type==="SCREW"?(Number.isFinite(r.length)?r.length/(2*Math.PI):NaN)
            :(Number.isFinite(r.ratio)&&r.ratio!==0?r.ratio:1);
     if(!Number.isFinite(k)) continue;
@@ -398,10 +417,33 @@ function applyOnshapeMates(cad,json,opts){
     why.push("\""+ms[1].id+"\" follows \""+ms[0].id+"\" through a "+r.type.toLowerCase().replace(/_/g," ")+" relation (ratio "+(+k.toFixed(4))+").");
   }
 
+  // the mates that close a loop: where the two bodies are pinned, so a solver
+  // that can close loops (src/joltmech.js) pins them there; the kinematic bench
+  // keeps driving each loop through its first joint
+  const jointOfBody=b=>{ const m=mechOf.get(b); return m?m.id:"chassis"; };
+  const loopRecs=[];
+  for(const e of loops){
+    const end=e.m.ends[0], occ=A.occ.get(pathKey(end.path)); if(!occ) continue;
+    const W=mMul(G,mMul(occ.T,end.cs)), ax=dir2c(W.r[2]), L=Math.hypot(ax[0],ax[1],ax[2])||1;
+    loopRecs.push({name:e.m.name, type:e.m.type, a:jointOfBody(e.ba), b:jointOfBody(e.bb), point:raw2c(W.t), axis:ax.map(v=>v/L)});
+  }
+  if(loopRecs.length) issues.push({sev:"note", code:"loop", text:loopRecs.length+" mate"+(loopRecs.length===1?" closes a linkage loop":"s close linkage loops")+" ("+loopRecs.slice(0,3).map(l=>"\""+l.name+"\"").join(", ")+
+    "). The physics solver pins "+(loopRecs.length===1?"it":"them")+" closed; the kinematic bench drives each loop through its first joint."});
+
   why.unshift(A.mates.length+" mates ("+moving.length+" moving), "+keys.length+" parts in "+new Set(keys.map((k,i)=>bodyOf(i))).size+
               " rigid bodies; "+mechs.length+" joint"+(mechs.length===1?"":"s")+" become mechanisms.");
   const drives=cad.mechs?cad.mechs.filter(m=>m.drive):[];
   cad.mechs=mechs.concat(drives);
-  cad.mates={source:"onshape", joints:mechs.length, matched:map.size, parts:keys.length, loops:loops.length, why};
+  cad.loops=loopRecs;
+  cad.mates={source:"onshape", joints:mechs.length, matched:map.size, parts:keys.length, loops:loops.length, why, issues};
   return cad.mates;
+}
+
+/* A mate's name read the way onshape-to-robot writes it: "dof_lift" is the
+   joint "lift", "dof_wrist_inv" the joint "wrist" with its axis turned round.
+   Any other name comes back as it is. */
+function mateNameHint(name){
+  const s=String(name||"");
+  const m=/^dof_(.+?)(_inv)?$/i.exec(s);
+  return m?{name:m[1], inv:!!m[2]}:{name:s, inv:false};
 }
