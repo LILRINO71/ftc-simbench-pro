@@ -12,6 +12,7 @@
     "corpus": "node tools/stepgen.mjs --check"
   },
   "devDependencies": {
+    "jolt-physics": "^1.1.0",
     "occt-import-js": "0.0.23"
   }
 }
