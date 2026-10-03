@@ -102,7 +102,8 @@ function parseOnshapeAssembly(json){
         // some API versions carry the limits on the mate itself
         const L=d.limits||d.mateLimits;
         if(L) m.limits=L;
-        mates.push(m); featById.set(f.id,m);
+        // a subassembly used twice has the same feature ids in each copy
+        mates.push(m); if(!featById.has(f.id)) featById.set(f.id,[]); featById.get(f.id).push(m);
       }else if(f.featureType==="mateRelation"){
         const ids=[]; const grab=x=>{ if(!x) return; if(Array.isArray(x)) return x.forEach(grab);
           if(typeof x==="object"){ if(typeof x.featureId==="string") ids.push(x.featureId); for(const k in x) if(typeof x[k]==="object") grab(x[k]); } };
@@ -158,15 +159,15 @@ function applyMateLimits(A,featuresJson){
   for(const f of (Array.isArray(list)?list:[])){
     const msg=f&&(f.message||f);
     const fid=msg&&(msg.featureId||msg.id); if(!fid) continue;
-    const m=A.featById.get(fid); if(!m) continue;
+    const ms=A.featById.get(fid); if(!ms||!ms.length) continue;   // every copy of the mate
     const P={};
     for(const p of (msg.parameters||[])){ const q=p&&(p.message||p); if(q&&q.parameterId) P[q.parameterId]=q; }
     if(P.limitsEnabled&&P.limitsEnabled.value===false) continue;
     const one=names=>{ for(const k of names) if(P[k]) return P[k].isNull===true?NaN:mateQty(P[k]); return NaN; };
-    const lin=m.type==="SLIDER";
+    const lin=ms[0].type==="SLIDER";
     const lo=one(lin?["limitZMin","limitAxialZMin"]:["limitAxialZMin","limitRotationMin"]);
     const hi=one(lin?["limitZMax","limitAxialZMax"]:["limitAxialZMax","limitRotationMax"]);
-    if(Number.isFinite(lo)||Number.isFinite(hi)){ m.limits=[lo,hi]; n++; }
+    if(Number.isFinite(lo)||Number.isFinite(hi)){ for(const m of ms) m.limits=[lo,hi]; n++; }
   }
   return n;
 }
@@ -437,10 +438,15 @@ function applyOnshapeMates(cad,json,opts){
   // parents: the joint whose child body this joint hangs from
   for(const j of joints){ const m=mechOf.get(j.child); if(!m) continue; const pm=mechOf.get(j.parent); if(pm) m.parent=pm.id; }
 
-  // relations: one joint driven through another (a cascade slide, a gear pair, a rack)
-  const byFid=new Map(); for(const [b,m] of mechOf) byFid.set(m.fromMate.id,m);
+  // relations: one joint driven through another (a cascade slide, a gear pair, a rack).
+  // Mates are keyed by where they sit ("path#featureId"): a subassembly used
+  // twice has the same feature ids in each copy, and each copy's relation
+  // ties that copy's own joints
+  const byKey=new Map();
+  for(const j of joints){ const m=mechOf.get(j.child); if(m&&m.fromMate.id===j.m.fid) byKey.set(j.m.id,m); }
   for(const r of A.relations){
-    const ms=r.ids.map(id=>byFid.get(id)).filter(Boolean);
+    const pre=pathKey(r.prefix)+"#";
+    const ms=r.ids.map(id=>byKey.get(pre+id)).filter(Boolean);
     if(ms.length!==2){
       issues.push({sev:"warn", code:"relation-dangling", text:"The "+(r.type?r.type.toLowerCase().replace(/_/g," ")+" ":"")+"relation \""+r.name+"\" ties "+(ms.length?"only one joint":"no joint")+
         " the bench simulates (a mate it names is suppressed, fastened, or a wheel), so it does nothing here."});
