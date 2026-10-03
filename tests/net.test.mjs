@@ -75,6 +75,32 @@ test('online: a public match shows up in the lobby, a guest joins it by its code
   assert.equal(C.O.openMatches().length, 0);
 });
 
+test('online: a stranger in the lobby can neither hide a listed match nor take over its listing', () => {
+  const hub = loadWithField().netLoopback();
+  const H = computer(hub, 'h'), B = computer(hub, 'b');
+  B.O.browse();
+  H.O.host({ name: 'Team 12345', pub: true, period: 'TeleOp' });
+  const X = hub.endpoint('x').join('lobby');
+  hub.flush();
+  const code = H.O.code, P = H.E.NET_PROTO;
+  X.send({ k: 'ad', code, gone: true }); hub.flush();
+  assert.equal(B.O.openMatches().length, 1, 'still listed after a stranger says it is gone');
+  X.send({ k: 'ad', code, name: 'Free robots', n: 1, open: 4, proto: P }); hub.flush();
+  assert.equal(B.O.ads[code].hid, 'h', 'joining it still asks the real host');
+  assert.equal(B.O.ads[code].name, "Team 12345's match");
+  // the host re-advertising keeps it fresh; its own "gone" is believed
+  run(hub, [H, B], 3);
+  assert.equal(B.O.openMatches().length, 1);
+  H.O.leave(); hub.flush();
+  assert.equal(B.O.openMatches().length, 0, 'the host unlisted it');
+  // an ad nobody repeats goes stale and is dropped; after that the code is free again
+  X.send({ k: 'ad', code, name: 'Another match', n: 1, open: 3, proto: P }); hub.flush();
+  assert.equal(B.O.ads[code].hid, 'x');
+  B.clock.t += 8000;
+  assert.equal(B.O.openMatches().length, 0);
+  assert.equal(B.O.ads[code], undefined, 'pruned');
+});
+
 test('online: places, ready and the right kind of OpMode hold the start; START deals the same match to everyone', () => {
   const hub = loadWithField().netLoopback();
   const H = computer(hub, 'h'), G = computer(hub, 'g'), W = computer(hub, 'w');
