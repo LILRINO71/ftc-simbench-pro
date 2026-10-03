@@ -53,6 +53,11 @@ pure, to test how joints are drawn.
 | `view-reload.test.mjs` | `src/view3d.js` with a stand-in for three.js: what `View.load` must drop with the old scene (ball trails, effects, the last robot's colours), and what a lost WebGL context needs when it comes back. |
 | `field.test.mjs`, `robot.test.mjs` | The BIOBUZZ field, collisions, shots, controllers. |
 | `session.test.mjs`, `mathdoc.test.mjs`, `product.test.mjs` | Workspaces (including hostile files), the Math export, the status light and GitHub import. |
+| `simbot.test.mjs` | **Robot packages**: the zip and glb round trips and what the readers refuse (unsafe names, damage, bombs, oversize, bad indices), Onshape, URDF and STEP robots back with the same parts, joints, limits, couplings, loops and mass, instancing, the validation report, hostile packages, determinism, and the robot check's view of them. |
+| `mjcf.test.mjs` | **MJCF import**: bodies, joints in degrees or radians, default classes, quaternions and Euler angles, couplings and loop closures, and the exact shape the Fusion exporter writes. |
+| `joltmech.test.mjs`, `sim-jolt.test.mjs` | **Solved mechanisms in Jolt Physics**, against hand-worked answers: free speed, stall versus lift, brake back-drive, slide stops, gears, racks, cascades, a loop-closed parallelogram, rotor inertia, determinism, and the sim running a team-style OpMode with them. |
+| `relay.test.mjs`, `lockstep.test.mjs` | **Rooms and lockstep**: the room's relaying, refusals, clock, secrets and ledger; the Pages Function; a whole match over WebSocket, SSE and SSE after a stripped WebSocket; command encoding, the ledger, stand-ins, the hash vote, and three computers ending in the same state. |
+| `import-fixes.test.mjs`, `onshape-cache.test.mjs`, `tier.test.mjs`, `sim-review-2.test.mjs` | CAD masses in the physics, sessions that keep their joint source, onshape-to-robot mate names, loops and closing mates, the Onshape part-studio cache, device tiers, and the second physics review. |
 | `ship.test.mjs`, `syntax.test.mjs` | The minified build behaves like the readable one, and its string table hides a string before a ternary's or a case's colon but never an object key; every shipped file compiles, and no method is defined twice. |
 
 ## Adding a test
