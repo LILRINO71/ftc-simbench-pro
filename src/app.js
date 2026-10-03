@@ -1815,12 +1815,14 @@ function robotCheckAct(act,a){
   if(act==="show") return showJoint(a);
   // declared joints (src/jointsheet.js) change on the joint sheet, never by turning into a joint spec
   if(act==="declare") return ImportFlow.openSheet();
+  // "device|joint": a joint id (a mate's or a part's name) may have a "|" of its own
+  const pair=()=>{ const i=a.indexOf("|"); return [a.slice(0,i), a.slice(i+1)]; };
   if(CAD&&isExact(CAD)){
-    if(act==="pair"){ const [dev,joint]=a.split("|"); return ImportFlow.sheetPair(dev,joint); }
+    if(act==="pair"){ const [dev,joint]=pair(); return ImportFlow.sheetPair(dev,joint); }
     if(act==="drop") return ImportFlow.sheetDrop(a);
     if(act==="click") return ImportFlow.openSheet();
   }
-  if(act==="pair"){ const [dev,joint]=a.split("|"); changeJoint(joint,{device:dev}); return; }
+  if(act==="pair"){ const [dev,joint]=pair(); changeJoint(joint,{device:dev}); return; }
   if(act==="drop"){ removeJoint(a); return; }
   if(act==="click"){ CadView.pendingDevice=a; if(!CadView.on) CadView.enter();
     const h=document.querySelector(".cad-hint"); if(h){ h.textContent="Click the part "+a+" moves, then 'New joint from this part'"; h.classList.add("ask"); } return; }
