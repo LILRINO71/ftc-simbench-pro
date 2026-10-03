@@ -381,6 +381,8 @@ test('saving a workspace and opening it again puts back the shooter, grip, physi
   const OPTS = { payloadKg: 0.18, duty: 0.3, trust: 'code', front: '+x', baseModel: 'auto', shooterModel: 'auto', mu: 0.9, physics: 'rigid' };
   const B = appSession({ ...engine, CAD: null, CODE: null, MAP: {}, OPTS, Shots, Sim: { chassis: { x: 0, y: 0, h: 0 } }, Field: { ok: false },
     classifyMechs: E.classifyMechs, loadCAD: () => { Shots.cfg = null; }, applyRig: (x) => { got.rig = x; return true; }, saveRig: () => {},
+    // opening a workspace makes its robot the bench's (src/app.js loadSessionCAD), which resets the shooter
+    LAST_STEP: null, JOINTS: { spec: null }, loadSessionCAD: (step) => { Shots.cfg = null; return JSON.parse(step.session); },
     addOpModeFromText: (name, text) => { got.op = { name, text }; }, rebuild: () => {}, syncOptionControls: () => {},
     Physics: { sync() {} }, setAlliance: (al) => { Shots.alliance = al; }, shotChanged: () => {}, $: () => toast });
   B.Session.apply(r.session, 'robot.ftcsim');
