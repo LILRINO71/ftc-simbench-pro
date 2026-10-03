@@ -57,7 +57,7 @@ const Sim={
       cmd:isMotor?0:(mech&&Number.isFinite(mech.restPos)?mech.restPos:0.5),
       act:isMotor?0:(mech&&Number.isFinite(mech.restPos)?mech.restPos:0.5), revs:0, ticks:0, stalled:false,
       reversed:false, mode:"run", target:0,
-      tpr: 28*(spec.ratio||19.2),        // goBILDA: 28 counts per motor rev
+      tpr: ticksPerRev(spec),            // counts per output turn (src/hardware.js)
       // the servo position the CAD was drawn at: a joint spec says; else the code's own
       restPos:(mech&&Number.isFinite(mech.restPos))?mech.restPos:(this.code&&!this.code.vm?restPosOf(this.code,d.name):0.5),
       sec60:spec.sec60||0.18, travelDeg:travelDegOf(spec)});
