@@ -1388,12 +1388,13 @@ function takeCAD(file){
    the mates as joints, no STEP and nothing to answer. */
 function loadOnshapeRobot(p,reparse){
   let cad;
-  const from=p.from==="urdf"?"URDF":"Onshape";
+  // a URDF or an MJCF is a file the team dropped; anything else came from Onshape
+  const file=p.from==="urdf"||p.from==="mjcf", from=p.from==="urdf"?"URDF":p.from==="mjcf"?"MJCF":"Onshape";
   try{ cad=cadFromOnshape(p,{up:OPTS.up, shift:OPTS.shift}); }
-  catch(e){ onshapeNote("Your robot came from "+from+", but it couldn't be built: "+esc(e.message)+(p.from==="urdf"?".":". Try again; if it keeps failing, export a STEP and drop it."),"bad");
-    if(p.from!=="urdf") OnshapeHelp.fail("Your robot arrived but couldn't be built: "+e.message+". Try again; if it keeps failing, export a STEP from Onshape and use Open a file.");
+  catch(e){ onshapeNote("Your robot came from "+from+", but it couldn't be built: "+esc(e.message)+(file?".":". Try again; if it keeps failing, export a STEP and drop it."),"bad");
+    if(!file) OnshapeHelp.fail("Your robot arrived but couldn't be built: "+e.message+". Try again; if it keeps failing, export a STEP from Onshape and use Open a file.");
     return false; }
-  if(p.from==="urdf"){ cad.source="urdf"; if(p.notes&&p.notes.length) cad.onshape.why=p.notes.concat(cad.onshape.why||[]); }
+  if(file){ cad.source=p.from; if(p.notes&&p.notes.length) cad.onshape.why=p.notes.concat(cad.onshape.why||[]); }
   LAST_STEP={name:p.name, text:"", onshape:p, label:p.name+" · from "+from};
   // a new robot drops the last one's joints; the same one re-read (a new up, a new centre) keeps them
   if(!reparse||JOINTS.step!==p.name){ JOINTS.spec=JOINTS.report=JOINTS.devices=null; JOINTS.name=JOINTS.step=null; }
@@ -1406,9 +1407,9 @@ function loadOnshapeRobot(p,reparse){
   $("#mateStatus").textContent=p.name+" · whole robot from "+from+" · "+n+" joint"+(n===1?"":"s"); $("#mateDrop").className="drop ok";
   $("#mateNote").innerHTML=(cad.onshape.why||[]).map(w=>"<li>"+esc(w)+"</li>").join("");
   const pill=$("#matePill"); if(pill){ pill.textContent=n+" joint"+(n===1?"":"s"); pill.className="pill ok"; }
-  if(p.from!=="urdf") OnshapeHelp.done(p.name, cad.solids.length, cad.mechs.filter(m=>m.fromMate).length, cad.onshape&&cad.onshape.kg);
-  onshapeNote("<b>"+esc(p.name)+"</b> loaded "+(p.from==="urdf"?"from its URDF":"straight from Onshape")+": "+cad.solids.length+" parts with their colours"+
-    (cad.onshape.kg?", "+cad.onshape.kg.toFixed(1)+" kg from your materials":"")+", and "+n+" joint"+(n===1?"":"s")+" from your "+(p.from==="urdf"?"joints":"mates")+". Load your code and press INIT.","ok");
+  if(!file) OnshapeHelp.done(p.name, cad.solids.length, cad.mechs.filter(m=>m.fromMate).length, cad.onshape&&cad.onshape.kg);
+  onshapeNote("<b>"+esc(p.name)+"</b> loaded "+(file?"from its "+from:"straight from Onshape")+": "+cad.solids.length+" parts with their colours"+
+    (cad.onshape.kg?", "+cad.onshape.kg.toFixed(1)+" kg from your materials":"")+", and "+n+" joint"+(n===1?"":"s")+" from your "+(file?"joints":"mates")+". Load your code and press INIT.","ok");
   renderFrameNote&&renderFrameNote();
   Status.render&&Status.render();
   void rep;
@@ -2194,33 +2195,41 @@ function wireMates(){
 }
 /* A URDF and its STL meshes, dropped together (src/urdf.js): gathered as they
    are read, then built once into the robot, joints and all. */
-const URDF_IN={text:null,name:null,files:{},timer:null};
-function takeUrdfPart(file){
-  const r=new FileReader();
-  const isUrdf=/\.urdf$/i.test(file.name);
-  r.onload=()=>{
-    if(isUrdf){ URDF_IN.text=r.result; URDF_IN.name=file.name.replace(/\.urdf$/i,""); }
-    else URDF_IN.files[file.name]=r.result;
+/* An MJCF (src/mjcf.js) comes in the same way: the model and its STL meshes. */
+const URDF_IN={text:null,name:null,files:{},timer:null,kind:"urdf"};
+function takeUrdfPart(file,mjcfText){
+  const isModel=/\.(urdf|mjcf)$/i.test(file.name)||mjcfText!=null;
+  const settle=()=>{
     clearTimeout(URDF_IN.timer);
     URDF_IN.timer=setTimeout(()=>{
-      if(!URDF_IN.text){ $("#cadStatus").textContent=Object.keys(URDF_IN.files).length+" mesh file(s) waiting for their .urdf"; return; }
+      if(!URDF_IN.text){ $("#cadStatus").textContent=Object.keys(URDF_IN.files).length+" mesh file(s) waiting for their URDF or MJCF"; return; }
+      const mj=URDF_IN.kind==="mjcf", what=mj?"MJCF":"URDF";
       let p;
-      try{ p=urdfToPayload(URDF_IN.text,URDF_IN.files,URDF_IN.name); }
-      catch(e){ $("#cadStatus").textContent="couldn't read this URDF — "+e.message; $("#cadDrop").className="drop bad"; return; }
-      // gathered once: a lone .stl dropped later waits for its own .urdf, it doesn't rebuild this one
-      const nm=URDF_IN.name; URDF_IN.text=null; URDF_IN.name=null; URDF_IN.files={};
-      if(loadOnshapeRobot(p)) $("#cadStatus").textContent=nm+" · from URDF · "+CAD.solids.length+" parts · "+CAD.mechs.filter(m=>m.fromMate).length+" joints";
+      try{ p=mj?mjcfToPayload(URDF_IN.text,URDF_IN.files,URDF_IN.name):urdfToPayload(URDF_IN.text,URDF_IN.files,URDF_IN.name); }
+      catch(e){ $("#cadStatus").textContent="couldn't read this "+what+" — "+e.message; $("#cadDrop").className="drop bad"; return; }
+      // gathered once: a lone .stl dropped later waits for its own model, it doesn't rebuild this one
+      const nm=URDF_IN.name; URDF_IN.text=null; URDF_IN.name=null; URDF_IN.files={}; URDF_IN.kind="urdf";
+      if(loadOnshapeRobot(p)) $("#cadStatus").textContent=nm+" · from "+what+" · "+CAD.solids.length+" parts · "+CAD.mechs.filter(m=>m.fromMate).length+" joints";
     },200);
   };
-  if(isUrdf) r.readAsText(file); else r.readAsArrayBuffer(file);
+  const model=text=>{ URDF_IN.text=text; URDF_IN.kind=/\.mjcf$/i.test(file.name)||/<mujoco[\s>]/.test(text)?"mjcf":"urdf";
+    URDF_IN.name=file.name.replace(/\.(urdf|mjcf|xml)$/i,""); settle(); };
+  if(mjcfText!=null){ model(mjcfText); return; }
+  const r=new FileReader();
+  r.onload=()=>{ if(isModel) model(r.result); else { URDF_IN.files[file.name]=r.result; settle(); } };
+  if(isModel) r.readAsText(file); else r.readAsArrayBuffer(file);
+}
+/* An .xml is a Control Hub configuration or a MuJoCo model: the file says which. */
+function takeXml(file){
+  readText(file,text=>{ if(/<mujoco[\s>]/.test(text)) takeUrdfPart(file,text); else setRobotConfig(text,file.name); });
 }
 function routeFile(file){
   const n=file.name.toLowerCase();
   if(/\.simbot$/.test(n)) RobotPackage.take(file);
-  else if(/\.(urdf|stl)$/.test(n)) takeUrdfPart(file);
+  else if(/\.(urdf|stl|mjcf)$/.test(n)) takeUrdfPart(file);
   else if(/\.(step|stp)$/.test(n)) takeCAD(file);
   else if(/\.ftcsim$/.test(n)) Session.take(file);
-  else if(/\.xml$/.test(n)) takeRobotConfig(file);
+  else if(/\.xml$/.test(n)) takeXml(file);
   else if(/\.json$/.test(n)) takeMates(file);
   else takeCode(file);
 }
@@ -3318,7 +3327,7 @@ function proBoot(){
 
   // hardware
   // the robot: a STEP, an Onshape .onshape.json, or a URDF with its meshes
-  wireDrop($("#cadDrop"),$("#cadFile"),f=>/\.(urdf|stl|json|simbot)$/i.test(f.name)?routeFile(f):takeCAD(f),true);
+  wireDrop($("#cadDrop"),$("#cadFile"),f=>/\.(urdf|stl|json|simbot|mjcf|xml)$/i.test(f.name)?routeFile(f):takeCAD(f),true);
   wireDrop($("#cfgDrop"),$("#cfgFile"),takeRobotConfig);
   wireMates();
   wirePageDrop();
