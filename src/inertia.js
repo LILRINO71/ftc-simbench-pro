@@ -174,6 +174,14 @@ function partMass(solid, opts){
   // the CAD's own volume when it came with the part (Onshape's mass properties, src/onshapecad.js):
   // exact, where a hull of the sample points reads a channel as a solid box
   const vol = (solid && Number.isFinite(solid.vol) && solid.vol > 0) ? solid.vol : hullVolume(pts);
+  let kind = (solid && solid.kind) || "metal";
+  // a game element drawn in the robot (an artifact in the hopper) is not the robot's mass;
+  // what it carries is the payload setting
+  if(kind === "game") return {kg:0, how:"game", density:0, fill:0, volume:vol, why:"a game element, not part of the robot"};
+  // the CAD's own mass with a real material (Onshape's materials, a URDF <inertial>): a
+  // measurement of this part, cut to its length, so it beats a catalogue figure for the stock part
+  const cadD = (opts.cad !== false && solid && Number.isFinite(solid.kg) && solid.kg > 0 && vol > 0) ? solid.kg/vol : NaN;
+  if(cadD >= CAD_DENSITY.lo && cadD <= CAD_DENSITY.hi) return {kg:solid.kg, how:"cad", density:cadD, fill:1, volume:vol, why:"mass from the CAD's own material"};
   if(opts.vendor !== false){
     const v = vendorMassFor(solid, vol);
     // density here is the back-computed effective density, for display only
@@ -186,18 +194,12 @@ function partMass(solid, opts){
     const lin = linearVendorMass(solid, pts);
     if(lin) return {kg:lin.kg, how:"vendor", density:(vol>0 ? lin.kg/vol : 0), fill:1, volume:vol, why:lin.why};
   }
-  let kind = (solid && solid.kind) || "metal";
-  // a game element drawn in the robot (an artifact in the hopper) is not the robot's mass;
-  // what it carries is the payload setting
-  if(kind === "game") return {kg:0, how:"game", density:0, fill:0, volume:vol, why:"a game element, not part of the robot"};
-  // the CAD's own mass (an Onshape URDF export's inertial). With a material set it is the
-  // real mass, kept when it is plausible for the part's hull. With no material Onshape's
+  // the CAD's own mass with no material set (a real one returned above). Onshape's
   // exporter writes the part at a density of 1 kg/m^3 — the number IS the part's volume
   // in m^3 (checked on a goBILDA export: pins and rollers at 0.4-0.7 of their hull, channels
   // at 0.1-0.3) — so that volume at the kind's solid density beats any hull-and-fill guess.
   if(opts.cad !== false && solid && Number.isFinite(solid.kg) && solid.kg > 0 && vol > 0){
     const d = solid.kg/vol;
-    if(d >= CAD_DENSITY.lo && d <= CAD_DENSITY.hi) return {kg:solid.kg, how:"cad", density:d, fill:1, volume:vol, why:"mass from the CAD's own material"};
     if(d > 0.02 && d <= 1.05){
       const k = (kind === "metal" && isPlateShape(pts)) ? "plate" : kind;
       const mat = MATERIALS[k] || MATERIALS.metal;

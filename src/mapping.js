@@ -63,10 +63,14 @@ function autoMap(devices,mechs,opts){
     mechText.set(m.id,{id:String(m.id||"").toLowerCase(), alias:String(m.alias||"").toLowerCase(), words:[...new Set(mapWords(m.id).concat(mapWords(m.alias),mapWords(m.partName),...parts.map(mapWords)))],
       raw:mapRaw(m.id).concat(mapRaw(m.alias))});
   }
+  // a mate named exactly as the device's configuration name is the team saying so:
+  // case, spaces, underscores and onshape-to-robot's dof_/_inv don't count
+  const exact=s=>String(s||"").toLowerCase().replace(/^dof_/,"").replace(/_inv$/,"").replace(/[^a-z0-9]/g,"");
   const one=(name,mech)=>{
     const T=mechText.get(mech.id), s=T.id, d=String(name||"").toLowerCase();
     if(!s||!d) return 0;
     if(d===s||(T.alias&&d===T.alias)) return 100;
+    const de=exact(d); if(de.length>=2&&(de===exact(s)||(T.alias&&de===exact(T.alias)))) return 100;
     const dw=mapWords(name), clash=mapClash(mapRaw(name),T.raw)?50:0;
     // a meaningful word in both: "liftMotor" and the mate "Lift Stage"
     if(dw.some(w=>w.length>=3&&T.words.indexOf(w)>=0)) return 80-clash;
