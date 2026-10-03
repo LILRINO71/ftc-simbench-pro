@@ -5,17 +5,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { loadEngine, loadWithField } from './load.mjs';
-import { RoomCore, packBin, unpackBin } from '../workers/room/room.js';
+import { RoomCore, RoomDO, packBin, unpackBin } from '../workers/room/room.js';
 import { handle } from '../functions/room/[[path]].js';
 
 const E = loadEngine();
 /* a connection the room can talk to, that records what it heard */
+const T = (id) => (id + 'secret-token-0123456789').slice(0, 24);
 const conn = (kind = 'ws') => { const heard = []; return { kind, heard, send: (d) => heard.push(typeof d === 'string' ? JSON.parse(d) : unpackBin(d)), close() {} }; };
 
 test('room: arrivals learn who is there, everyone hears arrivals and departures', () => {
   const R = new RoomCore('m-ABCDE'), a = conn(), b = conn();
-  assert.equal(R.join('alice', a), null);
-  assert.equal(R.join('bobby', b), null);
+  assert.equal(R.join('alice', a, T('alice')), null);
+  assert.equal(R.join('bobby', b, T('bobby')), null);
   assert.deepEqual(a.heard[0].peers, []);
   assert.deepEqual(b.heard[0].peers, ['alice']);
   assert.deepEqual(a.heard[1], { t: 'join', id: 'bobby' });
@@ -25,7 +26,7 @@ test('room: arrivals learn who is there, everyone hears arrivals and departures'
 
 test('room: messages go to everyone else, or to the players named, from who really sent them', () => {
   const R = new RoomCore('r'), a = conn(), b = conn(), c = conn();
-  R.join('aaaa', a); R.join('bbbb', b); R.join('cccc', c);
+  R.join('aaaa', a, T('aaaa')); R.join('bbbb', b, T('bbbb')); R.join('cccc', c, T('cccc'));
   R.text('aaaa', JSON.stringify({ t: 'm', d: { k: 'hi' }, from: 'cccc' }));
   assert.deepEqual(b.heard.at(-1), { t: 'm', from: 'aaaa', d: { k: 'hi' } }, 'a sender can\'t pretend to be someone else');
   assert.deepEqual(c.heard.at(-1), { t: 'm', from: 'aaaa', d: { k: 'hi' } });
@@ -42,11 +43,12 @@ test('room: messages go to everyone else, or to the players named, from who real
 test('room: a taken id, a full room, a bad id, oversize, junk and floods are refused', () => {
   const R = new RoomCore('r', { limits: { peers: 2, burst: 5, ratePerSec: 1, textBytes: 100 } });
   const a = conn(), b = conn();
-  assert.equal(R.join('aaaa', a), null);
-  assert.equal(R.join('aaaa', conn()), 'taken');
-  assert.equal(R.join('x', conn()), 'bad-id');
-  assert.equal(R.join('bbbb', b), null);
-  assert.equal(R.join('cccc', conn()), 'full');
+  assert.equal(R.join('aaaa', a, T('aaaa')), null);
+  assert.equal(R.join('aaaa', conn(), 'someone-elses-secret-000'), 'taken', 'an id is its secret holder\'s');
+  assert.equal(R.join('dddd', conn(), 'short'), 'bad-token');
+  assert.equal(R.join('x', conn(), T('x')), 'bad-id');
+  assert.equal(R.join('bbbb', b, T('bbbb')), null);
+  assert.equal(R.join('cccc', conn(), T('cccc')), 'full');
   R.text('aaaa', JSON.stringify({ t: 'm', d: 'x'.repeat(200) }));
   assert.equal(a.heard.at(-1).why, 'too-big');
   R.text('aaaa', '{nope');
@@ -60,13 +62,13 @@ test('room: a taken id, a full room, a bad id, oversize, junk and floods are ref
 
 test('room: the clock, and the lockstep ledger replayed to a player who comes back', () => {
   let t = 5000; const R = new RoomCore('r', { now: () => t }), a = conn(), b = conn();
-  R.join('aaaa', a); R.join('bbbb', b);
+  R.join('aaaa', a, T('aaaa')); R.join('bbbb', b, T('bbbb'));
   R.text('aaaa', JSON.stringify({ t: 'time', echo: 42 }));
   assert.deepEqual(a.heard.at(-1), { t: 'time', now: 5000, echo: 42 });
   for (let k = 0; k < 5; k++) { R.text('aaaa', JSON.stringify({ t: 'cmd', tick: k, d: 'A' + k })); R.text('bbbb', JSON.stringify({ t: 'cmd', tick: k, d: 'B' + k })); }
   R.text('aaaa', JSON.stringify({ t: 'cmd', tick: 2, d: 'changed my mind' }));
   assert.equal(b.heard.filter((m) => m.t === 'cmd').length, 5, 'a tick is said once');
-  R.leave('bbbb'); const b2 = conn(); R.join('bbbb', b2);
+  R.leave('bbbb'); const b2 = conn(); R.join('bbbb', b2, T('bbbb'));
   R.text('bbbb', JSON.stringify({ t: 'replay', from: 3 }));
   const rep = b2.heard.find((m) => m.t === 'replay');
   assert.deepEqual(rep.rows, [[3, [['aaaa', 'A3'], ['bbbb', 'B3']]], [4, [['aaaa', 'A4'], ['bbbb', 'B4']]]]);
@@ -103,31 +105,37 @@ test('pages function: health, TURN, routing, and another site can\'t borrow the 
 function relayHub(opts = {}) {
   const rooms = new Map(), queue = [], timers = [];
   const room = (n) => rooms.get(n) || rooms.set(n, new RoomCore(n)).get(n);
-  const parse = (u) => { const x = new URL(u); const m = /^\/room\/([^/]+)\/(ws|sse|send)$/.exec(x.pathname); return { name: decodeURIComponent(m[1]), id: x.searchParams.get('id') }; };
+  const parse = (u) => { const x = new URL(u); const m = /^\/room\/([^/]+)\/(ws|sse|send)$/.exec(x.pathname); return { name: decodeURIComponent(m[1]), id: x.searchParams.get('id'), tok: x.searchParams.get('tok') }; };
   class FakeWS {
     constructor(url) {
       this.readyState = 0; const { name, id } = parse(url.replace(/^ws/, 'http')); this.name = name; this.id = id;
       if (opts.blockWs) { queue.push(() => { this.readyState = 3; this.onclose && this.onclose({}); }); return; }
-      queue.push(() => { this.readyState = 1; const why = room(name).join(id, { kind: 'ws', send: (d) => queue.push(() => this.onmessage && this.onmessage({ data: typeof d === 'string' ? d : d.buffer.slice(d.byteOffset, d.byteOffset + d.byteLength) })) });
+      const { tok } = parse(url.replace(/^ws/, 'http'));
+      if (opts.stallWs) return;                  // a proxy that holds the upgrade: never opens, never closes
+      queue.push(() => { this.readyState = 1; const why = room(name).join(id, this.conn = { kind: 'ws', close: () => {}, send: (d) => queue.push(() => this.onmessage && this.onmessage({ data: typeof d === 'string' ? d : d.buffer.slice(d.byteOffset, d.byteOffset + d.byteLength) })) }, tok);
         if (why) { this.readyState = 3; this.onclose && this.onclose({}); } });
     }
     send(d) { queue.push(() => { const R = room(this.name); if (typeof d === 'string') R.text(this.id, d); else R.bin(this.id, d); }); }
-    close() { if (this.readyState === 3) return; this.readyState = 3; queue.push(() => room(this.name).leave(this.id)); }
+    close() { if (this.readyState === 3) return; this.readyState = 3; hub.closed.push('ws'); queue.push(() => { this.onclose && this.onclose({}); room(this.name).leave(this.id, this.conn); }); }
   }
   class FakeES {
-    constructor(url) { const { name, id } = parse(url); this.name = name; this.id = id;
-      queue.push(() => room(name).join(id, { kind: 'sse', send: (s) => queue.push(() => this.onmessage && this.onmessage({ data: s })) })); }
-    close() { queue.push(() => room(this.name).leave(this.id)); }
+    constructor(url) { const { name, id, tok } = parse(url); this.name = name; this.id = id; hub.streams++;
+      queue.push(() => { const why = room(name).join(id, this.conn = { kind: 'sse', close: () => {}, send: (s) => queue.push(() => this.onmessage && this.onmessage({ data: s })) }, tok); if (why) queue.push(() => this.onerror && this.onerror({})); }); }
+    close() { queue.push(() => room(this.name).leave(this.id, this.conn)); }
   }
-  const fetch = async (u, init) => { const { name, id } = parse(u); queue.push(() => room(name).text(id, init.body)); return { ok: true, json: async () => ({}) }; };
+  const fetch = async (u, init) => { const { name, id, tok } = parse(u); hub.posts.push(init.headers['Content-Type']);
+    if (!room(name).owns(id, tok)) return { ok: false, status: 403, json: async () => ({}) };
+    queue.push(() => { if (/octet-stream/.test(init.headers['Content-Type'])) room(name).bin(id, init.body); else room(name).text(id, init.body); });
+    return { ok: true, json: async () => ({}) }; };
   const setTimeout = (f, ms) => { const t = { f, ms, alive: true }; timers.push(t); return t; };
   const clearTimeout = (t) => { if (t) t.alive = false; };
-  return {
-    rooms, queue,
-    endpoint(id) { return E.netRelay({ base: 'https://sb.example', self: id, WebSocket: FakeWS, EventSource: FakeES, fetch, setTimeout, clearTimeout, sse: opts.sse }); },
+  const hub = {
+    rooms, queue, streams: 0, posts: [], closed: [],
+    endpoint(id, tok) { return E.netRelay({ base: 'https://sb.example', self: id, tok, WebSocket: FakeWS, EventSource: FakeES, fetch, setTimeout, clearTimeout, sse: opts.sse }); },
     // deliver everything, firing timers that are due as if their time had come
-    flush() { for (let g = 0; g < 1000; g++) { if (queue.length) { queue.shift()(); continue; } const t = timers.find((x) => x.alive); if (!t) break; t.alive = false; t.f(); } },
+    flush() { for (let g = 0; g < 2000; g++) { if (queue.length) { queue.shift()(); continue; } const t = timers.find((x) => x.alive); if (!t) break; t.alive = false; t.f(); } },
   };
+  return hub;
 }
 
 for (const mode of ['WebSocket', 'SSE', 'SSE after a stripped WebSocket']) {
@@ -169,4 +177,66 @@ test('relay: the room\'s clock and the command ledger reach the page', async () 
   A.command(0, 'x'); A.command(1, 'y'); hub.flush();
   assert.deepEqual(cmds, [['aaaa1', 0, 'x'], ['aaaa1', 1, 'y']]);
   assert.equal(A.via(), 'ws');
+});
+
+test('relay: nobody can post as another player, even knowing their id', async () => {
+  const D = new RoomDO({ getWebSockets: () => [] }, {});
+  const core = D.room('r2'), heard = [];
+  core.join('alice1', { kind: 'sse', send() {}, close() {} }, T('alice1'));
+  core.join('bobby1', { kind: 'sse', send: (m) => heard.push(JSON.parse(m)), close() {} }, T('bobby1'));
+  const post = (tok, body) => D.fetch(new Request('https://sb.example/room/r2/send?id=alice1&tok=' + tok, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body }));
+  const forged = await post('guessed-secret-000000000', JSON.stringify({ t: 'cmd', tick: 7, d: 'forged' }));
+  assert.equal(forged.status, 403);
+  const real = await post(T('alice1'), JSON.stringify({ t: 'cmd', tick: 7, d: 'real' }));
+  assert.equal(real.status, 200);
+  assert.deepEqual(heard.filter((m) => m.t === 'cmd').map((m) => m.d), ['real'], 'only her own command counts');
+  const huge = await D.fetch(new Request('https://sb.example/room/r2/send?id=alice1&tok=' + T('alice1'), { method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': '9999999' }, body: '[]' }));
+  assert.equal(huge.status, 413, 'an oversize body is refused before it is read');
+});
+
+test('relay: a WebSocket a proxy holds open falls back to one SSE stream, and leaving leaves', () => {
+  const hub = relayHub({ stallWs: true });
+  const A = hub.endpoint('aaaa2').join('r3'), B = hub.endpoint('bbbb2').join('r3');
+  hub.flush();
+  assert.equal(hub.streams, 2, 'one stream each, not two');
+  assert.equal(A.via(), 'sse');
+  assert.deepEqual([...hub.rooms.get('r3').peers.keys()].sort(), ['aaaa2', 'bbbb2']);
+  A.leave(); hub.flush();
+  assert.deepEqual([...hub.rooms.get('r3').peers.keys()], ['bbbb2'], 'really gone');
+});
+
+test('relay: a big binary from an SSE client goes up on its own and arrives, and the batch with it', () => {
+  const hub = relayHub({ sse: true });
+  const A = hub.endpoint('aaaa3').join('r4'), B = hub.endpoint('bbbb3').join('r4');
+  const bins = [], msgs = [], cmds = [];
+  B.onBin((buf, meta, from) => bins.push([buf.byteLength, meta.k, from])); B.onMessage((m) => msgs.push(m)); B.onCommand((f, t) => cmds.push(t));
+  hub.flush();
+  A.send({ k: 'state' }); A.sendBin(new Uint8Array(200000).fill(7).buffer, { k: 'mdl' }, ['bbbb3']); A.command(0, 'x');
+  hub.flush();
+  assert.deepEqual(bins, [[200000, 'mdl', 'aaaa3']]);
+  assert.deepEqual(msgs, [{ k: 'state' }]);
+  assert.deepEqual(cmds, [0]);
+  assert.ok(hub.posts.includes('application/octet-stream'));
+});
+
+test('relay: a dropped player comes back with its secret and takes its place, not refused as taken', () => {
+  const R = new RoomCore('r5'), a = conn(), a2 = conn(), b = conn();
+  R.join('alice', a, T('alice')); R.join('bobby', b, T('bobby'));
+  assert.equal(R.join('alice', a2, T('alice')), null, 'the same secret: back in');
+  assert.equal(a2.heard[0].t, 'hello'); assert.equal(a2.heard[0].back, true);
+  R.leave('alice', a);                               // the old socket's close comes late
+  assert.ok(R.peers.has('alice'), 'an old connection closing can\'t take the new one out');
+  assert.ok(!b.heard.some((m) => m.t === 'leave'), 'nobody saw her leave');
+});
+
+test('room: the ledger takes each player\'s ticks in order and only a little ahead', () => {
+  const R = new RoomCore('r6'), a = conn(), b = conn();
+  R.join('alice', a, T('alice')); R.join('bobby', b, T('bobby'));
+  const cmd = (id, tick) => R.text(id, JSON.stringify({ t: 'cmd', tick, d: 'x' }));
+  cmd('alice', 0); cmd('alice', 1); cmd('alice', 1000000);
+  assert.equal(R.ledgerMax, 1, 'the far future is refused');
+  cmd('alice', 0);
+  assert.equal(R.ledger.get(0).size, 1, 'and so is going back');
+  for (let t = 2; t < 60; t++) cmd('alice', t);
+  assert.equal(R.ledgerMax, 59);
 });
