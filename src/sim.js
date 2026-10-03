@@ -375,9 +375,10 @@ const Sim={
           const qc=Math.max(Number.isFinite(lo)?lo:-Infinity, Math.min(Number.isFinite(hi)?hi:Infinity, q));
           if(qc!==q){ s.revs=qc/k; s.ticks=s.revs*s.tpr; s.act=0; s.stalled=true; }
         }
-        // hard stops only where the travel is known: Onshape slider limits, or set by hand
+        // hard stops only where the travel is known: Onshape slider limits, or set by
+        // hand. In the joint's own direction, as mateJointQ and updateCOM read it
         if(lin&&s.mech.limits){
-          const k=slideMPerTick(s), q=s.ticks*k, lo=s.mech.limits[0], hi=s.mech.limits[1];
+          const k=slideMPerTick(s)*(s.mech.dir||1), q=s.ticks*k, lo=s.mech.limits[0], hi=s.mech.limits[1];
           const qc=Math.max(Number.isFinite(lo)?lo:-Infinity, Math.min(Number.isFinite(hi)?hi:Infinity, q));
           if(qc!==q){ s.ticks=qc/k; s.revs=s.ticks/s.tpr; s.act=0; s.stalled=true; }
         }
