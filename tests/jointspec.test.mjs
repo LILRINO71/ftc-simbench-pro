@@ -80,6 +80,23 @@ test('part picks: path, name, box; a later joint takes parts from an earlier one
   assert.throws(() => E.applyJointSpec(cad, { format: 'ftc-sim-bench.joints', joints: [{ id: 'a' }, { id: 'a' }] }), /two joints/);
 });
 
+test('joint kinds: every name for a slide is a slide, in mm', () => {
+  const kinds = ['slider', 'Slider', 'linear', 'prismatic', 'linear-slide'];
+  const spec = { format: 'ftc-sim-bench.joints', joints: kinds.map((k, i) => ({ id: 'j' + i, kind: k, axis: [0, 0, 1], limits: [0, 300] }))
+    .concat([{ id: 'turn', kind: 'revolute', axis: [0, 1, 0], limits: [0, 90] }]) };
+  const cad = { solids: [], mechs: [] };
+  E.applyJointSpec(cad, spec);
+  kinds.forEach((k, i) => {
+    const m = cad.mechs.find((x) => x.id === 'j' + i);
+    assert.equal(m.kind, 'linear', k + ' is a slide');
+    assert.equal(m.fromMate.type, 'SLIDER', k);
+    assert.deepEqual(m.limits, [0, 0.3], k + ' limits in mm');
+  });
+  const t = cad.mechs.find((x) => x.id === 'turn');
+  assert.equal(t.kind, 'revolute-lift');
+  assert.ok(Math.abs(t.limits[1] - Math.PI / 2) < 1e-12);
+});
+
 test('the joint editor: any robot\'s joints become an editable spec, and hand fixes win', () => {
   const cad = E.parseSTEP(fixture('robots/nested.step'));
   // a robot with guessed joints: written down with its exact parts
