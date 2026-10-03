@@ -47,6 +47,7 @@ const NET_ABC="ABCDEFGHJKLMNPQRSTUVWXYZ23456789";   // no 0/O or 1/I to misread
 const NET_HZ={pose:20, snap:12};
 const NET_LEAD_MS=3000;                            // START to the match: a countdown, and time to INIT
 const NET_MAX_PLAYERS=8;                           // four drivers, the rest watch
+const NET_AD_MS=7000;                              // a listed match says so every 2 s: this long silent, it's gone
 const NET_DELAY=100;                               // ms behind the newest robot pose and snapshot, to draw between two
 const NET_MODEL_MAX=6*1024*1024;                   // a robot's light copy, packed: bigger isn't one
 const netAl=s=>/^blue/.test(s||"")?"blue":"red";
@@ -217,17 +218,22 @@ const Online={
     L.onJoin(id=>{ if(this.pub&&this.role==="host"&&this.state==="room") L.send(this.ad(),id); });
   },
   unbrowse(){ if(this.lobby){ try{ this.lobby.leave(); }catch(e){} this.lobby=null; } this.ads=netMap(); },
+  /* A code's listing belongs to whoever advertised it first: only that computer
+     may update it or take it down, until it has said nothing for NET_AD_MS. */
   lobbyMsg(m,from){
     if(!m||m.k!=="ad"||!netIdOk(from)||!netCodeOk(m.code)) return;
-    if(m.gone){ delete this.ads[m.code]; this.emit("ads"); return; }
+    const old=this.ads[m.code], t=this.now();
+    if(old&&old.hid!==from&&t-old.at<NET_AD_MS) return;
+    if(m.gone){ if(old){ delete this.ads[m.code]; this.emit("ads"); } return; }
     this.ads[m.code]={code:m.code, hid:from, name:netStr(m.name,40)||"An FTC match",
       period:m.period==="Autonomous"?"Autonomous":"TeleOp", skill:MATCH_SKILL[m.skill]?m.skill:"typical",
-      n:netNum(m.n,0,NET_MAX_PLAYERS,0)|0, open:netNum(m.open,0,4,0)|0, proto:m.proto, at:this.now()};
+      n:netNum(m.n,0,NET_MAX_PLAYERS,0)|0, open:netNum(m.open,0,4,0)|0, proto:m.proto, at:t};
     this.emit("ads");
   },
   openMatches(){
     const t=this.now();
-    return Object.values(this.ads).filter(a=>a.proto===NET_PROTO&&a.open>0&&t-a.at<7000&&a.code!==this.code)
+    for(const c in this.ads) if(t-this.ads[c].at>=NET_AD_MS) delete this.ads[c];    // silent too long: gone
+    return Object.values(this.ads).filter(a=>a.proto===NET_PROTO&&a.open>0&&a.code!==this.code)
       .sort((a,b)=>b.n-a.n||b.at-a.at);
   },
   ad(){
