@@ -1547,7 +1547,7 @@ function applyJoints(){
     if(R.front&&FRONTS[R.front]!==undefined) OPTS.front=R.front;
     recomputeChain(CAD.mechs);
     View.hiddenParts=View.hiddenParts||new Set();
-    View.load(CAD); if(View.exact) View.applyExact();
+    View.load(CAD);                             // it puts the exact surfaces back itself (buildRobot)
     if(CadView.on) CadView.renderTree();
     if(Sim.phase!=="running") placeAtStart();
     if(CODE){ mapDevices(); rebuild(); }
