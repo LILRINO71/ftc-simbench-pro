@@ -1,8 +1,9 @@
 /* ============================================================
    9.  SESSION — the .ftcsim save/load bundle
    A whole workspace in one plain UTF-8 JSON file: the CAD as the
-   bench understands it, the OpMode source, the hardware map, the
-   options, the pose, the alliance and the shooter setup. Drag the
+   bench understands it, the OpMode source and its file name, the
+   hardware map, the options, the pose, the alliance, the shooter
+   setup and the rig panel's own document. Drag the
    file back in and you are where you left off, with no STEP to
    re-parse (a 40 MB export takes seconds; this takes none).
 
@@ -95,6 +96,7 @@ const {sessionFromBench, packSession, unpackSession} = (function(){
     return def;
   };
   const int = (v, def, C, what) => Math.round(num(v, def, C, what));
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
   const bool = v => v === true;
   const list = (v, cap, C, what) => {
     if(!Array.isArray(v)) return [];
@@ -295,34 +297,88 @@ const {sessionFromBench, packSession, unpackSession} = (function(){
     baseModel: oneOf(at(v, "baseModel"), ["auto", "show", "hide"], "auto"),
     shooterModel: oneOf(at(v, "shooterModel"), ["auto", "show", "hide"], "auto"),
     turretScale: num(at(v, "turretScale"), 0.55, C, "opts.turretScale"),
-    startPose: readPose(at(v, "startPose"), C)
+    startPose: readPose(at(v, "startPose"), C),
+    // the physics panel: tile grip and how the drive base moves (null: the bench's own setting)
+    mu: at(v, "mu") == null ? null : clamp(num(at(v, "mu"), 0.9, C, "opts.mu"), 0.05, 2),
+    physics: oneOf(at(v, "physics"), ["rigid", "kinematic"], null)
   });
 
   /* The shot config is the Shot Sim's own document, in the Shot Sim's own
      units (h0In inches, wheelMm millimetres, angles degrees) — carried through
      verbatim rather than converted, so it goes back into Shots.cfg unchanged. */
-  const readShots = (v, C) => {
-    const c = at(v, "cfg");
-    return {
-      seed: int(at(v, "seed"), 7, C, "shots.seed"),
-      spreadScale: num(at(v, "spreadScale"), 1, C, "shots.spreadScale"),
-      fired: Math.max(0, int(at(v, "fired"), 0, C, "shots.fired")),
-      scored: Math.max(0, int(at(v, "scored"), 0, C, "shots.scored")),
-      cfg: !isObj(c) ? null : {
-        shooter: str(at(c, "shooter"), C, "shot shooter"),
-        feeder: str(at(c, "feeder"), C, "shot feeder"),
-        motorId: str(at(c, "motorId"), C, "shot motor"),
-        hoodDeg: num(at(c, "hoodDeg"), 75, C, "shot hoodDeg"),
-        h0In: num(at(c, "h0In"), 16, C, "shot h0In"),
-        wheelMm: num(at(c, "wheelMm"), 96, C, "shot wheelMm"),
-        gear: num(at(c, "gear"), 1, C, "shot gear"),
-        mountDeg: num(at(c, "mountDeg"), 0, C, "shot mountDeg"),
-        ball: str(at(c, "ball"), C, "shot ball") || "pollen",
-        type: str(at(c, "type"), C, "shot type") || "single",
-        precision: str(at(c, "precision"), C, "shot precision") || "typical"
-      }
-    };
+  const readShotCfg = (c, C) => !isObj(c) ? null : {
+    shooter: str(at(c, "shooter"), C, "shot shooter"),
+    feeder: str(at(c, "feeder"), C, "shot feeder"),
+    motorId: str(at(c, "motorId"), C, "shot motor"),
+    hoodDeg: num(at(c, "hoodDeg"), 75, C, "shot hoodDeg"),
+    h0In: num(at(c, "h0In"), 16, C, "shot h0In"),
+    wheelMm: num(at(c, "wheelMm"), 96, C, "shot wheelMm"),
+    gear: num(at(c, "gear"), 1, C, "shot gear"),
+    mountDeg: num(at(c, "mountDeg"), 0, C, "shot mountDeg"),
+    ball: str(at(c, "ball"), C, "shot ball") || "pollen",
+    type: str(at(c, "type"), C, "shot type") || "single",
+    precision: str(at(c, "precision"), C, "shot precision") || "typical"
   };
+  const readShots = (v, C) => ({
+    seed: int(at(v, "seed"), 7, C, "shots.seed"),
+    spreadScale: num(at(v, "spreadScale"), 1, C, "shots.spreadScale"),
+    fired: Math.max(0, int(at(v, "fired"), 0, C, "shots.fired")),
+    scored: Math.max(0, int(at(v, "scored"), 0, C, "shots.scored")),
+    cfg: readShotCfg(at(v, "cfg"), C)
+  });
+
+  /* The rig panel's document (exportRig in src/app.js, "ftc-sim-bench.rig"):
+     the options, the shooter, each joint as the team set it, which device is
+     which, hardware overrides, the robot setup. Every field checked and capped
+     here; app.js applyRig reads it as it reads the one it keeps itself. */
+  const RIG_FORMAT = "ftc-sim-bench.rig";
+  const UPS = ["+z", "-z", "+y", "-y", "+x", "-x"];
+  function readRig(v, C){
+    if(!isObj(v) || at(v, "format") !== RIG_FORMAT) return null;
+    const tri = (a, lo, hi, what) => Array.isArray(a) && a.length === 3 ? a.map(x => clamp(num(x, 0, C, what), lo, hi)) : null;
+    // a hardware override is a flat bag of short values (role, kind, stallNm, rpm, ...)
+    const flatVal = (x, k) => x === null ? null : typeof x === "boolean" ? x : typeof x === "number" ? num(x, undefined, C, "rig.hardware " + k)
+      : typeof x === "string" ? str(x, C, "rig.hardware " + k) : undefined;
+    const d = at(v, "drive"), sh = at(v, "shift");
+    return {
+      format: RIG_FORMAT, version: 1,
+      cad: str(at(v, "cad"), C, "rig.cad"),
+      opmode: str(at(v, "opmode"), C, "rig.opmode"),
+      trust: oneOf(at(v, "trust"), ["code", "cad"], "code"),
+      payloadKg: clamp(num(at(v, "payloadKg"), 0.18, C, "rig.payloadKg"), 0, 20),
+      duty: clamp(num(at(v, "duty"), 0.3, C, "rig.duty"), 0, 1),
+      turretScale: clamp(num(at(v, "turretScale"), 0.55, C, "rig.turretScale"), 0.05, 5),
+      front: oneOf(at(v, "front"), ["+x", "+y", "-x", "-y"], "+x"),
+      baseModel: oneOf(at(v, "baseModel"), ["auto", "show", "hide"], "auto"),
+      shooterModel: oneOf(at(v, "shooterModel"), ["auto", "show", "hide"], "auto"),
+      shot: readShotCfg(at(v, "shot"), C),
+      joints: list(at(v, "joints"), C.caps.maxMechs, C, "rig.joints").filter(isObj).map(j => ({
+        id: str(at(j, "id"), C, "rig joint id") || "joint",
+        label: str(at(j, "label"), C, "rig joint label"),
+        kind: str(at(j, "kind"), C, "rig joint kind"),
+        parent: str(at(j, "parent"), C, "rig joint parent"),
+        dir: num(at(j, "dir"), 1, C, "rig joint dir") < 0 ? -1 : 1,
+        pivotMm: tri(at(j, "pivotMm"), -5000, 5000, "rig joint pivot"),
+        axis: tri(at(j, "axis"), -1, 1, "rig joint axis"),
+        leverMm: at(j, "leverMm") == null ? null : clamp(num(at(j, "leverMm"), 0, C, "rig joint lever"), 0, 5000),
+        part: str(at(j, "part"), C, "rig joint part"),
+        manual: bool(at(j, "manual")), inferred: bool(at(j, "inferred"))
+      })),
+      devices: dict(at(v, "devices"), C, "rig.devices", (x, k) => x === null ? null : (str(x, C, "rig.devices." + k) ?? undefined)),
+      hardware: dict(at(v, "hardware"), C, "rig.hardware", (o, k) => isObj(o) ? dict(o, C, "rig.hardware." + k, flatVal) : undefined),
+      ignored: list(at(v, "ignored"), C.caps.maxKeys, C, "rig.ignored").map(s => str(s, C, "rig ignored")).filter(Boolean),
+      up: oneOf(at(v, "up"), UPS, null),
+      shift: Array.isArray(sh) && sh.length <= 3 ? sh.map(x => clamp(num(x, 0, C, "rig.shift"), -0.4, 0.4)) : null,
+      // a drive base set by hand: the same checks as cleanDriveSpec in src/app.js
+      drive: !isObj(d) ? null : {kind: oneOf(at(d, "kind"), ["mecanum", "tank", "x"], "mecanum"),
+        n: [2, 4, 6].indexOf(at(d, "n")) >= 0 ? at(d, "n") : 4,
+        d: clamp(num(at(d, "d"), 0.096, C, "rig.drive.d"), 0.04, 0.2), track: clamp(num(at(d, "track"), 0.36, C, "rig.drive.track"), 0.1, 0.6),
+        base: clamp(num(at(d, "base"), 0.3, C, "rig.drive.base"), 0, 0.6), pattern: at(d, "pattern") === "O" ? "O" : "X"},
+      setup: dict(at(v, "setup"), C, "rig.setup", x => x === true)
+    };
+  }
+  /* The OpMode's file name, shown in the OpMode menu: never a path. */
+  const fileName = (v, C) => (str(v, C, "opName") || "").replace(/[\u0000-\u001f\u007f/\\:*?"<>|]/g, "").trim().slice(0, 128);
 
   /* The session, in engine units (metres/radians), already snapped to the grid
      the file will use — so what you hold is exactly what will come back. */
@@ -335,12 +391,14 @@ const {sessionFromBench, packSession, unpackSession} = (function(){
       notes: text(at(v, "notes"), C.caps.maxNotes, C, "notes") || "",
       cad: readCad(at(v, "cad"), C),
       java: text(typeof src === "string" ? src : at(at(v, "code"), "src"), C.caps.maxJava, C, "the OpMode source") || "",
+      opName: fileName(at(v, "opName"), C),
       code: code,
       map: dict(at(v, "map"), C, "map", (x, k) => { const s = str(x, C, "map." + k); return s === null ? null : s; }),
       opts: readOpts(at(v, "opts"), C),
       chassis: readPose(at(v, "chassis"), C),
       alliance: at(v, "alliance") === "blue" ? "blue" : "red",
-      shots: readShots(at(v, "shots"), C)
+      shots: readShots(at(v, "shots"), C),
+      rig: readRig(at(v, "rig"), C)
     };
   }
 
@@ -384,8 +442,8 @@ const {sessionFromBench, packSession, unpackSession} = (function(){
   const encode = s => ({
     magic: FTCSIM_MAGIC, app: APP, version: VERSION, unit: "0.1mm",
     savedISO: s.savedISO, notes: s.notes,
-    cad: encCad(s.cad), java: s.java, code: s.code, map: s.map, opts: s.opts,
-    chassis: s.chassis, alliance: s.alliance, shots: s.shots
+    cad: encCad(s.cad), java: s.java, opName: s.opName, code: s.code, map: s.map, opts: s.opts,
+    chassis: s.chassis, alliance: s.alliance, shots: s.shots, rig: s.rig
   });
 
   /* Maximum bracket nesting of a JSON text, counted by scanning characters
