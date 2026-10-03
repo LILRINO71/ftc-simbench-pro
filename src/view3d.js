@@ -195,7 +195,9 @@ const View={
     this.hiveG={}; this.shownHive=null; this.tipAnim=null; this.shownCells=-1;
     if(Field.ok) this.buildField(); else this.buildPlainField();
     this.dynG=new THREE.Group(); this.world.add(this.dynG);
-    this.ballPool=[]; this.arcLine=null;
+    // everything that lived in the last dynG went with it: ball trails and effects too,
+    // or the trails would keep moving meshes that are no longer in the scene
+    this.ballPool=[]; this.arcLine=null; this.trailG=[]; this.fxs=[];
     this.matchG=null; this.matchShown=null;
 
     // everything that drives around; the CAD sits in frontG, raised onto the base
