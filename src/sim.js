@@ -765,7 +765,13 @@ function buildRig(cad,dtn,base,dev,opts){
   for(const w of dtn.wheels){
     const corner=(w.front?"F":w.back?"B":"")+(w.left?"L":w.right?"R":"");
     const g=pick(w); if(g) taken.add(g);
-    const x=g?g.x:span?(w.front?span.x1:(w.back?span.x0:(span.x0+span.x1)/2)):(w.front?L/2:(w.back?-L/2:0));
+    // a tank motor that drives a whole side (chained or belted to every wheel
+    // on it) pushes and grips at the middle of that side, not at whichever of
+    // its wheels the pick landed on — a two-motor four-wheel base otherwise
+    // turned about its back axle
+    const side=kind==="tank"&&g&&!w.front&&!w.back?cadWheels.filter(o=>Math.sign(o.y)===Math.sign(g.y)):[];
+    const x=side.length>1?side.reduce((a,o)=>a+o.x,0)/side.length
+      :g?g.x:span?(w.front?span.x1:(w.back?span.x0:(span.x0+span.x1)/2)):(w.front?L/2:(w.back?-L/2:0));
     const y=g?g.y:span?(w.left?span.y1:span.y0):(w.left?W/2:-W/2);
     // the standard mecanum X when nothing says otherwise: FL and BR one way,
     // FR and BL the other
