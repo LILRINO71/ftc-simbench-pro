@@ -65,17 +65,23 @@ function cookies(req) {
 const setCookie = (name, value, maxAge) => `${name}=${value}; Path=/onshape; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}`;
 const json = (obj, status = 200, headers = {}) => new Response(JSON.stringify(obj), { status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store", ...headers } });
 
-/* the token from Onshape, by code or by refresh token */
+/* the token from Onshape, by code or by refresh token: {t}, or {why} when
+   there is none: "denied" (Onshape refused the code or the refresh token: a
+   stale one, or one already used) or "transient" (the token server busy,
+   down or unreachable, or an answer that isn't a token) */
 async function token(env, fetchImpl, form) {
-  const r = await fetchImpl(OAUTH + "/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
-    body: new URLSearchParams({ ...form, client_id: env.ONSHAPE_CLIENT_ID, client_secret: env.ONSHAPE_CLIENT_SECRET }).toString(),
-  });
-  if (!r.ok) return null;
+  let r;
+  try {
+    r = await fetchImpl(OAUTH + "/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+      body: new URLSearchParams({ ...form, client_id: env.ONSHAPE_CLIENT_ID, client_secret: env.ONSHAPE_CLIENT_SECRET }).toString(),
+    });
+  } catch (e) { return { why: "transient" }; }
+  if (!r.ok) return { why: r.status >= 500 || r.status === 429 ? "transient" : "denied" };
   const t = await r.json().catch(() => null);
-  if (!t || !t.access_token) return null;
-  return { a: t.access_token, r: t.refresh_token || form.refresh_token || null, e: Date.now() + (Number(t.expires_in) > 0 ? t.expires_in : 3600) * 1000 };
+  if (!t || !t.access_token) return { why: "transient" };
+  return { t: { a: t.access_token, r: t.refresh_token || form.refresh_token || null, e: Date.now() + (Number(t.expires_in) > 0 ? t.expires_in : 3600) * 1000 } };
 }
 
 /* the little page Onshape sends the team back to: tell the SimBench tab, then close */
@@ -116,10 +122,10 @@ export async function handle(request, env, fetchImpl = fetch) {
     const code = url.searchParams.get("code"), state = url.searchParams.get("state");
     if (url.searchParams.get("error")) return backPage(false, "you chose not to allow it (" + url.searchParams.get("error").slice(0, 60) + ")");
     if (!code || !state || state !== jar[STATE]) return backPage(false, "the sign-in link was stale. Click Sign in with Onshape again");
-    const t = await token(env, fetchImpl, { grant_type: "authorization_code", code, redirect_uri: url.origin + "/onshape/callback" });
-    if (!t) return backPage(false, "Onshape didn't hand over the sign-in. Click Sign in with Onshape again");
+    const got = await token(env, fetchImpl, { grant_type: "authorization_code", code, redirect_uri: url.origin + "/onshape/callback" });
+    if (!got.t) return backPage(false, "Onshape didn't hand over the sign-in. Click Sign in with Onshape again");
     const res = backPage(true);
-    res.headers.append("Set-Cookie", setCookie(COOKIE, await seal(env, t), 60 * 60 * 24 * 30));
+    res.headers.append("Set-Cookie", setCookie(COOKIE, await seal(env, got.t), 60 * 60 * 24 * 30));
     res.headers.append("Set-Cookie", setCookie(STATE, "", 0));
     return res;
   }
@@ -134,11 +140,26 @@ export async function handle(request, env, fetchImpl = fetch) {
     const path = route.slice(4);
     if (!ALLOWED.test(path)) return json({ error: "path", message: "SimBench doesn't read that from Onshape." }, 403);
     let t = jar[COOKIE] ? await unseal(env, jar[COOKIE]) : null;
-    const signedOut = () => json({ error: "signed-out", message: "Sign in with Onshape again." }, 401, { "Set-Cookie": setCookie(COOKIE, "", 0) });
-    if (!t) return signedOut();
-    let fresh = false;
-    const refresh = async () => { if (!t.r) return false; const n = await token(env, fetchImpl, { grant_type: "refresh_token", refresh_token: t.r }); if (!n) return false; t = n; fresh = true; return true; };
-    if (t.e < Date.now() + 60000 && !(await refresh())) return signedOut();
+    const signedOut = (headers) => json({ error: "signed-out", message: "Sign in with Onshape again." }, 401, headers);
+    // no cookie, or one that isn't ours (or was edited): signed out, and a bad cookie goes
+    if (!t) return signedOut(jar[COOKIE] ? { "Set-Cookie": setCookie(COOKIE, "", 0) } : {});
+    /* Renewing the token. The page makes its calls side by side, each with the
+       same cookie, so when the token runs out they all renew at once, and
+       Onshape takes each refresh token only once: all but the first renewal
+       are refused. So a renewal that fails never clears the cookie (the call
+       that renewed is setting the new one, and a Max-Age=0 landing after it
+       would sign the team out), and the call is still made with the token the
+       cookie has, which is often still good. A token server that is down or
+       unreachable is "try again", never "sign in again". */
+    const fromCookie = t;
+    let fresh = false, failed = null;
+    const renew = async () => {
+      if (!fromCookie.r) { failed = "denied"; return false; }
+      const n = await token(env, fetchImpl, { grant_type: "refresh_token", refresh_token: fromCookie.r });
+      if (!n.t) { failed = n.why; return false; }
+      t = n.t; fresh = true; return true;
+    };
+    if (t.e < Date.now() + 60000) await renew();              // about to run out
     // Part Studio shapes and masses pinned to a version or a microversion never change,
     // so they are kept at the edge and served to the next team that reads the same
     // goBILDA or REV part: fewer calls against the quota, and a faster second import.
@@ -147,8 +168,15 @@ export async function handle(request, env, fetchImpl = fetch) {
     const key = cacheable ? new Request("https://simbench-onshape-cache/" + path + url.search) : null;
     const store = cacheable && typeof caches !== "undefined" ? caches.default : null;
     const call = (p, q) => fetchImpl(API + p + (q || ""), { headers: { Authorization: "Bearer " + t.a, Accept: "application/json" } });
-    // one call, renewing the token once if Onshape says it ran out; null when it can't be renewed
-    const ask = async (p, q) => { let r = await call(p, q); if (r.status === 401 && !fresh) { if (!(await refresh())) return null; r = await call(p, q); } return r; };
+    // one call: refused, renew once and call again, unless a renewal already failed or the token
+    // is new. {r}, or {out}: what to answer instead (Onshape's sign-in busy, or signed out)
+    const ask = async (p, q) => {
+      let r = await call(p, q);
+      if (r.status === 401 && !fresh && !failed && await renew()) r = await call(p, q);
+      if (r.status === 401 && failed === "transient") return { out: json({ error: "busy", message: "Onshape's sign-in server didn't answer. Trying again." }, 503, { "Retry-After": "2" }) };
+      if (r.status === 401 && failed) return { out: signedOut() };
+      return { r };
+    };
     const keepToken = async (h) => { if (fresh) h.append("Set-Cookie", setCookie(COOKIE, await seal(env, t), 60 * 60 * 24 * 30)); return h; };
     if (store) {
       const hit = await store.match(key).catch(() => null);
@@ -157,15 +185,17 @@ export async function handle(request, env, fetchImpl = fetch) {
         // it is only for a team that can open the document itself, which Onshape says with
         // its cheapest call. (The shapes are the expensive part; this is one small read.)
         const did = /\/d\/([0-9a-f]{24})\//i.exec(path)[1];
-        const can = await ask("documents/" + did);
-        if (!can) return signedOut();
+        const c = await ask("documents/" + did);
+        if (c.out) return c.out;
+        const can = c.r;
         if (!can.ok) return json({ error: "access", message: "Your Onshape account can't open that document." }, can.status === 404 ? 404 : 403, Object.fromEntries(await keepToken(new Headers())));
         const h = await keepToken(new Headers(hit.headers)); h.set("X-SimBench-Cache", "hit"); h.set("Cache-Control", "no-store");
         return new Response(hit.body, { status: hit.status, headers: h });
       }
     }
-    const r = await ask(path, url.search);
-    if (!r) return signedOut();
+    const got = await ask(path, url.search);
+    if (got.out) return got.out;
+    const r = got.r;
     const headers = new Headers({ "Content-Type": r.headers.get("Content-Type") || "application/json", "Cache-Control": "no-store" });
     const ra = r.headers.get("Retry-After"); if (ra) headers.set("Retry-After", ra);
     await keepToken(headers);
