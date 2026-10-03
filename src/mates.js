@@ -151,14 +151,18 @@ function parseOnshapeAssembly(json){
   return {inst, occ, parts, mates, relations, groups, featById, why};
 }
 
-/* Mate limits live in the assembly's features (GET …/assemblies/…/features).
-   Read whatever form they come in: limitsEnabled plus limitAxialZMin/Max for
-   a slider, limitRotationMin/Max for a revolute. That call lists one
-   element's own features, so a subassembly's come with its definition key
-   (dk, as subAssemblies writes it); the root's have none, and an old payload
-   that put every mate's limits on the root still finds them. The limits stay
-   as Onshape gives them, mate values; applyOnshapeMates makes them travel
-   from the drawn pose. */
+/* Mate limits live in the assembly's features (GET …/assemblies/…/features),
+   under the names Onshape gives them (onshape-to-robot reads the same):
+   limitsEnabled, then limitZMin/limitZMax along a slider and
+   limitAxialZMin/limitAxialZMax about a revolute's axis (a cylindrical or
+   pin-slot mate is simulated as that turn, so it reads those too). The names
+   SimBench's own fixtures once wrote (limitAxialZ for a slider, limitRotation
+   for a turn) are still read after them. A limit Onshape leaves empty
+   (isNull) is open. That call lists one element's own features, so a
+   subassembly's come with its definition key (dk, as subAssemblies writes
+   it); the root's have none, and an old payload that put every mate's limits
+   on the root still finds them. The limits stay as Onshape gives them, mate
+   values; applyOnshapeMates makes them travel from the drawn pose. */
 function applyMateLimits(A,featuresJson,dk){
   let n=0; dk=dk||"";
   const list=(featuresJson&&(featuresJson.features||featuresJson))||[];
@@ -169,8 +173,15 @@ function applyMateLimits(A,featuresJson,dk){
     const P={};
     for(const p of (msg.parameters||[])){ const q=p&&(p.message||p); if(q&&q.parameterId) P[q.parameterId]=q; }
     if(P.limitsEnabled&&P.limitsEnabled.value===false) continue;
-    const lo=mateQty(P.limitAxialZMin||P.limitRotationMin), hi=mateQty(P.limitAxialZMax||P.limitRotationMax);
-    if(Number.isFinite(lo)||Number.isFinite(hi)){ for(const m of ms) m.limits=[lo,hi]; n++; }
+    const one=names=>{ for(const k of names) if(P[k]) return P[k].isNull===true?NaN:mateQty(P[k]); return NaN; };
+    let hit=false;
+    for(const m of ms){
+      const lin=m.type==="SLIDER";
+      const lo=one(lin?["limitZMin","limitAxialZMin"]:["limitAxialZMin","limitRotationMin"]);
+      const hi=one(lin?["limitZMax","limitAxialZMax"]:["limitAxialZMax","limitRotationMax"]);
+      if(Number.isFinite(lo)||Number.isFinite(hi)){ m.limits=[lo,hi]; hit=true; }
+    }
+    if(hit) n++;
   }
   return n;
 }
@@ -435,7 +446,8 @@ function applyOnshapeMates(cad,json,opts){
       const lo=Array.isArray(j.m.limits)?j.m.limits[0]:mateQty(j.m.limits.min), hi=Array.isArray(j.m.limits)?j.m.limits[1]:mateQty(j.m.limits.max);
       const q=mateTravel(A,j.m,j.parentEnd,lin);
       if(q&&(Number.isFinite(lo)||Number.isFinite(hi))){
-        const a=q.s*(lo-q.v0), b=q.s*(hi-q.v0);
+        // an end Onshape leaves open (no minimum, say) stays open: null, never NaN
+        const a=Number.isFinite(lo)?q.s*(lo-q.v0):null, b=Number.isFinite(hi)?q.s*(hi-q.v0):null;
         m.limits=q.s>0?[a,b]:[b,a];
       }else if(!q&&(Number.isFinite(lo)||Number.isFinite(hi))) why.push("\""+j.m.name+"\" has limits, but its two ends' axes don't line up, so they were left off.");
     }

@@ -331,7 +331,7 @@ async function urdfRobot(text,files,name,opts){
     features.push({id, suppressed:false, featureType:"mate", featureData:{name:j.name, mateType, matedEntities:[{matedOccurrence:[j.parent],matedCS:cs(inParent)},{matedOccurrence:[j.child],matedCS:cs(inChild)}]}});
     if(j.lo!=null||j.hi!=null){ const linr=mateType==="SLIDER", q=v=>linr?(v*1000)+" mm":(v*180/Math.PI)+" deg";
       limitsOut.push({message:{featureId:id,name:j.name,parameters:[{message:{parameterId:"limitsEnabled",value:true}},
-        {message:{parameterId:linr?"limitAxialZMin":"limitRotationMin",expression:q(j.lo||0)}},{message:{parameterId:linr?"limitAxialZMax":"limitRotationMax",expression:q(j.hi||0)}}]}}); }
+        {message:{parameterId:linr?"limitZMin":"limitAxialZMin",expression:q(j.lo||0)}},{message:{parameterId:linr?"limitZMax":"limitAxialZMax",expression:q(j.hi||0)}}]}}); }
   });
   for(const j of J){ if(!j.mimic||!j.fid) continue; const leader=byJName.get(j.mimic.joint); if(!leader) continue;
     features.push({id:"R"+j.fid,suppressed:false,featureType:"mateRelation",featureData:{name:"mimic "+j.mimic.joint,relationType:"LINEAR",mates:[{featureId:leader},{featureId:j.fid}],relationRatio:j.mimic.ratio,reverseDirection:false}}); }

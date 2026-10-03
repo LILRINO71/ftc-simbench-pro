@@ -52,6 +52,36 @@ test('mate limits come through in metres and radians', () => {
   assert.ok(Number.isNaN(E.mateQty('banana')));
 });
 
+test('mate limits are read by the names Onshape gives them: limitZ along a slider, limitAxialZ about a revolute', () => {
+  // the features list as GET …/assemblies/…/features returns it (and onshape-to-robot reads it)
+  const qty = (id, expression) => ({ typeName: 'BTMParameterNullableQuantity', message: { parameterId: id, expression, isNull: false } });
+  const mate = (featureId, name, params) => ({ typeName: 'BTMMate', message: { featureType: 'mate', featureId, name,
+    parameters: [{ typeName: 'BTMParameterBoolean', message: { parameterId: 'limitsEnabled', value: true } }, ...params] } });
+  const features = { features: [
+    mate('F1', 'Lift Stage', [qty('limitZMin', '0 mm'), qty('limitZMax', '280 mm')]),
+    mate('F3', 'Arm Pivot', [qty('limitAxialZMin', '-90 deg'), qty('limitAxialZMax', '120 deg')]),
+    // a slider with only its top set: the other end is open
+    mate('F2', 'Lift Carriage', [{ typeName: 'BTMParameterNullableQuantity', message: { parameterId: 'limitZMin', isNull: true, expression: '', value: 0 } }, qty('limitZMax', '10 in')])
+  ] };
+  const cad = fresh();
+  E.applyOnshapeMates(cad, R.onshape.assembly, { features });
+  const by = (id) => cad.mechs.find((m) => m.id === id);
+  assert.ok(by('Lift Stage').limits, 'a slider\'s limitZMin/limitZMax are its travel');
+  assert.deepEqual(by('Lift Stage').limits.map((v) => +v.toFixed(6)), [0, 0.28]);
+  assert.ok(Math.abs(by('Arm Pivot').limits[0] + Math.PI / 2) < 1e-9 && Math.abs(by('Arm Pivot').limits[1] - 120 * Math.PI / 180) < 1e-9);
+  assert.deepEqual(by('Lift Carriage').limits.map((v) => v == null ? v : +v.toFixed(6)), [null, 0.254], 'a limit Onshape leaves empty stays open');
+  // the corpus writes them the same way
+  const names = R.onshape.features.features.flatMap((f) => f.message.parameters.map((p) => p.message.parameterId));
+  assert.ok(names.includes('limitZMin') && names.includes('limitAxialZMax'), names.join());
+  assert.ok(!names.includes('limitRotationMin'), 'no names Onshape never writes');
+  // the names older SimBench fixtures used still read
+  const old = { features: [mate('F1', 'Lift Stage', [qty('limitAxialZMin', '0 mm'), qty('limitAxialZMax', '0.2 m')]), mate('F3', 'Arm Pivot', [qty('limitRotationMin', '-1 rad'), qty('limitRotationMax', '1 rad')])] };
+  const c2 = fresh();
+  E.applyOnshapeMates(c2, R.onshape.assembly, { features: old });
+  assert.deepEqual(c2.mechs.find((m) => m.id === 'Lift Stage').limits.map((v) => +v.toFixed(6)), [0, 0.2]);
+  assert.deepEqual(c2.mechs.find((m) => m.id === 'Arm Pivot').limits, [-1, 1]);
+});
+
 test('a STEP exported under another placement still lines up (the global offset is found)', () => {
   const cad = fresh();
   const A = clone(R.onshape.assembly);
