@@ -525,8 +525,12 @@ const Dyn = {
 
   /* One fixed step. `cmd` is the per-wheel motor command, -1..1, already
      produced by whatever ran the OpMode; this function only does physics.
-     Returns the next state — the one passed in is not touched. */
-  step(state, cmd, rig, dt) {
+     `coast`, optional, is per wheel: true for a motor set to
+     ZeroPowerBehavior.FLOAT, which at zero command has its windings open
+     and makes no torque at all, back-EMF braking included (see
+     motorTorque). Returns the next state — the one passed in is not
+     touched. */
+  step(state, cmd, rig, dt, coast) {
     rig = rig || {};
     const W = dynWheels(rig), n = W.length;
     const st = dynState(state, n);
@@ -568,10 +572,12 @@ const Dyn = {
       const w = W[i], row = w.vel;
       const spec = motors[i] || motors[0] || null;
       const c = dynClamp(dynNum(Array.isArray(cmd) ? cmd[i] : cmd, 0), -1, 1);
+      // FLOAT at zero power: the windings are open, so no torque and no droop
+      const open = c === 0 && Array.isArray(coast) && !!coast[i];
 
       u[i] = st.wheelOmega[i] * w.r;                                   // rim speed, m/s
       v[i] = row[0] * vx + row[1] * vy + row[2] * om;                  // ground speed under it
-      tauW[i] = motorTorque(spec, st.wheelOmega[i] * w.gear, c, mOpts) * w.gear * w.eff;
+      tauW[i] = open ? 0 : motorTorque(spec, st.wheelOmega[i] * w.gear, c, mOpts) * w.gear * w.eff;
 
       // grip available for driving. A traction wheel shares this with its
       // sideways force (one friction circle, solved below); a roller wheel
@@ -582,7 +588,7 @@ const Dyn = {
 
       // implicit in the motor's speed droop (see motorSlope): with the ground
       // taking nothing, the rim gains tau / (J/dt + k), not dt*tau/J
-      kW[i] = motorSlope(spec) * w.gear * w.gear * w.eff;
+      kW[i] = open ? 0 : motorSlope(spec) * w.gear * w.gear * w.eff;
       Jdt[i] = w.J / dt;
       b0[i] = (u[i] - v[i]) + tauW[i] * w.r / (Jdt[i] + kW[i]);
       K[i] = Cs * loads[i] / Math.max(Math.abs(v[i]), vEps);

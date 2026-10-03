@@ -173,6 +173,62 @@ test('driveProbe does not move the live game\'s balls or clock', () => {
   F.Shots.flying.length = 0;
 });
 
+/* ---- zero-power behaviour: FLOAT coasts, BRAKE brakes ---- */
+
+const coastJava = (zpb) => `package org.firstinspires.ftc.teamcode;
+import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
+import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
+import com.qualcomm.robotcore.hardware.DcMotor;
+@TeleOp(name = "Coast")
+public class C extends LinearOpMode {
+    DcMotor leftDrive, rightDrive;
+    @Override
+    public void runOpMode() {
+        leftDrive = hardwareMap.get(DcMotor.class, "leftDrive");
+        rightDrive = hardwareMap.get(DcMotor.class, "rightDrive");
+        leftDrive.setDirection(DcMotor.Direction.REVERSE);
+        ${zpb ? `leftDrive.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.${zpb});
+        rightDrive.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.${zpb});` : ''}
+        waitForStart();
+        while (opModeIsActive()) {
+            leftDrive.setPower(-gamepad1.left_stick_y);
+            rightDrive.setPower(-gamepad1.left_stick_y);
+        }
+    }
+}`;
+/* full stick for 0.6 s, let go: how far it rolls on in the next 0.6 s. On the
+   line reader (what this short OpMode gets) or on the Java VM. */
+function rollOn(zpb, engine) {
+  const b = sampleBench(E, coastJava(zpb));
+  if (engine) b.code = E.parseJava(coastJava(zpb), { engine });
+  assert.equal(!!b.code.vm, engine === 'vm');
+  E.Sim.reset(b.code, b.cad, b.map, { ...b.opts, physics: 'rigid', startPose: { x: -1.2, y: 0, h: 0 } });
+  E.Sim.pad[1].left_stick_y = -1;
+  run(E, 0.6);
+  const x = E.Sim.chassis.x, v = E.Sim.dstate.v.x;
+  E.Sim.pad[1].left_stick_y = 0;
+  run(E, 0.6);
+  return { v, d: E.Sim.chassis.x - x, after: E.Sim.dstate.v.x, dev: E.Sim.dev.leftDrive };
+}
+
+test('setZeroPowerBehavior(FLOAT): a drive base coasts when the stick is let go; BRAKE stops it', () => {
+  // FLOAT was stored and never read: every motor braked on its back-EMF
+  const brake = rollOn('BRAKE'), float = rollOn('FLOAT'), unset = rollOn(null);
+  assert.equal(float.dev.zpb, 'FLOAT', 'the VM stored it');
+  assert.ok(Math.abs(brake.v - float.v) < 0.02, `the same speed when let go: ${brake.v.toFixed(2)} and ${float.v.toFixed(2)} m/s`);
+  assert.ok(float.d > 1.5 * brake.d, `FLOAT rolls on ${(float.d * 1000).toFixed(0)} mm, BRAKE ${(brake.d * 1000).toFixed(0)} mm`);
+  // once the power has ramped off, only rolling resistance and drag slow it:
+  // most of its speed is left after 0.6 s. Back-EMF braking takes nearly all.
+  assert.ok(float.after > 0.6 * float.v, `FLOAT still at ${float.after.toFixed(2)} of ${float.v.toFixed(2)} m/s`);
+  assert.ok(brake.after < 0.15 * brake.v, `BRAKE down to ${brake.after.toFixed(3)} of ${brake.v.toFixed(2)} m/s`);
+  assert.ok(Math.abs(unset.d - brake.d) < 1e-9, 'not set at all brakes, as before');
+  // the same on the Java VM, which stores it through DcMotor.setZeroPowerBehavior
+  const vmBrake = rollOn('BRAKE', 'vm'), vmFloat = rollOn('FLOAT', 'vm');
+  assert.equal(vmFloat.dev.zpb, 'FLOAT');
+  assert.ok(Math.abs(vmFloat.d - float.d) < 0.01 && Math.abs(vmBrake.d - brake.d) < 0.01,
+    `VM: FLOAT ${(vmFloat.d * 1000).toFixed(0)} mm, BRAKE ${(vmBrake.d * 1000).toFixed(0)} mm`);
+});
+
 /* ---- the IMU's yaw rate in kinematic mode ---- */
 
 test('kinematic physics: the VM\'s yaw rate is how fast the robot is really turning', () => {
