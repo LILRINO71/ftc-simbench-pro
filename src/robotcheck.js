@@ -107,6 +107,10 @@ const {checkRobot, setupAuto}=(function(){
     for(const s of S) if(s.mech&&own.has(s.mech)) own.set(s.mech,own.get(s.mech)+1);
     const kids=id=>mechs.filter(k=>k.parent===id);
     const carries=m=>own.get(m.id)>0||kids(m.id).some(carries);
+    // joints nothing drives: asked about in order of how likely a device moves them (a
+    // motor or servo on it, then what it carries), and only up to twice the devices the
+    // code has; the rest, and hardware that just spins (src/mates.js passive), are one line
+    const undriven=[];
     for(const m of mechs){
       if(!carries(m)){ put({key:"empty:"+m.id, sev:"fail", joint:m.id, ask:"drop-joint", text:"\""+label(m)+"\" moves no parts. Remove it, or give it the parts it carries."}); continue; }
       if(m.couple){
@@ -114,19 +118,31 @@ const {checkRobot, setupAuto}=(function(){
         if(!to) put({key:"follow:"+m.id, sev:"fail", joint:m.id, ask:"drop-joint", text:"\""+label(m)+"\" follows \""+m.couple.to+"\", which isn't a joint."});
         continue;
       }
-      if(!driven.has(m.id)&&acts.length) put({key:"undriven:"+m.id, sev:"note", joint:m.id, ask:"pick-device",
-        text:"\""+label(m)+"\" stays where it's drawn: nothing in your code drives it. Pick the device that moves it, if one does."});
+      if(!driven.has(m.id)&&acts.length&&!m.passive) undriven.push(m);
     }
+    // while a device still has no joint, the question is asked from the device's side
+    // (above, with its likely joints); the joints are one line. Once every device is
+    // placed, the joints left over are asked about one by one, up to a handful
+    const unbound=acts.some(d=>!driven.has(map&&map[d.name])&&moved(d.name)&&!(map&&map[d.name]&&byId.get(map[d.name])));
+    const askMax=unbound?0:Math.max(6,2*acts.length);
+    const weight=m=>(m.hasActuator?1e3:0)+(m.lever||0)*10+S.filter(s=>s.mech===m.id).length;
+    undriven.sort((a,b)=>weight(b)-weight(a));
+    for(const m of undriven.slice(0,askMax)) put({key:"undriven:"+m.id, sev:"note", joint:m.id, ask:"pick-device",
+      text:"\""+label(m)+"\" stays where it's drawn: nothing in your code drives it. Pick the device that moves it, if one does."});
+    const rest=undriven.slice(askMax), spinners=mechs.filter(m=>m.passive&&!driven.has(m.id)).length;
+    if(rest.length||spinners) put({key:"undriven:more", sev:"note", text:(rest.length?rest.length+" more joint"+(rest.length===1?"":"s")+" ("+rest.slice(0,4).map(label).join(", ")+(rest.length>4?" …":"")+") and ":"")+
+      (spinners?spinners+" bearings, hubs and idlers that just spin":"")+" stay where they're drawn with nothing driving them. If a device moves one, pick it in the joint editor."});
 
     // the likely answers: a device the code moves and the joints nothing drives, paired by kind
     // (a servo turns something; a motor turns an arm or pulls a slide through a spool)
-    const free=mechs.filter(m=>!m.couple&&!driven.has(m.id)&&carries(m));
+    const free=mechs.filter(m=>!m.couple&&!driven.has(m.id)&&!m.passive&&carries(m));
     const fits=(d,m)=>{ const lin=normJointKind(m.kind)==="linear", sv=/servo/i.test(d.type||""), l=(m.label||m.id).toLowerCase();
       if(sv) return lin?0:(/servo/.test(l)?3:2);
       return lin?3:(/motor/.test(l)?3:1); };
     for(const it of items) if(it.ask==="pick-parts"&&it.device){
       const d=acts.find(x=>x.name===it.device);
-      it.candidates=free.map(m=>({joint:m.id, label:label(m), v:fits(d,m)})).filter(c=>c.v>0).sort((a,b)=>b.v-a.v).slice(0,6).map(({joint,label})=>({joint,label}));
+      const weight=m=>(m.hasActuator?1e3:0)+(m.lever||0)*10+S.filter(s=>s.mech===m.id).length;
+      it.candidates=free.map(m=>({joint:m.id, label:label(m), v:fits(d,m)*1e4+weight(m)})).filter(c=>c.v>=1e4).sort((a,b)=>b.v-a.v).slice(0,6).map(({joint,label})=>({joint,label}));
       if(it.candidates.length) it.text=it.device+" runs as a live gauge: no joint is tied to it yet. Is it one of these? Or click the part it moves.";
     }
     const loose=items.filter(i=>i.ask==="pick-parts").map(i=>acts.find(x=>x.name===i.device)).filter(Boolean);

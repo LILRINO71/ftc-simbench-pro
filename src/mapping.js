@@ -59,6 +59,11 @@ const mapGroupOf=w=>MAP_GROUPS.findIndex(g=>g.indexOf(w)>=0||(w.length>=4&&g.som
 function mapStem(n){ return String(n||"").replace(/([a-z0-9])([A-Z])/g,"$1 $2").toLowerCase().replace(/[_\-\s]*(left|right|l|r|[0-9]+)\b/g," ").replace(/[^a-z]+/g,""); }
 function autoMap(devices,mechs,opts){
   const map={}, used={};
+  // hardware that just spins (src/mates.js passive) is never a device's joint
+  mechs=(mechs||[]).filter(m=>!m.passive);
+  // with a handful of joints, a device can take the one of its kind; among dozens
+  // (an Onshape export of a whole robot) only a name can say
+  const few=mechs.filter(m=>!m.couple).length<=8;
   const solidsOf=opts&&opts.cad&&opts.cad.solids||[];
   const mechText=new Map();
   for(const m of mechs){
@@ -80,11 +85,13 @@ function autoMap(devices,mechs,opts){
     // a short form: "in" for intake, "ext" for extension
     if(!clash&&mapRaw(name).some(w=>w.length>=2&&w.length<=3&&!MAP_NOISE.has(w)&&T.words.some(x=>x.length>=5&&x.startsWith(w)))) return 60;
     if(clash) return 0;
+    // one name inside the other, as a whole word: "lift" in "Lift Stage", never "pin" in "spinner"
     const dc=d.replace(/[^a-z0-9]/g,""), sc=s.replace(/[^a-z0-9]/g,"");
-    if(dc.length>=3&&sc.length>=3&&(sc.indexOf(dc)>=0||dc.indexOf(sc)>=0)) return 70;
+    if(dc.length>=4&&sc.length>=4&&(T.words.indexOf(dc)>=0||mapWords(name).indexOf(sc)>=0)) return 70;
     // the same kind of mechanism by another name: viper -> slide, grabber -> claw
     const dg=new Set(dw.map(mapGroupOf).filter(g=>g>=0));
     if(T.words.some(w=>dg.has(mapGroupOf(w)))) return 55;
+    if(!few) return 0;
     const k=normJointKind(mech.kind);
     if(mech.kind==="effector"&&dg.has(4)) return 45;
     if(k==="linear"&&(dg.has(0)||dg.has(1))) return 45;

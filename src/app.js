@@ -583,8 +583,10 @@ function renderTables(){
   else mapT.innerHTML=`<tr><th>device</th><th>mechanism</th><th>role</th><th>N·m</th><th>lever</th></tr>`+
     CODE.devices.map(d=>{
       const mech=CAD.mechs.filter(m=>m.id===MAP[d.name])[0]||null;
-      const opts=[`<option value="">— none —</option>`].concat(CAD.mechs.map(m=>
-        `<option value="${esc(m.id)}"${MAP[d.name]===m.id?" selected":""}>${esc(mlabel(m))}</option>`)).join("");
+      const opt=m=>`<option value="${esc(m.id)}"${MAP[d.name]===m.id?" selected":""}>${esc(mlabel(m))}</option>`;
+      const spin=CAD.mechs.filter(m=>m.passive);
+      const opts=[`<option value="">— none —</option>`].concat(CAD.mechs.filter(m=>!m.passive).map(opt)).join("")+
+        (spin.length?`<optgroup label="bearings, hubs and idlers that just spin (${spin.length})">${spin.map(opt).join("")}</optgroup>`:"");
       const actuator=/Servo|DcMotor/i.test(d.type||"");
       const spec=specFor(d,mech,OPTS.trust);
       const ropts=["Torque","Speed","Servo","Motor","CR"].map(r=>`<option value="${r}"${spec.role===r?" selected":""}>${r}</option>`).join("");

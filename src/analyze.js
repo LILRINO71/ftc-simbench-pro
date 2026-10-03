@@ -244,9 +244,15 @@ headroom  ${ratio.toFixed(2)}×${ratio<1?"  ◄ SHORT":""}`;
 
   // ---- CAD mechanisms nothing drives
   const mapped={}; for(const k in map) if(map[k]) mapped[map[k]]=1;
+  // an Onshape export has dozens of mates nothing drives: one line, not one each
+  const idle=cad.mechs.filter(m=>!mapped[m.id]&&!m.drive&&!m.couple&&!m.passive&&m.fromMate&&m.kind!=="fixed");
+  if(idle.length>3) add("unmapped:mates","warn",idle.length+" Onshape joints have nothing driving them",
+    "They're mates in your assembly ("+idle.slice(0,3).map(m=>escHTML(mlabel(m))).join(", ")+" …) that no device in this OpMode maps to, so they stay where they were drawn.",null,
+    "Answer the robot check's questions, or name each mate a device drives after that device in Onshape.");
   for(const mech of cad.mechs) if(!mapped[mech.id]){
+    if(idle.length>3&&idle.includes(mech)) continue;
     // drive hardware turns wheels; a cascade stage or gear is driven through its leader
-    if(mech.drive||mech.couple) continue;
+    if(mech.drive||mech.couple||mech.passive) continue;      // hardware that just spins isn't a problem
     const cadSpec=mech.part?hwFromPart(mech.part,mech.partName):null;
     const actuator=cadSpec&&/^(motor|servo|crservo)$/.test(cadSpec.kind);
     if(mech.fromMate&&mech.kind!=="fixed")

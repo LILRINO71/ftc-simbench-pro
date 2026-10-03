@@ -294,7 +294,7 @@ const {simbotFromCad, simbotPack, simbotUnpack, cadFromSimbot, validateRobot, zi
       const acts=o.devices.filter(d=>d&&/servo|dcmotor/i.test(d.type||"")&&!(typeof isDriveDevice==="function"&&isDriveDevice(d)));
       const driven=new Set(Object.values(o.map||{}).filter(Boolean));
       for(const m of mechs){
-        if(m.couple||driven.has(m.id)) continue;
+        if(m.couple||driven.has(m.id)||m.passive) continue;
         put({sev:"note", code:"no-device", joint:m.id, text:"No device in the code drives \""+(m.label||m.id)+"\". Name its mate exactly as the device's configuration name ("+
           (acts.slice(0,3).map(d=>d.cfg||d.name).join(", ")||"none in this OpMode")+") and it binds by itself."});
       }

@@ -371,7 +371,8 @@ function applyOnshapeMates(cad,json,opts){
     const mn=[Infinity,Infinity,Infinity], mx=[-Infinity,-Infinity,-Infinity];
     for(const si of keys.map((k,i)=>i).filter(i=>bodyOf(i)===b).map(solidOf).filter(x=>x!=null))
       for(const p of cad.solids[si].pts) for(let k=0;k<3;k++){ if(p[k]<mn[k]) mn[k]=p[k]; if(p[k]>mx[k]) mx[k]=p[k]; }
-    if(Math.max(mx[0]-mn[0],mx[1]-mn[1],mx[2]-mn[2])<0.2) wheelBody.add(b);
+    // compact, and on the floor: an intake's roller higher up is a joint the code drives
+    if(Math.max(mx[0]-mn[0],mx[1]-mn[1],mx[2]-mn[2])<0.2&&mn[2]<0.03) wheelBody.add(b);
   }
   const seen=new Set([ground]), queue=[ground], joints=[], loops=[];
   const used=new Set();
@@ -481,6 +482,18 @@ function applyOnshapeMates(cad,json,opts){
       if(Number.isFinite(lo)||Number.isFinite(hi)) m.limits=[Number.isFinite(lo)?lo:null, Number.isFinite(hi)?hi:null];
     }
     if(j.m.continuous) m.continuous=true;
+    // Hardware spinning on an axle (a bearing, an idler, a hub, a shaft collar, an e-clip):
+    // a continuous mate carrying a few small parts, nothing beneath it, no motor or servo
+    // on it, and nothing in its names that a team drives. Kept as a joint, never asked about.
+    if(m.continuous&&!hw&&!joints.some(k=>k.parent===j.child)){
+      const mn=[Infinity,Infinity,Infinity], mx=[-Infinity,-Infinity,-Infinity];
+      for(const si of carried) for(const p of solids[si].pts) for(let k=0;k<3;k++){ if(p[k]<mn[k]) mn[k]=p[k]; if(p[k]>mx[k]) mx[k]=p[k]; }
+      const span=carried.length?Math.hypot(mx[0]-mn[0],mx[1]-mn[1],mx[2]-mn[2]):0;
+      const names=carried.map(si=>(solids[si].name||"")+" "+(solids[si].part||"")).join(" ")+" "+named;
+      const driven=/roller|tire|tyre|flywheel|wheel|intake|shooter|launcher|drum|carousel|turret|arm|lift|slide|claw|grip|finger|wrist|pivot|spinner|indexer|kicker|hood|flap|door|gate|bucket|ramp/i.test(names);
+      const hardware=/bearing|collar|shaft|spline|\bhub\b|gear|pulley|sprocket|spacer|standoff|e[- ]?clip|idler|axle|\bpin\b|washer|bushing|screw|bolt|nut\b/i.test(names);
+      if(!driven&&((carried.length<=6&&span<=0.15)||(hardware&&carried.length<=12&&span<=0.3))) m.passive=true;
+    }
     if(t==="CYLINDRICAL") why.push("\""+j.m.name+"\" is cylindrical (turns and slides); it's simulated as the turn.");
     if(t==="PIN_SLOT") why.push("\""+j.m.name+"\" is a pin-slot; it's simulated as the pin's turn.");
     if(kind==="fixed"){
