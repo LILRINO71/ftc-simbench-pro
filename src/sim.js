@@ -18,7 +18,7 @@ const Sim={
     const sp=(opts&&opts.startPose)||{x:0,y:0,h:0};
     this.chassis={x:sp.x,y:sp.y,h:sp.h};
     this.code=code; this.cad=cad; this.map=map; this.opts=opts;
-    this.bump=null; this.vel={x:0,y:0};
+    this.bump=null; this.vel={x:0,y:0}; this.yawRate=0;
     this.pc=0; this.sleepEnd=null; this.sleptMs=0; this.autoDone=false; this.pass=null; this.resumeAt=0;
     this.clock=0; this.vmTel=null;
     for(const d of code.devices) this.makeDev(d);
@@ -70,7 +70,8 @@ const Sim={
       pad(i){ return self.pad[i]||{}; },
       now(){ return self.clock||0; }, runtime(){ return self.t; }, resetRuntime(){ self.t=0; },
       heading(){ return self.chassis.h; },
-      omega(){ return self.dstate&&Number.isFinite(self.dstate.omega)?self.dstate.omega:0; },
+      // the turn rate driveChassis last moved the robot at, rigid or kinematic
+      omega(){ return Number.isFinite(self.yawRate)?self.yawRate:0; },
       pose(){ return {x:self.chassis.x,y:self.chassis.y,h:self.chassis.h}; },
       vel(){ const v=self.vel||{x:0,y:0}, h=self.chassis.h, c=Math.cos(h), sn=Math.sin(h); return {x:v.x*c+v.y*sn, y:-v.x*sn+v.y*c}; },
       ray(){ return self.frontRay(); },
@@ -466,7 +467,7 @@ const Sim={
   },
   driveChassis(dt){
     const dtn=this.drivetrain;
-    if(!dtn||!dtn.ok){ this.vel={x:0,y:0}; return; }
+    if(!dtn||!dtn.ok){ this.vel={x:0,y:0}; this.yawRate=0; return; }
     const x0=this.chassis.x, y0=this.chassis.y;
     if(this.rig&&this.physics!=="kinematic"){
       this.stepRigid(dt);
@@ -492,7 +493,7 @@ const Sim={
       const W=this.rig.drive.wheels, fk=fkFromIk(ikMatrix(rk,W));
       const t=chassisFromWheels(fk,this.rig.devs.map((n,i)=>this.wheelCmd(n,W[i]&&W[i].mount)*SPD));
       const h=this.chassis.h, c=Math.cos(h), s=Math.sin(h);
-      this.chassis.x+=(t.vx*c-t.vy*s)*dt; this.chassis.y+=(t.vx*s+t.vy*c)*dt; this.chassis.h+=t.omega*dt;
+      this.chassis.x+=(t.vx*c-t.vy*s)*dt; this.chassis.y+=(t.vx*s+t.vy*c)*dt; this.chassis.h+=t.omega*dt; this.yawRate=t.omega;
       if(Field.ok) this.bump=Field.collide(this.chassis,this.footprint,this.obstacles);
       this.vel={x:(this.chassis.x-x0)/dt, y:(this.chassis.y-y0)/dt};
       return;
@@ -516,7 +517,7 @@ const Sim={
     }
     const SPEED=1.15, TURN=3.4;               // m/s and rad/s at full power
     const v=(L+R)/2*SPEED, w=(R-L)/2*TURN;
-    this.chassis.h += w*dt;
+    this.chassis.h += w*dt; this.yawRate=w;
     this.chassis.x += (v*Math.cos(this.chassis.h) - strafe*SPEED*Math.sin(this.chassis.h))*dt;
     this.chassis.y += (v*Math.sin(this.chassis.h) + strafe*SPEED*Math.cos(this.chassis.h))*dt;
     if(Field.ok) this.bump=Field.collide(this.chassis,this.footprint,this.obstacles);
@@ -549,7 +550,7 @@ const Sim={
     const c=Math.cos(this.chassis.h), s=Math.sin(this.chassis.h);
     this.chassis.x += (st.v.x*c - st.v.y*s)*dt;
     this.chassis.y += (st.v.x*s + st.v.y*c)*dt;
-    this.chassis.h += st.omega*dt;
+    this.chassis.h += st.omega*dt; this.yawRate=st.omega;
     this.slipping=(st.slip||[]).some(k=>Math.abs(k)>0.3);
   },
   /* Each drive encoder from its wheel's own speed, through the gearing, with
