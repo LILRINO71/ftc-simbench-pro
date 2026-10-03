@@ -76,10 +76,14 @@ function onshapeRead(host, ref, opt){
     // that call lists the root's own features: each subassembly's mate limits (where lifts and
     // claws live) come from its own definition, keyed the way subAssemblies is
     const subs=(asm.subAssemblies||[]).filter(d=>d.documentMicroversion&&(d.features||[]).some(f=>f&&f.featureType==="mate"));
+    // at a microversion, so they never change either: kept like the part studios (opt.cache, below)
     const subLimits=()=>Promise.all(subs.map(d=>{
       const c=d.fullConfiguration||d.configuration||"default", key=[d.documentId||"",d.elementId||"",c].join("|");
-      return get(host+"/api/assemblies/d/"+d.documentId+"/m/"+d.documentMicroversion+"/e/"+d.elementId+"/features?configuration="+encodeURIComponent(c)+(d.documentId!==ref.did?"&linkDocumentId="+ref.did:""))
-        .then(f=>{ featuresBy[key]=f; },e=>{ if(e&&e.status===401) throw e; noLimits++; });
+      const ck="features|"+d.documentId+"/m/"+d.documentMicroversion+"/e/"+d.elementId+"|"+c, cache=opt.cache||null;
+      const read=()=>get(host+"/api/assemblies/d/"+d.documentId+"/m/"+d.documentMicroversion+"/e/"+d.elementId+"/features?configuration="+encodeURIComponent(c)+(d.documentId!==ref.did?"&linkDocumentId="+ref.did:""))
+        .then(f=>{ featuresBy[key]=f; if(cache&&f) try{ Promise.resolve(cache.put(ck,{features:f})).catch(()=>{}); }catch(e){} },e=>{ if(e&&e.status===401) throw e; noLimits++; });
+      const kept=cache?Promise.resolve().then(()=>cache.get(ck)).catch(()=>null):Promise.resolve(null);
+      return kept.then(hit=>{ if(hit&&hit.features){ featuresBy[key]=hit.features; return; } return read(); });
     }));
     // every Part Studio the robot uses, once, however many parts it places from it
     const jobs=[], seen={};
@@ -88,19 +92,28 @@ function onshapeRead(host, ref, opt){
       const key=onshapeGeomKey(i);
       if(seen[key]) return; seen[key]=1; jobs.push({key, i, ver:i.documentVersion?"v/"+i.documentVersion:"m/"+i.documentMicroversion});
     }));
-    const geom={}; let done=0, at=0;
+    const geom={}; let done=0, at=0, hits=0;
+    /* A part studio at a version or a microversion never changes, so what was
+       read once (opt.cache: {get(key), put(key, value)}, promises) is kept:
+       reading the same robot again costs the assembly and its features, not
+       two calls per part studio (a private Onshape app has 2,500 a year). A
+       cache that throws or is full never stops a read. */
+    const cache=opt.cache||null;
     const one=()=>{
       if(at>=jobs.length) return Promise.resolve();
       const j=jobs[at++], i=j.i, ps=host+"/api/partstudios/d/"+i.documentId+"/"+j.ver+"/e/"+i.elementId;
       const q="?configuration="+encodeURIComponent(i.configuration||"")+(i.documentId!==ref.did?"&linkDocumentId="+ref.did:"");
-      return Promise.all([
+      const fresh=()=>Promise.all([
         // 1.5 mm chords, 20 degrees per facet: the low-poly mesh the bench wants (src/meshfiles.js thins it further)
         get(ps+"/tessellatedfaces"+q+"&outputFaceAppearances=true&outputFacetNormals=false&chordTolerance=0.0015&angleTolerance=0.35"),
         get(ps+"/massproperties"+q+"&massAsGroup=false&useMassPropertyOverrides=true").catch(()=>null)
-      ]).then(t=>{ geom[j.key]={parts:osCompactTess(t[0]), mass:osCompactMass(t[1])}; },e=>{ if(e&&e.status===401) throw e; geom[j.key]=null; })   // a studio this user can't read (403) is left out, named by the builder
-        .then(()=>{ done++; say("Reading part shapes: "+done+" of "+jobs.length+" part studios …",done,jobs.length); return one(); });
+      ]).then(t=>{ geom[j.key]={parts:osCompactTess(t[0]), mass:osCompactMass(t[1])}; if(cache) try{ Promise.resolve(cache.put(j.key,geom[j.key])).catch(()=>{}); }catch(e){} },
+        e=>{ if(e&&e.status===401) throw e; geom[j.key]=null; });   // a studio this user can't read (403) is left out, named by the builder
+      const kept=cache?Promise.resolve().then(()=>cache.get(j.key)).catch(()=>null):Promise.resolve(null);
+      return kept.then(hit=>{ if(hit&&hit.parts){ geom[j.key]=hit; hits++; return; } return fresh(); })
+        .then(()=>{ done++; say("Reading part shapes: "+done+" of "+jobs.length+" part studios"+(hits?" ("+hits+" already here)":"")+" …",done,jobs.length); return one(); });
     };
-    return Promise.all([one(),one(),one(),one(),subLimits()]).then(()=>({asm, features, featuresBy, geom, noLimits:noLimits+(features?0:1)}));
+    return Promise.all([one(),one(),one(),one(),subLimits()]).then(()=>({asm, features, featuresBy, geom, noLimits:noLimits+(features?0:1), cached:hits}));
   });
 }
 
@@ -115,6 +128,28 @@ async function onshapeSignInState(){
     return {ready:!!j.ready, signedIn:!!j.signedIn};
   }catch(e){ return {ready:false, signedIn:false}; }
 }
+/* Part studios read before, kept in this browser (IndexedDB), by the key
+   onshapeRead uses: a document at a version or a microversion, which never
+   changes. At most CACHE_MAX of them; the oldest go first. Null where there's
+   no IndexedDB (a private window, Node). */
+const ONSHAPE_CACHE_MAX=400;
+function onshapeGeomCache(idb){
+  const I=idb||(typeof indexedDB!=="undefined"?indexedDB:null);
+  if(!I) return null;
+  let dbp=null, puts=0;
+  const db=()=>dbp||(dbp=new Promise((ok,no)=>{ const r=I.open("simbench-onshape",1);
+    r.onupgradeneeded=()=>r.result.createObjectStore("geom"); r.onsuccess=()=>ok(r.result); r.onerror=()=>no(r.error); }));
+  const tx=(mode,f)=>db().then(d=>new Promise((ok,no)=>{ const t=d.transaction("geom",mode), q=f(t.objectStore("geom"));
+    t.oncomplete=()=>ok(q&&q.result); t.onerror=()=>no(t.error); t.onabort=()=>no(t.error); }));
+  const prune=()=>tx("readwrite",s=>{ const all=[]; const c=s.openCursor();
+    c.onsuccess=()=>{ const cur=c.result; if(cur){ all.push([cur.key,(cur.value&&cur.value.at)||0]); cur.continue(); }
+      else if(all.length>ONSHAPE_CACHE_MAX){ all.sort((a,b)=>a[1]-b[1]); for(const [k] of all.slice(0,all.length-Math.floor(ONSHAPE_CACHE_MAX*0.75))) s.delete(k); } };
+    return null; });
+  return {
+    get:k=>tx("readonly",s=>s.get(k)).then(v=>v&&v.parts?v:null),
+    put:(k,v)=>tx("readwrite",s=>s.put(Object.assign({at:Date.now()},v),k)).then(()=>{ if(++puts%50===0) return prune(); })
+  };
+}
 /* The whole robot from a pasted assembly address, read through the sign-in.
    host is the relay ("<SimBench>/onshape"); the page's own when not given
    (the engine worker has no page address, so it passes one). */
@@ -125,7 +160,7 @@ async function onshapeFromLink(href, say, host){
   const denied="Onshape says you can't read it: sign in again, and make sure the document is yours or shared with you";
   let name="";
   try{ const r=await fetch(host+"/api/documents/"+ref.did,{credentials:"same-origin",headers:{Accept:"application/json"}}); if(r.ok) name=String((await r.json()).name||""); }catch(e){}
-  const r=await onshapeRead(host, ref, {cred:"same-origin", say, denied});
+  const r=await onshapeRead(host, ref, {cred:"same-origin", say, denied, cache:onshapeGeomCache()});
   return {format:ONSHAPE_FORMAT, v:3, name:name||"Onshape assembly", url:String(href).trim(), asm:r.asm, features:r.features, featuresBy:r.featuresBy, noLimits:r.noLimits, geom:r.geom};
 }
 
