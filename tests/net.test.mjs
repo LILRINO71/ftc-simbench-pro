@@ -101,6 +101,47 @@ test('online: a stranger in the lobby can neither hide a listed match nor take o
   assert.equal(B.O.ads[code], undefined, 'pruned');
 });
 
+test('online: only the host can turn a joiner away; a "no" from anyone else is held, and shown only if nobody lets them in', () => {
+  const hub = loadWithField().netLoopback();
+  const H = computer(hub, 'h');
+  H.O.host({ name: 'Host' });
+  const X = hub.endpoint('x').join('m-' + H.O.code);
+  hub.flush();
+  // joining by code, the host not known yet: a stranger answers first
+  const G = computer(hub, 'g');
+  G.O.join(H.O.code, { name: 'Guest' });
+  X.send({ k: 'nope', why: 'go away' }, 'g');
+  hub.flush();
+  assert.equal(G.O.state, 'room', 'the host let them in');
+  assert.equal(G.O.hostId, 'h');
+  // joining from the lobby (the host known): a stranger's "no" is nothing, the host's is the answer
+  const G2 = computer(hub, 'g2');
+  G2.O.join(H.O.code, { name: 'Two', hid: 'h' });
+  X.send({ k: 'nope', why: 'go away' }, 'g2');
+  hub.flush();
+  assert.equal(G2.O.state, 'room');
+  const G3 = computer(hub, 'g3');
+  G3.O.join(H.O.code, { name: 'Three', hid: 'h' });
+  H.O.room.send({ k: 'nope', why: 'the room is full' }, 'g3');
+  hub.flush();
+  assert.equal(G3.O.state, 'off');
+  assert.match(G3.O.why, /room is full/);
+  // nobody but a stranger in the room: its "no" is the reason given when the wait runs out
+  const Y = hub.endpoint('y').join('m-ZZZZZ'); hub.flush();
+  const G4 = computer(hub, 'g4');
+  G4.O.join('ZZZZZ', { name: 'Four' });
+  Y.send({ k: 'nope', why: 'version' }, 'g4');
+  hub.flush();
+  assert.equal(G4.O.state, 'joining', 'still waiting for the host');
+  assert.equal(G4.O.giveUp(), true);
+  assert.equal(G4.O.state, 'off');
+  assert.match(G4.O.why, /version/);
+  const G5 = computer(hub, 'g5');
+  G5.O.join('ZZZZY', { name: 'Five' }); hub.flush();
+  assert.equal(G5.O.giveUp(), false, 'no answer at all: nothing to show');
+  assert.equal(G5.O.state, 'off');
+});
+
 test('online: places, ready and the right kind of OpMode hold the start; START deals the same match to everyone', () => {
   const hub = loadWithField().netLoopback();
   const H = computer(hub, 'h'), G = computer(hub, 'g'), W = computer(hub, 'w');

@@ -2309,8 +2309,9 @@ const NetUI={
       if(Online.mySlot()&&Sim.phase==="init"){ Sim.start(); updateDS(); }
     }
     if(Online.state==="joining"&&this.joinT&&performance.now()-this.joinT>15000){
-      this.joinT=0; Online.leave();
-      this.say("Nobody answered. Check the code; the host may have closed the room, or a network between you blocks direct connections.","warn");
+      // a "no" heard before the host was known is the answer, if there was one
+      this.joinT=0;
+      if(!Online.giveUp()) this.say("Nobody answered. Check the code; the host may have closed the room, or a network between you blocks direct connections.","warn");
     }
   },
   slow(){

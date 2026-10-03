@@ -189,6 +189,7 @@ const Online={
   slots:null, seed:1, startAt:0, started:false, lastStart:null, fieldKey:null,
   ads:netMap(), chat:[], marks:[], score:null, final:null, why:null,
   hostGone:false,        // the host left after the final buzzer: the result stays, the room is gone
+  nope:null,             // joining: a "no" heard before the host was known, held (see giveUp)
   offset:0, rtt:0, syncs:[], acc:null, fid:0, heard:netMap(),
   // robots' light copies: mine (packed, and its hash), every one heard of by hash, and whose is whose
   model:null, models:netMap(), modelOf:netMap(), asked:netMap(), shown:netMap(), jointsOf:null,
@@ -245,7 +246,7 @@ const Online={
 
   /* ---- hosting and joining ---- */
   reset(){
-    this.state="off"; this.role=null; this.code=null; this.pub=false; this.hostId=null; this.why=null; this.hostGone=false;
+    this.state="off"; this.role=null; this.code=null; this.pub=false; this.hostId=null; this.why=null; this.hostGone=false; this.nope=null;
     this.players=netMap(); this.remote=netMap(); this.slots=null; this.started=false; this.score=null; this.final=null;
     this.chat=[]; this.marks=[]; this.syncs=[]; this.offset=0; this.rtt=0; this.heard=netMap(); this.lastStart=null; this.fieldKey=null;
     this.modelOf=netMap(); this.asked=netMap(); this.shown=netMap(); this.pend=[];
@@ -298,6 +299,14 @@ const Online={
   /* The field goes back to this bench's own (between matches, or after leaving). */
   unmatch(){ if(typeof Match!=="undefined"){ Match.players=[]; Match.net=false; Match.mirror=false; Match.noUser=false; } },
   lost(why){ const w=why; this.leave(); this.why=w; this.emit("error",w); },
+  /* The app's join timeout: nobody let this computer in. A "no" held from someone
+     who may have been the host is the reason, if one came (true: said, as an error). */
+  giveUp(){
+    if(this.state!=="joining") return false;
+    const why=this.nope;
+    if(why){ this.lost("The host couldn't take you: "+why); return true; }
+    this.leave(); return false;
+  },
 
   peerJoin(id){
     // whoever arrives hears which robot this is, and asks for it if it doesn't have it
@@ -336,7 +345,13 @@ const Online={
         if(typeof m.now==="number"&&isFinite(m.now)) this.offset=m.now-this.now();
         this.onRoster(m,from); this.sync();
         return;
-      case "nope": if(this.role==="guest"&&this.state==="joining") this.lost("The host couldn't take you: "+(netStr(m.why,80)||"no reason given")); return;
+      case "nope":
+        if(this.role!=="guest"||this.state!=="joining") return;
+        if(from===this.hostId) this.lost("The host couldn't take you: "+(netStr(m.why,80)||"no reason given"));
+        // the host not known yet, so anyone here could have said it: held, and the
+        // reason given only if nobody lets this computer in before the wait runs out
+        else if(!this.hostId) this.nope=netStr(m.why,80)||"no reason given";
+        return;
       case "roster": if(fromHost) this.onRoster(m,from); return;
       case "pick": if(this.role==="host") this.assign(from,m.slot); return;
       case "ready":
