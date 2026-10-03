@@ -438,11 +438,12 @@ onmessage=async e=>{
       try{ this.worker=this.worker||this.makeWorker(); }catch(e){ this.worker=null; this.noWorker=true; }
     }
     if(this.worker){
-      const id=++this.seq;
+      const id=++this.seq, w=this.worker;
       job=new Promise((resolve,reject)=>{ this.pending[id]={resolve,reject}; });
-      this.worker.postMessage({id, buf, params:OCCT_PARAMS},[buf]);
+      // the worker knows its job, so its onerror can fail this job at once
+      w.job=id; w.postMessage({id, buf, params:OCCT_PARAMS},[buf]);
       // a worker that dies on start (CSP, offline importScripts) falls back once
-      job=job.catch(e=>{ if(this.noWorker&&!/couldn't read/.test(e.message)) return this.mainThread(new TextEncoder().encode(text).buffer); throw e; });
+      job=job.catch(e=>{ if((this.noWorker||w.dead&&!w.done)&&!/couldn't read/.test(e.message)) return this.mainThread(new TextEncoder().encode(text).buffer); throw e; });
     }else job=this.mainThread(buf);
     const ms=timeoutMs||120000;
     let timer=null;
