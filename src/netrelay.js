@@ -47,7 +47,7 @@ const netB64=u8=>{ let s=""; for(let i=0;i<u8.length;i+=0x8000) s+=String.fromCh
 const netUnB64=s=>{ try{ return Uint8Array.from(atob(String(s||"")),c=>c.charCodeAt(0)); }catch(e){ return null; } };
 
 /* opts: base (the site, default this page's origin), self, WebSocket,
-   EventSource, fetch, sse (true: skip the WebSocket), setTimeout */
+   EventSource, fetch, sse (true: skip the WebSocket), setTimeout, tok (the secret) */
 function netRelay(opts){
   const o=opts||{};
   const base=String(o.base||(typeof location!=="undefined"?location.origin:"")).replace(/\/$/,"");
@@ -56,16 +56,22 @@ function netRelay(opts){
   const F=o.fetch||(typeof fetch!=="undefined"?fetch.bind(globalThis):null);
   const later=o.setTimeout||((f,ms)=>setTimeout(f,ms)), stop=o.clearTimeout||(t=>clearTimeout(t));
   const self=o.self||netRandomId();
+  // a secret this browser chose: the room binds the id to it, so only this browser
+  // can speak as the id, or take its place back after a dropped connection
+  const tok=o.tok||netRandomId(24);
   const out={self, onError:null, mode:null, join(name){
-    const url=base+"/room/"+encodeURIComponent(name), q="?id="+encodeURIComponent(self);
-    let ws=null, es=null, mode=null, ready=false, closed=false, timer=null, postT=null, retried=false;
+    const url=base+"/room/"+encodeURIComponent(name), q="?id="+encodeURIComponent(self)+"&tok="+encodeURIComponent(tok);
+    let ws=null, es=null, mode=null, ready=false, closed=false, timer=null, postT=null, tries=0;
     const queue=[], posts=[], peers=new Set();
     const H={msg:null, bin:null, join:null, leave:null, time:[], cmd:null, replay:null};
     const err=d=>{ if(out.onError) out.onError(Object.assign({room:name, via:mode},d)); };
     const handle=m=>{
       if(!m||typeof m!=="object") return;
-      if(m.t==="hello"){ ready=true; out.mode=mode; stop(timer);
-        for(const p of m.peers||[]) if(typeof p==="string"&&!peers.has(p)){ peers.add(p); if(H.join) H.join(p); }
+      if(m.t==="hello"){ ready=true; tries=0; out.mode=mode; stop(timer);
+        // back after a drop: whoever left meanwhile has left, whoever came has come
+        const now=new Set((m.peers||[]).filter(p=>typeof p==="string"));
+        for(const p of [...peers]) if(!now.has(p)){ peers.delete(p); if(H.leave) H.leave(p); }
+        for(const p of now) if(!peers.has(p)){ peers.add(p); if(H.join) H.join(p); }
         while(queue.length) queue.shift()(); }
       else if(m.t==="join"&&typeof m.id==="string"){ if(!peers.has(m.id)){ peers.add(m.id); if(H.join) H.join(m.id); } }
       else if(m.t==="leave"&&typeof m.id==="string"){ if(peers.delete(m.id)&&H.leave) H.leave(m.id); }
@@ -76,10 +82,14 @@ function netRelay(opts){
       else if(m.t==="replay"){ if(H.replay) H.replay(m.rows||[],!!m.done); }
       else if(m.t==="err") err({error:m.why||"error"});
     };
-    const lostAll=()=>{ for(const p of [...peers]){ peers.delete(p); if(H.leave) H.leave(p); } };
-    const flushPosts=()=>{ postT=null; if(!posts.length||closed) return; const batch=posts.splice(0,64);
-      F(url+"/send"+q,{method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(batch), keepalive:true})
-        .then(r=>{ if(!r.ok) err({error:"send-"+r.status}); }).catch(()=>err({error:"send-failed"}));
+    const post=(body,type)=>F(url+"/send"+q,{method:"POST", headers:{"Content-Type":type}, body, keepalive:body.length<60000})
+      .then(r=>{ if(!r.ok) err({error:"send-"+r.status}); }).catch(()=>err({error:"send-failed"}));
+    // what an SSE client says goes up in POSTs: JSON in batches under the room's
+    // 64 KB, and each binary on its own as raw bytes
+    const flushPosts=()=>{ postT=null; if(!posts.length||closed) return;
+      const batch=[]; let size=2;
+      while(posts.length&&batch.length<64){ const s=JSON.stringify(posts[0]).length+1; if(batch.length&&size+s>60000) break; batch.push(posts.shift()); size+=s; }
+      post(JSON.stringify(batch),"application/json");
       if(posts.length) postT=later(flushPosts,RELAY_POST_MS); };
     const say=m=>{
       if(closed) return;
@@ -88,39 +98,46 @@ function netRelay(opts){
           if(m.t==="b") ws.send(netPackBin({t:"b", to:m.to, meta:m.meta},m.payload));
           else ws.send(JSON.stringify(m));
         }else if(mode==="sse"){
-          posts.push(m.t==="b"?{t:"b64", to:m.to, meta:m.meta, b64:netB64(m.payload)}:m);
-          if(!postT) postT=later(flushPosts,RELAY_POST_MS);
+          if(m.t==="b") post(netPackBin({t:"b", to:m.to, meta:m.meta},m.payload),"application/octet-stream");
+          else { posts.push(m); if(!postT) postT=later(flushPosts,RELAY_POST_MS); }
         }
       };
       if(ready) go(); else queue.push(go);
     };
     const sse=()=>{
-      if(closed) return;
+      if(closed||es) return;                           // one stream, however we got here
       if(!ES||!F){ err({error:"no-route", fatal:true}); return; }
       mode="sse"; ready=false;
       es=new ES(url+"/sse"+q);
       es.onmessage=e=>{ let m; try{ m=JSON.parse(e.data); }catch(x){ return; } handle(m); };
-      es.onerror=()=>{ if(!ready&&!closed){ err({error:"unreachable", fatal:true}); try{ es.close(); }catch(x){} } };
+      // the browser reconnects a dropped stream by itself, with the same secret, and the
+      // room takes it back; one that never got in, or keeps failing, is reported
+      es.onerror=()=>{ if(closed) return; if(!ready||++tries>5){ err({error:"unreachable", fatal:true}); try{ es.close(); }catch(x){} } else ready=false; };
     };
+    // a socket that's been given up on says nothing more, closes quietly, and can't start a second fallback
+    const drop=s=>{ if(!s) return; s.onopen=s.onmessage=s.onclose=s.onerror=null; try{ s.close(); }catch(e){} };
     const wsOpen=()=>{
       mode="ws"; ready=false;
-      try{ ws=new WS(url.replace(/^http/,"ws")+"/ws"+q); }catch(e){ sse(); return; }
+      try{ ws=new WS(url.replace(/^http/,"ws")+"/ws"+q); }catch(e){ ws=null; sse(); return; }
       ws.binaryType="arraybuffer";
-      timer=later(()=>{ if(!ready&&!closed){ try{ ws.close(); }catch(e){} ws=null; sse(); } },RELAY_OPEN_MS);
-      ws.onmessage=e=>{
+      const me=ws;
+      timer=later(()=>{ if(!ready&&!closed&&ws===me){ drop(me); ws=null; sse(); } },RELAY_OPEN_MS);
+      me.onmessage=e=>{
+        if(ws!==me) return;
         if(typeof e.data==="string"){ let m; try{ m=JSON.parse(e.data); }catch(x){ return; } handle(m); return; }
         const f=netUnpackBin(e.data); if(!f||!H.bin||!peers.has(f.header.from)) return;
         H.bin(f.payload.buffer,f.header.meta||{},f.header.from);
       };
-      ws.onclose=()=>{
-        if(closed) return;
-        stop(timer);
-        if(!ready){ ws=null; sse(); return; }          // never got in: plain HTTPS instead
-        // dropped mid-match: everyone left as far as this computer knows; one quick retry
-        ready=false; lostAll(); ws=null;
-        if(!retried){ retried=true; later(()=>{ if(!closed) wsOpen(); },800); } else err({error:"dropped", fatal:true});
+      me.onclose=()=>{
+        if(closed||ws!==me) return;
+        stop(timer); ws=null;
+        if(!ready){ sse(); return; }                    // never got in: plain HTTPS instead
+        // dropped mid-match: back in with the same secret, which the room recognises
+        ready=false;
+        if(++tries<=3) later(()=>{ if(!closed&&!ws) wsOpen(); },400*tries);
+        else { for(const p of [...peers]){ peers.delete(p); if(H.leave) H.leave(p); } err({error:"dropped", fatal:true}); }
       };
-      ws.onerror=()=>{};
+      me.onerror=()=>{};
     };
     if(o.sse||!WS) sse(); else wsOpen();
     return {
@@ -135,7 +152,7 @@ function netRelay(opts){
       via(){ return mode; },
       leave(){ closed=true; stop(timer); if(postT) stop(postT);
         try{ if(ws) ws.close(1000,"bye"); }catch(e){} try{ if(es) es.close(); }catch(e){}
-        peers.clear(); }
+        ws=null; es=null; peers.clear(); }
     };
   }};
   return out;
