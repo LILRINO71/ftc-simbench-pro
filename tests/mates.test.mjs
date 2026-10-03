@@ -108,6 +108,21 @@ test('a mate drawn away from its zero: its limits count from where the connector
   assert.deepEqual(by('Lift Carriage').limits.map((v) => +v.toFixed(6)), [0, 0.27]);
 });
 
+test('mate quantities in every unit Onshape writes, and the number behind an expression it can\'t read', () => {
+  const near = (e, v) => assert.ok(Math.abs(E.mateQty(e) - v) < 1e-12, JSON.stringify(e) + ' -> ' + E.mateQty(e) + ', not ' + v);
+  near('3 yd', 3 * 0.9144); near('2 yards', 2 * 0.9144); near('1 yard', 0.9144);
+  near('10 centimeters', 0.1); near('10 centimetre', 0.1); near('1 centimeter', 0.01);
+  near('25 millimetres', 0.025); near('25 millimetre', 0.025); near('25 millimeters', 0.025);
+  near('1 foot', 0.3048); near('2 feet', 0.6096); near('3 inches', 3 * 0.0254); near('2 metres', 2);
+  near('90 degrees', Math.PI / 2); near('2 radians', 2);
+  near('+5 mm', 0.005); near('1e+2 mm', 0.1); near('1.5E-1 m', 0.15); near('.5 in', 0.0127);
+  // a variable or a formula: the parameter's own number (metres or radians), when it has one
+  near({ expression: '#liftTop', value: 0.3 }, 0.3);
+  near({ expression: '2 * #reach', value: 12, units: 'inch' }, 12 * 0.0254);
+  assert.ok(Number.isNaN(E.mateQty({ expression: '#liftTop' })), 'no number at all: unread');
+  assert.ok(Number.isNaN(E.mateQty('12 furlongs')));
+});
+
 test('a STEP exported under another placement still lines up (the global offset is found)', () => {
   const cad = fresh();
   const A = clone(R.onshape.assembly);

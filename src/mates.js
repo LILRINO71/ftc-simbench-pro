@@ -66,15 +66,27 @@ const mateKey=s=>String(s||"").replace(/\s*<\d+>\s*$/,"").replace(/\s+/g," ").tr
 const pathKey=p=>(p||[]).join("/");
 
 /* ---- quantity expressions from the features endpoint: "18 in", "-90 deg",
-   "0.3 m", "25.4*mm". Metres and radians out; NaN if unreadable. */
+   "0.3 m", "25.4*mm", "+1e+2 millimetres". Metres and radians out; NaN if
+   unreadable. A parameter whose expression can't be read here (a variable,
+   a formula) falls back to its own number, value (in its units, else
+   metres or radians). */
+const MATE_UNITS={"":1, m:1, meter:1, meters:1, metre:1, metres:1,
+  mm:0.001, millimeter:0.001, millimeters:0.001, millimetre:0.001, millimetres:0.001,
+  cm:0.01, centimeter:0.01, centimeters:0.01, centimetre:0.01, centimetres:0.01,
+  in:0.0254, inch:0.0254, inches:0.0254, ft:0.3048, foot:0.3048, feet:0.3048, yd:0.9144, yard:0.9144, yards:0.9144,
+  rad:1, radian:1, radians:1, deg:Math.PI/180, degree:Math.PI/180, degrees:Math.PI/180};
 function mateQty(e){
-  if(e&&typeof e==="object") e=e.expression!=null?e.expression:(e.value!=null?e.value:"");
-  const m=/^\s*(-?[\d.]+(?:e-?\d+)?)\s*\*?\s*([a-z]*)\s*$/i.exec(String(e==null?"":e));
+  if(e&&typeof e==="object"){
+    const v=mateQty(e.expression);
+    if(Number.isFinite(v)) return v;
+    if(typeof e.value==="string") return mateQty(e.value);
+    const k=MATE_UNITS[String(e.units||"").trim().toLowerCase()];
+    return typeof e.value==="number"&&Number.isFinite(e.value)&&k!=null?e.value*k:NaN;
+  }
+  const m=/^\s*([+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?)\s*\*?\s*([a-z]*)\s*$/i.exec(String(e==null?"":e));
   if(!m) return NaN;
-  const v=+m[1], u=m[2].toLowerCase();
-  const k={"":1, m:1, meter:1, meters:1, mm:0.001, millimeter:0.001, cm:0.01, in:0.0254, inch:0.0254, ft:0.3048,
-           rad:1, radian:1, deg:Math.PI/180, degree:Math.PI/180}[u];
-  return k==null?NaN:v*k;
+  const k=MATE_UNITS[m[2].toLowerCase()];
+  return k==null?NaN:+m[1]*k;
 }
 
 /* ---- read the assembly definition. Mates in a subassembly are written
