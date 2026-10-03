@@ -190,9 +190,11 @@ test('online: each sees the other\'s robot where it is, and the AI robots and th
   // the guest drives up the field; the host sits. The host's AI robots, step by step, to compare with
   // where the guest draws them: a tenth of a second behind, on purpose (between two snapshots heard)
   const past = [];
+  // the field as one key: the HIVEs, the TIPs, what's on the floor and the score
+  const field = (pc, score) => JSON.stringify([pc.F.hive, pc.F.tips, pc.M.floor.map((e) => e.id).sort((a, b) => a - b), score]);
   run(hub, [H, G], 6, (pc) => {
     if (pc === G) { pc.sim.chassis.y += 0.6 * 0.02; pc.sim.vel = { x: 0, y: 0.6 }; }
-    else past.push({ t: H.clock.t, bots: H.M.bots.map((b) => ({ x: b.x, y: b.y })) });
+    else past.push({ t: H.clock.t, bots: H.M.bots.map((b) => ({ x: b.x, y: b.y })), field: field(H, H.O.scoreOut(H.M.score(H.sim))) });
   });
   const hp = G.M.players.find((p) => p.id === 'host'), gp = H.M.players.find((p) => p.id === 'guest');
   assert.ok(hp && gp, 'each has the other');
@@ -204,10 +206,10 @@ test('online: each sees the other\'s robot where it is, and the AI robots and th
     const m = G.M.bots.find((x) => x.id === b.id), d = Math.hypot(m.x - then.bots[i].x, m.y - then.bots[i].y);
     assert.ok(d < 0.04, `${b.name}: ${(d * 100).toFixed(1)} cm from where the host had it 0.1 s before`);
   });
-  assert.deepEqual(G.F.hive, H.F.hive);
-  assert.deepEqual(G.F.tips, H.F.tips);
-  assert.deepEqual(G.M.floor.map((e) => e.id).sort(), H.M.floor.map((e) => e.id).sort());
-  assert.deepEqual(G.O.score, H.O.scoreOut(H.M.score(H.sim)));
+  // the field too is shown as the host had it a moment ago (the newest snapshot at least 0.1 s old),
+  // not as it is now: an AI robot may have picked something up since
+  const recent = past.filter((p) => p.t >= H.clock.t - 250).map((p) => p.field);
+  assert.ok(recent.includes(field(G, G.O.score)), 'the guest\'s field is one the host had in the last quarter second');
 });
 
 test('online: two robots that meet push each other apart, each computer moving its own', () => {
