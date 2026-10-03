@@ -1070,3 +1070,10 @@ details.fine summary:hover{color:var(--accent-tx);}
 .os-meter.bad i{background:var(--fail); width:100%;}
 .os-prog{font-size:14px; color:var(--tx); margin:4px 0;}
 @media (max-width:520px){.load-row{grid-template-columns:1fr;} .os-sheet{padding:18px 14px 12px;} .os-link{flex-direction:column;}}
+
+/* ---- the robots this browser kept (RecentRobots in app.js) ---- */
+.recent{margin-top:8px;}
+.recent-h{display:block; font-size:11px; font-weight:600; color:var(--tx-3); letter-spacing:.02em;}
+.recent-h small{font-weight:400;}
+.recent-list{display:flex; flex-wrap:wrap; gap:6px; margin-top:5px;}
+.recent-list .btn-sm{max-width:100%; overflow:hidden; text-overflow:ellipsis;}

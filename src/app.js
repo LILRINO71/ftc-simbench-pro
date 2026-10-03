@@ -1421,6 +1421,7 @@ function loadOnshapeRobot(p,reparse){
   $("#mateNote").innerHTML=V.items.map(i=>"<li><b>"+(i.sev==="warn"?"Check":"Note")+":</b> "+esc(i.text)+"</li>").join("")+(cad.onshape.why||[]).map(w=>"<li>"+esc(w)+"</li>").join("");
   const pill=$("#matePill"); if(pill){ pill.textContent=n+" joint"+(n===1?"":"s")+(V.counts.warn?" · "+V.counts.warn+" to check":""); pill.className="pill "+(V.counts.warn?"warnp":"ok"); }
   if(!file) OnshapeHelp.done(p.name, cad.solids.length, cad.mechs.filter(m=>m.fromMate).length, cad.onshape&&cad.onshape.kg);
+  if(!reparse) RecentRobots.remember(cad);
   onshapeNote("<b>"+esc(p.name)+"</b> loaded "+(file?"from its "+from:"straight from Onshape")+": "+cad.solids.length+" parts with their colours"+
     (cad.onshape.kg?", "+cad.onshape.kg.toFixed(1)+" kg from your materials":"")+", and "+n+" joint"+(n===1?"":"s")+" from your "+(file?"joints":"mates")+". Load your code and press INIT.","ok");
   renderFrameNote&&renderFrameNote();
@@ -1673,6 +1674,7 @@ function exactGeometry(cad,text){
   Tess.exact(cad,text,progress).then(res=>{
     if(CAD!==cad) return;                     // another file was dropped meanwhile
     EXACT={state:res&&res.meshes&&res.meshes.length?"ok":"failed", msg:"the file has no solid surfaces to mesh"};
+    if(EXACT.state==="ok"&&ownRobot()) setTimeout(()=>RecentRobots.remember(cad),0);
     const n=View.setExact(cad,res);
     if(CadView.on) CadView.renderTree();
     const secs=((performance.now()-t0)/1000).toFixed(0);
@@ -3015,7 +3017,7 @@ const RobotPackage={
     r.onload=async()=>{
       const u=await simbotUnpack(new Uint8Array(r.result));
       if(!u.ok){ $("#cadStatus").textContent="that robot package wouldn't open — "+u.error; $("#cadDrop").className="drop bad"; return; }
-      this.load(u.pkg,file.name);
+      if(this.load(u.pkg,file.name)) RecentRobots.remember(CAD,new Uint8Array(r.result));
     };
     r.readAsArrayBuffer(file);
   },
@@ -3039,6 +3041,63 @@ const RobotPackage={
     renderFrameNote&&renderFrameNote();
     Status.render&&Status.render();
     return true;
+  }
+};
+/* ---------- the robots this browser kept ----------
+   A team that brought its robot (from Onshape, a URDF or MJCF, a package, or
+   a STEP once its surfaces are meshed) gets it back next time from here, as a
+   robot package: no Onshape sign-in, no API calls, no network. The last five
+   are kept, in IndexedDB; nothing leaves the browser. */
+const RecentRobots={
+  MAX:5,
+  db(){
+    if(!this._db) this._db=new Promise((ok,no)=>{
+      if(typeof indexedDB==="undefined"){ no(new Error("no IndexedDB")); return; }
+      const r=indexedDB.open("simbench-robots",1);
+      r.onupgradeneeded=()=>r.result.createObjectStore("robots"); r.onsuccess=()=>ok(r.result); r.onerror=()=>no(r.error); });
+    return this._db;
+  },
+  tx(mode,f){ return this.db().then(d=>new Promise((ok,no)=>{ const t=d.transaction("robots",mode), q=f(t.objectStore("robots"));
+    t.oncomplete=()=>ok(q&&q.result); t.onerror=()=>no(t.error); t.onabort=()=>no(t.error); })); },
+  async list(){ const all=await this.tx("readonly",s=>s.getAll()); return (all||[]).filter(r=>r&&r.name&&r.bytes).sort((a,b)=>b.at-a.at); },
+  /* after a robot the team brought has loaded: packed when the page is idle (or
+     the package's own bytes, when it came as one) */
+  remember(cad,bytes){
+    if(!cad||!cad.solids||!cad.solids.length||(typeof DEFAULT_ROBOT!=="undefined"&&cad.name===DEFAULT_ROBOT.step)) return;
+    const run=async()=>{
+      try{
+        // another robot since: not this one. The same robot re-read (a new up, its joints
+        // applied) is a new object with the same name: keep that one, as it is now
+        if(!CAD||CAD.name!==cad.name) return;
+        cad=CAD;
+        let b=bytes, joints=cad.mechs.filter(m=>!m.drive&&m.kind!=="fixed").length;
+        if(!b){
+          const ex=View.exact&&View.exact.cad===cad&&typeof tessPackageMeshes==="function"?tessPackageMeshes(cad,View.exact.res):null;
+          b=await simbotPack(simbotFromCad(cad,{created:new Date().toISOString(), map:MAP||{}, devices:CODE?CODE.devices:null, meshFor:ex}));
+        }
+        if(b.length>20e6) return;
+        const name=String(cad.name||"robot").slice(0,120);
+        await this.tx("readwrite",s=>s.put({name, at:Date.now(), parts:cad.solids.length, joints, bytes:b},name));
+        const all=await this.list();
+        for(const old of all.slice(this.MAX)) await this.tx("readwrite",s=>s.delete(old.name));
+        this.render();
+      }catch(e){ this.lastError=e; }                       // a private window keeps nothing; that's fine
+    };
+    if(typeof requestIdleCallback==="function") requestIdleCallback(run,{timeout:2500}); else setTimeout(run,1500);
+  },
+  async render(){
+    const box=$("#recentRobots"), list=$("#recentList"); if(!box||!list) return;
+    let all=[]; try{ all=await this.list(); }catch(e){ all=[]; }
+    box.hidden=!all.length;
+    list.innerHTML=all.map((r,i)=>'<button class="btn-sm" type="button" data-recent="'+i+'" title="'+esc(r.parts+" parts · "+r.joints+" joints · kept "+new Date(r.at).toLocaleDateString())+'">'+esc(r.name.replace(/\.(step|stp|urdf|simbot)$/i,""))+'</button>').join("");
+    list.onclick=async e=>{ const b=e.target.closest("button[data-recent]"); if(!b) return; const r=all[+b.dataset.recent]; if(r) this.open(r); };
+  },
+  async open(r){
+    $("#cadStatus").textContent="opening "+r.name+" …";
+    const u=await simbotUnpack(r.bytes);
+    if(!u.ok){ $("#cadStatus").textContent="that kept robot wouldn't open — "+u.error; $("#cadDrop").className="drop bad"; return; }
+    RobotPackage.load(u.pkg,r.name+".simbot");
+    this.remember(CAD,r.bytes);                             // to the top of the list
   }
 };
 /* ---------- .ftcsim workspaces --------------------------- */
@@ -3339,6 +3398,7 @@ function proBoot(){
   Shots.alliance=View.alliance=al==="blue"?"blue":"red";
   ShotUI.arc=store.get("ftcbench.arc","1")!=="0"; $("#arcToggle").checked=ShotUI.arc;
   View.init($("#viewport"));
+  RecentRobots.render();
   Perf.pr=Math.min(devicePixelRatio||1,View.tier.budget.pixelRatio);
   OPTS.substeps=View.tier.budget.substeps;          // the solver's substeps per 20 ms tick, by tier
   View.setView("iso");
