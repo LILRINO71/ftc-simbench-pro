@@ -284,6 +284,13 @@ const JoltMech=(function(){
       values, hash, destroy, notes, chassis};
   }
 
+  /* Which way a joint turns as the code's value goes up: m.dir for a joint read
+     from mates or a spec; a guessed lift is drawn turning the other way about
+     its axis (src/view3d.js mechPose), so it moves the same way here. */
+  function jointSign(m){
+    const k=typeof normJointKind==="function"?normJointKind(m.kind):m.kind;
+    return (m.dir||1)*(!m.fromMate&&k==="revolute-lift"?-1:1);
+  }
   /* ---- the bench's devices -> commands, and the joints' motion -> encoders ----
      The sim keeps every device in the code's frame (AGENTS.md: ticks count up
      under positive power whatever setDirection says); a joint turns positive
@@ -292,7 +299,7 @@ const JoltMech=(function(){
     const o=opts||{}, cmds={}, arm={};
     for(const name in dev){
       const s=dev[name], m=s.mech; if(!m||!world.joints.has(m.id)) continue;
-      const j=world.joints.get(m.id), dir=m.dir||1, spec=s.spec||{};
+      const j=world.joints.get(m.id), dir=jointSign(m), spec=s.spec||{};
       if(s.kind==="motor"){
         const rpm=spec.rpm||300, stall=spec.stallNm||0.5;
         let k;                                   // joint units per output-shaft radian
@@ -318,7 +325,7 @@ const JoltMech=(function(){
   function readBack(dev,world,dt){
     for(const name in dev){
       const s=dev[name], m=s.mech; if(!m||!world.joints.has(m.id)) continue;
-      const j=world.joints.get(m.id), dir=m.dir||1;
+      const j=world.joints.get(m.id), dir=jointSign(m);
       if(s.kind==="motor"){
         const prev=s.ticks;
         if(j.lin){ const mpt=typeof slideMPerTick==="function"?slideMPerTick(s):0.0005; s.ticks=j.q*dir/mpt; s.revs=s.ticks/(s.tpr||537.7); }
@@ -345,5 +352,5 @@ const JoltMech=(function(){
     }
     return arm;
   }
-  return {build, bodiesOf, deviceCommands, readBack, armatureOf, diagonalize, ROTOR};
+  return {build, bodiesOf, deviceCommands, readBack, armatureOf, jointSign, diagonalize, ROTOR};
 })();

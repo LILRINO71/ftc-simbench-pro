@@ -130,7 +130,7 @@ test('jolt: the same commands give the same state, step for step (lockstep needs
 
 test('jolt: the bench\'s devices drive their joints and read their encoders back in the code\'s frame', () => {
   const cad = armCad([0, 0, 1]);
-  const m = cad.mechs[0]; m.gear = 2;
+  const m = cad.mechs[0]; m.gear = 2; m.fromMate = { name: 'arm' };
   const w = E.JoltMech.build(J, cad);
   const s = { kind: 'motor', mech: m, spec: { rpm: 117, stallNm: 9, ratio: 50.9 }, act: 1, cmd: 1, tpr: 1425.1, revs: 0, ticks: 0 };
   const dev = { arm: s };
@@ -155,4 +155,11 @@ test('jolt: the rotors two motors put on one joint add up, through the gearbox s
   const a = E.JoltMech.armatureOf(dev);
   assert.ok(Math.abs(a.arm - 2 * E.JoltMech.ROTOR.motor * (50.9 * 2) ** 2) < 1e-12);
   assert.equal(a.lift, undefined, 'a slide\'s spool isn\'t a turning joint');
+});
+
+test('jolt: a guessed lift turns the way the kinematic view draws it; a mate joint by its own axis', () => {
+  assert.equal(E.JoltMech.jointSign({ kind: 'revolute-lift' }), -1);
+  assert.equal(E.JoltMech.jointSign({ kind: 'revolute-lift', dir: -1 }), 1);
+  assert.equal(E.JoltMech.jointSign({ kind: 'revolute-lift', fromMate: {} }), 1);
+  assert.equal(E.JoltMech.jointSign({ kind: 'linear', dir: -1 }), -1);
 });
