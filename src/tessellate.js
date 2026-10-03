@@ -451,8 +451,10 @@ onmessage=async e=>{
     postMessage({id:d.id, ok:!!(r&&r.success), res:r},tr);
   }catch(err){ postMessage({id:d.id, ok:false, error:String(err&&err.message||err)}); }
 };`;
-    const url=URL.createObjectURL(new Blob([src],{type:"text/javascript"}));
-    const w=new Worker(url);
+    // one blob URL for every worker this page starts: a new one per worker (four per
+    // robot, more after a stall) was never revoked, so each held its blob for good
+    this.workerUrl=this.workerUrl||URL.createObjectURL(new Blob([src],{type:"text/javascript"}));
+    const w=new Worker(this.workerUrl);
     w.onmessage=e=>{ w.done=(w.done||0)+1; w.job=null; const p=this.pending[e.data.id]; if(!p) return; delete this.pending[e.data.id];
       e.data.ok?p.resolve(e.data.res):p.reject(new Error(e.data.error||"OpenCascade couldn't read this STEP file")); };
     // one worker's error (a part too big for its memory, a hiccup loading OpenCascade)
@@ -488,11 +490,12 @@ onmessage=async e=>{
       try{ this.worker=this.worker||this.makeWorker(); }catch(e){ this.worker=null; this.noWorker=true; }
     }
     if(this.worker){
-      const id=++this.seq;
+      const id=++this.seq, w=this.worker;
       job=new Promise((resolve,reject)=>{ this.pending[id]={resolve,reject}; });
-      this.worker.postMessage({id, buf, params:OCCT_PARAMS},[buf]);
+      // the worker knows its job, so its onerror can fail this job at once
+      w.job=id; w.postMessage({id, buf, params:OCCT_PARAMS},[buf]);
       // a worker that dies on start (CSP, offline importScripts) falls back once
-      job=job.catch(e=>{ if(this.noWorker&&!/couldn't read/.test(e.message)) return this.mainThread(new TextEncoder().encode(text).buffer); throw e; });
+      job=job.catch(e=>{ if((this.noWorker||w.dead&&!w.done)&&!/couldn't read/.test(e.message)) return this.mainThread(new TextEncoder().encode(text).buffer); throw e; });
     }else job=this.mainThread(buf);
     const ms=timeoutMs||120000;
     let timer=null;
@@ -569,6 +572,9 @@ onmessage=async e=>{
     if(cad&&cad.occs&&cad.occs.length)
       return this.perShape(cad,text,onProgress).catch(e=>{
         if(text.length>30e6) throw e;                 // a big file won't do better whole
+        // no workers: perShape kept the page responsive on purpose, and run()
+        // would now mesh the whole file on the page thread instead
+        if(this.noWorker) throw e;
         return this.run(text);
       });
     return this.run(text);

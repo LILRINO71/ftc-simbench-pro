@@ -436,7 +436,7 @@ function renderBindList(){
       const i=CONTROL_ORDER.indexOf(x), j=CONTROL_ORDER.indexOf(y); return (i<0?99:i)-(j<0?99:j); })
     .map(btn=>{
       const g=byBtn[btn];
-      return `<div class="bindrow" data-btn="${btn}">
+      return `<div class="bindrow" data-btn="${esc(btn)}">
         <span class="bk">${esc(CONTROL_LABEL(btn).slice(0,7))}</span>
         <span class="bd">${esc(describe(g))}
         <span class="edge">${g[0].analog?"analog — follows the stick":(g[0].cond?"when "+esc(g[0].cond.trim().slice(0,52)):"while held")}</span></span></div>`;
@@ -780,6 +780,7 @@ function renderFindings(){
   cc.textContent=cnt.fail?String(cnt.fail):(cnt.warn?String(cnt.warn):"");
   cc.className="count"+(cnt.fail?" fail":cnt.warn?" warn":"");
   const SEVL={fail:"WON'T WORK",warn:"RISKY",pass:"OK",info:"NOTE"};
+  // title, body and fix are HTML: every name in them was escaped where the finding was built (escHTML)
   $("#findings").innerHTML=live.length?live.map(f=>`<div class="finding ${f.sev}">
       <div class="fhead"><span class="fsev">${SEVL[f.sev]}</span><span class="ftitle">${f.title}</span>
         <button class="fignore" data-ig="${esc(f.key)}" title="Hide this finding — it stays hidden next time too">Ignore</button></div>
@@ -790,7 +791,7 @@ function renderFindings(){
     :`<p class="cmp-note">Nothing to report${hidden.length?" — "+hidden.length+" finding"+(hidden.length>1?"s":"")+" ignored":""}.</p>`;
   $("#ignoredWrap").innerHTML=hidden.length
     ?`<div class="ignored-head"><h4>Ignored · ${hidden.length}</h4><span class="spacer"></span><button class="btn-sm" id="clearIgnored">Restore all</button></div>`+
-      hidden.map(f=>`<div class="ign-row"><span class="t">${esc(f.title.replace(/<[^>]+>/g,""))}</span><button class="btn-sm" data-unig="${esc(f.key)}">Restore</button></div>`).join(""):"";
+      hidden.map(f=>`<div class="ign-row"><span class="t">${esc(stripTags(f.title))}</span><button class="btn-sm" data-unig="${esc(f.key)}">Restore</button></div>`).join(""):"";
   $$("[data-ig]").forEach(b=>b.addEventListener("click",()=>{ IGNORED[b.dataset.ig]=1; saveIgnored(); renderFindings(); saveRig(); }));
   $$("[data-unig]").forEach(b=>b.addEventListener("click",()=>{ delete IGNORED[b.dataset.unig]; saveIgnored(); renderFindings(); saveRig(); }));
   const ci=$("#clearIgnored"); if(ci) ci.addEventListener("click",()=>{ IGNORED={}; saveIgnored(); renderFindings(); saveRig(); });
@@ -1381,9 +1382,18 @@ function readText(file,cb,err){
   r.readAsText(file);
 }
 let LAST_STEP=null;                 // the dropped file's text, for the Up override and the exact geometry
+let STEP_READS=0;                       // STEP files being read right now
 function takeCAD(file){
   $("#cadStatus").textContent="reading "+file.name+" …"; $("#cadDrop").className="drop";
-  readText(file,text=>{ LAST_STEP={name:file.name, text}; parseAndLoad(); },m=>{ $("#cadStatus").textContent=m; });
+  STEP_READS++;
+  readText(file,text=>{
+    STEP_READS=Math.max(0,STEP_READS-1);
+    LAST_STEP={name:file.name, text};
+    // a joint spec dropped with this STEP (see takeMates) is this robot's, ahead of joints saved for it before
+    const P=JOINTS.pending; JOINTS.pending=null;
+    if(P){ MATES.asm=MATES.features=MATES.name=MATES.report=null; JOINTS.spec=P.spec; JOINTS.name=P.name; JOINTS.step=JOINTS.dropped=file.name; }
+    parseAndLoad();
+  },m=>{ STEP_READS=Math.max(0,STEP_READS-1); if(!STEP_READS) JOINTS.pending=null; $("#cadStatus").textContent=m; });
 }
 /* The whole robot from Onshape (src/onshapecad.js): parts, colours, mass and
    the mates as joints, no STEP and nothing to answer. */
@@ -1576,17 +1586,21 @@ function parseAndLoad(done){
   if(!LAST_STEP) return;
   if(LAST_STEP.onshape){ loadOnshapeRobot(LAST_STEP.onshape,true); if(done&&CAD) done(CAD); return; }
   if(LAST_STEP.simbot){ RobotPackage.load(LAST_STEP.simbot.pkg,LAST_STEP.simbot.file); if(done&&CAD) done(CAD); return; }
-  const {name,text}=LAST_STEP, mb=(text.length/1048576).toFixed(1);
+  // a workspace's robot has no STEP to read again: it comes back as the workspace had it
+  if(LAST_STEP.session){ loadSessionCAD(LAST_STEP); if(done&&CAD) done(CAD); return; }
+  const step=LAST_STEP, {name,text}=step, mb=(text.length/1048576).toFixed(1);
   SetupUI.beforeParse(name);
   $("#cadStatus").textContent="parsing "+mb+" MB …";
   setTimeout(()=>{
+    if(LAST_STEP!==step) return;               // another robot came in while this one waited: that one wins
     try{
       const cad=parseSTEP(text,msg=>{ $("#cadStatus").textContent=msg; },{up:OPTS.up, shift:OPTS.shift});
       cad.name=name;
       // a joint spec belongs to the file it was written for; another robot drops it
       if(JOINTS.spec&&JOINTS.step!==name){ JOINTS.spec=JOINTS.report=JOINTS.devices=null; JOINTS.name=JOINTS.step=null; }
-      // joints fixed by hand for this file before, in this browser
-      const mine=savedJoints(name);
+      // joints fixed by hand for this file before, in this browser (unless a spec was just dropped with it)
+      const mine=JOINTS.dropped===name&&JOINTS.spec?null:savedJoints(name);
+      JOINTS.dropped=null;
       if(mine&&(!JOINTS.spec||!JOINTS.spec.edited)){ JOINTS.spec=mine; JOINTS.step=name; JOINTS.name="your joints"; }
       loadCAD(cad, (LAST_STEP.label||name+" · "+mb+" MB")+" · "+cad.mechs.length+" mechanism"+(cad.mechs.length===1?"":"s"), cad.mechs.length?"ok":"bad");
       if(MATES.asm) applyMates();
@@ -1762,7 +1776,8 @@ if(SB_CHANNEL) SB_CHANNEL.addEventListener("message",e=>{
 });
 /* A joint spec (src/jointspec.js): the joints written down by hand. It
    belongs to one STEP file and comes back each time that file is parsed. */
-const JOINTS={spec:null, name:null, step:null, report:null, devices:null};
+// pending: a spec that came while a STEP was still being read; dropped: the STEP it was given to
+const JOINTS={spec:null, name:null, step:null, report:null, devices:null, pending:null, dropped:null};
 function takeMates(file){
   readText(file,text=>{
     let j; try{ j=JSON.parse(text); }catch(e){ $("#mateStatus").textContent=file.name+" isn't JSON — save the page Onshape shows as a .json file."; $("#mateDrop").className="drop bad"; return; }
@@ -1772,6 +1787,9 @@ function takeMates(file){
     }
     if(j&&j.format===SETUP_FORMAT){ SetupUI.take(j,file.name); return; }
     if(j&&j.format===JOINT_SPEC_FORMAT){
+      // dropped together with its STEP, the small spec is read first: it waits for
+      // that robot (takeCAD), not the one on the bench, which would then drop it
+      if(STEP_READS>0){ JOINTS.pending={spec:j, name:file.name}; $("#mateStatus").textContent=file.name+" is waiting for its robot"; return; }
       MATES.asm=MATES.features=MATES.name=MATES.report=null;
       JOINTS.spec=j; JOINTS.name=file.name; JOINTS.step=LAST_STEP?LAST_STEP.name:null;
       applyJoints(); return;
@@ -1793,7 +1811,7 @@ function applyMates(){
     MATES.report=rep;
     recomputeChain(CAD.mechs);
     View.hiddenParts=View.hiddenParts||new Set();
-    View.load(CAD); if(View.exact) View.applyExact();
+    View.load(CAD);                             // it puts the exact surfaces back itself (buildRobot)
     if(CadView.on) CadView.renderTree();
     if(CODE){ mapDevices(); rebuild(); }
     pill.textContent=rep.joints+" joint"+(rep.joints===1?"":"s"); pill.className="pill ok";
@@ -1817,7 +1835,7 @@ function applyJoints(){
     if(R.front&&FRONTS[R.front]!==undefined) OPTS.front=R.front;
     recomputeChain(CAD.mechs);
     View.hiddenParts=View.hiddenParts||new Set();
-    View.load(CAD); if(View.exact) View.applyExact();
+    View.load(CAD);                             // it puts the exact surfaces back itself (buildRobot)
     if(CadView.on) CadView.renderTree();
     if(Sim.phase!=="running") placeAtStart();
     if(CODE){ mapDevices(); rebuild(); }
@@ -2081,7 +2099,8 @@ function showJoint(id){
 }
 function robotCheckAct(act,a){
   if(act==="show") return showJoint(a);
-  if(act==="pair"){ const [dev,joint]=a.split("|"); changeJoint(joint,{device:dev}); return; }
+  // "device|joint": a joint id (a mate's or a part's name) may have a "|" of its own
+  if(act==="pair"){ const i=a.indexOf("|"), dev=a.slice(0,i), joint=a.slice(i+1); changeJoint(joint,{device:dev}); return; }
   if(act==="drop"){ removeJoint(a); return; }
   if(act==="click"){ CadView.pendingDevice=a; if(!CadView.on) CadView.enter();
     const h=document.querySelector(".cad-hint"); if(h){ h.textContent="Click the part "+a+" moves, then 'New joint from this part'"; h.classList.add("ask"); } return; }
@@ -3029,6 +3048,14 @@ function download(name,text,mime){
   a.href=url; a.download=name; document.body.appendChild(a); a.click();
   setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); },0);
 }
+/* A workspace's robot onto the bench, from the copy LAST_STEP keeps of it. */
+function loadSessionCAD(step){
+  const cad=JSON.parse(step.session);
+  classifyMechs(cad.mechs);
+  loadCAD(cad,step.label,"ok");
+  renderFrameNote();
+  return cad;
+}
 const Session={
   name(){ return ((CAD&&CAD.name)||"robot").replace(/\.(step|stp)$/i,"").replace(/[^\w.-]+/g,"-")+".ftcsim"; },
   save(){
@@ -3053,9 +3080,13 @@ const Session={
   apply(s,fileName){
     try{
       if(s.cad){
-        const cad=s.cad; cad.name=cad.name||fileName;
-        classifyMechs(cad.mechs);
-        loadCAD(cad,(cad.name||fileName)+" · from workspace","ok");
+        const name=s.cad.name||fileName; s.cad.name=name;
+        // this is the robot now: the default robot still downloading must not replace it,
+        // and Up, "Back to what the CAD shows" or clearing mates reload it, not the last STEP
+        LAST_STEP={name, text:"", session:JSON.stringify(s.cad), label:name+" · from workspace"};
+        // a joint spec belongs to the robot it was written for
+        if(JOINTS.spec&&JOINTS.step!==name){ JOINTS.spec=JOINTS.report=JOINTS.devices=null; JOINTS.name=JOINTS.step=null; }
+        loadSessionCAD(LAST_STEP);
         // the rig panel as it was saved (devices, hardware, drive base, setup), but not its
         // joints: the workspace's own CAD carries those, and more exactly
         if(s.rig&&applyRig(Object.assign({},s.rig,{joints:[]}))) saveRig();

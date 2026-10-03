@@ -58,6 +58,8 @@ const View={
     this.ren.outputEncoding=THREE.sRGBEncoding;
     this.ren.toneMapping=THREE.ACESFilmicToneMapping; this.ren.toneMappingExposure=1.0;
     el.appendChild(this.ren.domElement);
+    // after three.js's own handler (added first, so it runs first)
+    this.ren.domElement.addEventListener("webglcontextrestored",()=>this.contextRestored());
     this.hemi=new THREE.HemisphereLight(0xfff3dc,0x26221c,0.55); this.scene.add(this.hemi);
     const sun=new THREE.DirectionalLight(0xfff1df,2.1); this.sun=sun;
     sun.position.set(-2.2,5.5,3.0); sun.castShadow=B.shadows>0;
@@ -165,10 +167,12 @@ const View={
 
   load(cad){
     if(this.onLoad) this.onLoad();
+    this.loadN=(this.loadN||0)+1;                 // a new scene: whoever cached its objects (CadView.hid) looks again
     // another robot: the last one's exact surfaces go, GPU buffers and all, or a
     // hide click would redraw the old robot over this one
     if(this.exact&&this.exact.cad!==cad){ this.exact=null; this.exactG=[]; this.dropShapes(); this.shapeRes=null; this.spinWheels=[]; this.instHolder=null; }
     while(this.world.children.length){ const o=this.world.children[0]; this.world.remove(o); this.dispose(o); }
+    if(this.cad&&this.cad!==cad) this.dropColourMats();
     const bb=cad.bbox;
     // A canonical CAD (src/frame.js) already has its origin at the drivetrain
     // centre on the floor — the point the physics turns the robot about — so it
@@ -185,7 +189,9 @@ const View={
     this.hiveG={}; this.shownHive=null; this.tipAnim=null; this.shownCells=-1;
     if(Field.ok) this.buildField(); else this.buildPlainField();
     this.dynG=new THREE.Group(); this.world.add(this.dynG);
-    this.ballPool=[]; this.arcLine=null;
+    // everything that lived in the last dynG went with it: ball trails and effects too,
+    // or the trails would keep moving meshes that are no longer in the scene
+    this.ballPool=[]; this.arcLine=null; this.trailG=[]; this.fxs=[];
     this.matchG=null; this.matchShown=null;
 
     // everything that drives around; the CAD sits in frontG, raised onto the base
@@ -225,6 +231,33 @@ const View={
     if(this.exact&&this.cad===cad) this.applyExact();
     return this.exact?this.exact.res.meshes.length:0;
   },
+  /* The GPU context came back after being lost (a driver reset, a GPU switch;
+     headless Chrome's software GL loses it seconds after start-up). three.js
+     makes new buffers and programs as it draws, but two things stay broken:
+     each geometry and texture still carries the dead context's dispose
+     handler, so disposing it later (the next robot load) asks WebGL to delete a
+     buffer or vertex array "that does not belong to this context", hundreds of
+     warnings; and the reflection map was drawn on the GPU, so it came back
+     black and every metal part with it. */
+  contextRestored(){
+    const seen=new Set(), old=this._env;
+    const visit=x=>{
+      if(!x||typeof x!=="object"||seen.has(x)) return; seen.add(x);
+      // three r128 keeps listeners in _listeners; the new context adds its own when it uploads again
+      if(x.isBufferGeometry||x.isTexture){ if(x._listeners&&x._listeners.dispose) x._listeners.dispose.length=0; return; }
+      if(x.isMaterial){ for(const k in x){ const v=x[k]; if(v&&v.isTexture) visit(v); } return; }
+      if(x.isObject3D){ x.traverse(o=>{ visit(o.geometry); [].concat(o.material||[]).forEach(visit); }); return; }
+      if(x instanceof Map||Array.isArray(x)) x.forEach(visit);
+      else if(Object.getPrototypeOf(x)===Object.prototype) Object.values(x).forEach(visit);
+    };
+    // what is drawn, and what the caches hold for the next robot
+    visit(this.scene); visit(this.shapeCache); visit(this.liteMeshes);
+    for(const k of Object.keys(this)) if(k[0]==="_") visit(this[k]);
+    if(old){
+      this._env=undefined; const env=this.envMap();
+      for(const m of seen) if(m.isMaterial&&m.envMap===old){ m.envMap=env; m.needsUpdate=true; }
+    }
+  },
   /* A studio to reflect: a dim room with a big overhead softbox and side
      panels, pre-filtered once (PMREM) so every metal part picks up soft,
      believable highlights. Robot materials only; the field keeps its look. */
@@ -259,6 +292,14 @@ const View={
       polygonOffset:true, polygonOffsetFactor:1, polygonOffsetUnits:1});
     mat.userData.shared=true;
     return this._mats[key]=mat;
+  },
+  /* Another robot: the last one's colours go. The material caches are keyed by
+     colour, so without this every robot loaded added its palette for good (an
+     Onshape robot has one per part colour). The fixed finishes stay. */
+  dropColourMats(){
+    for(const k in this._mats||{}) this._mats[k].dispose();
+    this._mats={};
+    for(const k in this._rmat||{}) if(/^rgb:/.test(k)){ this._rmat[k].dispose(); delete this._rmat[k]; }
   },
   /* A shape meshed once (src/tessellate.js tessExpand) as GPU geometry: one
      draw group per run of faces in one colour, plus its edges. Shared by every

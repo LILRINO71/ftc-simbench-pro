@@ -2,10 +2,14 @@
 // the engine twice — as written, and after the minifier — and compare results.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { engineBundle, loadEngine, loadWithField } from './load.mjs';
 import { minifyJS, minifyCSS, minifyHTML, tokenize } from '../tools/minify.mjs';
 
 const run = (src) => new Function(`"use strict";return (${src})`)();
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 test('minifier: the awkward corners of JS survive', () => {
   const cases = [
@@ -27,6 +31,50 @@ test('minifier: the awkward corners of JS survive', () => {
     assert.deepEqual(run(min), want, `${what}: minified to ${min}`);
     // whitespace inside a template literal is content, so only check the rest
     if (!src.includes('`')) assert.ok(!/\n\s+/.test(min), `${what}: indentation left behind`);
+  }
+});
+
+/* A ${…} in a template is code: a quote inside a regex there (/can't/, /'/g)
+   is not a string. The old scanner took it for one, ran the template on past
+   its end, and then lexed the next template's text as code, where '//' is a
+   comment, so the rest of the line was cut off. */
+test('minifier: a regex inside ${} is a regex, not the start of a string', () => {
+  const cases = [
+    ["quote in a regex, then a '}' string and a template with //",
+      "(() => { const x = \"a'b\"; const s = `${x.replace(/'/g, \"\")}`; const t = '}'; return s + t + `://keep`; })()", "ab}://keep"],
+    ["the app's /Check|can't|\"O\"/", "(() => { const t = \"can't\"; return `<p${/Check|can't|\"O\"/.test(t) ? ' w' : ''}>` + `//x`; })()", "<p w>//x"],
+    ['a comment inside ${}', '(() => `a${ 1 /* } */ + 1 }b` + `//c`)()', 'a2b//c'],
+  ];
+  for (const [what, src, want] of cases) {
+    assert.equal(run(src), want, `${what}: the case itself`);
+    const min = minifyJS(src);
+    assert.equal(run(min), want, `${what}: minified to ${min}`);
+  }
+  // src/app.js has the /Check|can't|"O"/ regex; everything after it must still be minified
+  const app = fs.readFileSync(path.join(ROOT, 'src', 'app.js'), 'utf8');
+  const min = minifyJS(app);
+  assert.ok(!min.includes('MAIN LOOP') && !min.includes('PRO — one status light'), 'app.js comments after the regex survive the minifier');
+  const longest = Math.max(...tokenize(app).filter((t) => t.t === 'tmpl').map((t) => t.v.length));
+  assert.ok(longest < 10000, `a ${longest}-character template literal in app.js: the scanner ran past one's end`);
+  assert.doesNotThrow(() => new Function(min), 'minified app.js compiles');
+});
+
+/* A comment and the whitespace around it are one gap. The old pass looked at
+   each whitespace run alone: the space before `// c` became a space, and the
+   newline after it was then dropped because the previous kept token was that
+   space, not the code before it. */
+test('minifier: the newline after a same-line comment is kept where ASI needs it', () => {
+  const cases = [
+    ['return // c', '(function () {\n  return // c\n  5\n})()', undefined],
+    ['let after a comment', '(function () {\n  let a = 1\n  let b = a // c\n  let d = 2\n  return b + d\n})()', 3],
+    ['a block comment with a line break', '(function () {\n  return /* a\n b */ 5\n})()', undefined],
+    ['a comment between two words', '(() => typeof/**/1)()', 'number'],
+  ];
+  for (const [what, src, want] of cases) {
+    assert.deepEqual(run(src), want, `${what}: the case itself`);
+    const min = minifyJS(src);
+    let got; assert.doesNotThrow(() => { got = run(min); }, `${what}: minified to ${min}`);
+    assert.deepEqual(got, want, `${what}: minified to ${min}`);
   }
 });
 
@@ -91,6 +139,18 @@ test('ship build: the string-table pass is still the same engine', () => {
   assert.deepEqual(digest(loadWithField(hidden)), plain);
 });
 
+/* The bundle starts with "use strict";. The string pass used to hide that in
+   the table and put its prelude first, so a --strings build ran sloppy. */
+test('string table: a leading "use strict" stays a directive', () => {
+  const src = '"use strict";\n// a comment\nreturn [(function () { return this === undefined; })(), "some string"];';
+  const h = minifyJS(src, { strings: true });
+  assert.ok(h.startsWith('"use strict";'), `the directive comes first: ${h.slice(0, 40)}`);
+  assert.ok(!h.includes('"some string"'), 'the other strings are still in the table');
+  assert.deepEqual(new Function(h)(), [true, 'some string'], 'strict mode holds');
+  assert.throws(() => new Function(minifyJS('"use strict";\nundeclaredName = 1;', { strings: true }))(), ReferenceError);
+  assert.ok(minifyJS(engineBundle(), { strings: true }).startsWith('"use strict";'), 'the engine bundle keeps its directive');
+});
+
 test('string table: a string before a ternary or case colon is hidden; an object key is not', () => {
   const src = 'function f(x){ const o = {\n "alpha": 1, "beta" : 2 }; switch(x){ case "gamma": return x ? "delta" : o["alpha"]; } return "epsilon"; }\nreturn f;';
   const h = minifyJS(src, { strings: true });
@@ -117,4 +177,16 @@ test('minifier: HTML keeps pre and textarea content', () => {
   assert.ok(m.includes('<div><span>a</span>'), 'inter-tag whitespace collapses');
   assert.ok(m.includes('<pre id="x">  keep\n   me  </pre>'));
   assert.ok(m.includes('<textarea>  spaces  </textarea>'));
+});
+
+/* Whitespace between two inline elements is a space on the page. The old
+   pass removed every >\s+< and the help line "Keys IJKL" read "KeysIJKL". */
+test('minifier: HTML keeps one space between inline elements', () => {
+  const html = '<ul>\n  <li><b>Keys</b> <kbd>I</kbd><kbd>J</kbd> drive</li>\n  <li><b>a</b>\n      <i>b</i>\n    <button>x</button>\n    <button>y</button></li>\n</ul>\n<p>\n  <span>c</span>\n</p>';
+  const m = minifyHTML(html);
+  assert.ok(m.includes('<b>Keys</b> <kbd>I</kbd><kbd>J</kbd> drive'), m);
+  assert.ok(m.includes('<b>a</b> <i>b</i> <button>x</button> <button>y</button>'), m);
+  assert.ok(m.includes('<ul><li>') && m.includes('</li><li>') && m.includes('</ul><p><span>c</span></p>'), 'around block tags it still goes: ' + m);
+  const page = minifyHTML(fs.readFileSync(path.join(ROOT, 'src', 'markup.html'), 'utf8'));
+  assert.ok(page.includes('<b>Keys</b> <kbd>I</kbd>'), 'the help line in the page');
 });

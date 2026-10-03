@@ -19,9 +19,15 @@ const ID_START = /[A-Za-z_$]/;
 const ID_PART = /[A-Za-z0-9_$]/;
 
 /** JS -> tokens: {t, v} where t is ws|lc|bc|str|tmpl|regex|num|id|punc. */
-export function tokenize(src) {
+export function tokenize(src) { return lex(src, 0, false).out; }
+
+/* Tokens from `start`. Inside a template's ${…} (inTemplate) it stops at the
+   brace that closes the expression and returns that brace's index as `end`:
+   the expression is code like any other, with its own strings, regexes and
+   comments. */
+function lex(src, start, inTemplate) {
   const out = [];
-  let i = 0;
+  let i = start, depth = 0;
   const n = src.length;
   const last = () => { for (let k = out.length - 1; k >= 0; k--) { const t = out[k].t; if (t !== 'ws' && t !== 'lc' && t !== 'bc') return out[k]; } return null; };
 
@@ -69,9 +75,11 @@ export function tokenize(src) {
     let v = null;
     if (P4.includes(four)) v = four; else if (P3.includes(three)) v = three;
     else if (P2.includes(src.substr(i, 2))) v = src.substr(i, 2); else v = c;
+    if (inTemplate && v === '{') depth++;
+    else if (inTemplate && v === '}' && depth-- === 0) return { out, end: i };
     out.push({ t: 'punc', v }); i += v.length; continue;
   }
-  return out;
+  return { out, end: n };
 }
 
 function templateEnd(src, start) {
@@ -80,19 +88,9 @@ function templateEnd(src, start) {
     const c = src[i];
     if (c === '\\') { i += 2; continue; }
     if (c === '`') return i + 1;
-    if (c === '$' && src[i + 1] === '{') {           // nested expression: walk braces, strings and templates
-      let depth = 1; i += 2;
-      while (i < src.length && depth > 0) {
-        const d = src[i];
-        if (d === '\\') { i += 2; continue; }
-        if (d === '`') { i = templateEnd(src, i); continue; }
-        if (d === '"' || d === "'") { i++; while (i < src.length) { if (src[i] === '\\') i += 2; else if (src[i] === d) { i++; break; } else i++; } continue; }
-        if (d === '{') depth++;
-        if (d === '}') depth--;
-        i++;
-      }
-      continue;
-    }
+    // a ${…} expression is tokenized like the code around it, so a quote in a
+    // regex (/can't/) or a comment can't end it early or run it past its brace
+    if (c === '$' && src[i + 1] === '{') { i = lex(src, i + 2, true).end + 1; continue; }
     i++;
   }
   return src.length;
@@ -142,19 +140,26 @@ function needsSpace(a, b) {
   return false;
 }
 
+// LF, CR and the two Unicode line terminators (U+2028, U+2029)
+const LINE_BREAK = new RegExp('[\\n\\r' + String.fromCharCode(0x2028, 0x2029) + ']');
+
 export function minifyJS(src, opts = {}) {
   const toks = tokenize(src);
   const kept = [];
+  const gap = (t) => t.t === 'ws' || t.t === 'lc' || t.t === 'bc';
   for (let i = 0; i < toks.length; i++) {
     const t = toks[i];
-    if (t.t === 'bc' || t.t === 'lc') continue;
-    if (t.t === 'ws') {
-      const prev = kept[kept.length - 1];
-      let next = null;
-      for (let j = i + 1; j < toks.length; j++) { const u = toks[j]; if (u.t !== 'ws' && u.t !== 'lc' && u.t !== 'bc') { next = u; break; } }
+    if (gap(t)) {
+      // the whole run of whitespace and comments between two tokens is one gap:
+      // `a // c\nb` has its newline after the comment, and a block comment with
+      // a line break in it is a line break to ASI
+      let j = i, nl = false;
+      for (; j < toks.length && gap(toks[j]); j++) if (toks[j].t !== 'lc' && LINE_BREAK.test(toks[j].v)) nl = true;
+      const prev = kept[kept.length - 1], next = toks[j];
+      i = j - 1;
       if (!prev || !next) continue;
       // a newline only matters where ASI could fire; everything else is layout
-      if (t.v.includes('\n') && CAN_END_STATEMENT(prev)) kept.push({ t: 'nl', v: '\n' });
+      if (nl && CAN_END_STATEMENT(prev)) kept.push({ t: 'nl', v: '\n' });
       else if (needsSpace(prev, next)) kept.push({ t: 'sp', v: ' ' });
       continue;
     }
@@ -178,8 +183,20 @@ function hideStrings(src) {
   const toks = tokenize(src);
   const table = [];
   const index = new Map();
+  // a directive prologue ("use strict";) stays where it is, as written: hidden
+  // in the table or behind the prelude it would be an expression, not a directive
+  const gap = (t) => t && (t.t === 'ws' || t.t === 'lc' || t.t === 'bc');
+  let body = 0;
+  for (let k = 0; ; ) {
+    while (gap(toks[k])) k++;
+    if (!toks[k] || toks[k].t !== 'str') break;
+    let s = k + 1; while (gap(toks[s])) s++;
+    if (!toks[s] || toks[s].t !== 'punc' || toks[s].v !== ';') break;
+    body = k = s + 1;
+  }
+  const head = toks.slice(0, body).map((t) => t.v).join('');
   let out = '';
-  for (let i = 0; i < toks.length; i++) {
+  for (let i = body; i < toks.length; i++) {
     const t = toks[i];
     if (t.t !== 'str') { out += t.v; continue; }
     const nextTok = toks[i + 1];
@@ -199,7 +216,7 @@ function hideStrings(src) {
   if (!table.length) return src;
   const enc = Buffer.from(JSON.stringify(table), 'utf8').toString('base64');
   const prelude = 'var _st=JSON.parse(typeof atob==="function"?decodeURIComponent(escape(atob("' + enc + '"))):Buffer.from("' + enc + '","base64").toString("utf8"));function _s(i){return _st[i]}\n';
-  return prelude + out;
+  return head + prelude + out;
 }
 
 /* The value a JS string literal denotes, or null when this pass can't be sure.
@@ -248,13 +265,27 @@ export function minifyCSS(src) {
   return out.trim();
 }
 
+/* Elements whose neighbouring whitespace never renders: block boxes, table
+   parts, things in <head>, SVG shapes. Whitespace next to anything else (b,
+   kbd, span, button, input...) is a visible space between inline boxes. */
+const NO_SPACE_AROUND = new Set(('html head body meta link title script style div p ul ol li dl dt dd table thead tbody ' +
+  'tfoot tr td th caption colgroup col section article aside header footer nav main h1 h2 h3 h4 h5 h6 form fieldset ' +
+  'legend details summary dialog pre hr br blockquote figure figcaption option optgroup template noscript ' +
+  'svg g defs rect path circle ellipse line polyline polygon use symbol').split(' '));
+
 /* Conservative: comments and inter-tag whitespace only, and never inside a
-   pre/textarea/script/style where whitespace is content. */
+   pre/textarea/script/style where whitespace is content. Whitespace between
+   two tags goes when either tag is a block one, and is one space otherwise:
+   "<b>Keys</b> <kbd>I</kbd>" must not render as "KeysI". */
 export function minifyHTML(src) {
   const keep = /<(pre|textarea|script|style)\b[\s\S]*?<\/\1>/gi;
   const holes = [];
   let masked = src.replace(keep, (m) => { holes.push(m); return '\u0000' + (holes.length - 1) + '\u0000'; });
   masked = masked.replace(/<!--[\s\S]*?-->/g, '');
-  masked = masked.replace(/\n\s*/g, '\n').replace(/>\s+</g, '><').replace(/\s{2,}/g, ' ');
+  const tagAt = (s, i) => { const m = /^<\/?([A-Za-z][\w-]*)/.exec(s.slice(i, i + 64)); return m ? m[1].toLowerCase() : null; };
+  masked = masked.replace(/\n\s*/g, '\n').replace(/>\s+</g, (m, off, s) => {
+    const left = tagAt(s, s.lastIndexOf('<', off)), right = tagAt(s, off + m.length - 1);
+    return !left || !right || NO_SPACE_AROUND.has(left) || NO_SPACE_AROUND.has(right) ? '><' : '> <';
+  }).replace(/\s{2,}/g, ' ');
   return masked.replace(/\u0000(\d+)\u0000/g, (m, i) => holes[+i]).trim();
 }
