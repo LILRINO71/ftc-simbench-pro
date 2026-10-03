@@ -48,6 +48,9 @@ pure, to test how joints are drawn.
 | `engine.test.mjs`, `features.test.mjs`, `parser-review.test.mjs`, `sim-review.test.mjs`, `pid-ftclib.test.mjs` | Parser and sim: Java constructs, the Driver Station lifecycle, encoders, `RUN_TO_POSITION`, slides, sensors, FTCLib PID. |
 | `mapping-review.test.mjs`, `hardware-parts.test.mjs` | Which device drives which mechanism; motor specs by goBILDA part number. |
 | `pershape.test.mjs`, `render.test.mjs` | Exact geometry through OpenCascade (needs the `occt-import-js` dev dependency; its absence fails, never skips). |
+| `tess-workers.test.mjs` | The OpenCascade workers, faked: one stopping costs one part, a worker that can't start falls back at once, no workers means no whole robot meshed on the page thread, one blob URL for them all. |
+| `findings-html.test.mjs` | The Checks tab's findings are HTML: hostile device, config, module and joint names come out escaped, and the status light reads them back as text. |
+| `view-reload.test.mjs` | `src/view3d.js` with a stand-in for three.js: what `View.load` must drop with the old scene (ball trails, effects, the last robot's colours), and what a lost WebGL context needs when it comes back. |
 | `field.test.mjs`, `robot.test.mjs` | The BIOBUZZ field, collisions, shots, controllers. |
 | `session.test.mjs`, `mathdoc.test.mjs`, `product.test.mjs` | Workspaces (including hostile files), the Math export, the status light and GitHub import. |
 | `ship.test.mjs`, `syntax.test.mjs` | The minified build behaves like the readable one, and its string table hides a string before a ternary's or a case's colon but never an object key; every shipped file compiles, and no method is defined twice. |
