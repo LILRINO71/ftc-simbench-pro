@@ -157,8 +157,9 @@ function urdfToPayload(text,files,name){
     if(lim&&type!=="continuous"&&(lim.attrs.lower!=null||lim.attrs.upper!=null)){
       const lo=+lim.attrs.lower||0, hi=+lim.attrs.upper||0, lin=mateType==="SLIDER";
       const q=v=>lin?(v*1000)+" mm":(v*180/Math.PI)+" deg";
+      // named as Onshape's features list names them (src/mates.js applyMateLimits)
       limitsOut.push({message:{featureId:id,name:nm,parameters:[{message:{parameterId:"limitsEnabled",value:true}},
-        {message:{parameterId:lin?"limitAxialZMin":"limitRotationMin",expression:q(lo)}},{message:{parameterId:lin?"limitAxialZMax":"limitRotationMax",expression:q(hi)}}]}});
+        {message:{parameterId:lin?"limitZMin":"limitAxialZMin",expression:q(lo)}},{message:{parameterId:lin?"limitZMax":"limitAxialZMax",expression:q(hi)}}]}});
     }
     const mm=urdfKid(j,"mimic");
     if(mm) mimic.push({joint:mm.attrs.joint, id, ratio:mm.attrs.multiplier!=null?+mm.attrs.multiplier:1});

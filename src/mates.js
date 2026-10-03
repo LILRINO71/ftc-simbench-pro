@@ -144,9 +144,14 @@ function parseOnshapeAssembly(json){
   return {inst, occ, parts, mates, relations, groups, featById, why};
 }
 
-/* Mate limits live in the assembly's features (GET …/assemblies/…/features).
-   Read whatever form they come in: limitsEnabled plus limitAxialZMin/Max for
-   a slider, limitRotationMin/Max for a revolute. */
+/* Mate limits live in the assembly's features (GET …/assemblies/…/features),
+   under the names Onshape gives them (onshape-to-robot reads the same):
+   limitsEnabled, then limitZMin/limitZMax along a slider and
+   limitAxialZMin/limitAxialZMax about a revolute's axis (a cylindrical or
+   pin-slot mate is simulated as that turn, so it reads those too). The names
+   SimBench's own fixtures once wrote (limitAxialZ for a slider, limitRotation
+   for a turn) are still read after them. A limit Onshape leaves empty
+   (isNull) is open. */
 function applyMateLimits(A,featuresJson){
   let n=0;
   const list=(featuresJson&&(featuresJson.features||featuresJson))||[];
@@ -157,7 +162,10 @@ function applyMateLimits(A,featuresJson){
     const P={};
     for(const p of (msg.parameters||[])){ const q=p&&(p.message||p); if(q&&q.parameterId) P[q.parameterId]=q; }
     if(P.limitsEnabled&&P.limitsEnabled.value===false) continue;
-    const lo=mateQty(P.limitAxialZMin||P.limitRotationMin), hi=mateQty(P.limitAxialZMax||P.limitRotationMax);
+    const one=names=>{ for(const k of names) if(P[k]) return P[k].isNull===true?NaN:mateQty(P[k]); return NaN; };
+    const lin=m.type==="SLIDER";
+    const lo=one(lin?["limitZMin","limitAxialZMin"]:["limitAxialZMin","limitRotationMin"]);
+    const hi=one(lin?["limitZMax","limitAxialZMax"]:["limitAxialZMax","limitRotationMax"]);
     if(Number.isFinite(lo)||Number.isFinite(hi)){ m.limits=[lo,hi]; n++; }
   }
   return n;
