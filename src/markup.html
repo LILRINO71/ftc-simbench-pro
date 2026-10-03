@@ -159,11 +159,11 @@
       <div class="onshape-note" id="onshapeNote" hidden></div>
       <div class="sec" data-sec="cad">
         <div class="sec-head"><h3>Robot CAD</h3><span class="spacer"></span><span class="mono dim" id="vpDims">—</span></div>
-        <div class="drop ok" id="cadDrop" tabindex="0" role="button" aria-label="Load a STEP CAD file">
-          <div class="dt">Drop a robot file here <small>.simbot · STEP · URDF · MJCF · .onshape.json</small></div>
+        <div class="drop ok" id="cadDrop" tabindex="0" role="button" aria-label="Load a robot file">
+          <div class="dt">Drop a robot file here <small>Onshape's exported .zip · .simbot · STEP · URDF · MJCF · glTF</small></div>
           <div class="ds" id="cadStatus">sample: fulll.step (measured)</div>
         </div>
-        <input type="file" id="cadFile" accept=".simbot,.step,.stp,.STEP,.STP,.urdf,.mjcf,.xml,.stl,.STL,.json" multiple hidden>
+        <input type="file" id="cadFile" accept=".zip,.simbot,.step,.stp,.STEP,.STP,.urdf,.mjcf,.xml,.stl,.STL,.obj,.gltf,.glb,.dae,.bin,.json" multiple hidden>
         <div class="load-row">
           <button class="load-btn os" type="button" data-os-open>
             <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8.2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M6.2 10.4l2.6 2.6 5-5.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -549,11 +549,56 @@
 
       <div id="osGuide">
         <h2 id="osTitle">Get your robot from Onshape</h2>
-        <p class="os-lead">Every part, its colour and weight, and <b>every joint from your mates</b>, straight from your Onshape assembly. Nothing to export, and it works on school computers.</p>
+        <p class="os-lead">Every part, its colour and weight, and <b>every joint from your mates</b>, from your Onshape assembly. The sure way is a file: Onshape exports it and you drop it here. It works on school computers, with school accounts, in any browser.</p>
         <p class="os-warn" id="osPhone" hidden>This needs a computer: Chrome, Edge, Firefox, Safari or a Chromebook.</p>
 
-        <div id="osSignInWay">
+        <div class="os-file" id="osFileWay">
           <ol class="os-steps">
+            <li class="os-step">
+              <span class="os-n">1</span>
+              <div class="os-body">
+                <h3>In Onshape, right-click your <u>Assembly</u> tab and choose <b>Export…</b></h3>
+                <p>The tabs run along the bottom of the Onshape window. It has to be the assembly, not a Part Studio: the joints live in the assembly.</p>
+                <svg class="os-pic" viewBox="0 0 360 74" aria-hidden="true">
+                  <rect x="1" y="1" width="358" height="72" rx="8" class="p-win"/>
+                  <rect x="10" y="10" width="340" height="30" rx="4" class="p-canvas"/><text x="150" y="30" class="p-t dim">your robot</text>
+                  <rect x="10" y="48" width="86" height="18" rx="3" class="p-tab"/><text x="18" y="61" class="p-t dim">Part Studio 1</text>
+                  <rect x="102" y="48" width="86" height="18" rx="3" class="p-tab hi"/><text x="112" y="61" class="p-t">◈ Assembly 1</text>
+                  <path d="M226 57 h-30 M202 51 l-6 6 6 6" class="p-arrow"/><text x="232" y="61" class="p-t acc">right-click this one → Export…</text>
+                </svg>
+                <a class="btn-sm" href="https://cad.onshape.com/documents" target="_blank" rel="noopener">Open Onshape in a new tab ↗</a>
+              </div>
+            </li>
+            <li class="os-step">
+              <span class="os-n">2</span>
+              <div class="os-body">
+                <h3>Set <b>Format</b> to <b>URDF</b> and <b>Geometry</b> to <b>STL</b>, then click <b>Export</b></h3>
+                <p>Leave everything else as it is. Onshape builds a <b>.zip</b> and your browser downloads it. Don't unzip it.</p>
+                <svg class="os-pic" viewBox="0 0 360 96" aria-hidden="true">
+                  <rect x="1" y="1" width="358" height="94" rx="8" class="p-win"/>
+                  <text x="14" y="20" class="p-t">Export</text>
+                  <text x="14" y="44" class="p-t dim">Format</text><rect x="90" y="31" width="120" height="18" rx="4" class="p-addr hi"/><text x="98" y="44" class="p-t">URDF ▾</text>
+                  <text x="14" y="70" class="p-t dim">Geometry</text><rect x="90" y="57" width="120" height="18" rx="4" class="p-addr hi"/><text x="98" y="70" class="p-t">STL ▾</text>
+                  <rect x="276" y="62" width="70" height="20" rx="4" class="p-bm"/><text x="296" y="76" class="p-t ink">Export</text>
+                  <text x="222" y="44" class="p-t acc">← these two</text>
+                </svg>
+              </div>
+            </li>
+            <li class="os-step">
+              <span class="os-n">3</span>
+              <div class="os-body">
+                <h3>Drop that .zip on SimBench</h3>
+                <div class="os-row"><button class="btn-sm primary os-big" type="button" id="osPickZip">Choose the .zip…</button><span class="dim">or drag it from your downloads onto the robot box</span></div>
+                <p class="dim">Your mates arrive as joints with their limits, gear relations as couplings, and every part with its name, colour and weight. SimBench keeps the robot in this browser for next time.</p>
+              </div>
+            </li>
+          </ol>
+          <p class="os-once">No <b>URDF</b> in the Format list? Make sure you right-clicked the <b>Assembly</b> tab. If it's still missing, export <b>GLTF</b> or <b>STEP</b> instead: the shapes come in, and the joints are found from the geometry and asked about.</p>
+        </div>
+
+        <details class="os-way" id="osSignInWay"><summary>Or sign in with Onshape and paste your assembly's address (no export)</summary>
+          <p class="os-warn">A school (Enterprise) Onshape account may need its admin to allow SimBench before this works. The export above always does.</p>
+          <ol class="os-steps small">
             <li class="os-step" id="osStep1">
               <span class="os-n">1</span>
               <div class="os-body">
@@ -596,11 +641,10 @@
               </div>
             </li>
           </ol>
-        </div>
-        <p class="os-warn" id="osNoSignIn" hidden>Sign in with Onshape isn't switched on for this copy of SimBench. Use the bookmark below on a home computer, or export a STEP from Onshape and use <b>Open a file</b>.</p>
+        </details>
 
-        <details class="os-way" id="osBmWay"><summary>Or use the bookmark (home computers only)</summary>
-          <p class="os-warn">School computers block bookmarks that run code. If clicking it does nothing, or a tab says <code>about:blank#blocked</code>, use <b>Sign in with Onshape</b> above.</p>
+        <details class="os-way" id="osBmWay"><summary>Or the bookmark (your own computer and browser only)</summary>
+          <p class="os-warn">Managed browsers block bookmarks that run code, and a school account can bring that policy to a home computer. If clicking it does nothing, or a tab says <code>about:blank#blocked</code>, use the export (the first way above).</p>
           <p class="os-once">Steps 1 and 2 are <b>once per computer</b>. After that, getting your robot is just steps 3 and 4.</p>
           <ol class="os-steps small">
             <li class="os-step">
@@ -676,15 +720,21 @@
             <dd>The address has to come from the <b>Assembly</b> tab, not a Part Studio or a drawing. Click that tab in Onshape, then copy the address again.</dd>
             <dt>It says I'm not allowed (401 or 403)</dt>
             <dd>The document has to be yours or shared with you (view access is enough). Click <b>sign out</b>, then sign in again with the Onshape account that owns the robot.</dd>
+            <dt>Export doesn't offer URDF</dt>
+            <dd>You're exporting a Part Studio or a drawing. Right-click the <b>Assembly</b> tab along the bottom of the Onshape window and choose Export there.</dd>
+            <dt>SimBench says there's no robot in the zip</dt>
+            <dd>Look inside it for a <code>urdf</code> folder with a <code>.urdf</code> file and a <code>meshes</code> folder beside it. If it holds only STL files, export again with Format set to <b>URDF</b>.</dd>
+            <dt>Some parts are missing</dt>
+            <dd>Parts hidden or suppressed in the assembly aren't exported. A part with no material in Onshape still comes in, weighed by its shape.</dd>
             <dt>The bookmark does nothing, or I see about:blank#blocked</dt>
-            <dd>Your school blocks bookmarks that run code, and dropping the button on the Onshape page never works. Use <b>Sign in with Onshape</b> instead.</dd>
+            <dd>Your browser blocks bookmarks that run code, and dropping the button on the Onshape page never works. Use the export instead.</dd>
             <dt>It's taking a long time</dt>
             <dd>Every part studio is read once; a robot with 100 of them takes a minute or two.</dd>
           </dl>
         </details>
 
         <div class="os-foot">
-          <span class="dim">Read-only, with your own Onshape sign-in. Nothing is stored on our side.</span>
+          <span class="dim">Your file is read in this browser and never uploaded. Sign-in is read-only and stores nothing on our side.</span>
           <span class="spacer"></span>
           <button class="btn-sm primary" id="osDone" type="button">Close</button>
         </div>

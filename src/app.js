@@ -1386,21 +1386,24 @@ let STEP_READS=0;                       // STEP files being read right now
 function takeCAD(file){
   $("#cadStatus").textContent="reading "+file.name+" …"; $("#cadDrop").className="drop";
   STEP_READS++;
-  readText(file,text=>{
-    STEP_READS=Math.max(0,STEP_READS-1);
-    LAST_STEP={name:file.name, text};
-    // a joint spec dropped with this STEP (see takeMates) is this robot's, ahead of joints saved for it before
-    const P=JOINTS.pending; JOINTS.pending=null;
-    if(P){ MATES.asm=MATES.features=MATES.name=MATES.report=null; JOINTS.spec=P.spec; JOINTS.name=P.name; JOINTS.step=JOINTS.dropped=file.name; }
-    parseAndLoad();
-  },m=>{ STEP_READS=Math.max(0,STEP_READS-1); if(!STEP_READS) JOINTS.pending=null; $("#cadStatus").textContent=m; });
+  readText(file,text=>{ STEP_READS=Math.max(0,STEP_READS-1); takeStepText(file.name,text); },
+    m=>{ STEP_READS=Math.max(0,STEP_READS-1); if(!STEP_READS) JOINTS.pending=null; $("#cadStatus").textContent=m; });
+}
+/* a STEP's text, read from a file or found in a zip */
+function takeStepText(name,text){
+  LAST_STEP={name, text};
+  // a joint spec dropped with this STEP (see takeMates) is this robot's, ahead of joints saved for it before
+  const P=JOINTS.pending; JOINTS.pending=null;
+  if(P){ MATES.asm=MATES.features=MATES.name=MATES.report=null; JOINTS.spec=P.spec; JOINTS.name=P.name; JOINTS.step=JOINTS.dropped=name; }
+  parseAndLoad();
 }
 /* The whole robot from Onshape (src/onshapecad.js): parts, colours, mass and
    the mates as joints, no STEP and nothing to answer. */
 function loadOnshapeRobot(p,reparse){
   let cad;
   // a URDF or an MJCF is a file the team dropped; anything else came from Onshape
-  const file=p.from==="urdf"||p.from==="mjcf", from=p.from==="urdf"?"URDF":p.from==="mjcf"?"MJCF":"Onshape";
+  const file=p.from==="urdf"||p.from==="mjcf"||p.from==="gltf";
+  const from=p.from==="urdf"?(p.onshapeExport?"Onshape's URDF export":"URDF"):p.from==="mjcf"?"MJCF":p.from==="gltf"?"glTF":"Onshape";
   try{ cad=cadFromOnshape(p,{up:OPTS.up, shift:OPTS.shift}); }
   catch(e){ onshapeNote("Your robot came from "+from+", but it couldn't be built: "+esc(e.message)+(file?".":". Try again; if it keeps failing, export a STEP and drop it."),"bad");
     if(!file) OnshapeHelp.fail("Your robot arrived but couldn't be built: "+e.message+". Try again; if it keeps failing, export a STEP from Onshape and use Open a file.");
@@ -1422,8 +1425,9 @@ function loadOnshapeRobot(p,reparse){
   const pill=$("#matePill"); if(pill){ pill.textContent=n+" joint"+(n===1?"":"s")+(V.counts.warn?" · "+V.counts.warn+" to check":""); pill.className="pill "+(V.counts.warn?"warnp":"ok"); }
   if(!file) OnshapeHelp.done(p.name, cad.solids.length, cad.mechs.filter(m=>m.fromMate).length, cad.onshape&&cad.onshape.kg);
   if(!reparse) RecentRobots.remember(cad);
-  onshapeNote("<b>"+esc(p.name)+"</b> loaded "+(file?"from its "+from:"straight from Onshape")+": "+cad.solids.length+" parts with their colours"+
-    (cad.onshape.kg?", "+cad.onshape.kg.toFixed(1)+" kg from your materials":"")+", and "+n+" joint"+(n===1?"":"s")+" from your "+(file?"joints":"mates")+". Load your code and press INIT.","ok");
+  onshapeNote("<b>"+esc(p.name)+"</b> loaded "+(file?"from "+(p.from==="gltf"?"a glTF":from):"straight from Onshape")+": "+cad.solids.length+" parts with their colours"+
+    (cad.onshape.kg?", "+cad.onshape.kg.toFixed(1)+" kg from your materials":"")+
+    (p.from==="gltf"?", and no joints yet (a glTF carries none)":", and "+n+" joint"+(n===1?"":"s")+" from your "+(p.from==="urdf"&&p.onshapeExport?"mates":file?"joints":"mates"))+". Load your code and press INIT.","ok");
   renderFrameNote&&renderFrameNote();
   Status.render&&Status.render();
   void rep;
@@ -1448,7 +1452,7 @@ const OnshapeHelp={
     for(const a of $$(".bm-link")){
       a.href=href;
       // clicking it here does nothing useful: say so, right where they clicked
-      a.addEventListener("click",e=>{ e.preventDefault(); this.tip("Drag it, don't click it here: press and hold the yellow button, move it up onto your bookmarks bar and let go. It only works when you click it on your Onshape tab."); });
+      a.addEventListener("click",e=>{ e.preventDefault(); this.tip("Drag it, don't click it here: press and hold the yellow button, move it up onto your bookmarks bar and let go. It only works when you click it on your Onshape tab. If your browser won't take it, use the export (the first way above): that always works."); });
       a.addEventListener("dragend",e=>{ const ok=e.dataTransfer&&e.dataTransfer.dropEffect!=="none";
         if(ok){ store.set("ftcbench.bookmark","1"); this.tip("✓ If you see Send to SimBench on your bookmarks bar, you're set. Now steps 3 and 4."); } });
     }
@@ -1461,6 +1465,7 @@ const OnshapeHelp={
     });
     for(const b of $$("[data-os-open]")) b.addEventListener("click",()=>this.open());
     $("#cadPick").addEventListener("click",()=>$("#cadFile").click());
+    const pz=$("#osPickZip"); if(pz) pz.addEventListener("click",()=>{ this.close(); $("#cadFile").click(); });
     $("#osClose").addEventListener("click",()=>this.close());
     $("#osDone").addEventListener("click",()=>this.close());
     $("#osShowSteps").addEventListener("click",()=>this.open());
@@ -1480,8 +1485,7 @@ const OnshapeHelp={
   /* whether this site can sign in to Onshape (it needs functions/onshape), and whether it has */
   async refresh(){
     const st=this.signin=await onshapeSignInState();
-    $("#osSignInWay").hidden=!st.ready; $("#osNoSignIn").hidden=st.ready;
-    if(!st.ready) $("#osBmWay").open=true;
+    $("#osSignInWay").hidden=!st.ready;
     $("#osSignIn").hidden=st.signedIn; $("#osSignedIn").hidden=!st.signedIn;
     $("#osStep1").classList.toggle("done",st.signedIn);
     return st;
@@ -2226,7 +2230,18 @@ function takeUrdfPart(file,mjcfText){
   const settle=()=>{
     clearTimeout(URDF_IN.timer);
     URDF_IN.timer=setTimeout(()=>{
-      if(!URDF_IN.text){ $("#cadStatus").textContent=Object.keys(URDF_IN.files).length+" mesh file(s) waiting for their URDF or MJCF"; return; }
+      if(!URDF_IN.text){
+        if(URDF_IN.reading) return;                                  // its model is still being read
+        // one glTF or GLB on its own (Onshape's glTF export) is the robot's shapes; the joints come after
+        const names=Object.keys(URDF_IN.files), gl=names.filter(n=>/\.(gltf|glb)$/i.test(n));
+        if(gl.length===1&&names.every(n=>/\.(gltf|glb|bin)$/i.test(n))){
+          const files=URDF_IN.files; URDF_IN.files={};
+          let p; try{ p=gltfToPayload(files[gl[0]],files,gl[0].replace(/\.(gltf|glb)$/i,"")); }
+          catch(e){ $("#cadStatus").textContent="couldn't read "+gl[0]+" — "+e.message; $("#cadDrop").className="drop bad"; return; }
+          if(loadOnshapeRobot(p)) $("#cadStatus").textContent=gl[0]+" · shapes from glTF · "+CAD.solids.length+" parts · no joints yet";
+          return;
+        }
+        $("#cadStatus").textContent=names.length+" mesh file(s) waiting for their URDF or MJCF"; return; }
       const mj=URDF_IN.kind==="mjcf", what=mj?"MJCF":"URDF";
       let p;
       try{ p=mj?mjcfToPayload(URDF_IN.text,URDF_IN.files,URDF_IN.name):urdfToPayload(URDF_IN.text,URDF_IN.files,URDF_IN.name); }
@@ -2240,8 +2255,38 @@ function takeUrdfPart(file,mjcfText){
     URDF_IN.name=file.name.replace(/\.(urdf|mjcf|xml)$/i,""); settle(); };
   if(mjcfText!=null){ model(mjcfText); return; }
   const r=new FileReader();
-  r.onload=()=>{ if(isModel) model(r.result); else { URDF_IN.files[file.name]=r.result; settle(); } };
+  if(isModel) URDF_IN.reading=(URDF_IN.reading||0)+1;
+  const read=()=>{ if(isModel) URDF_IN.reading=Math.max(0,(URDF_IN.reading||0)-1); };
+  r.onerror=()=>{ read(); $("#cadStatus").textContent="couldn't read "+file.name; settle(); };
+  r.onload=()=>{ read(); if(isModel) model(r.result); else { URDF_IN.files[file.name]=r.result; settle(); } };
   if(isModel) r.readAsText(file); else r.readAsArrayBuffer(file);
+}
+/* A zip holds the whole robot: Onshape's URDF or glTF export, a ROS package from
+   onshape-to-robot or Fusion, a zipped STEP or robot package (src/zipin.js). The
+   team drops the zip as it downloaded; nothing is unzipped by hand. */
+function takeZip(file){
+  $("#cadStatus").textContent="opening "+file.name+" …"; $("#cadDrop").className="drop";
+  const r=new FileReader();
+  r.onerror=()=>{ $("#cadStatus").textContent="couldn't read "+file.name; $("#cadDrop").className="drop bad"; };
+  r.onload=async()=>{
+    let z;
+    try{ z=await robotFromZip(new Uint8Array(r.result)); }
+    catch(e){ $("#cadStatus").textContent=file.name+": "+(e&&e.message||e); $("#cadDrop").className="drop bad"; return; }
+    const bad=t=>{ $("#cadStatus").textContent=t; $("#cadDrop").className="drop bad"; };
+    if(z.kind==="simbot"){
+      const u=await simbotUnpack(z.bytes);
+      if(!u.ok){ bad("the robot package in "+file.name+" wouldn't open — "+u.error); return; }
+      if(RobotPackage.load(u.pkg,z.name+".simbot")) RecentRobots.remember(CAD,z.bytes);
+      return;
+    }
+    if(z.kind==="step"){ takeStepText(z.name,z.text); return; }
+    let p;
+    try{ p=z.kind==="mjcf"?mjcfToPayload(z.text,z.files,z.name):z.kind==="gltf"?gltfToPayload(z.bytes,z.files,z.name):urdfToPayload(z.text,z.files,z.name); }
+    catch(e){ bad("couldn't read the "+(z.kind==="gltf"?"glTF":z.kind.toUpperCase())+" in "+file.name+" — "+(e&&e.message||e)); return; }
+    const what=z.kind==="mjcf"?"MJCF":z.kind==="gltf"?"glTF (shapes only)":z.onshape?"Onshape's URDF export":"URDF";
+    if(loadOnshapeRobot(p)) $("#cadStatus").textContent=file.name+" · "+what+" · "+CAD.solids.length+" parts · "+CAD.mechs.filter(m=>m.fromMate).length+" joints";
+  };
+  r.readAsArrayBuffer(file);
 }
 /* An .xml is a Control Hub configuration or a MuJoCo model: the file says which. */
 function takeXml(file){
@@ -2250,7 +2295,8 @@ function takeXml(file){
 function routeFile(file){
   const n=file.name.toLowerCase();
   if(/\.simbot$/.test(n)) RobotPackage.take(file);
-  else if(/\.(urdf|stl|mjcf)$/.test(n)) takeUrdfPart(file);
+  else if(/\.zip$/.test(n)) takeZip(file);
+  else if(/\.(urdf|stl|mjcf|obj|gltf|glb|dae|bin)$/.test(n)) takeUrdfPart(file);
   else if(/\.(step|stp)$/.test(n)) takeCAD(file);
   else if(/\.ftcsim$/.test(n)) Session.take(file);
   else if(/\.xml$/.test(n)) takeXml(file);
@@ -3456,8 +3502,8 @@ function proBoot(){
   });
 
   // hardware
-  // the robot: a STEP, an Onshape .onshape.json, or a URDF with its meshes
-  wireDrop($("#cadDrop"),$("#cadFile"),f=>/\.(urdf|stl|json|simbot|mjcf|xml)$/i.test(f.name)?routeFile(f):takeCAD(f),true);
+  // the robot: Onshape's exported zip, a STEP, a robot package, a URDF or MJCF with its meshes, a glTF
+  wireDrop($("#cadDrop"),$("#cadFile"),f=>/\.(urdf|stl|json|simbot|mjcf|xml|zip|obj|gltf|glb|dae|bin)$/i.test(f.name)?routeFile(f):takeCAD(f),true);
   wireDrop($("#cfgDrop"),$("#cfgFile"),takeRobotConfig);
   wireMates();
   wirePageDrop();
