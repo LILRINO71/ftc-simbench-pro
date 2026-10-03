@@ -148,7 +148,28 @@ Across all 190 enabled TeleOps, 55 drive correctly (it was 4), and 23 of 28 team
 does. Nothing times out. The median number of questions on a CAD fell from 5 to 3 with no code,
 and from 21 to 8 with the ITD code.
 
-## Not done, in order
+## Since then (branch claude/architecture-phase-1, 2026-10-03)
+
+The CAD import and architecture design (robot packages, Jolt for the mechanisms, rooms on the
+site's own origin, lockstep, tiers, offline) is mostly built, and four reviews' worth of bugs
+(sim and physics, CAD import, online and sessions, the view and the build, and the new code
+itself) are fixed with a failing-first test each. What's left of the design:
+
+1. **Lockstep as the match's default.** The ledger, the room's command store, the hash vote and
+   Jolt's determinism are built and tested (`tests/lockstep.test.mjs`); matches still send
+   poses. Each computer needs to run the other teams' drivetrains from their robot packages.
+2. **The simulation in a Worker.** The UI reads about 150 fields of `Sim` directly
+   (`Sim.phase`, `Sim.chassis`, `Sim.dev`, `Sim.pad`...), so moving the interpreter and the
+   physics off the page's thread needs a mirror of that state posted back each tick. The loop
+   time is now measured and shown, so a slow machine is visible meanwhile.
+3. **three.js past r128 / WebGPU.** Not started: r128 runs on every Chromebook's WebGL, and a
+   current three.js changes colour management and lighting, which needs a person checking
+   screenshots.
+4. **The rooms and TURN, live.** Deploy `workers/room`, bind it as ROOMS, add the TURN secrets
+   (DEPLOY.md), then play a match between two school networks.
+5. **The Fusion exporter, in Fusion** (`tools/exporters/fusion`): written, never run.
+
+## Not done, in order (from before)
 
 1. **Switch on Sign in with Onshape and test it live.** Register the OAuth
    app and set the two secrets (`DEPLOY.md`), then try it on a school

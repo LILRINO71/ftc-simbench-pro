@@ -6,7 +6,7 @@ A robot package is the whole robot in one file: its shapes, its joints and how t
 - **Open one:** drop the `.simbot` anywhere on the page, or use **Open a file**.
 - **Share it:** commit it next to your code, or send it to a teammate. It opens on a school Chromebook with no Onshape access.
 
-The code is `src/simbot.js`; the tests are `tests/simbot.test.mjs`.
+The code is `src/simbot.js`; the tests are `tests/simbot.test.mjs`. A package picks parts by number only: a pattern pick in a package is ignored.
 
 ## What's inside
 
