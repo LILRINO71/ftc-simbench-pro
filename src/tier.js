@@ -32,12 +32,13 @@ function deviceTier(info){
   const mem=Number.isFinite(i.memoryGB)?i.memoryGB:null, cores=Number.isFinite(i.cores)?i.cores:null;
   if(/swiftshader|llvmpipe|softpipe|software|microsoft basic render/.test(r)) return pick(0,"the browser is drawing in software ("+(i.renderer||"no GPU")+")");
   if(i.webgl2===false) return pick(0,"no WebGL 2");
-  const discrete=/nvidia|geforce|quadro|rtx|gtx|radeon (rx|pro)|radeon\(tm\) rx|apple m\d|apple gpu/.test(r)&&!/intel/.test(r);
+  // a phone or a tablet first: an iPad says "Apple GPU" just like a Mac does
+  if(i.mobile) return pick(0,"a phone or tablet");
+  const discrete=/nvidia|geforce|quadro|rtx|gtx|radeon (rx|pro)|radeon\(tm\) rx|apple m\d/.test(r)&&!/intel/.test(r);
   const weakGpu=/mali-g(5|7)\d|mali-t|powervr|adreno \(tm\) [1-6]\d\d|adreno [1-6]\d\d|intel.*(hd graphics (4|5)\d\d|uhd graphics (600|605|610|615|617|620))|intel.*(jasperlake|gemini ?lake|elkhart)/.test(r);
   if(mem!=null&&mem<=4) return pick(0,mem+" GB of memory");
   if(weakGpu&&(mem==null||mem<=8)) return pick(0,"an entry-level GPU ("+i.renderer+")");
   if(cores!=null&&cores<=2) return pick(0,cores+" CPU cores");
   if(discrete&&(mem==null||mem>=8)) return pick(2,"a dedicated GPU ("+i.renderer+")");
-  if(i.mobile) return pick(0,"a phone or tablet");
   return pick(1,r?"integrated graphics ("+i.renderer+")":"no GPU name given");
 }

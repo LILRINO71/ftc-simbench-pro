@@ -127,3 +127,16 @@ test('mjcf: the shape tools/exporters/fusion writes (bodies in the root frame, j
   const span = (k) => Math.max(...ch.pts.map((p) => p[k])) - Math.min(...ch.pts.map((p) => p[k]));
   assert.ok(Math.abs(Math.max(span(0), span(1)) - 0.4) < 1e-6, 'centimetre meshes scaled to metres: ' + span(0) + ', ' + span(1));
 });
+
+test('mjcf: an equality\'s offset is kept, and a connect with no body2 pins to the world (the robot\'s root)', () => {
+  const xml = `<mujoco><compiler angle="radian"/><worldbody><body name="base"><geom type="box" size="0.2 0.2 0.02"/>
+    <body name="a" pos="0 0 0.2"><joint name="a" axis="0 1 0" range="-1 1"/><geom type="box" size="0.1 0.01 0.01" pos="0.1 0 0"/>
+      <body name="c" pos="0.2 0 0"><joint name="c" axis="0 1 0"/><geom type="box" size="0.05 0.01 0.01" pos="0.05 0 0"/></body></body>
+    <body name="b" pos="0 0.1 0.2"><joint name="b" axis="0 1 0" range="-1 1"/><geom type="box" size="0.1 0.01 0.01" pos="0.1 0 0"/></body></body></worldbody>
+    <equality><joint joint1="b" joint2="a" polycoef="0.25 1 0 0 0"/><connect body1="c" anchor="0.1 0 0"/></equality></mujoco>`;
+  const cad = E.cadFromMjcf(xml, {});
+  const b = cad.mechs.find((m) => m.id === 'b');
+  assert.ok(Math.abs(b.couple.offset - 0.25) < 1e-9, 'offset ' + b.couple.offset);
+  assert.equal(cad.loops.length, 1);
+  assert.ok(cad.loops.some((L) => [L.a, L.b].includes('chassis')), JSON.stringify(cad.loops));
+});

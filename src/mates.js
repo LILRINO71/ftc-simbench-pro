@@ -342,17 +342,25 @@ function applyOnshapeMates(cad,json,opts){
   }
   const seen=new Set([ground]), queue=[ground], joints=[], loops=[];
   const used=new Set();
-  while(queue.length){
-    const b=queue.shift();
-    for(const e of edges){
-      if(used.has(e)) continue;
-      const other=e.ba===b?e.bb:(e.bb===b?e.ba:null); if(other==null) continue;
-      used.add(e);
-      if(seen.has(other)){ loops.push(e); continue; }
-      seen.add(other); queue.push(other);
-      joints.push({m:e.m, parent:b, child:other, parentEnd:e.ba===b?0:1});
+  // onshape-to-robot's convention: a mate named closing_<x> closes a loop and is never
+  // a joint of the tree (an MJCF <connect> comes in named that way), so the tree is
+  // walked without them first, and they're taken only for what that walk didn't reach
+  const closing=e=>/^closing[_ ]/i.test(String(e.m.name||""));
+  const walk=allow=>{
+    while(queue.length){
+      const b=queue.shift();
+      for(const e of edges){
+        if(used.has(e)||!allow(e)) continue;
+        const other=e.ba===b?e.bb:(e.bb===b?e.ba:null); if(other==null) continue;
+        used.add(e);
+        if(seen.has(other)){ loops.push(e); continue; }
+        seen.add(other); queue.push(other);
+        joints.push({m:e.m, parent:b, child:other, parentEnd:e.ba===b?0:1});
+      }
     }
-  }
+  };
+  walk(e=>!closing(e));
+  queue.push(...seen); walk(()=>true);
   // what a person should look at, as data (src/simbot.js validateRobot reads these)
   const issues=[];
   const floating=new Set(keys.map((k,i)=>bodyOf(i)).filter(b=>!seen.has(b)));

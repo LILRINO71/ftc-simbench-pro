@@ -129,7 +129,7 @@ function mjcfToPayload(text,files,name){
   });
 
   // ---- joints: each in its child body, at its pos along its axis (body frame)
-  const features=[], limitsOut=[], fidOfJoint=new Map();
+  const features=[], limitsOut=[], fidOfJoint=new Map(), fidKind=new Map();
   const cs=Mx=>({origin:Mx.t, xAxis:[Mx.r[0][0],Mx.r[1][0],Mx.r[2][0]], yAxis:[Mx.r[0][1],Mx.r[1][1],Mx.r[2][1]], zAxis:[Mx.r[0][2],Mx.r[1][2],Mx.r[2][2]]});
   const jointFrame=(axis,pos)=>{ const L=Math.hypot(...axis)||1, z=axis.map(v=>v/L), x0=Math.abs(z[0])<0.9?[1,0,0]:[0,1,0], d=x0[0]*z[0]+x0[1]*z[1]+x0[2]*z[2];
     let x=[x0[0]-d*z[0],x0[1]-d*z[1],x0[2]-d*z[2]]; const Lx=Math.hypot(...x); x=x.map(v=>v/Lx);
@@ -149,7 +149,7 @@ function mjcfToPayload(text,files,name){
     const id="J"+(k++), nm=(j&&j.name)||(B.name+" joint");
     features.push({id, suppressed:false, featureType:"mate", featureData:{name:nm, mateType, matedEntities:[
       {matedOccurrence:[B.parent.id], matedCS:cs(inParent)}, {matedOccurrence:[B.id], matedCS:cs(Jc)}]}});
-    if(j&&j.name) fidOfJoint.set(j.name,id);
+    if(j&&j.name){ fidOfJoint.set(j.name,id); fidKind.set(id,type); }
     const lim=j&&j.range!=null&&String(j.limited||"auto")!=="false"?urdfNums(j.range,2,null):null;
     if(lim&&(type==="hinge"||type==="slide")){
       const lin=type==="slide", q=v=>lin?(v*1000)+" mm":(A(v)*180/Math.PI)+" deg";
@@ -165,15 +165,17 @@ function mjcfToPayload(text,files,name){
       if(!f1||!f2){ notes.push("A joint equality names \""+(e.attrs.joint1||"?")+"\" and \""+(e.attrs.joint2||"?")+"\"; one isn't a joint here."); continue; }
       // joint1 = c0 + c1 joint2 (+ higher terms, which a gear or cascade doesn't have)
       const c=urdfNums(e.attrs.polycoef,5,null)||urdfNums(e.attrs.polycoef,2,[0,1]);
+      // the offset is in the model's own units (metres, or its compiler's angle unit)
+      const off=c[0]?(fidKind.get(f1)==="slide"?c[0]:A(c[0])):0;
       features.push({id:"R"+features.length, suppressed:false, featureType:"mateRelation", featureData:{name:"equality "+e.attrs.joint1, relationType:"LINEAR",
-        mates:[{featureId:f2},{featureId:f1}], relationRatio:c[1], reverseDirection:false}});
-      if(c[0]) notes.push("\""+e.attrs.joint1+"\" follows \""+e.attrs.joint2+"\" with an offset of "+c[0]+"; the offset is left out.");
+        mates:[{featureId:f2},{featureId:f1}], relationRatio:c[1], relationOffset:off, reverseDirection:false}});
     }else if(e.tag==="connect"){
-      const b1=byName.get(e.attrs.body1), b2=e.attrs.body2?byName.get(e.attrs.body2):null;
+      // no body2: pinned to the world, which for a robot is its root body
+      const b1=byName.get(e.attrs.body1), b2=e.attrs.body2?byName.get(e.attrs.body2):bodies[0];
       if(!b1||!b2){ notes.push("A connect constraint names a body that isn't here; it's left out."); continue; }
       const anchor=urdfNums(e.attrs.anchor,3,[0,0,0]);           // in body1's frame
       const W1={r:I3, t:anchor}, inW=urdfMul(b1.W,W1), in2=urdfMul(urdfInv(b2.W),inW);
-      features.push({id:"C"+features.length, suppressed:false, featureType:"mate", featureData:{name:"connect "+b1.name+"-"+b2.name, mateType:"BALL", matedEntities:[
+      features.push({id:"C"+features.length, suppressed:false, featureType:"mate", featureData:{name:"closing_connect "+b1.name+"-"+b2.name, mateType:"BALL", matedEntities:[
         {matedOccurrence:[b1.id], matedCS:cs(W1)}, {matedOccurrence:[b2.id], matedCS:cs(in2)}]}});
     }
   }

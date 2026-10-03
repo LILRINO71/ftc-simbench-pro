@@ -83,8 +83,6 @@ const fragment = [
   // three.js from this site (vendor/, served beside the page), the CDN only if that's missing
   '<script src="vendor/three/three.min.js"></script>',
   '<script>window.THREE||document.write(' + JSON.stringify('<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"><' + '/script>').replace(/<\//g, '<\\/') + ')</script>',
-  // which libraries this site serves itself (the build copies them when it has them)
-  `<script>window.SIMBENCH_VENDOR=${JSON.stringify(VENDOR_SEEN)};for(var k in SIMBENCH_VENDOR)SIMBENCH_VENDOR[k]=new URL(SIMBENCH_VENDOR[k],location.href).href;</script>`,
   `<style>\n${css}</style>`,
   markup,
   `<script>\n${safe(shotJs)}</script>`,
@@ -119,6 +117,9 @@ const page = `<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\
   `<meta name="twitter:card" content="summary_large_image">\n` +
   `<link rel="icon" href="${favicon}">\n` +
   `<link rel="manifest" href="manifest.webmanifest">\n` +
+  // which libraries this site serves itself (the build copies them when it has them); only the
+  // full page says so: a page that embeds the fragment has no vendor/ beside it, and uses the CDNs
+  `<script>window.SIMBENCH_VENDOR=${JSON.stringify(VENDOR_SEEN)};for(var k in SIMBENCH_VENDOR)SIMBENCH_VENDOR[k]=new URL(SIMBENCH_VENDOR[k],location.href).href;</script>\n` +
   `</head>\n<body>\n${fragment}\n` +
   // installable, and it opens from cache on a venue's bad Wi-Fi (dist/sw.js); only the full page registers it
   `<script>if("serviceWorker" in navigator&&(location.protocol==="https:"||location.hostname==="localhost"))addEventListener("load",function(){navigator.serviceWorker.register("sw.js").catch(function(){})})</script>\n` +

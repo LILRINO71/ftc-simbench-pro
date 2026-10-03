@@ -194,3 +194,35 @@ test('package: the robot check shows what the CAD leaves open as notes, never qu
   assert.ok(n, R.items.map((i) => i.key).join());
   assert.equal(n.sev, 'note');
 });
+
+test('package: a pattern in a mailed package\'s part picks is never run', async () => {
+  const cad = onshapeCad();
+  const pkg = E.simbotFromCad(cad, {});
+  pkg.joints.joints[0].parts.push({ in: '^(a+)+$' });
+  const back = await E.simbotUnpack(await E.simbotPack(pkg));
+  const t0 = Date.now();
+  const r = E.cadFromSimbot(back.pkg);
+  assert.ok(Date.now() - t0 < 2000);
+  assert.equal(r.cad.solids.filter((s) => s.mech === pkg.joints.joints[0].id).length, cad.solids.filter((s) => s.mech === pkg.joints.joints[0].id).length, 'the part numbers still pick the parts');
+});
+
+test('package: copies of one mesh count toward the triangle cap', () => {
+  const nodes = [{ name: 'robot', children: [] }];
+  for (let i = 0; i < 50; i++) { nodes[0].children.push(nodes.length); nodes.push({ name: 'p' + i, mesh: 0, extras: { solid: i } }); }
+  const pos = [], idx = []; for (let i = 0; i < 1000; i++) { pos.push(i, 0, 0, i, 1, 0, i, 0, 1); idx.push(3 * i, 3 * i + 1, 3 * i + 2); }
+  const glb = E.glbWrite({ meshes: [{ pos, idx }], materials: [], nodes, scene: [0] });
+  const pkg = { manifest: { format: 'ftc-simbench.robot', version: 1 }, joints: { format: 'ftc-sim-bench.joints', version: 2, joints: [] }, bindings: {}, glb };
+  const old = E.SIMBOT_CAPS.triangles; E.SIMBOT_CAPS.triangles = 20000;
+  try { assert.throws(() => E.cadFromSimbot(pkg), /places more than/); } finally { E.SIMBOT_CAPS.triangles = old; }
+});
+
+test('package: a fixed joint\'s parts ride the moving joint above it, and joints below hang from that one', async () => {
+  const cad = onshapeCad();
+  const arm = cad.mechs.find((m) => m.id === 'Arm Pivot'), claw = cad.mechs.find((m) => m.id === 'Claw');
+  cad.mechs.push({ id: 'bracket', kind: 'fixed', parent: 'Arm Pivot', axis: [0, 0, 1], pivot: arm.pivot.slice(), cluster: [], fromMate: { name: 'bracket', type: 'PLANAR', id: 'X' } });
+  claw.parent = 'bracket';
+  const moved = cad.solids.find((s) => s.mech === 'Claw'); moved.mech = 'bracket';
+  const { robot } = await roundTrip(cad);
+  assert.equal(robot.cad.mechs.find((m) => m.id === 'Claw').parent, 'Arm Pivot');
+  assert.equal(robot.cad.solids.find((s) => s.name === moved.name).mech, 'Arm Pivot', 'the bracket\'s part rides the arm, not the frame');
+});

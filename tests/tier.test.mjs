@@ -29,3 +29,8 @@ test('tiers: each tier\'s budget follows the design (shadows, pixel ratio, light
   assert.equal(E.deviceTier({ memoryGB: 4, override: 2 }).tier, 2, 'chosen by hand wins');
   assert.match(E.deviceTier({ memoryGB: 4 }).why, /4 GB/);
 });
+
+test('tiers: an iPad says "Apple GPU" like a Mac, and still starts light', () => {
+  assert.equal(E.deviceTier({ renderer: 'Apple GPU', mobile: true, memoryGB: 8 }).tier, 0);
+  assert.equal(E.deviceTier({ renderer: 'Apple GPU', mobile: false, memoryGB: 8 }).tier, 1);
+});

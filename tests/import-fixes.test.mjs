@@ -195,3 +195,16 @@ test('mates: a mate that closes a loop is kept as a loop closure with the point 
   assert.ok([L.a, L.b].includes('Arm Pivot'), 'between the arm and what it hangs from: ' + L.a + ' / ' + L.b);
   assert.ok(cad.mates.issues.some((i) => i.code === 'loop'));
 });
+
+test('mates: a mate named closing_<x> only ever closes a loop, never carries a body (onshape-to-robot)', () => {
+  const p = payload();
+  const arm = p.asm.rootAssembly.features.find((f) => f.featureData && f.featureData.name === 'Arm Pivot');
+  const twin = JSON.parse(JSON.stringify(arm));
+  twin.id = 'F3c'; twin.featureData.name = 'closing_arm';
+  // put the closing mate first, where a plain walk would take it as the arm's joint
+  p.asm.rootAssembly.features.unshift(twin);
+  const cad = E.cadFromOnshape(p);
+  assert.ok(cad.mechs.some((m) => m.id === 'Arm Pivot'), 'the real mate is the joint: ' + cad.mechs.map((m) => m.id).join());
+  assert.equal(cad.loops.length, 1);
+  assert.equal(cad.loops[0].name, 'closing_arm');
+});

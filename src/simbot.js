@@ -316,7 +316,11 @@ const {simbotFromCad, simbotPack, simbotUnpack, cadFromSimbot, validateRobot, zi
     const solids=cad.solids;
     const mechs=(cad.mechs||[]).filter(m=>!m.drive&&m.kind!=="fixed");
     const ids=new Set(mechs.map(m=>m.id));
-    const group=solids.map(s=>s.mech&&ids.has(s.mech)?s.mech:"chassis");
+    // a "fixed" joint (a mate the bench holds where it's drawn) is part of whatever
+    // moving joint carries it: its parts ride that one, and joints below hang from it
+    const byId=new Map((cad.mechs||[]).map(m=>[m.id,m]));
+    const moving=id=>{ let x=id, g=0; while(x&&x!=="chassis"&&g++<64){ if(ids.has(x)) return x; const m=byId.get(x); x=m?m.parent:null; } return "chassis"; };
+    const group=solids.map(s=>s.mech?moving(s.mech):"chassis");
 
     // geometry: one mesh per unique shape, placed at each copy
     const meshes=[], meshAt=new Map(), materials=[], matAt=new Map();
@@ -363,6 +367,7 @@ const {simbotFromCad, simbotPack, simbotUnpack, cadFromSimbot, validateRobot, zi
     const devMap={};
     for(const [d,j] of Object.entries(o.map||{})) if(j&&ids.has(j)) devMap[d]=j;
     const spec=specFromCad(cad,group,devMap);
+    for(const j of spec.joints) if(j.parent&&!ids.has(j.parent)){ const p=moving(j.parent); if(p==="chassis") delete j.parent; else j.parent=p; }
     spec.version=2;
     spec.source=cad.source||"step";
     spec.exact=!!(cad.mates&&(cad.mates.source==="onshape"||cad.mates.exact));
@@ -464,6 +469,10 @@ const {simbotFromCad, simbotPack, simbotUnpack, cadFromSimbot, validateRobot, zi
     };
     for(const r of scene) walk(r,YUP_TO_ZUP,0,null);
     if(!parts.length) bad("empty","robot.glb has no parts");
+    // the triangles drawn, every copy counted: a few meshes placed many times can't blow past the cap
+    let drawn=0;
+    for(const p of parts) for(const it of p.inst){ const m=g.meshes[it.mesh]; drawn+=m.idx?m.idx.length/3:m.pos.length/9;
+      if(drawn>CAPS.triangles) bad("too-big","robot.glb places more than "+CAPS.triangles+" triangles"); }
     if(parts.length>CAPS.parts) bad("too-big","robot.glb has "+parts.length+" parts; the limit is "+CAPS.parts);
     parts.sort((a,b)=>a.i-b.i);
     parts.forEach((p,k)=>{ if(p.i!==k) bad("not-glb","robot.glb's parts aren't numbered 0.."+(parts.length-1)); });
@@ -494,7 +503,7 @@ const {simbotFromCad, simbotPack, simbotUnpack, cadFromSimbot, validateRobot, zi
       const thin=typeof thinPoints==="function"?thinPoints(pts.length>=4?pts:pts.concat(pts,pts,pts).slice(0,4),120):pts;
       for(const q of thin) P.push(q);
       const ex=p.ex, pn=typeof ex.part==="string"?ex.part.slice(0,64):null;
-      const s={name:p.name.replace(/\s*<\d+>\s*$/,""), part:pn, kind:typeof ex.kind==="string"&&KIND_RGB[ex.kind]?ex.kind:(typeof solidKind==="function"?solidKind(p.name,pn):"metal"),
+      const s={name:p.name.replace(/\s*<\d+>\s*$/,""), part:pn, kind:typeof ex.kind==="string"&&Object.prototype.hasOwnProperty.call(KIND_RGB,ex.kind)?ex.kind:(typeof solidKind==="function"?solidKind(p.name,pn):"metal"),
         size:pos.length?Math.hypot(smx[0]-smn[0],smx[1]-smn[1],smx[2]-smn[2]):0, pts:thin, tri:{pos,nor}, keepTri:true, color:col};
       if(fin(ex.kg)&&ex.kg>0) s.kg=ex.kg;
       if(typeof ex.path==="string") s.osPath=ex.path.slice(0,400);
@@ -511,7 +520,13 @@ const {simbotFromCad, simbotPack, simbotUnpack, cadFromSimbot, validateRobot, zi
         R:[[1,0,0],[0,1,0],[0,0,1]], M:I4.slice(), shift:null},
       source:src==="step"?"simbot":src, simbot:{manifest:M}};
     // the joints, through the same reader a hand-written spec takes
-    const R=applyJointSpec(cad,pkg.joints);
+    // a package only ever picks parts by number: a pattern in a mailed file would be
+    // run against its part names (a crafted one can hang the page), so none is
+    const pick=sel=>{ if(!isObj(sel)) return null; const o={}; for(const k of ["solid","x","y","z"]) if(Array.isArray(sel[k])) o[k]=sel[k].slice(0,CAPS.parts).filter(v=>typeof v==="number"&&fin(v)); return Object.keys(o).length?o:null; };   // nothing left picks nothing, not everything
+    const J0=pkg.joints, joints=Object.assign({},J0,{
+      joints:(Array.isArray(J0.joints)?J0.joints:[]).map(j=>isObj(j)?Object.assign({},j,{parts:(Array.isArray(j.parts)?j.parts:[]).map(pick).filter(Boolean)}):j),
+      assign:(Array.isArray(J0.assign)?J0.assign:[]).map(a=>isObj(a)?Object.assign({},a,{parts:(Array.isArray(a.parts)?a.parts:[]).map(pick).filter(Boolean)}):a)});
+    const R=applyJointSpec(cad,joints);
     cad.mates.origin=src;
     const why=R.report.why.slice();
     // which device drives what
