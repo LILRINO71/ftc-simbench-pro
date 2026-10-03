@@ -1200,6 +1200,10 @@ const View={
     // still takes its drawn-pose fix
     const drawn=jointValues(this.cad.mechs,m=>{
       if(this.preview&&this.preview.id===m.id) return this.preview.q;     // the joint editor's "try it"
+      // solved mechanisms (src/joltmech.js): every joint where the solver put it,
+      // a linkage's free pins included
+      const W=Sim.mechWorld;
+      if(W&&W.joints.has(m.id)){ const q=W.q(m.id); return normJointKind(m.kind)==="linear"?q:q+(m.fromMate?(m.q0||0):0); }
       const dn=deviceOn(m.id), s=dn?Sim.dev[dn]:null;
       if(!s) return m.couple?null:(m.q0||null);
       const p=mechPose(m,s,this.size);
