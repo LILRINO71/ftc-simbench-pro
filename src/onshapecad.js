@@ -99,7 +99,7 @@ function cadFromOnshape(p,opts){
     if(!inst||inst.type!=="Part"||inst.suppressed) continue;
     nOcc++;
     const key=onshapeGeomKey(inst), G=geom[key], body=G&&G.parts[inst.partId];
-    if(!body||!body.tri||body.tri.length<9){ missing.add(inst.name||inst.partId); continue; }
+    if(!body||!body.tri||body.tri.length<9){ if(!inst.shapeless) missing.add(inst.name||inst.partId); continue; }
     const T=o.transform, R=[[T[0],T[1],T[2]],[T[4],T[5],T[6]],[T[8],T[9],T[10]]], t=[T[3],T[7],T[11]];
     const tri=body.tri, pos=new Array(tri.length), nor=new Array(tri.length);
     const smn=[Infinity,Infinity,Infinity], smx=[-Infinity,-Infinity,-Infinity], pts=[];

@@ -101,9 +101,10 @@ function mjcfToPayload(text,files,name){
       let T=[];
       if(type==="mesh"){
         const m=meshes[g.mesh]; if(!m){ missing.add(String(g.mesh)); continue; }
-        if(!/\.stl$/i.test(m.file)){ missing.add(base(m.file)+" (only STL is read)"); continue; }
         const f=fileByBase[base(m.file)]; if(!f){ missing.add(base(m.file)); continue; }
-        T=urdfStl(f); for(let k=0;k<T.length;k+=3){ T[k]*=m.scale[0]; T[k+1]*=m.scale[1]; T[k+2]*=m.scale[2]; }
+        let M=null; try{ M=urdfMesh(m.file,f,fileByBase); }catch(e){ missing.add(base(m.file)+" ("+(e&&e.message||e)+")"); continue; }
+        if(!M){ missing.add(base(m.file)+" (only STL, OBJ, glTF, GLB and DAE are read)"); continue; }
+        T=M; for(let k=0;k<T.length;k+=3){ T[k]*=m.scale[0]; T[k+1]*=m.scale[1]; T[k+2]*=m.scale[2]; }
       }else{
         const s=urdfNums(g.size,3,null)||urdfNums(g.size,2,null)||urdfNums(g.size,1,[0.01]);
         if(g.fromto!=null&&(type==="cylinder"||type==="capsule")){
