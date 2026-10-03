@@ -95,6 +95,7 @@ the code sends goes up, after any `setDirection(REVERSE)` in the code.
 | `id`, `label` | Name in the UI and in `parent` / `follows`. |
 | `kind` | `slider` or `revolute`. |
 | `axis`, `pivot` | Direction (unit or not) and a point on the axis, in mm. |
+| `dir` | `-1`: the device drives the joint the other way along `axis` (the rig panel's **±**); its `limits` still count along `axis`. Default `1`. |
 | `parent` | The joint this one rides on (default: the chassis). |
 | `device` | The code device or devices that drive it, by variable name or configuration name. |
 | `part` | The actuator's part number: speed, torque, ticks per revolution (e.g. `5203-2402-0051` = 50.9:1, 1425.1 ticks per turn). |
