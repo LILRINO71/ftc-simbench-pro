@@ -265,13 +265,27 @@ export function minifyCSS(src) {
   return out.trim();
 }
 
+/* Elements whose neighbouring whitespace never renders: block boxes, table
+   parts, things in <head>, SVG shapes. Whitespace next to anything else (b,
+   kbd, span, button, input...) is a visible space between inline boxes. */
+const NO_SPACE_AROUND = new Set(('html head body meta link title script style div p ul ol li dl dt dd table thead tbody ' +
+  'tfoot tr td th caption colgroup col section article aside header footer nav main h1 h2 h3 h4 h5 h6 form fieldset ' +
+  'legend details summary dialog pre hr br blockquote figure figcaption option optgroup template noscript ' +
+  'svg g defs rect path circle ellipse line polyline polygon use symbol').split(' '));
+
 /* Conservative: comments and inter-tag whitespace only, and never inside a
-   pre/textarea/script/style where whitespace is content. */
+   pre/textarea/script/style where whitespace is content. Whitespace between
+   two tags goes when either tag is a block one, and is one space otherwise:
+   "<b>Keys</b> <kbd>I</kbd>" must not render as "KeysI". */
 export function minifyHTML(src) {
   const keep = /<(pre|textarea|script|style)\b[\s\S]*?<\/\1>/gi;
   const holes = [];
   let masked = src.replace(keep, (m) => { holes.push(m); return '\u0000' + (holes.length - 1) + '\u0000'; });
   masked = masked.replace(/<!--[\s\S]*?-->/g, '');
-  masked = masked.replace(/\n\s*/g, '\n').replace(/>\s+</g, '><').replace(/\s{2,}/g, ' ');
+  const tagAt = (s, i) => { const m = /^<\/?([A-Za-z][\w-]*)/.exec(s.slice(i, i + 64)); return m ? m[1].toLowerCase() : null; };
+  masked = masked.replace(/\n\s*/g, '\n').replace(/>\s+</g, (m, off, s) => {
+    const left = tagAt(s, s.lastIndexOf('<', off)), right = tagAt(s, off + m.length - 1);
+    return !left || !right || NO_SPACE_AROUND.has(left) || NO_SPACE_AROUND.has(right) ? '><' : '> <';
+  }).replace(/\s{2,}/g, ' ');
   return masked.replace(/\u0000(\d+)\u0000/g, (m, i) => holes[+i]).trim();
 }
