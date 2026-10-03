@@ -178,3 +178,15 @@ test('minifier: HTML keeps pre and textarea content', () => {
   assert.ok(m.includes('<pre id="x">  keep\n   me  </pre>'));
   assert.ok(m.includes('<textarea>  spaces  </textarea>'));
 });
+
+/* Whitespace between two inline elements is a space on the page. The old
+   pass removed every >\s+< and the help line "Keys IJKL" read "KeysIJKL". */
+test('minifier: HTML keeps one space between inline elements', () => {
+  const html = '<ul>\n  <li><b>Keys</b> <kbd>I</kbd><kbd>J</kbd> drive</li>\n  <li><b>a</b>\n      <i>b</i>\n    <button>x</button>\n    <button>y</button></li>\n</ul>\n<p>\n  <span>c</span>\n</p>';
+  const m = minifyHTML(html);
+  assert.ok(m.includes('<b>Keys</b> <kbd>I</kbd><kbd>J</kbd> drive'), m);
+  assert.ok(m.includes('<b>a</b> <i>b</i> <button>x</button> <button>y</button>'), m);
+  assert.ok(m.includes('<ul><li>') && m.includes('</li><li>') && m.includes('</ul><p><span>c</span></p>'), 'around block tags it still goes: ' + m);
+  const page = minifyHTML(fs.readFileSync(path.join(ROOT, 'src', 'markup.html'), 'utf8'));
+  assert.ok(page.includes('<b>Keys</b> <kbd>I</kbd>'), 'the help line in the page');
+});
