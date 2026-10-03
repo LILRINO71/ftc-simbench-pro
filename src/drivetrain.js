@@ -574,7 +574,7 @@ function driveFromSpec(spec,F){
   for(const x of xs) for(const y of [track/2,-track/2]){
     const c=[F.fwd[0]*x+F.left[0]*y+F.up[0]*r, F.fwd[1]*x+F.left[1]*y+F.up[1]*r, F.fwd[2]*x+F.left[2]*y+F.up[2]*r];
     // an X-drive's wheels sit at 45 degrees, rolling round the centre
-    const ax=kind==="x"?[(x>0)===(y>0)?-1:1,1].map(v=>v/Math.SQRT2):[0,1];
+    const ax=kind==="x"?[(x>0)===(y>0)?1:-1,1].map(v=>v/Math.SQRT2):[0,1];
     const axis=[F.fwd[0]*ax[0]+F.left[0]*ax[1], F.fwd[1]*ax[0]+F.left[1]*ax[1], F.fwd[2]*ax[0]+F.left[2]*ax[1]];
     ws.push({name:"wheel (set by hand)", part:null, c, axis, r, width:0.04, x, y, z:r, ax, skew:dtSkew(ax), roller:0, steer:false, corner:null, alpha:0});
   }
