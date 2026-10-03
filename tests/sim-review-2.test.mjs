@@ -172,3 +172,21 @@ test('driveProbe does not move the live game\'s balls or clock', () => {
   assert.equal(F.Shots.flying.length, n0);
   F.Shots.flying.length = 0;
 });
+
+/* ---- the IMU's yaw rate in kinematic mode ---- */
+
+test('kinematic physics: the VM\'s yaw rate is how fast the robot is really turning', () => {
+  // only the rigid path updated dstate.omega, so getAngularVelocity read 0
+  // while a kinematic robot spun
+  for (const physics of ['kinematic', 'rigid']) {
+    const b = sampleBench(E, E.DRIVE_JAVA);
+    E.Sim.reset(b.code, b.cad, b.map, { ...b.opts, physics, startPose: { x: 0, y: 0, h: 0 } });
+    E.Sim.pad[1].right_stick_x = 1;
+    run(E, 0.5);
+    const h = E.Sim.chassis.h;
+    E.Sim.tick(0.02);
+    const rate = (E.Sim.chassis.h - h) / 0.02, w = E.Sim.vmHost().omega();
+    assert.ok(Math.abs(rate) > 0.5, `${physics}: it turns, ${rate.toFixed(2)} rad/s`);
+    assert.ok(Math.abs(w - rate) < 1e-6 * Math.max(1, Math.abs(rate)), `${physics}: the host says ${w.toFixed(3)} rad/s, the heading turned at ${rate.toFixed(3)}`);
+  }
+});
