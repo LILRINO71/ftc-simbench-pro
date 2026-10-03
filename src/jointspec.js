@@ -220,7 +220,11 @@ const {applyJointSpec, jointSpecSelect, followQ, linkPin, sliderCrank, rodAngle,
       }else if(f.linkage==="four-bar"){
         const link={crankPivot:L.pivot, crankAxis:L.axis, crankPin:mm(f.crankPin), pin:mm(f.pin), ground:mm(f.ground), role:f.role==="rocker"?"rocker":"coupler"};
         if(!link.crankPin||!link.pin||!link.ground){ why.push("\""+j.id+"\": a four-bar needs crankPin, pin and ground."); continue; }
-        link.rod=Math.hypot(...sub(link.crankPin,link.pin)); link.rocker=Math.hypot(...sub(link.ground,link.pin));
+        // fourBarPin solves in the plane square to the crank's axis, so the
+        // links are measured there too: pins set apart along the axis (a
+        // coupler beside the crank) would otherwise move the linkage at rest
+        const flat=v=>{ const d=sub(v,mul(L.axis,dot(L.axis,v))); return Math.hypot(d[0],d[1],d[2]); };
+        link.rod=flat(sub(link.crankPin,link.pin)); link.rocker=flat(sub(link.ground,link.pin));
         m.couple={to:L.id, ratio:1, via:"four-bar", link};
       }else m.couple={to:L.id, ratio:Number.isFinite(f.ratio)?f.ratio:1, via:f.via||"ratio"};
     }
