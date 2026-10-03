@@ -182,7 +182,8 @@ const {applyJointSpec, jointSpecSelect, followQ, linkPin, sliderCrank, rodAngle,
     }
     const mechs=[], byId=new Map();
     for(const j of joints){
-      const lin=/^(slider|linear|prismatic)$/i.test(j.kind||"");
+      // "slider", or any of the bench's names for a slide (normJointKind: linear, prismatic, linear-slide)
+      const kn=String(j.kind||"").toLowerCase(), lin=kn==="slider"||normJointKind(kn)==="linear";
       const axis=unit(Array.isArray(j.axis)?j.axis:[0,0,1]);
       const pivot=mm(j.pivot)||[0,0,0];
       const parent=j.parent&&ids.has(j.parent)?j.parent:"chassis";
