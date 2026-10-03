@@ -43,12 +43,23 @@ Open **Online** in the top bar.
 
 ## The network
 
-- **Direct connections.** Browsers connect straight to each other with WebRTC. They find each other through public [Nostr](https://nostr.com) relays, using the [Trystero](https://github.com/dmotz/trystero) library (MIT). Trystero is loaded from jsDelivr (or esm.sh if jsDelivr fails), pinned to one version, and only when someone opens **Online**.
-- **Which relays.** SimBench names its relays (`NET_RELAYS` in `src/net.js`): seven large public ones, all used at once, so one or two being down doesn't stop anyone. Left to itself, Trystero picked the same 5 of its built-in 28 for every SimBench player, and two of those were down or refused connections, so players often never found each other. Only "who is in which room" goes through a relay; the match itself is direct.
-- **No server.** The match itself never passes through any server, and SimBench runs none. There's no account, no sign-in and no API key.
-- **Your IP address.** Like any peer-to-peer game, the other players' browsers can see your IP address.
-- **Blocked networks.** Some school and company networks block direct connections between browsers. If players can't connect, try a phone hotspot or a home network. A TURN relay would fix this for every network, but it has to run somewhere with a secret key, so it isn't in the browser code.
+School networks drop UDP, which WebRTC needs, and WebSockets to hosts their filter doesn't know, which the public relays are. The one path a school can't block without blocking SimBench itself is HTTPS to SimBench. So going online climbs a ladder (`netConnect` in `src/netrelay.js`), and takes the first rung the site has:
+
+| Rung | How | Needs |
+| --- | --- | --- |
+| Match rooms on this site | A WebSocket to `/room/<name>/ws` on SimBench's own origin. Where a proxy strips WebSocket upgrades, Server-Sent Events down and batched POSTs up, which is plain HTTPS. | The site's room service is switched on (DEPLOY.md, "Online rooms") |
+| WebRTC through TURN | Browsers connect directly; where they can't, through Cloudflare's TURN relay, which also listens on TCP port 443. | The site has TURN credentials (DEPLOY.md) |
+| WebRTC | Browsers connect directly, found through public Nostr relays (Trystero). | Nothing: this is how it always worked |
+
+- **The rooms** (`workers/room/room.js`): one Cloudflare Durable Object per room. It relays each message to everyone or to the players named, always stamped with who really sent it; tells everyone who arrives and leaves; tells the time, so the countdown is the same whoever hosts; and keeps each tick's commands for lockstep matches (`src/lockstep.js`). It refuses taken or malformed ids, full rooms, oversize messages and floods, and only this site's own pages may use it. It runs no physics, and it hibernates between messages.
+- **Direct connections.** On the WebRTC rungs, browsers connect straight to each other. They find each other through public [Nostr](https://nostr.com) relays, using the [Trystero](https://github.com/dmotz/trystero) library (MIT), loaded from jsDelivr (or esm.sh) only when someone opens **Online**. SimBench names its relays (`NET_RELAYS` in `src/net.js`): seven large public ones, all used at once.
+- **Your IP address.** On the WebRTC rungs, like any peer-to-peer game, the other players' browsers can see your IP address. In a room, only SimBench's server sees it.
+- **Still can't connect?** On a site without rooms, some school and company networks block direct connections between browsers. A phone hotspot or a home network works.
 - **Tab in the background.** A browser gives a hidden or covered tab no animation frames. While a match is on, SimBench keeps stepping it from a timer instead, so a host who switches tabs doesn't freeze everyone.
+
+## Lockstep (built, not yet the match's default)
+
+`src/lockstep.js` is the bookkeeping for matches where every computer runs every robot and only each robot's motor and servo commands travel: a 16-bit encoding (a tick's commands for one robot are a few dozen bytes), the ledger that plays tick T only once every robot's commands for T are in, a stand-in (motors off) for a robot whose commands stop coming, and a hash vote that names the computer that diverged. The rooms carry and keep the ledger. With Jolt Physics for the mechanisms (`src/joltmech.js`), three computers fed the same commands in a scrambled order end in identical states (`tests/lockstep.test.mjs`). Today's matches still run as described above; switching them to lockstep needs every computer to simulate the other teams' drivetrains from their robot packages, which is the next step.
 
 ## What it isn't yet
 

@@ -99,6 +99,54 @@ bookmark and STEP files instead. The secret never reaches the page. Each team's 
 kept in an encrypted, HttpOnly cookie that only `/onshape/*` sees. The function only reads, and only
 the calls the robot reader makes, and only from `cad.onshape.com`.
 
+## Online rooms (do this once, so matches work on school networks)
+
+School networks drop UDP and WebSockets to unknown hosts, so the browsers' direct WebRTC
+connections and the public relays they meet through often fail there. The site can run its own
+match rooms instead, reached over HTTPS on SimBench's own address, which a school can't block
+without blocking SimBench (`docs/online.md`, "The network"). Each room is a Cloudflare Durable
+Object; the class lives in `workers/room/`, deployed as its own small Worker, and the Pages
+Function `functions/room/` routes `/room/*` to it.
+
+1. Deploy the Worker that holds the rooms (once, and again whenever `workers/room/` changes):
+   ```bash
+   npx wrangler login
+   npx wrangler deploy --config workers/room/wrangler.toml
+   ```
+   It's called `ftc-simbench-rooms`. Durable Objects with SQLite storage are on the free plan.
+2. In Cloudflare: **Workers & Pages → ftc-simbench-pro → Settings → Bindings → Add → Durable
+   Object namespace**: variable name `ROOMS`, Worker `ftc-simbench-rooms`, class `RoomDO`.
+   Add it for Production (and Preview if you test there).
+3. **Deployments → the latest one → Retry deployment.**
+4. Check: `https://<site>/room/health` says `{"ready":true,...}`. Players going online now meet
+   in the site's own rooms.
+
+Without the binding, `/room/health` says `ready:false` and the page uses direct WebRTC as before.
+
+**Cost.** A room sleeps between messages (WebSocket hibernation). Incoming WebSocket messages are
+billed at 20 to a request: a four-player match sends about 100 poses and states a second, so an
+hour of one match is about 18,000 billed requests. The free plan's 100,000 a day covers a few
+match-hours a day; past that it's the Workers Paid plan.
+
+### TURN (optional)
+
+For sites without rooms, or as WebRTC's fallback: Cloudflare Realtime TURN relays WebRTC through
+TCP port 443 when UDP is blocked. Create a TURN key in **Realtime → TURN**, then add two secrets
+to the Pages project: `TURN_KEY_ID` and `TURN_KEY_API_TOKEN`. `/room/turn` hands browsers
+short-lived credentials; the key never reaches the page. 1,000 GB a month is free.
+
+## Libraries served from the site
+
+The page loads three.js, OpenCascade (for STEP files) and Jolt Physics from the site itself,
+under `vendor/`, so a filter that blocks CDNs can't break it; the CDN copies are only a
+fallback. three.js is committed in `vendor/three/`. OpenCascade and Jolt are copied from
+`node_modules` by the build, so the Pages build must install dev dependencies (Cloudflare Pages
+does by default: `npm ci` before `npm run build:ship`). If they're missing, the build says nothing
+and the page falls back to jsDelivr.
+
+`dist/sw.js` caches the page and these libraries, so after one visit SimBench opens offline (at a
+venue with bad Wi-Fi, say), and `dist/manifest.webmanifest` makes it installable as an app.
+
 ## The domain
 
 `ftc-simbench.com` has to be registered and paid for by you; I can't do that. Once it is:
