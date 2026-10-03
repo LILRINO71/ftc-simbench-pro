@@ -2,10 +2,14 @@
 // the engine twice — as written, and after the minifier — and compare results.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { engineBundle, loadEngine, loadWithField } from './load.mjs';
 import { minifyJS, minifyCSS, minifyHTML, tokenize } from '../tools/minify.mjs';
 
 const run = (src) => new Function(`"use strict";return (${src})`)();
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 test('minifier: the awkward corners of JS survive', () => {
   const cases = [
@@ -28,6 +32,31 @@ test('minifier: the awkward corners of JS survive', () => {
     // whitespace inside a template literal is content, so only check the rest
     if (!src.includes('`')) assert.ok(!/\n\s+/.test(min), `${what}: indentation left behind`);
   }
+});
+
+/* A ${…} in a template is code: a quote inside a regex there (/can't/, /'/g)
+   is not a string. The old scanner took it for one, ran the template on past
+   its end, and then lexed the next template's text as code, where '//' is a
+   comment, so the rest of the line was cut off. */
+test('minifier: a regex inside ${} is a regex, not the start of a string', () => {
+  const cases = [
+    ["quote in a regex, then a '}' string and a template with //",
+      "(() => { const x = \"a'b\"; const s = `${x.replace(/'/g, \"\")}`; const t = '}'; return s + t + `://keep`; })()", "ab}://keep"],
+    ["the app's /Check|can't|\"O\"/", "(() => { const t = \"can't\"; return `<p${/Check|can't|\"O\"/.test(t) ? ' w' : ''}>` + `//x`; })()", "<p w>//x"],
+    ['a comment inside ${}', '(() => `a${ 1 /* } */ + 1 }b` + `//c`)()', 'a2b//c'],
+  ];
+  for (const [what, src, want] of cases) {
+    assert.equal(run(src), want, `${what}: the case itself`);
+    const min = minifyJS(src);
+    assert.equal(run(min), want, `${what}: minified to ${min}`);
+  }
+  // src/app.js has the /Check|can't|"O"/ regex; everything after it must still be minified
+  const app = fs.readFileSync(path.join(ROOT, 'src', 'app.js'), 'utf8');
+  const min = minifyJS(app);
+  assert.ok(!min.includes('MAIN LOOP') && !min.includes('PRO — one status light'), 'app.js comments after the regex survive the minifier');
+  const longest = Math.max(...tokenize(app).filter((t) => t.t === 'tmpl').map((t) => t.v.length));
+  assert.ok(longest < 10000, `a ${longest}-character template literal in app.js: the scanner ran past one's end`);
+  assert.doesNotThrow(() => new Function(min), 'minified app.js compiles');
 });
 
 test('minifier: comments go, code does not', () => {
