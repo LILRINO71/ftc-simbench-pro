@@ -73,3 +73,61 @@ test('ticksPerRev: the published count first, else 28 counts on the motor throug
   assert.equal(E.ticksPerRev(E.hwFromPart('REV-41-1300')), 288);
   assert.equal(E.ticksPerRev(null), 537.7, 'nothing known: the unspecified motor');
 });
+
+/* ---- in rigid physics a drive encoder counts what its wheel turned ---- */
+
+const TANK = `
+@TeleOp(name = "Tank")
+public class T extends LinearOpMode {
+    DcMotor leftDrive, rightDrive;
+    @Override
+    public void runOpMode() {
+        leftDrive = hardwareMap.get(DcMotor.class, "leftDrive");
+        rightDrive = hardwareMap.get(DcMotor.class, "rightDrive");
+        leftDrive.setDirection(DcMotor.Direction.REVERSE);
+        waitForStart();
+        while (opModeIsActive()) {
+            leftDrive.setPower(-gamepad1.left_stick_y);
+            rightDrive.setPower(-gamepad1.left_stick_y);
+        }
+    }
+}`;
+function tankOnField() {
+  const F = loadWithField();
+  const b = sampleBench(F, TANK);
+  F.Sim.reset(b.code, b.cad, b.map, { ...b.opts, physics: 'rigid', startPose: F.Field.startPose('red', F.footprintOf(b.cad, '+x')) });
+  return F;
+}
+const pos = (F, n) => F.Sim.env().device(n, 'getCurrentPosition');
+
+test('rigid physics: free driving, the drive encoders read the distance actually covered', () => {
+  // they integrated free speed x commanded power, so they ran ahead of a
+  // robot that was still getting up to speed
+  const F = tankOnField(), x0 = F.Sim.chassis.x;
+  F.Sim.pad[1].left_stick_y = -1;
+  run(F, 0.5);
+  assert.equal(F.Sim.bump, null, 'nothing in the way yet');
+  const d = F.Sim.chassis.x - x0, r = F.Sim.rig.drive.wheels[0].r, tpr = F.Sim.dev.leftDrive.tpr;
+  assert.ok(d > 0.2, `it drove ${d.toFixed(3)} m`);
+  for (const n of ['leftDrive', 'rightDrive']) {
+    const m = pos(F, n) / tpr * 2 * Math.PI * r;
+    assert.ok(m > 0, `${n} counts up under positive power, REVERSE or not: ${pos(F, n)}`);
+    assert.ok(Math.abs(m - d) < 0.03 * d, `${n}: ${pos(F, n)} ticks is ${m.toFixed(3)} m, the robot covered ${d.toFixed(3)} m`);
+  }
+});
+
+test('rigid physics: pinned on a wall, the drive encoders stop counting', () => {
+  const F = tankOnField();
+  F.Sim.pad[1].left_stick_y = -1;                         // full power, the whole way in
+  run(F, 5);
+  assert.ok(F.Sim.bump, 'against something');
+  const a = [pos(F, 'leftDrive'), pos(F, 'rightDrive')], x = F.Sim.chassis.x;
+  run(F, 1);
+  assert.ok(Math.abs(F.Sim.chassis.x - x) < 0.002, 'and not moving');
+  const b = [pos(F, 'leftDrive'), pos(F, 'rightDrive')];
+  // the tiles hold a 12 kg two-wheel base against two motors at stall: no
+  // wheelspin. Free speed is 2796 ticks/s; what's left is the tyre's creep
+  // under the full stall force, a few mm/s (its stiffness at rest is finite)
+  assert.ok(Math.abs(b[0] - a[0]) <= 15 && Math.abs(b[1] - a[1]) <= 15, `a second on the wall counted ${b[0] - a[0]} and ${b[1] - a[1]} ticks`);
+  assert.ok(Math.abs(F.Sim.env().device('leftDrive', 'getVelocity')) < 15, 'and getVelocity reads still');
+});
