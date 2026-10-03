@@ -181,13 +181,14 @@ const JoltMech=(function(){
       const cp=j.m.couple; if(!cp) continue;
       const L=joints.get(cp.to); if(!L){ notes.push("\""+id+"\" follows \""+cp.to+"\", which isn't simulated; it holds still."); continue; }
       const r=fin(cp.ratio)?cp.ratio:1, sameFrame=j.parentId==="chassis"&&L.parentId==="chassis";
-      if(!cp.link&&sameFrame&&r!==0&&!L.lin&&!j.lin){
+      const off=Number.isFinite(cp.offset)&&cp.offset!==0;        // a gear or rack constraint has no offset: those track
+      if(!cp.link&&!off&&sameFrame&&r!==0&&!L.lin&&!j.lin){
         // Jolt's gear: angle2 = -angle1 / ratio
         const s=new J.GearConstraintSettings(); s.mSpace=J.EConstraintSpace_WorldSpace;
         s.mHingeAxis1=V3(L.axis); s.mHingeAxis2=V3(j.axis); s.mRatio=-1/r;
         const g=J.castObject(s.Create(L.body,j.body),J.GearConstraint); J.destroy(s);
         g.SetConstraints(L.c,j.c); ps.AddConstraint(g); j.gear=g; j.follow="gear";
-      }else if(!cp.link&&sameFrame&&r!==0&&!L.lin&&j.lin){
+      }else if(!cp.link&&!off&&sameFrame&&r!==0&&!L.lin&&j.lin){
         // Jolt's rack: pinion angle = ratio * rack travel; ours: travel = r * angle
         const s=new J.RackAndPinionConstraintSettings(); s.mSpace=J.EConstraintSpace_WorldSpace;
         s.mHingeAxis=V3(L.axis); s.mSliderAxis=V3(j.axis); s.mRatio=1/r;
