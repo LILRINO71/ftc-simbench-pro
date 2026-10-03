@@ -80,12 +80,14 @@ const {applyJointSpec, jointSpecSelect, followQ, linkPin, sliderCrank, rodAngle,
     return ang(perp(sub(L.pin,L.crankPin)),perp(sub(C,linkPin(L,q))))-q*dot(ax,L.crankAxis);
   }
   /* A follower's value from the joints that drive it. get(id) is a joint's
-     drawn value — radians for a turn, metres for a slide — or null. */
+     drawn value — radians for a turn, metres for a slide — or null. A ratio
+     follower sits at q*ratio+offset (offset: a URDF mimic's, in the
+     follower's own metres or radians). */
   function followQ(m,get){
     const c=m.couple; if(!c) return null;
     const q=get(c.to); if(q==null) return null;
     const L=c.link;
-    if(!L) return q*(Number.isFinite(c.ratio)?c.ratio:1);
+    if(!L) return q*(Number.isFinite(c.ratio)?c.ratio:1)+(Number.isFinite(c.offset)?c.offset:0);
     if(c.via==="slider-crank") return sliderCrank(L,q);
     if(c.via==="rod"){ const e=get(L.slider); return rodAngle(L,q,e==null?0:e,m.axis); }
     if(c.via==="four-bar") return fourBarAngle(L,q,m.axis);
@@ -147,6 +149,9 @@ const {applyJointSpec, jointSpecSelect, followQ, linkPin, sliderCrank, rodAngle,
     return info.filter(p=>(!only||only.has(p.i))&&(!inR||inR.test(p.path))&&!(notR&&notR.test(p.path))&&
       box.every((r,k)=>!r||(p.c[k]>=r[0]&&p.c[k]<=r[1]))).map(p=>p.i);
   }
+
+  // a follower's offset on file (mm for a slide, degrees for a turn) in metres or radians; 0 for none
+  const offsetOf=(m,v)=>Number.isFinite(v)&&v?(normJointKind(m.kind)==="linear"?v/1000:v*DEG):0;
 
   /* ---- the spec -> the bench's mechanisms ---- */
   function applyJointSpec(cad,spec){
@@ -223,7 +228,10 @@ const {applyJointSpec, jointSpecSelect, followQ, linkPin, sliderCrank, rodAngle,
         if(!link.crankPin||!link.pin||!link.ground){ why.push("\""+j.id+"\": a four-bar needs crankPin, pin and ground."); continue; }
         link.rod=Math.hypot(...sub(link.crankPin,link.pin)); link.rocker=Math.hypot(...sub(link.ground,link.pin));
         m.couple={to:L.id, ratio:1, via:"four-bar", link};
-      }else m.couple={to:L.id, ratio:Number.isFinite(f.ratio)?f.ratio:1, via:f.via||"ratio"};
+      }else{
+        m.couple={to:L.id, ratio:Number.isFinite(f.ratio)?f.ratio:1, via:f.via||"ratio"};
+        const off=offsetOf(m,f.offset); if(off) m.couple.offset=off;
+      }
     }
     // version 2 (a robot package's joints.json): the couplings and the mates
     // that close loops, as a list of constraints
@@ -234,7 +242,8 @@ const {applyJointSpec, jointSpecSelect, followQ, linkPin, sliderCrank, rodAngle,
         const F=byId.get(c.follower), L=byId.get(c.leader);
         if(!F||!L||F===L){ why.push("A "+c.type+" constraint names \""+(c.follower||"?")+"\" and \""+(c.leader||"?")+"\"; one isn't a joint here."); continue; }
         if(F.couple){ why.push("\""+F.id+"\" already follows \""+F.couple.to+"\"; the "+c.type+" constraint to \""+L.id+"\" is ignored."); continue; }
-        F.couple={to:L.id, ratio:Number.isFinite(c.ratio)&&c.ratio!==0?c.ratio:1, via:c.type.toLowerCase()};
+        F.couple={to:L.id, ratio:Number.isFinite(c.ratio)?c.ratio:1, via:c.type.toLowerCase()};     // a ratio of 0 holds it still
+        const off=offsetOf(F,c.offset); if(off) F.couple.offset=off;
       }else if(c.type==="loop"){
         const end=x=>x==="chassis"||ids.has(x)?x:null, a=end(c.a), b=end(c.b), p=mm(c.point);
         if(a==null||b==null||a===b||!p){ why.push("A loop closure \""+(c.name||"?")+"\" doesn't name two joints and a point; it's ignored."); continue; }
@@ -283,7 +292,8 @@ const {applyJointSpec, jointSpecSelect, followQ, linkPin, sliderCrank, rodAngle,
       const dv=Object.keys(devices||{}).filter(d=>devices[d]===m.id); if(dv.length) j.device=dv.length===1?dv[0]:dv;
       if(m.continuous) j.continuous=true;
       // the relation's kind (gear, rack and pinion, linear) is kept, not just its ratio
-      if(m.couple&&!m.couple.link){ j.follows={joint:m.couple.to, ratio:m.couple.ratio}; if(m.couple.via&&m.couple.via!=="ratio") j.follows.via=m.couple.via; }
+      if(m.couple&&!m.couple.link){ j.follows={joint:m.couple.to, ratio:m.couple.ratio}; if(m.couple.via&&m.couple.via!=="ratio") j.follows.via=m.couple.via;
+        if(Number.isFinite(m.couple.offset)&&m.couple.offset) j.follows.offset=+(lin?m.couple.offset*1000:m.couple.offset/DEG).toFixed(lin?4:6); }
       else if(m.couple&&m.couple.link){ const L=m.couple.link; j.follows={joint:m.couple.to, linkage:m.couple.via, crankPin:r3(L.crankPin), pin:r3(L.pin)};
         if(L.slider) j.follows.slider=L.slider;
         if(L.ground){ j.follows.ground=r3(L.ground); j.follows.role=L.role; } }
