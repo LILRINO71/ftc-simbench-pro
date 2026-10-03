@@ -26,6 +26,8 @@ function loadView() {
     Group: class extends Obj {},
     Mesh: class extends Obj { constructor(g, m) { super(); this.geometry = g; this.material = m; } },
     MeshBasicMaterial: class { constructor(p) { Object.assign(this, p || {}); this.color = color(); this.userData = {}; } dispose() {} },
+    MeshStandardMaterial: class { constructor(p) { Object.assign(this, p || {}); this.isMaterial = true; this.userData = {}; } dispose() { this.disposed = true; } },
+    Color: class { constructor(...a) { this.a = a; } },
     SphereGeometry: class { constructor() { this.userData = {}; } dispose() {} },
     RingGeometry: class { constructor() { this.userData = {}; } dispose() {} },
     Vector3: class { constructor(x = 0, y = 0, z = 0) { this.x = x; this.y = y; this.z = z; } },
@@ -89,4 +91,24 @@ test('view: an effect from before View.load is not kept', () => {
   assert.equal(View.fxs.length, 1);
   View.load(CAD);
   assert.equal(View.fxs.length, 0, 'the old scene\'s effects went with it');
+});
+
+/* The material caches are keyed by colour (finishMat for the exact surfaces,
+   robotMat's "rgb:" entries for a robot read from Onshape or a URDF) and were
+   never emptied, so every robot loaded added its whole palette for good. */
+test('view: the last robot\'s colours leave the material caches when another robot loads', () => {
+  const View = loadView();
+  View.envMap = () => null;
+  const A = { ...CAD }, B = { ...CAD };
+  View.load(A);
+  const fin = View.finishMat(0xff0000, 'metal'), rgb = View.robotMat('rgb:255,0,0'), fixed = View.robotMat('metal');
+  View.load(A);                                     // a joint or rig change: the same robot keeps its materials
+  assert.equal(View.finishMat(0xff0000, 'metal'), fin);
+  assert.equal(View.robotMat('rgb:255,0,0'), rgb);
+  View.load(B);
+  assert.ok(fin.disposed && rgb.disposed, 'the old robot\'s colours are given back');
+  assert.equal(Object.keys(View._mats).length, 0);
+  assert.ok(!('rgb:255,0,0' in View._rmat));
+  assert.equal(View.robotMat('metal'), fixed, 'the fixed finishes stay');
+  assert.ok(!fixed.disposed);
 });
