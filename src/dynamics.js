@@ -58,6 +58,17 @@
    (the "projected" part), which is what makes wheelspin fall out rather
    than having to be special-cased.
 
+   A traction wheel (tank, six-wheel, swerve) also grips SIDEWAYS: it has
+   a second row, across its rolling direction, solved the same implicit
+   way with the same stiffness — the slip there is the ground speed under
+   the patch, since the rim has no sideways motion of its own. Both rows
+   share one friction circle, mu*N. Inside it each force is the one above;
+   past it the patch slides, and Coulomb puts the full mu*N along the
+   end-of-step slip. That direction depends on the forces themselves, so it
+   is one scalar root per wheel (dynCoulomb). Without the sideways row a
+   tank base turning a corner kept going straight, sideways. Roller wheels
+   (mecanum, omni, X, kiwi) have no such row: their rollers turn instead.
+
    Rolling resistance and viscous drag are applied last, as a decrement on
    the speed rather than a force, so they can shrink a velocity to exactly
    zero but never push it through zero and set the robot buzzing at rest.
@@ -385,6 +396,16 @@ function dynWheels(rig) {
   const kind = String(drive.kind || "tank").toLowerCase();
   const eta = dynClamp(dynOpt(rig, "strafeEff"), 0.05, 1);
   const out = [];
+  // A tank side grips sideways as one contact at the middle of its wheels:
+  // the differential-drive idealisation, the same one the kinematic mode
+  // drives on. The end wheels of a real four-wheel traction side scrub when
+  // it turns; that scrub torque is not modelled (a six-wheel drop centre,
+  // turning on its middle wheels, is what this describes exactly).
+  const sideX = { 1: [0, 0], "-1": [0, 0] };
+  if (kind === "tank") for (const w of list) {
+    const s = sideX[dynNum(w && w.y, 0) >= 0 ? 1 : -1];
+    s[0] += dynNum(w && w.x, 0); s[1]++;
+  }
 
   for (let i = 0; i < list.length; i++) {
     const w = list[i] || {};
@@ -392,7 +413,7 @@ function dynWheels(rig) {
     const r = Math.max(1e-4, dynNum(w.r, DYN_DEFAULTS.wheelRadius));
     const k = kind === "mecanum" ? Math.sign(dynNum(w.roller, 0)) : 0;
 
-    let vel, force, dir, gain;
+    let vel, force, dir, gain, lat = null;
     if (k) {
       vel = [1, -k, -(y + k * x)];
       force = [1, -k * eta, -(y + k * eta * x)];
@@ -407,9 +428,16 @@ function dynWheels(rig) {
       force = [ca, sa, x * sa - y * ca];
       dir = [ca, sa];
       gain = 1;
+      // across the wheel, 90 degrees left of its rolling direction: the
+      // ground speed under the patch that way, and (virtual work again) the
+      // chassis wrench of one newton pushed that way. A tank's at the middle
+      // of its side (above).
+      const s = sideX[y >= 0 ? 1 : -1], xl = kind === "tank" && s[1] ? s[0] / s[1] : x;
+      lat = [-sa, ca, xl * ca + y * sa];
     }
     const row = ik[i];
     if (row && row.length === 3) vel = [dynNum(row[0], vel[0]), dynNum(row[1], vel[1]), dynNum(row[2], vel[2])];
+    const rolls = k !== 0 || kind === "x" || kind === "omni" || kind === "kiwi";
 
     out.push({
       x: x, y: y, r: r, roller: k, alpha: dynNum(w.alpha, 0), kind: kind,
@@ -417,7 +445,10 @@ function dynWheels(rig) {
       J: Math.max(DYN_MIN_J, dynPer(rig && rig.wheelInertia, i, DYN_DEFAULTS.wheelInertia)),
       gear: Math.max(1e-6, Math.abs(dynPer(rig && rig.gear, i, DYN_DEFAULTS.gear))),
       eff: dynClamp(dynPer(rig && rig.efficiency, i, DYN_DEFAULTS.efficiency), 0, 1),
-      rolls: k !== 0 || kind === "x" || kind === "omni" || kind === "kiwi"
+      rolls: rolls,
+      // only a traction wheel grips sideways; a mecanum wheel whose hand is
+      // unknown is still a roller wheel, just one modelled as rolling straight
+      lat: !rolls && kind !== "mecanum" ? lat : null
     });
   }
   return out;
@@ -436,6 +467,7 @@ function dynState(state, n) {
     slip: arr(s.slip),
     loads: new Array(n).fill(0),
     force: arr(s.force),
+    side: arr(s.side),
     accel: { x: dynFin(+(s.accel && s.accel.x)), y: dynFin(+(s.accel && s.accel.y)) },
     alpha: dynFin(+s.alpha),
     wrench: { fx: dynFin(+wr.fx), fy: dynFin(+wr.fy), tz: dynFin(+wr.tz) }
@@ -447,9 +479,37 @@ function dynStill(n) {
   return {
     v: { x: 0, y: 0 }, omega: 0,
     wheelOmega: new Array(n).fill(0), slip: new Array(n).fill(0),
-    loads: new Array(n).fill(0), force: new Array(n).fill(0),
+    loads: new Array(n).fill(0), force: new Array(n).fill(0), side: new Array(n).fill(0),
     accel: { x: 0, y: 0 }, alpha: 0, wrench: { fx: 0, fy: 0, tz: 0 }
   };
+}
+
+/* A sliding traction wheel: the rolling force F and sideways force G that
+   put the whole friction circle R along the slip left at the END of the
+   step. With b and c the rolling and sideways slip the step would leave
+   with no contact force, and D and E what one newton closes of each, the
+   end slip is (b - D F, c - E G), and Coulomb asks for
+
+       F = R b / (lam + D R),   G = R c / (lam + E R),   F^2 + G^2 = R^2
+
+   where lam >= 0 is the size of that slip. The left side of the circle
+   condition falls monotonically and convexly in lam, so Newton from zero
+   climbs to the root without overshooting it. Only called when the
+   no-slip forces don't fit inside the circle, so the root exists. */
+function dynCoulomb(b, c, D, E, R) {
+  if (!(R > 0)) return [0, 0];
+  const a = D * R, e = E * R;
+  let lam = 0;
+  for (let k = 0; k < 40; k++) {
+    const p = b / (lam + a), q = c / (lam + e);
+    const f = p * p + q * q - 1;
+    if (!(f > 1e-10)) break;
+    const df = -2 * (p * p / (lam + a) + q * q / (lam + e));
+    if (!(df < 0)) break;
+    lam -= f / df;
+  }
+  const F = R * b / (lam + a), G = R * c / (lam + e);
+  return [dynFin(F), dynFin(G)];
 }
 
 const Dyn = {
@@ -465,8 +525,12 @@ const Dyn = {
 
   /* One fixed step. `cmd` is the per-wheel motor command, -1..1, already
      produced by whatever ran the OpMode; this function only does physics.
-     Returns the next state — the one passed in is not touched. */
-  step(state, cmd, rig, dt) {
+     `coast`, optional, is per wheel: true for a motor set to
+     ZeroPowerBehavior.FLOAT, which at zero command has its windings open
+     and makes no torque at all, back-EMF braking included (see
+     motorTorque). Returns the next state — the one passed in is not
+     touched. */
+  step(state, cmd, rig, dt, coast) {
     rig = rig || {};
     const W = dynWheels(rig), n = W.length;
     const st = dynState(state, n);
@@ -508,66 +572,98 @@ const Dyn = {
       const w = W[i], row = w.vel;
       const spec = motors[i] || motors[0] || null;
       const c = dynClamp(dynNum(Array.isArray(cmd) ? cmd[i] : cmd, 0), -1, 1);
+      // FLOAT at zero power: the windings are open, so no torque and no droop
+      const open = c === 0 && Array.isArray(coast) && !!coast[i];
 
       u[i] = st.wheelOmega[i] * w.r;                                   // rim speed, m/s
       v[i] = row[0] * vx + row[1] * vy + row[2] * om;                  // ground speed under it
-      tauW[i] = motorTorque(spec, st.wheelOmega[i] * w.gear, c, mOpts) * w.gear * w.eff;
+      tauW[i] = open ? 0 : motorTorque(spec, st.wheelOmega[i] * w.gear, c, mOpts) * w.gear * w.eff;
 
-      // grip available for driving, after this patch pays for the cornering
-      // force it is already passing. A roller wheel makes no cornering force
-      // worth the name, so there is nothing for it to trade away.
+      // grip available for driving. A traction wheel shares this with its
+      // sideways force (one friction circle, solved below); a roller wheel
+      // makes no cornering force worth the name, so it has nothing to share.
       const kObj = { kind: w.kind, roller: w.roller, alpha: w.alpha, sideMu: rig.rollerMu };
-      let grip = tractionLimit(loads[i], mu, kObj, w.dir);
-      if (!w.rolls) {
-        const lat = [-w.dir[1], w.dir[0]];
-        const latCap = tractionLimit(loads[i], mu, kObj, lat);
-        const need = Math.abs(st.wrench.fx * lat[0] + st.wrench.fy * lat[1]) / n;
-        const f = latCap > 0 ? Math.min(1, need / latCap) : 0;
-        grip *= Math.sqrt(Math.max(0, 1 - f * f));
-      }
+      const grip = tractionLimit(loads[i], mu, kObj, w.dir);
       cap[i] = grip / w.gain;                                          // ceiling on the RIM force
 
       // implicit in the motor's speed droop (see motorSlope): with the ground
       // taking nothing, the rim gains tau / (J/dt + k), not dt*tau/J
-      kW[i] = motorSlope(spec) * w.gear * w.gear * w.eff;
+      kW[i] = open ? 0 : motorSlope(spec) * w.gear * w.gear * w.eff;
       Jdt[i] = w.J / dt;
       b0[i] = (u[i] - v[i]) + tauW[i] * w.r / (Jdt[i] + kW[i]);
       K[i] = Cs * loads[i] / Math.max(Math.abs(v[i]), vEps);
     }
 
-    // ---- coupling: how much one newton at wheel j closes wheel i's slip gap
+    // ---- the solver's rows: every wheel's rolling row (0..n-1), then the
+    // sideways row of each traction wheel. side[i] is wheel i's sideways row.
+    const rows = W.map(w => ({ vel: w.vel, force: w.force }));
+    const side = new Array(n).fill(-1);
+    for (let i = 0; i < n; i++) if (W[i].lat) { side[i] = rows.length; rows.push({ vel: W[i].lat, force: W[i].lat }); }
+    const nr = rows.length;
+
+    // ---- coupling: how much one newton on row q closes row p's slip gap
     const A = [];
-    for (let i = 0; i < n; i++) {
-      const p = W[i].vel; A[i] = new Array(n);
-      for (let j = 0; j < n; j++) {
-        const q = W[j].force;
-        A[i][j] = (p[0] * q[0] + p[1] * q[1]) / m + p[2] * q[2] / Izz;
+    for (let p = 0; p < nr; p++) {
+      const a = rows[p].vel; A[p] = new Array(nr);
+      for (let q = 0; q < nr; q++) {
+        const t = rows[q].force;
+        A[p][q] = (a[0] * t[0] + a[1] * t[1]) / m + a[2] * t[2] / Izz;
       }
+    }
+    for (let i = 0; i < n; i++) {
       D[i] = W[i].r * W[i].r / (Jdt[i] + kW[i]) + dt * Math.max(0, A[i][i]);
       if (!(D[i] > 0)) D[i] = W[i].r * W[i].r / (Jdt[i] + kW[i]);
     }
+    // sideways there is no wheel to spin: only the chassis takes the newton
+    const E = side.map(j => j < 0 ? 0 : Math.max(1e-9, dt * A[j][j]));
+    // the sideways slip the step would end with and no contact force: the
+    // ground speed under the patch (the rim has no sideways speed of its
+    // own), with the body-frame velocity already turned by omega x v. Left
+    // out, a robot holding a steady corner slid out by a whole step's worth
+    // of centripetal acceleration.
+    const fvx = vx + dt * om * vy, fvy = vy - dt * om * vx;
+    const c0 = side.map((j, i) => {
+      if (j < 0) return 0;
+      const l = W[i].lat;
+      return -(l[0] * fvx + l[1] * fvy + l[2] * om);
+    });
 
     // ---- projected Gauss-Seidel, warm-started from last step's forces
-    const F = st.force.slice(), bb = new Array(n).fill(0);
+    const f = new Array(nr).fill(0);
+    for (let i = 0; i < n; i++) { f[i] = st.force[i]; if (side[i] >= 0) f[side[i]] = st.side[i]; }
+    const bb = new Array(n).fill(0), cc = new Array(n).fill(0);
+    const gap = (p, g0) => { let off = 0; for (let q = 0; q < nr; q++) if (q !== p) off += A[p][q] * f[q]; return g0 - dt * off; };
     for (let s = 0; s < sweeps; s++) {
       for (let i = 0; i < n; i++) {
-        let off = 0;
-        for (let j = 0; j < n; j++) if (j !== i) off += A[i][j] * F[j];
-        const b = b0[i] - dt * off;
+        const b = gap(i, b0[i]);
         bb[i] = b;
-        let f = K[i] * b / (1 + K[i] * D[i]);
-        if (!Number.isFinite(f)) f = 0;
-        F[i] = dynClamp(f, -cap[i], cap[i]);
+        let fi = K[i] * b / (1 + K[i] * D[i]);
+        if (!Number.isFinite(fi)) fi = 0;
+        const j = side[i];
+        if (j < 0) { f[i] = dynClamp(fi, -cap[i], cap[i]); continue; }
+        // a traction wheel: both rows at once, inside one friction circle
+        const c = gap(j, c0[i]);
+        cc[i] = c;
+        let gi = K[i] * c / (1 + K[i] * E[i]);
+        if (!Number.isFinite(gi)) gi = 0;
+        if (fi * fi + gi * gi > cap[i] * cap[i]) [fi, gi] = dynCoulomb(b, c, D[i], E[i], cap[i]);
+        f[i] = fi; f[j] = gi;
       }
     }
     // the hard guarantee: no wheel may push past the point where its own slip
-    // closes, so it can never drag the chassis backwards through zero in a step
+    // closes, so it can never drag the chassis backwards through zero in a
+    // step — rolling, or sideways
+    const hold = (x, g, d) => {
+      const lim = Math.abs(g) / d;
+      x = dynClamp(x, -lim, lim);
+      if (g > 0 && x < 0) x = 0;
+      if (g < 0 && x > 0) x = 0;
+      return Number.isFinite(x) ? x : 0;
+    };
+    const F = new Array(n), Gs = new Array(n).fill(0);
     for (let i = 0; i < n; i++) {
-      const lim = Math.abs(bb[i]) / D[i];
-      F[i] = dynClamp(F[i], -lim, lim);
-      if (bb[i] > 0 && F[i] < 0) F[i] = 0;
-      if (bb[i] < 0 && F[i] > 0) F[i] = 0;
-      if (!Number.isFinite(F[i])) F[i] = 0;
+      F[i] = hold(f[i], bb[i], D[i]);
+      if (side[i] >= 0) Gs[i] = hold(f[side[i]], cc[i], E[i]);
     }
 
     // ---- chassis wrench from the contacts
@@ -575,6 +671,8 @@ const Dyn = {
     for (let i = 0; i < n; i++) {
       const q = W[i].force;
       Fx += F[i] * q[0]; Fy += F[i] * q[1]; Tz += F[i] * q[2];
+      const l = W[i].lat;
+      if (l) { Fx += Gs[i] * l[0]; Fy += Gs[i] * l[1]; Tz += Gs[i] * l[2]; }
     }
 
     // ---- rigid body, body frame: omega x v is what makes a turning robot
@@ -588,6 +686,10 @@ const Dyn = {
     al = dynClamp(dynFin(al), -DYN_DEFAULTS.omegaMax / dt, DYN_DEFAULTS.omegaMax / dt);
 
     let nvx = vx + dt * ax, nvy = vy + dt * ay, nom = om + dt * al;
+    // what the body really accelerates at, for next step's load transfer:
+    // force over mass. ax, ay above are d(v_body)/dt, which in a steady turn
+    // is zero (the velocity only rotates) though the robot leans outward.
+    const lx = dynClamp(dynFin(Fx / m), -aMax, aMax), ly = dynClamp(dynFin(Fy / m), -aMax, aMax);
 
     // ---- losses, as a decrement rather than a force: a robot that has
     // stopped must stay stopped, not jitter across the tile
@@ -629,8 +731,8 @@ const Dyn = {
 
     return {
       v: { x: nvx, y: nvy }, omega: nom,
-      wheelOmega: wo, slip: slip, loads: loads, force: F,
-      accel: { x: ax, y: ay }, alpha: al,
+      wheelOmega: wo, slip: slip, loads: loads, force: F, side: Gs,
+      accel: { x: lx, y: ly }, alpha: al,
       wrench: { fx: dynFin(Fx), fy: dynFin(Fy), tz: dynFin(Tz) }
     };
   }

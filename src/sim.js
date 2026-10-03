@@ -18,7 +18,7 @@ const Sim={
     const sp=(opts&&opts.startPose)||{x:0,y:0,h:0};
     this.chassis={x:sp.x,y:sp.y,h:sp.h};
     this.code=code; this.cad=cad; this.map=map; this.opts=opts;
-    this.bump=null; this.vel={x:0,y:0};
+    this.bump=null; this.vel={x:0,y:0}; this.yawRate=0;
     this.pc=0; this.sleepEnd=null; this.sleptMs=0; this.autoDone=false; this.pass=null; this.resumeAt=0;
     this.clock=0; this.vmTel=null;
     for(const d of code.devices) this.makeDev(d);
@@ -57,7 +57,7 @@ const Sim={
       cmd:isMotor?0:(mech&&Number.isFinite(mech.restPos)?mech.restPos:0.5),
       act:isMotor?0:(mech&&Number.isFinite(mech.restPos)?mech.restPos:0.5), revs:0, ticks:0, stalled:false,
       reversed:false, mode:"run", target:0,
-      tpr: 28*(spec.ratio||19.2),        // goBILDA: 28 counts per motor rev
+      tpr: ticksPerRev(spec),            // counts per output turn (src/hardware.js)
       // the servo position the CAD was drawn at: a joint spec says; else the code's own
       restPos:(mech&&Number.isFinite(mech.restPos))?mech.restPos:(this.code&&!this.code.vm?restPosOf(this.code,d.name):0.5),
       sec60:spec.sec60||0.18, travelDeg:travelDegOf(spec)});
@@ -70,7 +70,8 @@ const Sim={
       pad(i){ return self.pad[i]||{}; },
       now(){ return self.clock||0; }, runtime(){ return self.t; }, resetRuntime(){ self.t=0; },
       heading(){ return self.chassis.h; },
-      omega(){ return self.dstate&&Number.isFinite(self.dstate.omega)?self.dstate.omega:0; },
+      // the turn rate driveChassis last moved the robot at, rigid or kinematic
+      omega(){ return Number.isFinite(self.yawRate)?self.yawRate:0; },
       pose(){ return {x:self.chassis.x,y:self.chassis.y,h:self.chassis.h}; },
       vel(){ const v=self.vel||{x:0,y:0}, h=self.chassis.h, c=Math.cos(h), sn=Math.sin(h); return {x:v.x*c+v.y*sn, y:-v.x*sn+v.y*c}; },
       ray(){ return self.frontRay(); },
@@ -255,6 +256,7 @@ const Sim={
         const s=this.dev[st.obj];
         if(this.timers[st.obj]!==undefined){ if(st.meth==="reset") this.timers[st.obj]=this.t; }
         else if(s&&st.meth==="setDirection") s.reversed=/REVERSE/i.test(st.raw||"");
+        else if(s&&st.meth==="setZeroPowerBehavior"){ const z=/\b(FLOAT|BRAKE)\b/.exec(st.raw||""); if(z) s.zpb=z[1]; }
         else if(s&&st.meth==="setTargetPosition") s.target=evalNode(st.args[0],env);
         else if(s&&st.meth==="setMode"){
           const raw=st.raw||"";
@@ -325,7 +327,8 @@ const Sim={
     this.stepDevices(dt);
     this.updateCOM();
     this.driveChassis(dt);
-    Shots.tick(dt,this.chassis);
+    // the shots in the air are the live game's: a probe's copy (driveProbe) leaves them be
+    if(this===Sim) Shots.tick(dt,this.chassis);
     // the rest of the match (src/match.js): only the live sim plays it, never a probe's copy
     // (online, src/net.js steps it instead, whatever this robot is doing)
     if(this===Sim&&this.phase==="running"&&typeof Match!=="undefined"&&Match.on&&!Match.net) Match.tick(dt,this);
@@ -334,6 +337,7 @@ const Sim={
      slew and the joints' stops. tick() runs it; so does INIT, when an OpMode
      busy-waits for a mechanism to arrive (src/jvmrun.js drain) */
   stepDevices(dt){
+    const wheeled=this.rigidDrive();
     for(const name in this.dev){
       const s=this.dev[name];
       if(s.kind==="motor"){
@@ -361,6 +365,9 @@ const Sim={
           if(up&&Math.sign(act)===up&&slideHoldNm(s,this.opts)>s.spec.stallNm*(this.opts.duty||1)){ act=0; s.stalled=true; }
         }
         s.act=act;
+        // a drive motor under the chassis physics: its encoder counts what its
+        // wheel really turns, after the step (stepRigid), not free speed x power
+        if(wheeled&&wheeled.indexOf(name)>=0) continue;
         const prev=s.ticks;
         s.revs+=(s.spec.rpm||300)*s.act/60*dt;
         s.ticks=s.revs*s.tpr;
@@ -371,9 +378,10 @@ const Sim={
           const qc=Math.max(Number.isFinite(lo)?lo:-Infinity, Math.min(Number.isFinite(hi)?hi:Infinity, q));
           if(qc!==q){ s.revs=qc/k; s.ticks=s.revs*s.tpr; s.act=0; s.stalled=true; }
         }
-        // hard stops only where the travel is known: Onshape slider limits, or set by hand
+        // hard stops only where the travel is known: Onshape slider limits, or set by
+        // hand. In the joint's own direction, as mateJointQ and updateCOM read it
         if(lin&&s.mech.limits){
-          const k=slideMPerTick(s), q=s.ticks*k, lo=s.mech.limits[0], hi=s.mech.limits[1];
+          const k=slideMPerTick(s)*(s.mech.dir||1), q=s.ticks*k, lo=s.mech.limits[0], hi=s.mech.limits[1];
           const qc=Math.max(Number.isFinite(lo)?lo:-Infinity, Math.min(Number.isFinite(hi)?hi:Infinity, q));
           if(qc!==q){ s.ticks=qc/k; s.revs=s.ticks/s.tpr; s.act=0; s.stalled=true; }
         }
@@ -460,7 +468,7 @@ const Sim={
   },
   driveChassis(dt){
     const dtn=this.drivetrain;
-    if(!dtn||!dtn.ok){ this.vel={x:0,y:0}; return; }
+    if(!dtn||!dtn.ok){ this.vel={x:0,y:0}; this.yawRate=0; return; }
     const x0=this.chassis.x, y0=this.chassis.y;
     if(this.rig&&this.physics!=="kinematic"){
       this.stepRigid(dt);
@@ -473,6 +481,7 @@ const Sim={
       }
       this.vel={x:(this.chassis.x-x0)/dt, y:(this.chassis.y-y0)/dt};
       this.stopAgainst(this.chassis.x-xi, this.chassis.y-yi);
+      this.driveEncoders(dt);
       return;
     }
     // Kinematic mode for anything that isn't a left/right base: forward
@@ -485,7 +494,7 @@ const Sim={
       const W=this.rig.drive.wheels, fk=fkFromIk(ikMatrix(rk,W));
       const t=chassisFromWheels(fk,this.rig.devs.map((n,i)=>this.wheelCmd(n,W[i]&&W[i].mount)*SPD));
       const h=this.chassis.h, c=Math.cos(h), s=Math.sin(h);
-      this.chassis.x+=(t.vx*c-t.vy*s)*dt; this.chassis.y+=(t.vx*s+t.vy*c)*dt; this.chassis.h+=t.omega*dt;
+      this.chassis.x+=(t.vx*c-t.vy*s)*dt; this.chassis.y+=(t.vx*s+t.vy*c)*dt; this.chassis.h+=t.omega*dt; this.yawRate=t.omega;
       if(Field.ok) this.bump=Field.collide(this.chassis,this.footprint,this.obstacles);
       this.vel={x:(this.chassis.x-x0)/dt, y:(this.chassis.y-y0)/dt};
       return;
@@ -509,7 +518,7 @@ const Sim={
     }
     const SPEED=1.15, TURN=3.4;               // m/s and rad/s at full power
     const v=(L+R)/2*SPEED, w=(R-L)/2*TURN;
-    this.chassis.h += w*dt;
+    this.chassis.h += w*dt; this.yawRate=w;
     this.chassis.x += (v*Math.cos(this.chassis.h) - strafe*SPEED*Math.sin(this.chassis.h))*dt;
     this.chassis.y += (v*Math.sin(this.chassis.h) + strafe*SPEED*Math.cos(this.chassis.h))*dt;
     if(Field.ok) this.bump=Field.collide(this.chassis,this.footprint,this.obstacles);
@@ -537,13 +546,40 @@ const Sim={
     this.steerModules();
     const W=this.rig.drive.wheels;
     const cmd=this.rig.devs.map((n,i)=>this.wheelCmd(n,W[i]&&W[i].mount));
-    const st=Dyn.step(this.dstate,cmd,this.rig,dt);
+    // setZeroPowerBehavior(FLOAT): at zero power that wheel coasts instead of braking
+    const coast=this.rig.devs.map(n=>{ const s=this.dev[n]; return !!(s&&s.zpb==="FLOAT"); });
+    const st=Dyn.step(this.dstate,cmd,this.rig,dt,coast);
     this.dstate=st;
     const c=Math.cos(this.chassis.h), s=Math.sin(this.chassis.h);
     this.chassis.x += (st.v.x*c - st.v.y*s)*dt;
     this.chassis.y += (st.v.x*s + st.v.y*c)*dt;
-    this.chassis.h += st.omega*dt;
+    this.chassis.h += st.omega*dt; this.yawRate=st.omega;
     this.slipping=(st.slip||[]).some(k=>Math.abs(k)>0.3);
+  },
+  /* Each drive encoder from its wheel's own speed, through the gearing, with
+     the mounting and setDirection undone (wheelCmd's signs are their own
+     inverses) so it counts in the code's frame, up under positive power. Run
+     after the walls have had their say: a robot pinned on one reads still, a
+     wheel spinning on the tiles counts. */
+  driveEncoders(dt){
+    const W=this.rig.drive.wheels, wo=(this.dstate&&this.dstate.wheelOmega)||[], mine=this.rigidDrive()||[], seen=new Set();
+    this.rig.devs.forEach((n,i)=>{
+      const s=this.dev[n]; if(mine.indexOf(n)<0||seen.has(n)) return; seen.add(n);
+      const gr=Math.abs(+(Array.isArray(this.rig.gear)?this.rig.gear[i]:this.rig.gear))||1;
+      const sign=(s.reversed?-1:1)*((W[i]&&W[i].mount)===-1?-1:1);
+      const prev=s.ticks;
+      s.revs+=(wo[i]||0)*gr/(2*Math.PI)*dt*sign;
+      s.ticks=s.revs*s.tpr;
+      s.vel=(s.ticks-prev)/dt;
+    });
+  },
+  /* The drive motors whose encoders the chassis physics turns, or null when
+     the chassis glides kinematically (the same test driveChassis makes). A
+     motor mapped to a mechanism keeps the mechanism's model and its stops,
+     even when the drivetrain finder counted it as a wheel. */
+  rigidDrive(){
+    if(!(this.rig&&this.physics!=="kinematic"&&this.drivetrain&&this.drivetrain.ok)) return null;
+    return this.rig.devs.filter(n=>{ const s=this.dev[n]; return s&&s.kind==="motor"&&!s.mech; });
   },
 
   /* A wall stops a robot, it doesn't throw it back. (px,py) is how far the
@@ -560,7 +596,17 @@ const Sim={
     let wx=v.x*c-v.y*s, wy=v.x*s+v.y*c;              // chassis frame -> world
     const into=wx*nx+wy*ny;
     if(into<0){ wx-=into*nx; wy-=into*ny; }          // only the part driving in
-    this.dstate.v={x:wx*c+wy*s, y:-wx*s+wy*c};
+    const nv={x:wx*c+wy*s, y:-wx*s+wy*c}, dvx=nv.x-v.x, dvy=nv.y-v.y;
+    this.dstate.v=nv;
+    // the wall stops the ground under each wheel too: a wheel keeps its slip
+    // against the ground, so one that was rolling stops with the robot and one
+    // that was spinning keeps spinning. Left alone, every wheel spun on as if
+    // the robot had driven through the wall, and its encoder counted it.
+    const r=this.rig, wo=this.dstate.wheelOmega;
+    if(!r||!wo||!(Math.abs(dvx)+Math.abs(dvy)>0)) return;
+    const ik=ikMatrix(r.drive.kind,r.drive.wheels);
+    this.dstate.wheelOmega=wo.map((o,i)=>{ const w=r.drive.wheels[i], k=ik[i];
+      return w&&k&&w.r>0?o+(k[0]*dvx+k[1]*dvy)/w.r:o; });
   }
 };
 
@@ -737,7 +783,13 @@ function buildRig(cad,dtn,base,dev,opts){
   for(const w of dtn.wheels){
     const corner=(w.front?"F":w.back?"B":"")+(w.left?"L":w.right?"R":"");
     const g=pick(w); if(g) taken.add(g);
-    const x=g?g.x:span?(w.front?span.x1:(w.back?span.x0:(span.x0+span.x1)/2)):(w.front?L/2:(w.back?-L/2:0));
+    // a tank motor that drives a whole side (chained or belted to every wheel
+    // on it) pushes and grips at the middle of that side, not at whichever of
+    // its wheels the pick landed on — a two-motor four-wheel base otherwise
+    // turned about its back axle
+    const side=kind==="tank"&&g&&!w.front&&!w.back?cadWheels.filter(o=>Math.sign(o.y)===Math.sign(g.y)):[];
+    const x=side.length>1?side.reduce((a,o)=>a+o.x,0)/side.length
+      :g?g.x:span?(w.front?span.x1:(w.back?span.x0:(span.x0+span.x1)/2)):(w.front?L/2:(w.back?-L/2:0));
     const y=g?g.y:span?(w.left?span.y1:span.y0):(w.left?W/2:-W/2);
     // the standard mecanum X when nothing says otherwise: FL and BR one way,
     // FR and BL the other

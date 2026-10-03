@@ -4,7 +4,7 @@
 // isn't (double the mass, halve the acceleration).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { loadEngine, loadWithField, sampleBench, run } from './load.mjs';
+import { loadEngine, loadWithField, sampleBench, run, fixture } from './load.mjs';
 
 const E = loadEngine();
 const G = 9.80665;
@@ -118,6 +118,96 @@ test('turning: yaw acceleration is the torque divided by the yaw inertia', () =>
   assert.ok(Math.abs(b.omega - a.omega / 2) < Math.abs(a.omega) * 0.15,
     `twice the inertia, half the yaw rate: ${a.omega.toFixed(2)} -> ${b.omega.toFixed(2)}`);
   assert.ok(Math.abs(a.v.x) < 0.05 && Math.abs(a.v.y) < 0.05, 'a spin in place goes nowhere');
+});
+
+test('a tank base corners on its tyres: it drives an arc, it does not slide sideways', () => {
+  // A traction wheel had no sideways force at all, so a tank at speed given
+  // left 0.4 / right 1.0 kept going the way it was already going and slid
+  // sideways at 1.7-2.9 m/s, spinning in place over it.
+  const R = rig({ kg: 12, stallNm: 2.38, mu: 0.9 });
+  let st = E.Dyn.reset(R);
+  for (let i = 0; i < 100; i++) st = E.Dyn.step(st, fwd, R, 0.02);
+  assert.ok(st.v.x > 1.45, `full power first: ${st.v.x.toFixed(2)} m/s`);
+  let h = 0, x = 0, y = 0, side = 0;
+  for (let i = 0; i < 75; i++) {
+    st = E.Dyn.step(st, [0.4, 1, 0.4, 1], R, 0.02);       // lf rf lb rb: the left side slower
+    const c = Math.cos(h), s = Math.sin(h);
+    x += (st.v.x * c - st.v.y * s) * 0.02; y += (st.v.x * s + st.v.y * c) * 0.02; h += st.omega * 0.02;
+    side = Math.max(side, Math.abs(st.v.y));
+  }
+  assert.ok(side < 0.15, `sideways speed up to ${side.toFixed(3)} m/s: it slid instead of turning`);
+  assert.ok(st.v.x > 0.8, `still driving forward round the corner: ${st.v.x.toFixed(2)} m/s`);
+  // 1.5 s at ~1.06 m/s on a left-hand arc: about half a metre across, half a turn
+  assert.ok(h > 2.5 && h < 4.5, `it turned left through ${(h * 180 / Math.PI).toFixed(0)} deg`);
+  assert.ok(y > 0.5, `and curved left: ${x.toFixed(2)} m forward, ${y.toFixed(2)} m left`);
+});
+
+test('a traction wheel has one friction circle: shoved sideways it slides at mu g, no faster', () => {
+  const R = rig({ kg: 12, stallNm: 2.38, mu: 0.9 });
+  const st = E.Dyn.step({ ...E.Dyn.reset(R), v: { x: 0, y: 1 } }, [0, 0, 0, 0], R, 0.02);
+  // the tiles take 0.9 g out of it, rolling resistance a little more
+  const want = 1 - 0.9 * G * 0.02;
+  assert.ok(Math.abs(st.v.y - want) < 0.02, `after one step ${st.v.y.toFixed(3)} m/s, sliding friction says ${want.toFixed(3)}`);
+  const pushed = st.side.reduce((a, b) => a + b, 0);
+  assert.ok(Math.abs(pushed + 0.9 * 12 * G) < 1, `the four patches push back ${pushed.toFixed(1)} N, mu m g is ${(0.9 * 12 * G).toFixed(1)}`);
+  // and slowly it is held outright: a tenth of a step's worth of friction
+  const slow = E.Dyn.step({ ...E.Dyn.reset(R), v: { x: 0, y: 0.01 } }, [0, 0, 0, 0], R, 0.02);
+  assert.ok(Math.abs(slow.v.y) < 1e-3, `a slow sideways creep stops in one step: ${slow.v.y}`);
+  // a wheel already passing its full grip sideways has none left to drive with
+  const busy = E.Dyn.step({ ...E.Dyn.reset(R), v: { x: 0, y: 1 } }, fwd, R, 0.02);
+  for (let i = 0; i < 4; i++) {
+    const F = busy.force[i], S = busy.side[i], cap = 0.9 * busy.loads[i];
+    assert.ok(Math.hypot(F, S) <= cap * (1 + 1e-6), `wheel ${i}: ${Math.hypot(F, S).toFixed(2)} N past its ${cap.toFixed(2)} N circle`);
+  }
+});
+
+test('a steady turn loads the outside wheels: load transfer comes from force / mass', () => {
+  // The acceleration kept for the next step's loads was d(v_body)/dt, which
+  // in a steady turn is zero (the speed only changes direction), so a tall
+  // robot cornering hard had the same load on every wheel.
+  const R = rig({ kg: 12, stallNm: 2.38, mu: 0.9, comZ: 0.25 });
+  let st = E.Dyn.reset(R);
+  for (let i = 0; i < 100; i++) st = E.Dyn.step(st, fwd, R, 0.02);
+  for (let i = 0; i < 75; i++) st = E.Dyn.step(st, [0.4, 1, 0.4, 1], R, 0.02);   // a steady left-hand arc
+  const a = st.omega * st.v.x;                                   // centripetal, m/s^2, to the left
+  assert.ok(a > 1.5, `cornering at ${a.toFixed(2)} m/s^2`);
+  const inside = st.loads[0] + st.loads[2], outside = st.loads[1] + st.loads[3];
+  assert.ok(outside > inside * 1.3, `outside (right) wheels ${outside.toFixed(1)} N, inside ${inside.toFixed(1)} N`);
+  // m a h / track moves from the inside pair to the outside pair
+  const want = 12 * a * 0.25 / 0.36, got = (outside - inside) / 2;
+  assert.ok(Math.abs(got - want) < 0.2 * want, `transfer ${got.toFixed(1)} N, m a h / t says ${want.toFixed(1)} N`);
+});
+
+test('a two-motor tank stands on the middle of each side, so it spins in place', () => {
+  // the motor's wheel was whichever CAD wheel the pick landed on: the back
+  // one, so with sideways grip the robot turned about its back axle
+  const Ef = loadWithField();
+  const java = `
+@TeleOp(name = "Tank")
+public class T extends LinearOpMode {
+    DcMotor leftDrive, rightDrive;
+    @Override
+    public void runOpMode() {
+        leftDrive = hardwareMap.get(DcMotor.class, "leftDrive");
+        rightDrive = hardwareMap.get(DcMotor.class, "rightDrive");
+        leftDrive.setDirection(DcMotor.Direction.REVERSE);
+        waitForStart();
+        while (opModeIsActive()) {
+            leftDrive.setPower(-gamepad1.left_stick_y + gamepad1.right_stick_x);
+            rightDrive.setPower(-gamepad1.left_stick_y - gamepad1.right_stick_x);
+        }
+    }
+}`;
+  const cad = Ef.parseSTEP(fixture('robots/tank-traction.step')), code = Ef.parseJava(java);
+  Ef.Sim.reset(code, cad, Ef.autoMap(code.devices, cad.mechs), { payloadKg: 0, duty: 0.3, trust: 'code', physics: 'rigid', startPose: { x: 0, y: 0, h: 0 } });
+  const ws = Ef.Sim.rig.drive.wheels;
+  assert.equal(ws.length, 2);
+  for (const w of ws) assert.ok(Math.abs(w.x) < 1e-6, `the wheels are 0.15 m either side of the middle; the rig put one at x = ${w.x.toFixed(3)}`);
+  Ef.Sim.pad[1].right_stick_x = 1;
+  let worst = 0;
+  for (let i = 0; i < 100; i++) { Ef.Sim.tick(0.02); worst = Math.max(worst, Math.hypot(Ef.Sim.chassis.x, Ef.Sim.chassis.y)); }
+  assert.ok(Math.abs(Ef.Sim.chassis.h) > Math.PI, `it turns: ${(Ef.Sim.chassis.h * 180 / Math.PI).toFixed(0)} deg`);
+  assert.ok(worst < 0.005, `and stays put while it does: moved up to ${(worst * 1000).toFixed(1)} mm`);
 });
 
 test('mecanum: strafing is real, and slower than driving forward', () => {

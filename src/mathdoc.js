@@ -190,7 +190,8 @@ function mdInputs(bench) {
   const tau = dspec && mdNo(dspec.stallNm) ? dspec.stallNm : null;
   const aMotor = mdNo(tau) && mdNo(r) && nWheel && mass && mdNo(mass.kg) && mass.kg > 0
     ? nWheel * tau / (r * mass.kg) : null;
-  const tpr = mdNo(gear) ? 28 * gear : null;          // goBILDA: 28 encoder counts per motor revolution
+  // encoder counts per output turn: the published figure, else 28 through the box
+  const tpr = dspec && (mdNo(dspec.tpr) || mdNo(gear)) ? ticksPerRev(dspec) : null;
 
   return { cad, code, map, opts, mechs, mechOf, mass, drive, dt, dspec, ddev,
            drv: { r, gear, nOut, nMotor, wFree, vMax, nWheel, tau, aMotor, tpr } };
@@ -313,11 +314,21 @@ function mdDriveSection(X) {
 
   if (mdNo(D.r) && mdNo(D.tpr)) {
     const s = 2 * Math.PI * D.r / D.tpr;
-    rows.push({ label: "odometry constant", symbols: "s = 2π r / (N_ppr · G)",
-      expr: "s = 2π × " + mdNum(D.r) + " m / (28 × " + mdNum(D.gear) + ") = " + mdNum(s) + " m per tick",
-      value: s, unit: "m/tick",
-      note: "28 counts per motor revolution is the goBILDA/REV encoder on the back of the motor, so one metre is " + mdNum(1 / s) + " ticks",
-      source: "vendor spec" });
+    // a published count (goBILDA's exact planetary ratios, the Core Hex's 4
+    // counts a motor turn) says itself; otherwise 28 counts through the box
+    const pub = !mdNo(D.gear) || Math.abs(D.tpr - 28 * D.gear) > 1e-9;
+    const N = String(+(+D.tpr).toFixed(1));                 // as published: 384.5, never rounded to 385
+    rows.push(pub
+      ? { label: "odometry constant", symbols: "s = 2π r / N_out",
+          expr: "s = 2π × " + mdNum(D.r) + " m / " + N + " = " + mdNum(s) + " m per tick",
+          value: s, unit: "m/tick",
+          note: N + " counts per output revolution is the published figure for this gearmotor (its encoder through the exact gear ratio, not 28 × the nominal " + (mdNo(D.gear) ? mdNum(D.gear) + ":1" : "ratio") + "), so one metre is " + mdNum(1 / s) + " ticks",
+          source: "vendor spec" }
+      : { label: "odometry constant", symbols: "s = 2π r / (N_ppr · G)",
+          expr: "s = 2π × " + mdNum(D.r) + " m / (28 × " + mdNum(D.gear) + ") = " + mdNum(s) + " m per tick",
+          value: s, unit: "m/tick",
+          note: "28 counts per motor revolution is the goBILDA/REV encoder on the back of the motor, so one metre is " + mdNum(1 / s) + " ticks",
+          source: "vendor spec" });
   } else {
     rows.push(mdMiss("odometry constant", "needs the wheel radius and the gear ratio to turn ticks into metres"));
   }
@@ -540,7 +551,7 @@ function mdShooterSection(X) {
   try { if (dev) spec = specFor(dev, X.mechOf(name), X.opts.trust); } catch (e) { spec = null; }
   const gear = mdNo(cfg.gear) ? cfg.gear : 1;
   const dM = mdNo(cfg.wheelMm) ? cfg.wheelMm / 1000 : null;
-  const tpr = spec && mdNo(spec.ratio) ? 28 * spec.ratio : 28;
+  const tpr = spec && (mdNo(spec.tpr) || mdNo(spec.ratio)) ? ticksPerRev(spec) : 28;
 
   const ticks = mdCommanded(code, name, "setVelocity").filter((v) => v > 0);
   const powers = mdCommanded(code, name, "setPower").map(Math.abs).filter((v) => v > 0);
@@ -548,10 +559,10 @@ function mdShooterSection(X) {
   if (ticks.length) {
     const t = Math.max.apply(null, ticks);
     nFly = 60 * t / tpr * gear;
-    how = "n = 60 × " + mdNum(t) + " tick/s / " + mdNum(tpr) + " tick/rev × " + mdNum(gear) + " = " + mdNum(nFly) + " rpm";
+    how = "n = 60 × " + mdNum(t) + " tick/s / " + mdNum(tpr, 5) + " tick/rev × " + mdNum(gear) + " = " + mdNum(nFly) + " rpm";
     rows.push({ label: "flywheel speed", symbols: "n_fly = 60 · ticks_per_second / N_ppr · G_fly",
       expr: how, value: nFly, unit: "rpm",
-      note: "the fastest setVelocity this OpMode commands " + name + "; " + mdNum(tpr) + " ticks per output revolution is 28 counts on the motor through its gearbox",
+      note: "the fastest setVelocity this OpMode commands " + name + "; " + mdNum(tpr, 5) + " ticks per output revolution is its encoder through its gearbox, as the maker publishes it",
       source: "code" });
   } else if (powers.length && spec && mdNo(spec.rpm)) {
     const pw = Math.min(1, Math.max.apply(null, powers));
