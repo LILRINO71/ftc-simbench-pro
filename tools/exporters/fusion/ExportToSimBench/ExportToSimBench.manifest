@@ -1,0 +1,10 @@
+{
+	"autodeskProduct": "Fusion",
+	"type": "script",
+	"author": "FTC SimBench Pro",
+	"description": {
+		"": "Writes the robot as an MJCF model with STL meshes, joints and limits, for FTC SimBench Pro."
+	},
+	"supportedOS": "windows|mac",
+	"editEnabled": true
+}

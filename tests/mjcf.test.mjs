@@ -96,3 +96,34 @@ test('mjcf: angles in radians, quaternions, and a file that isn\'t MJCF', () => 
   assert.ok(Math.abs(Math.abs(a.axis[0]) - 1) < 1e-4 || Math.abs(Math.abs(a.axis[1]) - 1) < 1e-4, 'axis ' + a.axis);
   assert.throws(() => E.cadFromMjcf('<robot name="x"/>', {}), /isn't an MJCF/);
 });
+
+test('mjcf: the shape tools/exporters/fusion writes (bodies in the root frame, joints at world pivots, centimetre meshes) imports', () => {
+  const stlCm = (() => { const b = new ArrayBuffer(84 + 50), dv = new DataView(b); dv.setUint32(80, 1, true);
+    [0, 0, 0, 40, 0, 0, 0, 36, 0].forEach((v, i) => dv.setFloat32(84 + 12 + 4 * i, v, true)); return b; })();   // 40 x 36 cm, in cm
+  const xml = `<mujoco model="fusionbot">
+  <compiler angle="radian"/>
+  <asset>
+    <mesh name="chassis_0" file="meshes/chassis_0.stl" scale="0.01 0.01 0.01"/>
+    <mesh name="arm_1" file="meshes/arm_1.stl" scale="0.01 0.01 0.01"/>
+  </asset>
+  <worldbody>
+    <body name="chassis">
+      <inertial pos="0 0 0" mass="9.00000" diaginertia="1e-4 1e-4 1e-4"/>
+      <geom type="mesh" mesh="chassis_0"/>
+      <body name="arm">
+        <joint name="armMotor" type="hinge" pos="0.100000 0.000000 0.300000" axis="0.000000 1.000000 0.000000" range="-1.500000 0.700000"/>
+        <inertial pos="0 0 0" mass="0.40000" diaginertia="1e-4 1e-4 1e-4"/>
+        <geom type="mesh" mesh="arm_1"/>
+      </body>
+    </body>
+  </worldbody>
+</mujoco>`;
+  const cad = E.cadFromMjcf(xml, { 'meshes/chassis_0.stl': stlCm, 'meshes/arm_1.stl': stlCm });
+  const arm = cad.mechs.find((m) => m.id === 'armMotor');
+  assert.ok(arm, cad.mechs.map((m) => m.id).join());
+  assert.deepEqual(arm.limits.map((v) => +v.toFixed(6)), [-1.5, 0.7]);
+  const ch = cad.solids.find((s) => s.name === 'chassis');
+  assert.equal(ch.kg, 9);
+  const span = (k) => Math.max(...ch.pts.map((p) => p[k])) - Math.min(...ch.pts.map((p) => p[k]));
+  assert.ok(Math.abs(Math.max(span(0), span(1)) - 0.4) < 1e-6, 'centimetre meshes scaled to metres: ' + span(0) + ', ' + span(1));
+});
