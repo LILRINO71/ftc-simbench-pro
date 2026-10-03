@@ -73,3 +73,20 @@ Those files are free again; read the conventions below before changing them.
   `slideMmPerTick(mech, tpr)`, shared by the sim and the view.
 - `npm test` runs every `tests/*.test.mjs`; `tests/anyrobot.test.mjs` is the
   any-robot corpus, and it must stay 14/14.
+- **Robot packages** (`src/simbot.js`, `.simbot`): joints.json is a joint spec
+  at version 2 (`constraints` for couplings and `loop` closures, `continuous`,
+  `exact`/`auto`/`source`). A package picks parts by solid number only; pattern
+  picks in a package are dropped on opening. `cad.mates.exact` marks joints read
+  from mates; the robot check treats them as exact.
+- **Loops**: `cad.loops` holds each mate that closes a linkage loop
+  (`{a, b, point, axis}`, joint ids or `"chassis"`). A mate named `closing_<x>`
+  (onshape-to-robot's convention, and every MJCF `<connect>`) only ever closes a
+  loop.
+- **Solved mechanisms** (`src/joltmech.js`, Physics → Mechanisms → solved): a Jolt
+  angle is the joint's own value (the code's frame times `JoltMech.jointSign`,
+  which is `m.dir`, and -1 more for a guessed lift); followers and linkages read
+  their leader in the drawn angle (`q + q0`). `Sim.mechWorld` is the live world;
+  a probe (`Object.create(Sim)`) never builds or destroys one.
+- **Rooms** (`workers/room`, `functions/room`, `src/netrelay.js`): a player's id
+  is bound to a secret its browser chooses (`tok`); every request speaking as an
+  id must carry it. The protocol over a room is the same as over WebRTC.
