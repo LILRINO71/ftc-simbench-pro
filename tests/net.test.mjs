@@ -250,6 +250,23 @@ test('online: a guest\'s shot is flown again by the host, decided there, and the
   assert.equal(H.O.players.guest.fired, 1, 'a shot from 2 m away from the robot is thrown out');
 });
 
+test('online: a ball flown on a guest takes as long as on the host, its last stretch included', () => {
+  const hub = loadWithField().netLoopback();
+  const { H, G } = twoInAMatch(hub);
+  run(hub, [H, G], 3.3);
+  // 10 points, 9 steps: sent as points 0, 4, 8 and 9, so the last stretch is one step, not four
+  const path = Array.from({ length: 10 }, (_, i) => [i * 10, 0, 20]);
+  H.O.fly({ path, fid: 999, owner: '', kind: 'pollen' });
+  hub.flush();
+  let f = null;
+  for (let i = 0; i < 10 && !f; i++) { G.clock.t += 20; G.O.drain(); f = G.M.flying.find((x) => x.fid === 999); }
+  assert.ok(f, 'the guest flies it');
+  const step = f.step / 4;                                       // one of the host's steps
+  assert.ok(Math.abs(f.dur - 9 * step) < 1e-9, `${(f.dur / step).toFixed(2)} steps long, not 9`);
+  f.t = 8.5 * step; G.O.mirror(0, G.sim);
+  assert.ok(Math.abs(f.pos[0] - 85) < 1e-6, `half way along the last stretch at 8.5 steps: x ${f.pos[0]}`);
+});
+
 test('online: an AUTO to the end: the same final score and each robot\'s shots on both', () => {
   const hub = loadWithField().netLoopback();
   const { H, G } = twoInAMatch(hub, 'Autonomous');

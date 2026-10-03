@@ -672,21 +672,24 @@ const Online={
     for(const f of Match.flying) if(!f.fid){ f.fid=++this.fid; f.owner=""; this.fly(f); }
     if(typeof Shots!=="undefined") for(const b of Shots.flying) if(!b.fid){ b.fid=++this.fid; b.owner=this.self; this.fly(b); }
   },
+  /* Every 4th point of the path and the last one. Each stretch between two is 4
+     steps, but the last, which is whatever was left over (1 to 4): `last` says how long. */
   fly(f){
-    if(!this.room) return;
-    const P=[], n=f.path.length, every=4, r1=v=>Math.round(v*10)/10;
+    const n=f.path.length; if(!this.room||n<2) return;
+    const P=[], every=4, r1=v=>Math.round(v*10)/10, k=Math.floor((n-2)/every)*every;
     for(let i=0;i<n-1;i+=every) P.push(f.path[i].map(r1));
     P.push(f.path[n-1].map(r1));
-    this.room.send({k:"fly", ht:Math.round(this.now()), fid:f.fid, owner:f.owner||"", kind:f.kind, color:f.color||"", step:SHOT_STEP_S*every, path:P});
+    this.room.send({k:"fly", ht:Math.round(this.now()), fid:f.fid, owner:f.owner||"", kind:f.kind, color:f.color||"",
+      step:SHOT_STEP_S*every, last:SHOT_STEP_S*(n-1-k), path:P});
   },
   onFly(m){
     if(m.owner===this.self||!this.inMatch()) return;
     const path=(Array.isArray(m.path)?m.path:[]).slice(0,600)
       .filter(q=>Array.isArray(q)&&q.length===3).map(q=>q.map(v=>netNum(v,-400,400,0)));
     if(path.length<2) return;
-    const step=netNum(m.step,0.001,0.1,0.02), kind=m.kind==="nectar"?"nectar":"pollen";
+    const step=netNum(m.step,0.001,0.1,0.02), last=netNum(m.last,0.001,step,step), kind=m.kind==="nectar"?"nectar":"pollen";
     // it leaves when the robot that fired it is seen to fire: on the robots' clock
-    this.hold(this.heardAt(m.ht),{fly:{path, step, t:0, dur:(path.length-1)*step, kind, color:kind==="nectar"?(m.color==="blue"?"blue":"red"):null,
+    this.hold(this.heardAt(m.ht),{fly:{path, step, last, t:0, dur:(path.length-2)*step+last, kind, color:kind==="nectar"?(m.color==="blue"?"blue":"red"):null,
       pos:path[0].slice(), fid:netNum(m.fid,0,1e9,0), mirror:true}});
   },
   /* A guest shows the host's match as it was NET_DELAY ago, the robots and what
@@ -782,8 +785,9 @@ const Online={
     }
     for(const al of ["red","blue"]){ const A=M.humans[al].anim; if(A) A.t=Math.min(A.dur,A.t+dt); }
     for(const f of M.flying){
-      const step=f.step||SHOT_STEP_S; f.t+=dt;
-      const q=Math.min(f.path.length-1,f.t/step), i=Math.floor(q), fr=q-i, a=f.path[i], c=f.path[Math.min(f.path.length-1,i+1)];
+      // each stretch `step` long, but the last: f.last
+      const step=f.step||SHOT_STEP_S, n=f.path.length-1, end=(n-1)*step; f.t+=dt;
+      const q=f.t<end?f.t/step:Math.min(n,n-1+(f.t-end)/(f.last||step)), i=Math.floor(q), fr=q-i, a=f.path[i], c=f.path[Math.min(n,i+1)];
       f.pos=[a[0]+(c[0]-a[0])*fr, a[1]+(c[1]-a[1])*fr, a[2]+(c[2]-a[2])*fr];
       if(f.t>=f.dur) f.done=true;
     }
