@@ -283,7 +283,7 @@ const {simbotFromCad, simbotPack, simbotUnpack, cadFromSimbot, validateRobot, zi
       if(m.couple) continue;                                    // a follower's travel is its leader's
       const lim=m.limits&&(fin(m.limits[0])||fin(m.limits[1]));
       if(!lim&&!m.continuous&&!CONTINUOUS.test((m.id||"")+" "+(m.alias||"")))
-        put({sev:"warn", code:"no-limits", joint:m.id, text:"\""+(m.label||m.id)+"\" has no travel limits, so nothing stops it short of the code. Turn on its mate limits in Onshape (or set them in the joint editor)."});
+        put({sev:"warn", code:"no-limits", joint:m.id, text:"\""+(m.label||m.id)+"\" has no travel limits, so nothing stops it short of the code. Give it limits in the CAD (Onshape mate limits, a URDF limit, an MJCF range), or set them in the joint editor."});
     }
     if(cad&&(cad.source==="onshape"||cad.source==="urdf"||cad.source==="mjcf")){
       const none=(cad.solids||[]).filter(s=>!(s.kg>0));

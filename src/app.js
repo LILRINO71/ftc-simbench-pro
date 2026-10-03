@@ -1406,8 +1406,10 @@ function loadOnshapeRobot(p,reparse){
   if(JOINTS.spec) applyJoints();
   const rep=cad.onshape.report, n=cad.mechs.filter(m=>m.fromMate).length;
   $("#mateStatus").textContent=p.name+" · whole robot from "+from+" · "+n+" joint"+(n===1?"":"s"); $("#mateDrop").className="drop ok";
-  $("#mateNote").innerHTML=(cad.onshape.why||[]).map(w=>"<li>"+esc(w)+"</li>").join("");
-  const pill=$("#matePill"); if(pill){ pill.textContent=n+" joint"+(n===1?"":"s"); pill.className="pill ok"; }
+  // what to check before anything moves (src/simbot.js validateRobot), then how it was read
+  const V=typeof validateRobot==="function"?validateRobot(cad,{devices:CODE?CODE.devices:null, map:MAP}):{items:[],counts:{}};
+  $("#mateNote").innerHTML=V.items.map(i=>"<li><b>"+(i.sev==="warn"?"Check":"Note")+":</b> "+esc(i.text)+"</li>").join("")+(cad.onshape.why||[]).map(w=>"<li>"+esc(w)+"</li>").join("");
+  const pill=$("#matePill"); if(pill){ pill.textContent=n+" joint"+(n===1?"":"s")+(V.counts.warn?" · "+V.counts.warn+" to check":""); pill.className="pill "+(V.counts.warn?"warnp":"ok"); }
   if(!file) OnshapeHelp.done(p.name, cad.solids.length, cad.mechs.filter(m=>m.fromMate).length, cad.onshape&&cad.onshape.kg);
   onshapeNote("<b>"+esc(p.name)+"</b> loaded "+(file?"from its "+from:"straight from Onshape")+": "+cad.solids.length+" parts with their colours"+
     (cad.onshape.kg?", "+cad.onshape.kg.toFixed(1)+" kg from your materials":"")+", and "+n+" joint"+(n===1?"":"s")+" from your "+(file?"joints":"mates")+". Load your code and press INIT.","ok");
