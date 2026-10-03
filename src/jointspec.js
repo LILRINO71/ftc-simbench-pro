@@ -197,6 +197,7 @@ const {applyJointSpec, jointSpecSelect, followQ, linkPin, sliderCrank, rodAngle,
       if(Number.isFinite(j.gear)&&j.gear>0) m.gear=j.gear;
       if(Number.isFinite(j.restPos)) m.restPos=Math.max(0,Math.min(1,j.restPos));
       if(Number.isFinite(j.offsetDeg)&&j.offsetDeg) m.q0=j.offsetDeg*DEG;
+      if(j.continuous===true&&!lin) m.continuous=true;    // a roller or a wheel: no limits on purpose
       if(j.note) m.note=String(j.note);
       mechs.push(m); byId.set(m.id,m);
       for(const i of members) solids[i].mech=m.id;
@@ -224,6 +225,22 @@ const {applyJointSpec, jointSpecSelect, followQ, linkPin, sliderCrank, rodAngle,
         m.couple={to:L.id, ratio:1, via:"four-bar", link};
       }else m.couple={to:L.id, ratio:Number.isFinite(f.ratio)?f.ratio:1, via:f.via||"ratio"};
     }
+    // version 2 (a robot package's joints.json): the couplings and the mates
+    // that close loops, as a list of constraints
+    const loops=[], RATIO=/^(ratio|gear|rack and pinion|rack|screw|linear|cascade|mimic)$/i;
+    for(const c of Array.isArray(spec.constraints)?spec.constraints:[]){
+      if(!c||typeof c.type!=="string") continue;
+      if(RATIO.test(c.type)){
+        const F=byId.get(c.follower), L=byId.get(c.leader);
+        if(!F||!L||F===L){ why.push("A "+c.type+" constraint names \""+(c.follower||"?")+"\" and \""+(c.leader||"?")+"\"; one isn't a joint here."); continue; }
+        if(F.couple){ why.push("\""+F.id+"\" already follows \""+F.couple.to+"\"; the "+c.type+" constraint to \""+L.id+"\" is ignored."); continue; }
+        F.couple={to:L.id, ratio:Number.isFinite(c.ratio)&&c.ratio!==0?c.ratio:1, via:c.type.toLowerCase()};
+      }else if(c.type==="loop"){
+        const end=x=>x==="chassis"||ids.has(x)?x:null, a=end(c.a), b=end(c.b), p=mm(c.point);
+        if(a==null||b==null||a===b||!p){ why.push("A loop closure \""+(c.name||"?")+"\" doesn't name two joints and a point; it's ignored."); continue; }
+        loops.push({name:typeof c.name==="string"?c.name.slice(0,120):"loop", type:typeof c.joint==="string"?c.joint:"REVOLUTE", a, b, point:p, axis:unit(Array.isArray(c.axis)?c.axis:[0,0,1])});
+      }else why.push("A \""+c.type+"\" constraint isn't one the bench knows; it's ignored.");
+    }
     // reach: everything a joint carries, itself and downstream
     const kids=id=>mechs.filter(k=>k.parent===id);
     for(const m of mechs){
@@ -237,7 +254,10 @@ const {applyJointSpec, jointSpecSelect, followQ, linkPin, sliderCrank, rodAngle,
     why.unshift(mechs.length+" joints from "+(spec.robot||"the joint spec")+"; "+used+" of "+solids.length+" parts ride on them, the rest are the frame.");
     const drives=(cad.mechs||[]).filter(m=>m.drive);
     cad.mechs=mechs.concat(drives);
-    cad.mates={source:"spec", auto:!!spec.auto, name:spec.robot||null, joints:mechs.length, matched:used, parts:solids.length, loops:0, why};
+    cad.loops=loops;
+    // a robot package's joints say whether they were read from mates (exact) or found (a draft)
+    cad.mates={source:"spec", auto:!!spec.auto, exact:spec.exact===true&&!spec.auto, origin:typeof spec.source==="string"?spec.source:null,
+      name:spec.robot||null, joints:mechs.length, matched:used, parts:solids.length, loops:loops.length, why};
     return {report:cad.mates, devices, front:typeof spec.front==="string"?spec.front:null};
   }
   /* ---- the joint editor's helpers ----
@@ -246,7 +266,7 @@ const {applyJointSpec, jointSpecSelect, followQ, linkPin, sliderCrank, rodAngle,
      group[i] is the joint part i rides, or "chassis"; devices maps code
      device names to joints. Numbers in mm and degrees, as on file. */
   function specFromCad(cad,group,devices){
-    const r3=v=>v.map(x=>+(x*1000).toFixed(2)), mechs=((cad&&cad.mechs)||[]).filter(m=>!m.drive&&m.kind!=="fixed");   // a "fixed" group is frame, not a joint
+    const r3=v=>v.map(x=>+(x*1000).toFixed(3)), mechs=((cad&&cad.mechs)||[]).filter(m=>!m.drive&&m.kind!=="fixed");   // a "fixed" group is frame, not a joint
     const joints=mechs.map(m=>{
       const k=normJointKind(m.kind), lin=k==="linear", own=[];
       (group||[]).forEach((g,i)=>{ if(g===m.id) own.push(i); });
@@ -257,11 +277,13 @@ const {applyJointSpec, jointSpecSelect, followQ, linkPin, sliderCrank, rodAngle,
         pivot:r3(m.pivot||[0,0,0]), parts:own.length?[{solid:own}]:[]};
       if(m.parent&&m.parent!=="chassis") j.parent=m.parent;
       if(m.part) j.part=m.part;
-      if(m.limits) j.limits=m.limits.map(v=>v==null?null:+(lin?v*1000:v/DEG).toFixed(3));
+      if(m.limits) j.limits=m.limits.map(v=>v==null?null:+(lin?v*1000:v/DEG).toFixed(lin?4:6));
       for(const k of ["mmPerTick","gear","restPos"]) if(Number.isFinite(m[k])) j[k]=m[k];
       if(Number.isFinite(m.q0)&&m.q0) j.offsetDeg=+(m.q0/DEG).toFixed(3);
       const dv=Object.keys(devices||{}).filter(d=>devices[d]===m.id); if(dv.length) j.device=dv.length===1?dv[0]:dv;
-      if(m.couple&&!m.couple.link) j.follows={joint:m.couple.to, ratio:m.couple.ratio};
+      if(m.continuous) j.continuous=true;
+      // the relation's kind (gear, rack and pinion, linear) is kept, not just its ratio
+      if(m.couple&&!m.couple.link){ j.follows={joint:m.couple.to, ratio:m.couple.ratio}; if(m.couple.via&&m.couple.via!=="ratio") j.follows.via=m.couple.via; }
       else if(m.couple&&m.couple.link){ const L=m.couple.link; j.follows={joint:m.couple.to, linkage:m.couple.via, crankPin:r3(L.crankPin), pin:r3(L.pin)};
         if(L.slider) j.follows.slider=L.slider;
         if(L.ground){ j.follows.ground=r3(L.ground); j.follows.role=L.role; } }

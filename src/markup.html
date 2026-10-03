@@ -160,17 +160,17 @@
       <div class="sec" data-sec="cad">
         <div class="sec-head"><h3>Robot CAD</h3><span class="spacer"></span><span class="mono dim" id="vpDims">—</span></div>
         <div class="drop ok" id="cadDrop" tabindex="0" role="button" aria-label="Load a STEP CAD file">
-          <div class="dt">Drop a robot file here <small>STEP · URDF · .onshape.json</small></div>
+          <div class="dt">Drop a robot file here <small>.simbot · STEP · URDF · .onshape.json</small></div>
           <div class="ds" id="cadStatus">sample: fulll.step (measured)</div>
         </div>
-        <input type="file" id="cadFile" accept=".step,.stp,.STEP,.STP,.urdf,.stl,.STL,.json" multiple hidden>
+        <input type="file" id="cadFile" accept=".simbot,.step,.stp,.STEP,.STP,.urdf,.stl,.STL,.json" multiple hidden>
         <div class="load-row">
           <button class="load-btn os" type="button" data-os-open>
             <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8.2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M6.2 10.4l2.6 2.6 5-5.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
             <span><b>Get my robot from Onshape</b><small>Exact joints, step by step</small></span></button>
           <button class="load-btn" type="button" id="cadPick">
             <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 2.5h6.5L15 6v11.5H5z M11.5 2.5V6H15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
-            <span><b>Open a file</b><small>STEP or URDF</small></span></button>
+            <span><b>Open a file</b><small>Robot package, STEP or URDF</small></span></button>
         </div>
         <details class="fine"><summary>How the CAD was read</summary>
           <p class="hint" id="frameNote"></p>
@@ -216,6 +216,7 @@
         <div class="joint-acts" id="jointActs">
           <button class="btn-sm" id="jointsFind" type="button" title="Find the joints from the STEP's geometry: servos, motors, slides, and what each one carries">Find joints automatically</button>
           <button class="btn-sm" id="jointsDownload" type="button">Download joint spec</button>
+          <button class="btn-sm" id="simbotDownload" type="button" title="The whole robot in one file: shapes, joints, what drives them and masses. Teammates open it with no STEP and no Onshape.">Download robot package</button>
           <button class="btn-sm" id="jointsReset" type="button" hidden>Undo my joint edits</button>
         </div>
         <p class="hint">Fix a joint in the <b>CAD</b> view: click a part (Ctrl-click for more), then pick what it rides on, or make a new joint from it.</p>

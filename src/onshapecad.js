@@ -122,7 +122,10 @@ function cadFromOnshape(p,opts){
     const pn=/(\d{4}-\d{4}-\d{1,4}|REV-\d{2}-\d{4})/.exec((inst.partNumber||"")+" "+raw);
     const mass=G.mass&&G.mass[inst.partId];
     const sd={name:nm, part:pn?pn[1]:null, kind:solidKind(nm,pn?pn[1]:null), size, pts:thinPoints(pts.length>=4?pts:pts.concat(pts),120),
-      rawTri:{pos,nor}, color:osColor(body.color), occT:{r:R.map(r=>r.slice()), t:t.slice()}, osPath:o.path.join("/")};
+      rawTri:{pos,nor}, color:osColor(body.color), occT:{r:R.map(r=>r.slice()), t:t.slice()}, osPath:o.path.join("/"),
+      // the shape once, in its Part Studio's frame, and where this copy sits: a
+      // robot package (src/simbot.js) stores eight identical channels as one mesh
+      inst:{key:key+"#"+inst.partId, local:tri, M:[T[0],T[1],T[2],T[3], T[4],T[5],T[6],T[7], T[8],T[9],T[10],T[11], 0,0,0,1]}};
     if(mass){ sd.kg=mass.kg; kgSum+=mass.kg; kgParts++; }
     for(const q of sd.pts) P.push(q);
     solids.push(sd);
@@ -138,6 +141,10 @@ function cadFromOnshape(p,opts){
     for(let k=0;k<3;k++){ mn[k]=bb.min[k]; mx[k]=bb.max[k]; }
     frame=frameRecord(F);
     for(const s of solids){ const r=s.rawTri, pos=new Array(r.pos.length), nor=new Array(r.nor.length);
+      // the copy's placement in the robot frame: the frame after the occurrence
+      const A=frame.M, B=s.inst.M, C=new Array(16);
+      for(let i=0;i<4;i++) for(let j=0;j<4;j++){ let v=0; for(let k=0;k<4;k++) v+=A[4*i+k]*B[4*k+j]; C[4*i+j]=v; }
+      s.inst.M=C;
       for(let k=0;k<r.pos.length;k+=3){ const a=F.toRobot([r.pos[k],r.pos[k+1],r.pos[k+2]]), b=F.dirToRobot([r.nor[k],r.nor[k+1],r.nor[k+2]]);
         pos[k]=a[0]; pos[k+1]=a[1]; pos[k+2]=a[2]; nor[k]=b[0]; nor[k+1]=b[1]; nor[k+2]=b[2]; }
       s.tri={pos,nor}; s.keepTri=true; delete s.rawTri; }

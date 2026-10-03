@@ -77,6 +77,8 @@ const {checkRobot, setupAuto}=(function(){
     // where the joints came from
     const src=cad&&cad.mates&&cad.mates.source;
     if(src==="onshape") put({key:"source", sev:"ok", text:cad.source==="urdf"?"Joints come from your URDF's joints, so axes, pivots and parts are exact.":"Joints come from your Onshape mates, so axes, pivots and parts are exact."});
+    // a robot package made from mates (src/simbot.js) is as exact as the mates were
+    else if(src==="spec"&&cad.mates.exact&&!cad.mates.auto) put({key:"source", sev:"ok", text:"Joints come from your robot package, made from your "+(cad.source==="urdf"?"URDF's joints":cad.source==="mjcf"?"MJCF's joints":"Onshape mates")+", so axes, pivots and parts are exact."});
     else if(src==="spec"&&!(cad.mates.auto)) put({key:"source", sev:"ok", text:"Joints come from a joint spec"+(cad.mates.name?" ("+cad.mates.name+")":"")+"."});
     else put({key:"source", sev:"note", ask:"mates", text:(src==="spec"?"Joints were found from the geometry":"Joints are guessed from the assembly")+
       ". The Onshape bookmark or a URDF would make them exact."});
@@ -278,7 +280,7 @@ const {checkRobot, setupAuto}=(function(){
   function setupAuto(cad,code,map){
     const out={up:false,front:false,drive:false,joints:false};
     if(!cad) return out;
-    const exact=cad.source==="onshape"||cad.source==="urdf";
+    const exact=cad.source==="onshape"||cad.source==="urdf"||cad.source==="mjcf"||!!(cad.mates&&cad.mates.exact&&!cad.mates.auto);
     const F=cad.frame||{};
     let D=null; try{ D=driveFromCAD(cad,{}); }catch(e){ D=null; }
     const W=D&&D.wheels?D.wheels:[];

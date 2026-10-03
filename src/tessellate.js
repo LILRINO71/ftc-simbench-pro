@@ -249,6 +249,21 @@ function tessEdges(cad,res,asg,hidden){
 }
 /* raw -> canonical for a mesh: the frame's 4x4 (row-major), after the mesh's own
    placement when it's a shape placed per occurrence (src/tessellate tessExpand) */
+/* A STEP robot's exact meshes for a robot package (src/simbot.js meshFor):
+   for part i, every OpenCascade mesh that belongs to it, keyed by the shape it
+   is a copy of, with where that copy sits in the robot frame. */
+function tessPackageMeshes(cad,res){
+  if(!res||!Array.isArray(res.meshes)||!res.meshes.length) return null;
+  const mt=tessMatch(cad,res), M=frameM(cad), byPart=new Map(), keys=new Map();
+  res.meshes.forEach((m,j)=>{
+    const i=mt.solid[j]; if(!(i>=0)) return;
+    const pos=m.attributes&&m.attributes.position&&m.attributes.position.array; if(!pos||pos.length<9) return;
+    if(!keys.has(pos)) keys.set(pos,"occt:"+keys.size);
+    const col=m.color?m.color.map(v=>linToSrgb(v)):null;
+    (byPart.get(i)||byPart.set(i,[]).get(i)).push({key:keys.get(pos), pos, idx:m.index&&m.index.array?m.index.array:null, M:placeM(M,m.T), color:col});
+  });
+  return i=>byPart.get(i)||null;
+}
 function placeM(M,T){
   if(!T) return M;
   const r=T.r, t=T.t, O=[r[0][0],r[1][0],r[2][0],t[0], r[0][1],r[1][1],r[2][1],t[1], r[0][2],r[1][2],r[2][2],t[2]];

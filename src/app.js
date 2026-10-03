@@ -1571,6 +1571,7 @@ function waitForOnshape(){
 function parseAndLoad(done){
   if(!LAST_STEP) return;
   if(LAST_STEP.onshape){ loadOnshapeRobot(LAST_STEP.onshape,true); if(done&&CAD) done(CAD); return; }
+  if(LAST_STEP.simbot){ RobotPackage.load(LAST_STEP.simbot.pkg,LAST_STEP.simbot.file); if(done&&CAD) done(CAD); return; }
   const {name,text}=LAST_STEP, mb=(text.length/1048576).toFixed(1);
   SetupUI.beforeParse(name);
   $("#cadStatus").textContent="parsing "+mb+" MB …";
@@ -2183,6 +2184,7 @@ function wireMates(){
   });
   $("#mateClear").addEventListener("click",clearMates);
   $("#jointsDownload").addEventListener("click",downloadJoints);
+  $("#simbotDownload").addEventListener("click",()=>RobotPackage.download());
   $("#jointsFind").addEventListener("click",()=>{ if(CAD) findJoints(CAD,false); });
   $("#jointsReset").addEventListener("click",()=>{
     const name=JOINTS.step||(CAD&&CAD.name); store.del(jointsKey(name));
@@ -2214,7 +2216,8 @@ function takeUrdfPart(file){
 }
 function routeFile(file){
   const n=file.name.toLowerCase();
-  if(/\.(urdf|stl)$/.test(n)) takeUrdfPart(file);
+  if(/\.simbot$/.test(n)) RobotPackage.take(file);
+  else if(/\.(urdf|stl)$/.test(n)) takeUrdfPart(file);
   else if(/\.(step|stp)$/.test(n)) takeCAD(file);
   else if(/\.ftcsim$/.test(n)) Session.take(file);
   else if(/\.xml$/.test(n)) takeRobotConfig(file);
@@ -2939,6 +2942,62 @@ const Tour={
   },
 };
 
+/* ---------- robot packages (.simbot, src/simbot.js) ----------
+   The whole robot in one file: shapes, joints, what drives them, masses.
+   Made once from whatever the team had (Onshape, a URDF, a STEP and its
+   joints) and opened anywhere after, with nothing to re-parse or re-fetch. */
+const RobotPackage={
+  name(){ return ((CAD&&CAD.name)||"robot").replace(/\.(step|stp|urdf|simbot)$/i,"").replace(/[^\w.-]+/g,"-")+".simbot"; },
+  async download(){
+    if(!CAD||!CAD.solids||!CAD.solids.length){ Session.toast("load a robot first"); return; }
+    const btn=$("#simbotDownload"); if(btn) btn.disabled=true;
+    try{
+      // a STEP's exact OpenCascade surfaces go in when they're loaded; else the parts' own triangles
+      const ex=View.exact&&View.exact.cad===CAD&&typeof tessPackageMeshes==="function"?tessPackageMeshes(CAD,View.exact.res):null;
+      const pkg=simbotFromCad(CAD,{devices:CODE?CODE.devices:null, map:MAP||{}, created:new Date().toISOString(),
+        app:typeof SIMBENCH_BUILD!=="undefined"?{version:SIMBENCH_BUILD.v, build:SIMBENCH_BUILD.build}:null, meshFor:ex});
+      const bytes=await simbotPack(pkg);
+      const a=document.createElement("a"), url=URL.createObjectURL(new Blob([bytes],{type:"application/zip"}));
+      a.href=url; a.download=this.name(); document.body.appendChild(a); a.click();
+      setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); },500);
+      const c=pkg.manifest.validation.counts;
+      Session.toast("Saved "+this.name()+" · "+pkg.manifest.parts+" parts, "+pkg.manifest.joints.count+" joints"+(c.warn?" · "+c.warn+" thing"+(c.warn===1?"":"s")+" to check":""));
+    }catch(e){ Session.toast("couldn't make the robot package — "+e.message); }
+    finally{ if(btn) btn.disabled=false; }
+  },
+  take(file){
+    $("#cadStatus").textContent="opening "+file.name+" …"; $("#cadDrop").className="drop";
+    const r=new FileReader();
+    r.onerror=()=>{ $("#cadStatus").textContent="couldn't read "+file.name; $("#cadDrop").className="drop bad"; };
+    r.onload=async()=>{
+      const u=await simbotUnpack(new Uint8Array(r.result));
+      if(!u.ok){ $("#cadStatus").textContent="that robot package wouldn't open — "+u.error; $("#cadDrop").className="drop bad"; return; }
+      this.load(u.pkg,file.name);
+    };
+    r.readAsArrayBuffer(file);
+  },
+  load(pkg,fileName){
+    let out;
+    try{ out=cadFromSimbot(pkg); }
+    catch(e){ $("#cadStatus").textContent="that robot package couldn't be built — "+e.message; $("#cadDrop").className="drop bad"; return false; }
+    const cad=out.cad, n=cad.mechs.filter(m=>!m.drive).length;
+    LAST_STEP={name:cad.name, text:"", simbot:{pkg, file:fileName}, label:cad.name+" · robot package"};
+    MATES.asm=MATES.features=MATES.report=MATES.url=null; MATES.fromLink=false;
+    JOINTS.spec=pkg.joints; JOINTS.report=cad.mates; JOINTS.devices=out.devices; JOINTS.name=fileName; JOINTS.step=cad.name;
+    SetupUI.beforeParse&&SetupUI.beforeParse(cad.name);
+    loadCAD(cad, cad.name+" · robot package · "+cad.solids.length+" parts · "+n+" joint"+(n===1?"":"s"), "ok");
+    recomputeChain(cad.mechs);
+    EXACT={state:"ok", msg:null};
+    const note=$("#exactNote"); if(note) note.textContent="Shapes from the robot package: "+(pkg.manifest.meshes||"its")+" meshes, placed "+cad.solids.length+" times.";
+    const pill=$("#matePill"); if(pill){ pill.textContent=n+" joint"+(n===1?"":"s"); pill.className="pill "+(cad.mates.exact?"ok":"warnp"); }
+    $("#mateStatus").textContent=fileName+" · "+(cad.mates.exact?"exact joints":"joints found from the geometry (a draft)");
+    $("#mateNote").innerHTML=(cad.mates.issues||[]).map(i=>"<li><b>"+(i.sev==="warn"?"Check":"Note")+":</b> "+esc(i.text)+"</li>").join("")+
+      (cad.mates.why||[]).map(w=>"<li>"+esc(w)+"</li>").join("");
+    renderFrameNote&&renderFrameNote();
+    Status.render&&Status.render();
+    return true;
+  }
+};
 /* ---------- .ftcsim workspaces --------------------------- */
 function download(name,text,mime){
   const blob=new Blob([text],{type:mime||"text/plain;charset=utf-8"});
@@ -3240,7 +3299,7 @@ function proBoot(){
 
   // hardware
   // the robot: a STEP, an Onshape .onshape.json, or a URDF with its meshes
-  wireDrop($("#cadDrop"),$("#cadFile"),f=>/\.(urdf|stl|json)$/i.test(f.name)?routeFile(f):takeCAD(f),true);
+  wireDrop($("#cadDrop"),$("#cadFile"),f=>/\.(urdf|stl|json|simbot)$/i.test(f.name)?routeFile(f):takeCAD(f),true);
   wireDrop($("#cfgDrop"),$("#cfgFile"),takeRobotConfig);
   wireMates();
   wirePageDrop();
