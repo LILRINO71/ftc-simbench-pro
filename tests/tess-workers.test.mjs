@@ -61,6 +61,20 @@ test('exact geometry: a worker that fails to start fails its whole-file job at o
   assert.ok(Date.now() - t0 < 1500, `took ${Date.now() - t0} ms: the job waited for the timeout`);
 });
 
+/* With no workers at all, perShape refuses to mesh a robot of many shapes on
+   the page thread and throws. exact() caught that and called run(text), which
+   then meshed the whole file on the page thread: the freeze it was avoiding. */
+test('exact geometry: with no workers, a many-shape robot is not meshed whole on the page thread', async () => {
+  const M = load(DeadWorker);
+  const text = buildRobot('mecanum-zup').text;
+  const cad = M.parseSTEP(text);
+  let onPage = 0;
+  M.Tess.mainThread = () => { onPage++; return Promise.resolve({ success: true, meshes: [] }); };
+  await assert.rejects(M.Tess.exact(cad, text), /background/);
+  assert.equal(M.Tess.noWorker, true, 'the workers are marked unavailable');
+  assert.equal(onPage, 0, 'nothing meshed on the page thread');
+});
+
 test('exact geometry: one worker stopping costs one part, and nothing is meshed on the page thread', async () => {
   const M = load(fakeWorkers(3));
   const text = buildRobot('mecanum-zup').text;
