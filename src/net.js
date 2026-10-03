@@ -359,7 +359,16 @@ const Online={
     this.sendRoster();
     this.wantModels();
     // arriving mid-match: they watch (after the end, they're simply in the room for the next one)
-    if(this.state==="playing"&&this.lastStart) this.room.send(Object.assign({},this.lastStart,{late:true}),from);
+    if(this.state==="playing"&&this.lastStart) this.room.send(this.lateStart(),from);
+  },
+  /* START for someone arriving mid-match: the match as it is now, not as it was
+     dealt. A place whose player has left is "gone" (no robot there, and no AI
+     robot either), and so is the newcomer's own old place if they're back with
+     the same id: the host no longer takes their robot, so they watch. */
+  lateStart(){
+    const S=this.lastStart, slots={};
+    for(const s of NET_SLOTS){ const v=S.slots[s], p=v!=="ai"&&this.players[v]; slots[s]=v==="ai"||(p&&p.slot===s)?v:"gone"; }
+    return Object.assign({},S,{slots, late:true});
   },
   rosterMsg(){
     return {k:"roster", state:this.state, settings:this.settings,
@@ -443,11 +452,14 @@ const Online={
     return true;
   },
   onStart(m){
-    const slots={};
-    for(const s of NET_SLOTS){ const v=m.slots&&m.slots[s]; slots[s]=typeof v==="string"&&(v==="ai"||this.players[v])?v:"ai"; }
+    // each place: "ai" (an AI robot), a player here, or "gone" (nobody: its player
+    // left). Only "ai" makes an AI robot. Arriving late, this computer watches.
+    const slots={}, late=m.late===true;
+    for(const s of NET_SLOTS){ const v=m.slots&&m.slots[s];
+      slots[s]=v==="ai"?"ai":typeof v==="string"&&this.players[v]&&!(late&&v===this.self)?v:"gone"; }
     // the host places everyone: whatever this computer thought its place was, it's this
     for(const id in this.players){ const p=this.players[id]; p.slot=null; }
-    for(const s of NET_SLOTS) if(slots[s]!=="ai") this.players[slots[s]].slot=s;
+    for(const s of NET_SLOTS) if(slots[s]!=="ai"&&slots[s]!=="gone") this.players[slots[s]].slot=s;
     this.begin({seed:netNum(m.seed,1,1e6,1)|0, period:m.period==="Autonomous"?"Autonomous":"TeleOp",
       skill:MATCH_SKILL[m.skill]?m.skill:"typical", slots, at:netNum(m.at,0,1e16,this.now()+this.offset)});
   },

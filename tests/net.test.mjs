@@ -446,3 +446,29 @@ test('network: players meet on a fixed set of working relays, and a CDN that fai
   assert.ok(E.NET_RELAYS.length >= 5 && E.NET_RELAYS.every((u) => /^wss:\/\//.test(u)));
   for (const dead of ['relay.agorist.space', 'bucket.coracle.social']) assert.ok(!E.NET_RELAYS.some((u) => u.includes(dead)), dead + ' is not used');
 });
+
+test('online: someone arriving mid-match watches the match as it is now: no robot for a player who left, and no place of their own', () => {
+  const hub = loadWithField().netLoopback();
+  const { H, G } = twoInAMatch(hub);
+  run(hub, [H, G], 3.5);
+  const aiIds = H.M.bots.map((b) => b.id).sort();
+  // the guest leaves mid-match: its robot leaves the field, and no AI robot takes its place
+  G.O.leave(); hub.flush();
+  run(hub, [H], 0.5);
+  const L = computer(hub, 'late');
+  L.O.join(H.O.code, { name: 'Late' }); hub.flush();
+  run(hub, [H, L], 0.5);
+  assert.equal(L.O.state, 'playing');
+  assert.equal(L.O.mySlot(), null, 'a late joiner watches');
+  assert.deepEqual(L.M.bots.map((b) => b.id).sort(), aiIds, 'the same AI robots as the host: none where the guest was');
+  assert.equal(L.O.slots.red2, 'gone');
+  // the guest comes back with the same id (a Trystero selfId doesn't change): it watches too
+  const G2 = computer(hub, 'guest');
+  G2.O.join(H.O.code, { name: 'Team 222' }); hub.flush();
+  run(hub, [H, L, G2], 0.5);
+  assert.equal(G2.O.state, 'playing');
+  assert.equal(G2.O.mySlot(), null, 'no robot that nobody else would see');
+  assert.ok(G2.M.noUser);
+  assert.deepEqual(G2.M.bots.map((b) => b.id).sort(), aiIds);
+  assert.equal(H.M.players.length, 0, 'and the host sees no robot of theirs');
+});
