@@ -554,6 +554,9 @@ onmessage=async e=>{
     if(cad&&cad.occs&&cad.occs.length)
       return this.perShape(cad,text,onProgress).catch(e=>{
         if(text.length>30e6) throw e;                 // a big file won't do better whole
+        // no workers: perShape kept the page responsive on purpose, and run()
+        // would now mesh the whole file on the page thread instead
+        if(this.noWorker) throw e;
         return this.run(text);
       });
     return this.run(text);
