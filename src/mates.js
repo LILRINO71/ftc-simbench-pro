@@ -455,7 +455,10 @@ function applyOnshapeMates(cad,json,opts){
     const k=r.type==="RACK_AND_PINION"||r.type==="SCREW"?(Number.isFinite(r.length)?r.length/(2*Math.PI):NaN)
            :(Number.isFinite(r.ratio)&&r.ratio!==0?r.ratio:1);
     if(!Number.isFinite(k)) continue;
-    ms[1].couple={to:ms[0].id, ratio:(r.reverse?-1:1)*k, via:r.type.toLowerCase().replace(/_/g," ")};
+    // an _inv mate's axis was turned round, so its value runs the other way:
+    // the ratio turns round once for each end that was
+    const flip=ms.reduce((s,m)=>s*(mateNameHint(m.fromMate.name).inv?-1:1),1);
+    ms[1].couple={to:ms[0].id, ratio:(r.reverse?-1:1)*flip*k, via:r.type.toLowerCase().replace(/_/g," ")};
     why.push("\""+ms[1].id+"\" follows \""+ms[0].id+"\" through a "+r.type.toLowerCase().replace(/_/g," ")+" relation (ratio "+(+k.toFixed(4))+").");
   }
 
