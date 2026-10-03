@@ -49,9 +49,36 @@ also read (shapes only: the joints then come from the finder and the editor).
 Onshape's STL meshes are dense (a channel with forty holes is tens of thousands of triangles, a
 robot is millions), and a browser tab has a memory limit, so every mesh is cut down on import
 (`urdfDecimate`: vertices snap to a grid and merge) to a budget that keeps the whole robot near
-a million placed triangles (less on a tier-0 Chromebook), one mesh shared by many parts is
-computed and stored once, and the geometry lives in typed arrays. The note under the robot says
-how much was cut. Joints, placements and masses are untouched by this.
+two million placed triangles on a desktop (the device tier's own allowance on a Chromebook),
+shared out by each mesh's size (a tyre keeps tens of thousands, a screw keeps its eight; eighty
+copies of one roller take at most 30% between them, one part at most an eighth). One mesh shared
+by many parts is computed and stored once, the geometry lives in typed arrays, and normals are
+smoothed within a 35° crease so cylinders shade round. The note under the robot says how much was
+cut. Joints, placements and masses are untouched by this.
+
+What a real export taught (a 1,900-link, 9.4-million-triangle robot, 2026-10-03):
+
+- **Every revolute mate without limits is a `continuous` joint**, and a team mates every bearing,
+  hub, idler and e-clip that way: 463 of them here. A continuous mate carrying a few small parts,
+  with nothing beneath it, no motor or servo on it and nothing in its names a team drives, is
+  marked **passive** (`src/mates.js`): kept as a joint, listed under "bearings, hubs and idlers
+  that just spin", never asked about, never guessed as a device's joint, never a status-light
+  problem. Parts whose names say roller, tyre, intake, arm, lift, claw and so on are never passive.
+- **The robot check asks from the device's side.** While a motor or servo in the code has no
+  joint, that is the question (with its likely joints, biggest and most actuated first); the
+  joints nothing drives are one line. Only once every device is placed are leftover joints asked
+  about one by one, up to a handful. The zero-question route is to name the mates after the devices.
+- **A part with no material** is exported with a density of 1 kg/m³, so its "mass" is its volume.
+  Such a part is weighed from its mesh volume as what its name says (aluminium by default, steel
+  for fasteners, rubber for wheels, plastic for prints, an effective density for motors and servos);
+  a decal with no volume gets a gram. The robot's mass is then plausible instead of 50 kg from
+  hull-and-fill estimates, and "N parts have no mass" goes away.
+- **Cylindrical mates** come as a slide and a turn through a dummy named after the mate
+  (`cylindrical_1`, `cylindrical_1_1`); **parallel mates** as chains of dummies (`parallel_1`,
+  `parallel_1_2`…) held where drawn like a planar mate; a parallel mate's loop closure
+  (`parallel_5_loop_closure`) stands for no named part and is left out.
+- **An intake roller is not a drive wheel**: a compact body with a wheel-shaped part is skipped
+  as a wheel only when it sits on the floor.
 
 **Sign in with Onshape** (`src/onshapelink.js`, `functions/onshape/`): in the **Get my robot from
 Onshape** pop-up, sign in through Onshape's own page once, then paste the assembly's address. It
