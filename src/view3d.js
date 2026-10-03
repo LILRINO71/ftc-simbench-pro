@@ -55,6 +55,8 @@ const View={
     this.ren.outputColorSpace=THREE.SRGBColorSpace;
     this.ren.toneMapping=THREE.ACESFilmicToneMapping; this.ren.toneMappingExposure=1.0;
     el.appendChild(this.ren.domElement);
+    // after three.js's own handler (added first, so it runs first)
+    this.ren.domElement.addEventListener("webglcontextrestored",()=>this.contextRestored());
     // light in physical units (three r155+): a bright hall, a warm key light, a cool fill
     this.hemi=new THREE.HemisphereLight(0xfff3dc,0x3a362f,1.4); this.scene.add(this.hemi);
     const sun=new THREE.DirectionalLight(0xfff1df,5.2); this.sun=sun;
@@ -238,6 +240,35 @@ const View={
     this.exact=res&&res.meshes&&res.meshes.length?{cad,res}:null;
     if(this.exact&&this.cad===cad) this.applyExact();
     return this.exact?this.exact.res.meshes.length:0;
+  },
+  /* The GPU context came back after being lost (a driver reset, a GPU switch;
+     headless Chrome's software GL loses it seconds after start-up). three.js
+     makes new buffers and programs as it draws, but two things stay broken:
+     each geometry and texture still carries the dead context's dispose
+     handler, so disposing it later (the next robot load) asks WebGL to delete a
+     buffer or vertex array "that does not belong to this context", hundreds of
+     warnings; and the reflection map was drawn on the GPU, so it came back
+     black and every metal part with it. */
+  contextRestored(){
+    const seen=new Set(), old=this._env;
+    const visit=x=>{
+      if(!x||typeof x!=="object"||seen.has(x)) return; seen.add(x);
+      // three keeps listeners in _listeners (r128 and r186 alike); the new context adds its own when it uploads again
+      if(x.isBufferGeometry||x.isTexture){ if(x._listeners&&x._listeners.dispose) x._listeners.dispose.length=0; return; }
+      if(x.isMaterial){ for(const k in x){ const v=x[k]; if(v&&v.isTexture) visit(v); } return; }
+      if(x.isObject3D){ x.traverse(o=>{ visit(o.geometry); [].concat(o.material||[]).forEach(visit); }); return; }
+      if(x instanceof Map||Array.isArray(x)) x.forEach(visit);
+      else if(Object.getPrototypeOf(x)===Object.prototype) Object.values(x).forEach(visit);
+    };
+    // what is drawn, and what the caches hold for the next robot
+    visit(this.scene); visit(this.shapeCache); visit(this.liteMeshes);
+    for(const k of Object.keys(this)) if(k[0]==="_") visit(this[k]);
+    if(old){
+      this._env=undefined; const env=this.envMap();
+      for(const m of seen) if(m.isMaterial&&m.envMap===old){ m.envMap=env; m.needsUpdate=true; }
+      // the whole scene reflects it too (three r155+: scene.environment), or every metal part stays dark
+      if(this.scene&&this.scene.environment===old) this.scene.environment=env||null;
+    }
   },
   /* A studio to reflect: a dim room with a big overhead softbox and side
      panels, pre-filtered once (PMREM) so every metal part picks up soft,

@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 class Obj {
-  constructor() { this.children = []; this.parent = null; this.visible = true; this.userData = {};
+  constructor() { this.isObject3D = true; this.children = []; this.parent = null; this.visible = true; this.userData = {};
     const v = () => ({ x: 0, y: 0, z: 0, set(x, y, z) { this.x = x; this.y = y; this.z = z; return this; }, copy(o) { return this.set(o.x, o.y, o.z); } });
     this.position = v(); this.scale = v(); }
   add(o) { if (o.parent) o.parent.remove(o); this.children.push(o); o.parent = this; }
@@ -52,6 +52,34 @@ test('view: ball trails are drawn again after View.load', () => {
   const shown = View.trailG.filter((m) => m.visible);
   assert.ok(shown.length >= 4, 'a ball in the air still has its trail');
   assert.ok(shown.every((m) => inScene(View, m)), 'and the trail meshes are in the scene that is drawn');
+});
+
+/* A lost WebGL context that comes back (a driver reset; headless Chrome's
+   software GL at start-up) killed every buffer and texture made before it.
+   Each geometry and texture still carried the dead context's dispose handler,
+   so the next robot load asked WebGL to delete hundreds of objects "that do not
+   belong to this context"; and the reflection map, drawn on the GPU, came back
+   black, so every metal part went dark. */
+test('view: after a lost context comes back, old dispose handlers go and the reflections are redrawn', () => {
+  const View = loadView();
+  View.load(CAD);
+  const handler = () => { throw new Error('the dead context\'s handler ran'); };
+  const geo = { isBufferGeometry: true, _listeners: { dispose: [handler] } };
+  const tex = { isTexture: true, _listeners: { dispose: [handler] } };
+  const oldEnv = { isTexture: true, _listeners: { dispose: [handler] } }, newEnv = { isTexture: true };
+  const mat = { isMaterial: true, map: tex, envMap: oldEnv };
+  const cached = { isMaterial: true, envMap: oldEnv };              // not drawn right now, kept for the next robot
+  const cachedGeo = { isBufferGeometry: true, _listeners: { dispose: [handler] } };
+  const mesh = new Obj(); mesh.geometry = geo; mesh.material = mat; View.world.add(mesh);
+  View.scene = new Obj(); View.scene.add(View.world);
+  View._env = oldEnv; View._rmat = { metal: cached }; View.shapeCache = new Map([['s', { g: cachedGeo }]]);
+  View.envMap = function () { if (this._env === undefined) this._env = newEnv; return this._env; };
+  View.contextRestored();
+  for (const [what, x] of [['drawn geometry', geo], ['its texture', tex], ['the old reflections', oldEnv], ['a cached shape', cachedGeo]])
+    assert.equal(x._listeners.dispose.length, 0, what + ' still has the dead context\'s dispose handler');
+  assert.equal(mat.envMap, newEnv, 'a drawn part reflects the new map');
+  assert.equal(cached.envMap, newEnv, 'so does a cached material');
+  assert.ok(mat.needsUpdate && cached.needsUpdate);
 });
 
 test('view: an effect from before View.load is not kept', () => {
