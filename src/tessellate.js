@@ -435,8 +435,10 @@ onmessage=async e=>{
     postMessage({id:d.id, ok:!!(r&&r.success), res:r},tr);
   }catch(err){ postMessage({id:d.id, ok:false, error:String(err&&err.message||err)}); }
 };`;
-    const url=URL.createObjectURL(new Blob([src],{type:"text/javascript"}));
-    const w=new Worker(url);
+    // one blob URL for every worker this page starts: a new one per worker (four per
+    // robot, more after a stall) was never revoked, so each held its blob for good
+    this.workerUrl=this.workerUrl||URL.createObjectURL(new Blob([src],{type:"text/javascript"}));
+    const w=new Worker(this.workerUrl);
     w.onmessage=e=>{ w.done=(w.done||0)+1; w.job=null; const p=this.pending[e.data.id]; if(!p) return; delete this.pending[e.data.id];
       e.data.ok?p.resolve(e.data.res):p.reject(new Error(e.data.error||"OpenCascade couldn't read this STEP file")); };
     // one worker's error (a part too big for its memory, a hiccup loading OpenCascade)
