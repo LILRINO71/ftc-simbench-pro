@@ -25,7 +25,7 @@ export const SITE = 'https://ftc-simbench-pro.pages.dev';
 // earlier ones define. The engine never touches the DOM; only view3d and app do.
 export const ORDER = ['hardware', 'samples', 'step', 'hull', 'inertia', 'expr', 'jvm', 'jvmlib', 'jvmprelude', 'jvmrun', 'java', 'roadrunner', 'mapping', 'robotconfig',
   'compare', 'analyze', 'drivetrain', 'frame', 'mates', 'onshapelink', 'onshapecad', 'urdf', 'jointspec', 'simbot', 'autorig-lib', 'autorig', 'robotcheck', 'dynamics', 'joltmech', 'field', 'shots', 'match', 'robotlite', 'net', 'netrelay', 'lockstep', 'controllers', 'session', 'mathdoc',
-  'gitimport', 'onboarding', 'sim', 'tessellate', 'view3d', 'cadview', 'app'];
+  'gitimport', 'onboarding', 'sim', 'tier', 'tessellate', 'view3d', 'cadview', 'app'];
 
 const argv = process.argv.slice(2);
 const MIN = argv.includes('--min');
