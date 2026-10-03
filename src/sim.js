@@ -325,7 +325,8 @@ const Sim={
     this.stepDevices(dt);
     this.updateCOM();
     this.driveChassis(dt);
-    Shots.tick(dt,this.chassis);
+    // the shots in the air are the live game's: a probe's copy (driveProbe) leaves them be
+    if(this===Sim) Shots.tick(dt,this.chassis);
     // the rest of the match (src/match.js): only the live sim plays it, never a probe's copy
     // (online, src/net.js steps it instead, whatever this robot is doing)
     if(this===Sim&&this.phase==="running"&&typeof Match!=="undefined"&&Match.on&&!Match.net) Match.tick(dt,this);

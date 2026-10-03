@@ -153,3 +153,22 @@ test('a slide whose motor runs it backwards (dir -1) travels to its limit and st
   run(E, 3);
   assert.ok(Math.abs(q()) < 1e-6 && Math.abs(s.ticks) < 1e-6, `back at 0: ${(q() * 1000).toFixed(2)} mm, ${s.ticks} ticks`);
 });
+
+/* ---- the drive probe runs on a private copy, and leaves the live game alone ---- */
+
+test('driveProbe does not move the live game\'s balls or clock', () => {
+  // its copy of the sim ran Sim.tick, which called the global Shots.tick: a
+  // robot check while a shot was in the air flew the ball 1.5 s on
+  const F = loadWithField();
+  const b = sampleBench(F, F.DRIVE_JAVA);
+  F.Sim.reset(b.code, b.cad, b.map, { ...b.opts, physics: 'rigid' });
+  const ball = { t: 0.1, dur: 30, path: [[0, 0, 10], [1, 1, 20]], pos: [0, 0, 10], kind: 'x', color: 'red', al: 'red', v: 5 };
+  F.Shots.flying.push(ball);
+  const t0 = F.Shots.t, n0 = F.Shots.flying.length;
+  const pr = F.driveProbe(F.parseJava(F.DRIVE_JAVA), b.cad, b.map, b.opts);
+  assert.ok(pr && pr.up.fwd > 0.08, 'the probe still drives its own copy');
+  assert.equal(F.Shots.t, t0, 'the shot clock did not run');
+  assert.equal(ball.t, 0.1, 'the ball in the air did not fly on');
+  assert.equal(F.Shots.flying.length, n0);
+  F.Shots.flying.length = 0;
+});
