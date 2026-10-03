@@ -180,7 +180,7 @@ const {checkRobot, setupAuto}=(function(){
       if(m.couple||!driven.has(m.id)||!m.limits||normJointKind(m.kind)!=="linear"||typeof travelRange!=="function") continue;
       const dv=acts.find(d=>d.name===driven.get(m.id)); if(!dv||!/dcmotor/i.test(dv.type||"")) continue;
       const tr=travelRange(code,dv.name,"setTargetPosition"); if(!tr) continue;
-      const spec=typeof specFor==="function"?specFor(dv,m,"code"):null, tpr=motorTpr(spec);
+      const spec=typeof specFor==="function"?specFor(dv,m,"code"):null, tpr=typeof ticksPerRev==="function"?ticksPerRev(spec):537.7;
       const mm=Math.max(Math.abs(tr.lo),Math.abs(tr.hi))*slideMmPerTick(m,tpr), top=Math.max(Math.abs(m.limits[0]||0),Math.abs(m.limits[1]||0))*1000;
       if(top>0&&mm>top*1.1+10) put({key:"targets:"+m.id, sev:"warn", joint:m.id, device:dv.name, ask:"look",
         text:"Your code sends "+dv.name+" to "+Math.max(Math.abs(tr.lo),Math.abs(tr.hi))+" ticks, "+mm.toFixed(0)+" mm up \""+label(m)+"\", but it only travels "+top.toFixed(0)+
