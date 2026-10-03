@@ -141,6 +141,29 @@ test('mates: a subassembly used twice: each copy\'s relation couples its own joi
   assert.ok(!cad.mates.issues.some((i) => i.code === 'relation-dangling'), JSON.stringify(cad.mates.issues));
 });
 
+test('onshape: each part\'s placement (occT) holds its axes the way the STEP parser does, so a reader lines parts up by it', () => {
+  const p = payload();
+  // the robot turned 90 degrees, so no part's turn is its own transpose
+  for (const o of p.asm.rootAssembly.occurrences) {
+    const T = o.transform;
+    o.transform = [-T[4], -T[5], -T[6], -T[7], T[0], T[1], T[2], T[3], T[8], T[9], T[10], T[11], 0, 0, 0, 1];
+  }
+  const cad = E.cadFromOnshape(p);
+  const T = new Map(p.asm.rootAssembly.occurrences.map((o) => [o.path.join('/'), o.transform]));
+  for (const s of cad.solids) {
+    const M = T.get(s.osPath);
+    // r[k] is the part's own k axis in the world: column k of Onshape's row-major 4x4
+    const same = (a, b) => a.length === 3 && a.every((v, i) => Math.abs(v - b[i]) < 1e-12);
+    for (let k = 0; k < 3; k++) assert.ok(same(s.occT.r[k], [M[k], M[4 + k], M[8 + k]]), s.name + ' axis ' + k + ': ' + s.occT.r[k]);
+    assert.ok(same(s.occT.t, [M[3], M[7], M[11]]));
+  }
+  // matching by placement (what a STEP import does) finds every part
+  for (const s of cad.solids) delete s.osPath;
+  const A = E.parseOnshapeAssembly(p.asm);
+  const { map } = E.matchOnshapeParts(A, cad, []);
+  assert.equal(map.size, A.parts.length);
+});
+
 test('mates: a mate that closes a loop is kept as a loop closure with the point it pins', () => {
   const p = payload();
   const arm = p.asm.rootAssembly.features.find((f) => f.featureData && f.featureData.name === 'Arm Pivot');
