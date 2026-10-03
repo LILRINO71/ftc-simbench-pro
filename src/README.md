@@ -41,7 +41,9 @@ was designed in, not the build order.
 | `robotcheck.js` | The robot check: the joints against the team's OpMode (devices, joints, drivetrain, a small swing of each joint against the frame), as questions with likely answers. See [../docs/robot-check.md](../docs/robot-check.md). |
 | `jointspec.js` | Joint specs (`ftc-sim-bench.joints`). Part picks by path, name and position; axis, pivot, travel, devices, rest poses; followers (ratio, slider-crank, rod); hand fixes. Also the joint editor's helpers: `specFromCad`, `suggestJoint`, and `mateJointQ`/`jointValues`, which the sim and the view share. See [../docs/joints.md](../docs/joints.md). |
 | `simbot.js` | Robot packages (`.simbot`): a deterministic zip and a capped reader, a glTF binary writer and reader, the package from any robot and back, and `validateRobot` (what to check). Joint spec version 2's constraints live here and in jointspec.js. See [../docs/robot-package.md](../docs/robot-package.md). |
+| `urdf.js` | URDF into the same payload an Onshape import gives, including Onshape's own export (root, dummy links for loop closures, cylindrical and planar mates, continuous joints, `<mimic>`, underscored names, near-zero masses), with mesh readers for STL, OBJ, glTF, GLB and COLLADA, and a glTF-only reader for shapes without joints. |
 | `mjcf.js` | MuJoCo MJCF models into the same payload an Onshape import gives: bodies, joints with limits, joint equalities as couplings, connects as loop closures. |
+| `zipin.js` | A robot in a zip: Onshape's URDF or glTF export, a ROS package, a zipped STEP or robot package. `robotFromZip` reads it with the package's capped zip reader and says what it holds. |
 
 ## Code → behaviour
 

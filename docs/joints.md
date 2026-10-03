@@ -22,12 +22,36 @@ pin-slot) out from the chassis as a joint tree. Each joint gets its true axis an
 it carries, its limits from the features list, and any gear, rack or screw relation to another
 joint.
 
+**As a file, from Onshape itself** (`src/zipin.js`, `src/urdf.js`): in Onshape, right-click the
+assembly's tab along the bottom → **Export…** → Format **URDF**, Geometry **STL** (GLTF, GLB and OBJ
+are read too) → **Export**. Onshape downloads a `.zip` (a ROS package: `<name>/urdf/<name>.urdf`,
+`<name>/meshes/*.stl`). Drop the zip on SimBench as it is; nothing is unzipped by hand and
+nothing leaves the browser. This is the recommended route: it needs no sign-in, no OAuth app, no
+bookmark and no network beyond the download, so it works on school computers, in managed
+browsers and with Enterprise accounts. What the export carries, and how it's read:
+
+- every mate is a joint (`revolute_N`, `slider_N`, `fastened_N`); a mate with limits becomes a
+  `revolute` or `prismatic` joint with `<limit>`, a mate without becomes `continuous` (the
+  bench marks that joint continuous, so the robot check doesn't ask for its limits);
+- a cylindrical mate is a slide and a turn through a dummy link (`cylindrical_N_0`): read back as
+  one cylindrical mate; a planar mate's dummies (`planar_N_M`) are held where they were drawn;
+- a mate that closes a linkage loop is a joint onto a dummy link `<part>__1__loop_closure`: read
+  back as a `closing_` mate between the two real parts, so the loop is closed;
+- gear and rack relations are `<mimic>`: couplings; the empty `root` link and each
+  subassembly's frame link are shapeless and skipped silently;
+- names are lowercased and underscored (`20_gripper_assembly__1_`): shown as words, with the
+  goBILDA or REV part number read out of them; a near-zero mass (a part with no material) is
+  treated as no mass and weighed by shape.
+
+Onshape added URDF export in version 1.212 (2024); mate limits in 1.215. The glTF export alone is
+also read (shapes only: the joints then come from the finder and the editor).
+
 **Sign in with Onshape** (`src/onshapelink.js`, `functions/onshape/`): in the **Get my robot from
 Onshape** pop-up, sign in through Onshape's own page once, then paste the assembly's address. It
 reads the same API calls as the bookmark below, through a small Cloudflare Pages Function, and works
 on school computers, which block bookmarks. Setting it up for a site is in `DEPLOY.md`.
 
-**In one click, on a home computer** (`onshapeGrab` in `src/onshapelink.js`): drag **Send to
+**In one click, on a home computer with an unmanaged browser** (`onshapeGrab` in `src/onshapelink.js`): drag **Send to
 SimBench** from the **Get my robot from Onshape** pop-up (under *Or use the bookmark*) to the
 bookmarks bar once. Then, on the robot's assembly tab in Onshape, click the bookmark. It opens a
 SimBench tab and reads the whole robot from Onshape's API with the team's own sign-in, the same
@@ -40,6 +64,9 @@ needed.
   bookmark saves the robot as one `.onshape.json` file instead. Drop it on SimBench, or use **Open a
   file**: it's the same robot.
 - **Clicking it again** reuses the same SimBench tab.
+- **A managed browser** (a school Chromebook, or a home computer signed in to a school account
+  whose policy blocks `javascript:` URLs) won't run it at all: a click does nothing and a drag shows
+  `about:blank#blocked`. There is no way round that from a web page; use the export above.
 
 **By hand**, the **Mates & joints** panel builds the two API links from an assembly URL. Open them in a browser
 that's signed in to Onshape, save the pages, and drop them on the panel. For scripting there's

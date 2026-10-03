@@ -1,6 +1,6 @@
 # tests/
 
-457 tests on Node's built-in runner (`node:test`). There's no browser, no mocks and no transpile
+739 tests on Node's built-in runner (`node:test`). There's no browser, no mocks and no transpile
 step: the tests run the same engine code that ships.
 
 ```bash
@@ -54,6 +54,7 @@ pure, to test how joints are drawn.
 | `field.test.mjs`, `robot.test.mjs` | The BIOBUZZ field, collisions, shots, controllers. |
 | `session.test.mjs`, `mathdoc.test.mjs`, `product.test.mjs` | Workspaces (including hostile files), the Math export, the status light and GitHub import. |
 | `simbot.test.mjs` | **Robot packages**: the zip and glb round trips and what the readers refuse (unsafe names, damage, bombs, oversize, bad indices), Onshape, URDF and STEP robots back with the same parts, joints, limits, couplings, loops and mass, instancing, the validation report, hostile packages, determinism, and the robot check's view of them. |
+| `urdf-onshape.test.mjs` | **Onshape's URDF export, as the zip it downloads**: recognised with its meshes by path and bare name (junk ignored); the shapeless root and subassembly frames, loop-closure dummies as `closing_` mates, a cylindrical mate's dummy chain as one mate, planar dummies held, continuous joints, `<mimic>`, underscored names and part numbers, near-zero masses, one shared mesh as one shape; the robot's joints, loop and coupling, and the same through a package; the OBJ, glTF, GLB and COLLADA readers; a glTF alone as shapes; what else a zip may hold and what it refuses. |
 | `mjcf.test.mjs` | **MJCF import**: bodies, joints in degrees or radians, default classes, quaternions and Euler angles, couplings and loop closures, and the exact shape the Fusion exporter writes. |
 | `joltmech.test.mjs`, `sim-jolt.test.mjs` | **Solved mechanisms in Jolt Physics**, against hand-worked answers: free speed, stall versus lift, brake back-drive, slide stops, gears, racks, cascades, a loop-closed parallelogram, rotor inertia, determinism, and the sim running a team-style OpMode with them. |
 | `relay.test.mjs`, `lockstep.test.mjs` | **Rooms and lockstep**: the room's relaying, refusals, clock, secrets and ledger; the Pages Function; a whole match over WebSocket, SSE and SSE after a stripped WebSocket; command encoding, the ledger, stand-ins, the hash vote, and three computers ending in the same state. |

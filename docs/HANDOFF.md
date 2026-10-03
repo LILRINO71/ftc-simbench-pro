@@ -92,9 +92,22 @@ The research behind the fixes is in
     `#onshape-wait`.
   - `cadFromOnshape` builds the CAD with real triangles, colours and mass,
     and every mate becomes an exact joint (matched by occurrence path).
-- **URDF** (`src/urdf.js`): drop a `.urdf` with its `.stl` meshes. URDF is
-  what the Fusion, SolidWorks and FreeCAD exporters write. Links become
-  parts, joints become mates, and `mimic` becomes a coupled joint.
+- **Onshape's own URDF export, as a zip** (`src/zipin.js`, `src/urdf.js`):
+  the route the owner asked for when neither the bookmark (blocked on a
+  managed browser, even at home with a school account) nor Sign in with
+  Onshape (needs an OAuth app the school's Enterprise admin must allow) was
+  usable. Right-click the assembly tab → Export → URDF → STL gives a zip;
+  the zip is dropped whole. `robotFromZip` says what a zip holds (URDF, MJCF,
+  STEP, glTF, a package) and the URDF reader knows Onshape's habits: the
+  shapeless `root`, dummy links for loop closures (→ `closing_` mates),
+  cylindrical and planar mates, `continuous` joints, `<mimic>`, underscored
+  names with the part number inside, near-zero masses. The Onshape pop-up
+  leads with these three steps now; sign-in and the bookmark are folds.
+  Tests: `tests/urdf-onshape.test.mjs`.
+- **URDF** (`src/urdf.js`): drop a `.urdf` with its meshes (STL, OBJ, glTF,
+  GLB, COLLADA), loose or zipped. URDF is what the Fusion, SolidWorks and
+  FreeCAD exporters write. Links become parts, joints become mates, and
+  `mimic` becomes a coupled joint.
 - **Devices to joints** (`autoMap`, `src/mapping.js`):
   - names are split into words and matched through FTC synonym groups;
   - short forms count ("in" for intake);
@@ -128,7 +141,7 @@ The research behind the fixes is in
   - long hints are cut short;
   - "how the CAD was read" folds away;
   - the duplicate START banner is gone, and the arm-torque inset starts folded;
-  - the CAD drop says STEP · URDF · Onshape;
+  - the CAD drop takes Onshape's exported .zip, .simbot, STEP, URDF, MJCF and glTF;
   - the Telemetry panel shows exactly what the VM sent;
   - the Java tab says whether the VM ran the code, stood in for a library
     call, or stopped on an exception.
@@ -153,7 +166,19 @@ and from 21 to 8 with the ITD code.
 The CAD import and architecture design (robot packages, Jolt for the mechanisms, rooms on the
 site's own origin, lockstep, tiers, offline) is mostly built, and four reviews' worth of bugs
 (sim and physics, CAD import, online and sessions, the view and the build, and the new code
-itself) are fixed with a failing-first test each. What's left of the design:
+itself) are fixed with a failing-first test each.
+
+**The CAD route that actually works for a school team (2026-10-03):** the owner tried the
+bookmark on a home PC with their school's Enterprise Onshape account: a click did nothing and a
+drag showed `about:blank#blocked`, because the account's browser policy follows the account.
+Sign in with Onshape needs an OAuth app the school's admin must allow. So the file route is now
+first: Onshape's own **Export → URDF** zip, dropped whole (`src/zipin.js`, the Onshape habits in
+`src/urdf.js`, the pop-up's three steps in `src/markup.html`). It needs nothing but a download.
+The body builder in `src/mates.js` also learned that a root-level part fastened to a moving part
+rides it (it used to drag the arm into the frame), which is how Onshape's export lays out
+subassembly frame links.
+
+What's left of the design:
 
 1. **Lockstep as the match's default.** The ledger, the room's command store, the hash vote and
    Jolt's determinism are built and tested (`tests/lockstep.test.mjs`); matches still send
