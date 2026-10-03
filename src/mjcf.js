@@ -104,7 +104,8 @@ function mjcfToPayload(text,files,name){
         const f=fileByBase[base(m.file)]; if(!f){ missing.add(base(m.file)); continue; }
         let M=null; try{ M=urdfMesh(m.file,f,fileByBase); }catch(e){ missing.add(base(m.file)+" ("+(e&&e.message||e)+")"); continue; }
         if(!M){ missing.add(base(m.file)+" (only STL, OBJ, glTF, GLB and DAE are read)"); continue; }
-        T=M; for(let k=0;k<T.length;k+=3){ T[k]*=m.scale[0]; T[k+1]*=m.scale[1]; T[k+2]*=m.scale[2]; }
+        // dense meshes come down to a budget (src/urdf.js urdfDecimate): a tab has a memory limit
+        T=urdfDecimate(M,urdfTriBudget(Object.keys(meshes).length)); for(let k=0;k<T.length;k+=3){ T[k]*=m.scale[0]; T[k+1]*=m.scale[1]; T[k+2]*=m.scale[2]; }
       }else{
         const s=urdfNums(g.size,3,null)||urdfNums(g.size,2,null)||urdfNums(g.size,1,[0.01]);
         if(g.fromto!=null&&(type==="cylinder"||type==="capsule")){

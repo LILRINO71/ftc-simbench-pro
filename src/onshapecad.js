@@ -101,14 +101,17 @@ function cadFromOnshape(p,opts){
     const key=onshapeGeomKey(inst), G=geom[key], body=G&&G.parts[inst.partId];
     if(!body||!body.tri||body.tri.length<9){ if(!inst.shapeless) missing.add(inst.name||inst.partId); continue; }
     const T=o.transform, R=[[T[0],T[1],T[2]],[T[4],T[5],T[6]],[T[8],T[9],T[10]]], t=[T[3],T[7],T[11]];
-    const tri=body.tri, pos=new Array(tri.length), nor=new Array(tri.length);
+    // typed arrays: half the memory of plain ones, and what the view uploads as they are
+    const tri=body.tri, nv=tri.length, pos=new Float32Array(nv), nor=new Float32Array(nv);
     const smn=[Infinity,Infinity,Infinity], smx=[-Infinity,-Infinity,-Infinity], pts=[];
-    for(let k=0;k<tri.length;k+=3){
+    // a sample of the vertices for the hull and the frame: at most ~1500 per part (thinPoints keeps 120)
+    const step=Math.max(3,Math.ceil(nv/3/1500))*3;
+    for(let k=0;k<nv;k+=3){
       const x=tri[k], y=tri[k+1], z=tri[k+2];
-      const w=[R[0][0]*x+R[0][1]*y+R[0][2]*z+t[0], R[1][0]*x+R[1][1]*y+R[1][2]*z+t[1], R[2][0]*x+R[2][1]*y+R[2][2]*z+t[2]];
-      pos[k]=w[0]; pos[k+1]=w[1]; pos[k+2]=w[2];
-      for(let q=0;q<3;q++){ if(w[q]<smn[q]) smn[q]=w[q]; if(w[q]>smx[q]) smx[q]=w[q]; }
-      if((k/3)%3===0||tri.length<300) pts.push(w);
+      const wx=R[0][0]*x+R[0][1]*y+R[0][2]*z+t[0], wy=R[1][0]*x+R[1][1]*y+R[1][2]*z+t[1], wz=R[2][0]*x+R[2][1]*y+R[2][2]*z+t[2];
+      pos[k]=wx; pos[k+1]=wy; pos[k+2]=wz;
+      if(wx<smn[0]) smn[0]=wx; if(wx>smx[0]) smx[0]=wx; if(wy<smn[1]) smn[1]=wy; if(wy>smx[1]) smx[1]=wy; if(wz<smn[2]) smn[2]=wz; if(wz>smx[2]) smx[2]=wz;
+      if(k%step===0||nv<300) pts.push([wx,wy,wz]);
     }
     // flat normals, one per facet
     for(let k=0;k<pos.length;k+=9){
@@ -142,12 +145,13 @@ function cadFromOnshape(p,opts){
     const bb=applyFrame(F,{points:P, solids, placements:[], bbox:{min:mn.slice(),max:mx.slice()}});
     for(let k=0;k<3;k++){ mn[k]=bb.min[k]; mx[k]=bb.max[k]; }
     frame=frameRecord(F);
-    for(const s of solids){ const r=s.rawTri, pos=new Array(r.pos.length), nor=new Array(r.nor.length);
+    for(const s of solids){ const r=s.rawTri, pos=r.pos, nor=r.nor;
       // the copy's placement in the robot frame: the frame after the occurrence
       const A=frame.M, B=s.inst.M, C=new Array(16);
       for(let i=0;i<4;i++) for(let j=0;j<4;j++){ let v=0; for(let k=0;k<4;k++) v+=A[4*i+k]*B[4*k+j]; C[4*i+j]=v; }
       s.inst.M=C;
-      for(let k=0;k<r.pos.length;k+=3){ const a=F.toRobot([r.pos[k],r.pos[k+1],r.pos[k+2]]), b=F.dirToRobot([r.nor[k],r.nor[k+1],r.nor[k+2]]);
+      // in place: the frame is rigid, so no second copy of the robot is needed
+      for(let k=0;k<pos.length;k+=3){ const a=F.toRobot([pos[k],pos[k+1],pos[k+2]]), b=F.dirToRobot([nor[k],nor[k+1],nor[k+2]]);
         pos[k]=a[0]; pos[k+1]=a[1]; pos[k+2]=a[2]; nor[k]=b[0]; nor[k+1]=b[1]; nor[k+2]=b[2]; }
       s.tri={pos,nor}; s.keepTri=true; delete s.rawTri; }
   } else for(const s of solids){ s.tri=s.rawTri; s.keepTri=true; delete s.rawTri; }

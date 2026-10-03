@@ -46,6 +46,13 @@ browsers and with Enterprise accounts. What the export carries, and how it's rea
 Onshape added URDF export in version 1.212 (2024); mate limits in 1.215. The glTF export alone is
 also read (shapes only: the joints then come from the finder and the editor).
 
+Onshape's STL meshes are dense (a channel with forty holes is tens of thousands of triangles, a
+robot is millions), and a browser tab has a memory limit, so every mesh is cut down on import
+(`urdfDecimate`: vertices snap to a grid and merge) to a budget that keeps the whole robot near
+a million placed triangles (less on a tier-0 Chromebook), one mesh shared by many parts is
+computed and stored once, and the geometry lives in typed arrays. The note under the robot says
+how much was cut. Joints, placements and masses are untouched by this.
+
 **Sign in with Onshape** (`src/onshapelink.js`, `functions/onshape/`): in the **Get my robot from
 Onshape** pop-up, sign in through Onshape's own page once, then paste the assembly's address. It
 reads the same API calls as the bookmark below, through a small Cloudflare Pages Function, and works

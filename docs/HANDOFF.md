@@ -103,7 +103,13 @@ The research behind the fixes is in
   cylindrical and planar mates, `continuous` joints, `<mimic>`, underscored
   names with the part number inside, near-zero masses. The Onshape pop-up
   leads with these three steps now; sign-in and the bookmark are folds.
-  Tests: `tests/urdf-onshape.test.mjs`.
+  The owner's first real export crashed the tab (out of memory): Onshape's
+  STLs are dense and the builder held four plain-array copies of every
+  triangle. Meshes are now decimated on import to a per-robot budget
+  (`urdfDecimate`, `urdfTriBudget`, the tier's `ownTris`), shared shapes are
+  computed once, and geometry is Float32Array transformed in place: a 300
+  part, 6M-triangle export went from ~1 GB resident and 9 s to ~50 MB and
+  1 s in Node. Tests: `tests/urdf-onshape.test.mjs`.
 - **URDF** (`src/urdf.js`): drop a `.urdf` with its meshes (STL, OBJ, glTF,
   GLB, COLLADA), loose or zipped. URDF is what the Fusion, SolidWorks and
   FreeCAD exporters write. Links become parts, joints become mates, and

@@ -252,6 +252,47 @@ function urdfPrim(g){
   }
   return T;
 }
+/* Fewer triangles for a dense mesh (Onshape's STL of a channel with forty holes runs
+   to tens of thousands): every vertex snaps to a grid cell and the cell's vertices
+   merge into their mean, so flat faces collapse to a few triangles and small holes
+   close. The grid is coarsened until the mesh fits the budget. The result is a
+   Float32Array: half the memory of a plain array, and what the view uploads. */
+function urdfDecimate(T,budget){
+  const n=T.length/9;
+  if(n<=budget) return T instanceof Float32Array?T:Float32Array.from(T);
+  const mn=[Infinity,Infinity,Infinity], mx=[-Infinity,-Infinity,-Infinity];
+  for(let k=0;k<T.length;k+=3) for(let q=0;q<3;q++){ const v=T[k+q]; if(v<mn[q]) mn[q]=v; if(v>mx[q]) mx[q]=v; }
+  const span=Math.max(mx[0]-mn[0],mx[1]-mn[1],mx[2]-mn[2])||1;
+  // start fine (a 2.5 mm grid on a 400 mm channel) and coarsen only as far as the budget needs
+  let cells=160, best=null;
+  for(let pass=0;pass<10;pass++){
+    const C=cells+1, cell=span/cells, rep=new Map(), sum=[], idx=new Int32Array(T.length/3);
+    for(let v=0;v<idx.length;v++){
+      const x=T[3*v], y=T[3*v+1], z=T[3*v+2];
+      const key=Math.floor((x-mn[0])/cell)+(Math.floor((y-mn[1])/cell)+Math.floor((z-mn[2])/cell)*C)*C;
+      let r=rep.get(key); if(r==null){ r=sum.length; rep.set(key,r); sum.push([0,0,0,0]); }
+      const s=sum[r]; s[0]+=x; s[1]+=y; s[2]+=z; s[3]++; idx[v]=r;
+    }
+    let kept=0; for(let f=0;f<n;f++){ const a=idx[3*f], b=idx[3*f+1], c=idx[3*f+2]; if(a!==b&&b!==c&&a!==c) kept++; }
+    const out=new Float32Array(kept*9); let o=0;
+    for(let f=0;f<n;f++){ const a=idx[3*f], b=idx[3*f+1], c=idx[3*f+2]; if(a===b||b===c||a===c) continue;
+      for(const r of [a,b,c]){ const s=sum[r]; out[o++]=s[0]/s[3]; out[o++]=s[1]/s[3]; out[o++]=s[2]/s[3]; } }
+    best=out;
+    if(kept<=budget||cells<=4) break;
+    cells=Math.max(4,Math.floor(cells*0.72));
+  }
+  return best;
+}
+/* a mesh scaled and placed by a visual's origin, as a Float32Array */
+function urdfPlace(T,O,sc){
+  const out=new Float32Array(T.length), r=O.r, t=O.t, s=sc||[1,1,1];
+  for(let k=0;k<T.length;k+=3){ const x=T[k]*s[0], y=T[k+1]*s[1], z=T[k+2]*s[2];
+    out[k]=r[0][0]*x+r[0][1]*y+r[0][2]*z+t[0]; out[k+1]=r[1][0]*x+r[1][1]*y+r[1][2]*z+t[1]; out[k+2]=r[2][0]*x+r[2][1]*y+r[2][2]*z+t[2]; }
+  return out;
+}
+/* How many triangles a part may keep: a whole robot stays near a million placed
+   triangles, which a Chromebook's tab and GPU carry; one part never below 600. */
+function urdfTriBudget(meshLinks,total){ return Math.max(600,Math.min(5000,Math.round((total||1.2e6)/Math.max(1,meshLinks)))); }
 /* a short stable hash of a string, for geometry keys */
 function urdfHash(s){ let h=0x811c9dc5; for(let i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,16777619)>>>0; } return h.toString(36); }
 /* Onshape's URDF names a part by its instance, lowercased, every other character an
@@ -268,8 +309,8 @@ function urdfPrettyName(name){
 }
 
 /* The URDF as a SimBench robot payload. files: {name or basename: ArrayBuffer} for meshes. */
-function urdfToPayload(text,files,name){
-  files=files||{};
+function urdfToPayload(text,files,name,opts){
+  files=files||{}; opts=opts||{};
   const doc=urdfXml(text), robot=doc.kids.find(k=>k.tag==="robot");
   if(!robot) throw new Error("no <robot> in this file"+(/xacro/.test(text)?" (it's a xacro file: run xacro on it first)":""));
   if(/<xacro:|\$\{/.test(text)) throw new Error("this is a xacro file; run xacro on it first to get the plain URDF");
@@ -311,8 +352,10 @@ function urdfToPayload(text,files,name){
     }
     return null;
   };
-  // each mesh file read once, however many links share it
-  const meshCache=new Map();
+  // each mesh file read once, however many links share it, and cut down to its budget
+  const meshLinks=links.filter(l=>urdfKids(l,"visual").some(v=>{ const g=urdfKid(v,"geometry"); return g&&g.kids[0]&&g.kids[0].tag==="mesh"; })).length;
+  const budget=opts.triBudget>0?opts.triBudget:urdfTriBudget(meshLinks,opts.triangles);
+  const meshCache=new Map(); let triIn=0, triOut=0, cut=0;
   const loadMesh=fname=>{
     const key=resolve(fname), b=base(fname);
     if(key==null) return {miss:b};
@@ -320,7 +363,9 @@ function urdfToPayload(text,files,name){
     const f=key[0]==="#"?fileByBase[key.slice(1)]:fileByPath[key];
     let r;
     if(!URDF_MESH_EXT.test(b)) r={miss:b+" (only STL, OBJ, glTF, GLB and DAE are read)"};
-    else { try{ const t=urdfMesh(b,f,fileByBase); r=t&&t.length>=9?{tri:t,key}:{miss:b+" (no triangles in it)"}; }catch(e){ r={miss:b+" ("+(e&&e.message||e)+")"}; } }
+    else { try{ const t=urdfMesh(b,f,fileByBase);
+      if(t&&t.length>=9){ const d=urdfDecimate(t,budget); triIn+=t.length/9; triOut+=d.length/9; if(d.length<t.length) cut++; r={tri:d,key}; }
+      else r={miss:b+" (no triangles in it)"}; }catch(e){ r={miss:b+" ("+(e&&e.message||e)+")"}; } }
     meshCache.set(key,r); return r;
   };
   const kgOf=l=>{ const inertial=urdfKid(l,"inertial"), mass=inertial&&urdfKid(inertial,"mass"); return mass?+mass.attrs.value:NaN; };
@@ -361,25 +406,32 @@ function urdfToPayload(text,files,name){
     if(loopDummy.has(nm)||through.has(nm)) return;         // not parts: handled as mates below
     const id="L"+i; idOf.set(nm,id);
     const display=onshape?urdfPrettyName(nm):nm, pn=urdfPartNumber(nm);
-    const tri=[]; let color=null, key=null;
+    let color=null, key=null, tri=null;
     const visuals=urdfKids(l,"visual");
-    for(const v of visuals){
-      const O=urdfOrigin(v), g=urdfKid(v,"geometry"), shape=g&&g.kids[0]; if(!shape) continue;
-      let T=[];
-      if(shape.tag==="mesh"){
-        const r=loadMesh(shape.attrs.filename);
-        if(r.miss){ missingMesh.add(r.miss); continue; }
-        const sc=urdfNums(shape.attrs.scale,3,[1,1,1]);
-        T=r.tri; if(sc[0]!==1||sc[1]!==1||sc[2]!==1){ T=T.slice(); for(let k=0;k<T.length;k+=3){ T[k]*=sc[0]; T[k+1]*=sc[1]; T[k+2]*=sc[2]; } }
-        // one mesh, placed one way, is one shape however many links wear it (a robot
-        // package stores it once)
-        if(visuals.length===1) key=r.key+"|"+sc.join(",")+"|"+O.r.flat().map(x=>x.toFixed(6)).join(",")+"|"+O.t.map(x=>x.toFixed(6)).join(",");
-      } else T=urdfPrim(shape);
-      for(let k=0;k<T.length;k+=3){ const q=urdfPt(O,[T[k],T[k+1],T[k+2]]); tri.push(q[0],q[1],q[2]); }
-      const mat=urdfKid(v,"material");
-      if(mat&&!color){ const c=urdfKid(mat,"color"); color=c?urdfNums(c.attrs.rgba,3,null):(materials[mat.attrs.name]||null); }
+    for(const v of visuals){ const mat=urdfKid(v,"material"); if(mat&&!color){ const c=urdfKid(mat,"color"); color=c?urdfNums(c.attrs.rgba,3,null):(materials[mat.attrs.name]||null); } }
+    const one=visuals.length===1?visuals[0]:null, oneG=one&&urdfKid(one,"geometry"), oneShape=oneG&&oneG.kids[0];
+    if(oneShape&&oneShape.tag==="mesh"){
+      // one mesh, placed one way, in one colour, is one shape however many links wear
+      // it: computed once, stored once (a robot package keeps it once too)
+      const r=loadMesh(oneShape.attrs.filename);
+      if(r.miss){ missingMesh.add(r.miss); tri=new Float32Array(0); }
+      else{
+        const O=urdfOrigin(one), sc=urdfNums(oneShape.attrs.scale,3,[1,1,1]);
+        key=urdfHash(r.key+"|"+sc.join(",")+"|"+O.r.flat().map(x=>x.toFixed(6)).join(",")+"|"+O.t.map(x=>x.toFixed(6)).join(",")+"|"+(color?color.join(","):""));
+        const had=geom["URDF/m/MV/e/E"+key+"|default"];
+        tri=had?had.parts.P.tri:urdfPlace(r.tri,O,sc);
+      }
+    } else {
+      const parts=[]; let total=0;
+      for(const v of visuals){
+        const O=urdfOrigin(v), g=urdfKid(v,"geometry"), shape=g&&g.kids[0]; if(!shape) continue;
+        let T;
+        if(shape.tag==="mesh"){ const r=loadMesh(shape.attrs.filename); if(r.miss){ missingMesh.add(r.miss); continue; } T=urdfPlace(r.tri,O,urdfNums(shape.attrs.scale,3,[1,1,1])); }
+        else T=urdfPlace(urdfPrim(shape),O,null);
+        parts.push(T); total+=T.length;
+      }
+      tri=new Float32Array(total); let o=0; for(const T of parts){ tri.set(T,o); o+=T.length; }
     }
-    if(key) key=urdfHash(key+"|"+(color?color.join(","):""));
     let kg=kgOf(l);
     // Onshape writes a near-zero mass for a part with no material; that's no mass
     if(Number.isFinite(kg)&&kg>0&&kg<1e-4&&tri.length){ tinyMass++; if(tinyNames.length<5) tinyNames.push(display); kg=NaN; }
@@ -394,6 +446,7 @@ function urdfToPayload(text,files,name){
     if(W.has(nm)) occurrences.push({path:[id],transform:urdfT16(W.get(nm)),fixed:nm===root.attrs.name,hidden:false});
   });
   if(tinyMass) notes.push(tinyMass+" part"+(tinyMass===1?" came":"s came")+" with almost no mass ("+tinyNames.join(", ")+(tinyMass>5?" …":"")+"): Onshape writes that for a part with no material, so the bench weighs them by their shape instead.");
+  if(cut) notes.push(cut+" mesh"+(cut===1?" was":"es were")+" simplified for the browser ("+(triIn/1e6).toFixed(1)+"M triangles down to "+(triOut/1e6).toFixed(2)+"M): the shapes draw a little coarser; the joints, placements and masses are exact.");
 
   // joints as mates: the joint frame, z along its axis, in each end's own frame
   const features=[], limitsOut=[], mimic=[];
@@ -475,7 +528,7 @@ function urdfToPayload(text,files,name){
 }
 /* The robot itself */
 function cadFromUrdf(text,files,opts){
-  const p=urdfToPayload(text,files,opts&&opts.name);
+  const p=urdfToPayload(text,files,opts&&opts.name,opts);
   const cad=cadFromOnshape(p,opts);
   cad.source="urdf";
   if(p.notes.length) cad.onshape.why=p.notes.concat(cad.onshape.why||[]);
@@ -487,7 +540,7 @@ function cadFromUrdf(text,files,opts){
    every mesh node is a part (a part Onshape splits by face is one part again:
    its face meshes hang under one named node), with its colour and name. The
    joints then come from the automatic finder and the editor. */
-function gltfToPayload(buf,files,name){
+function gltfToPayload(buf,files,name,opts){
   const meshes=urdfGltfScene(buf,files);
   if(!meshes.length) throw new Error("the glTF has no meshes");
   // the format is Y up; Onshape writes its parts' own Z-up coordinates as they are
@@ -511,10 +564,11 @@ function gltfToPayload(buf,files,name){
     groups.clear(); groups.set("#0",one);
   } else if(groups.size===1&&[...groups.keys()][0][0]==="#"&&name) groups.values().next().value.name=name;
   const instances=[], occurrences=[], geom={};
+  const budget=urdfTriBudget(groups.size,opts&&opts.triangles);
   let i=0;
   for(const g of groups.values()){
     const id="G"+i, eid="E"+i, key="GLTF/m/MV/e/"+eid+"|default";
-    geom[key]={parts:{["P"+i]:{name:g.name, tri:g.tri, color:g.color}}, mass:{}};
+    geom[key]={parts:{["P"+i]:{name:g.name, tri:urdfDecimate(g.tri,budget), color:g.color}}, mass:{}};
     instances.push({id,name:g.name,type:"Part",suppressed:false,documentId:"GLTF",elementId:eid,configuration:"default",documentMicroversion:"MV",partId:"P"+i, partNumber:urdfPartNumber(g.name)});
     occurrences.push({path:[id],transform:[1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1],fixed:false,hidden:false});
     i++;

@@ -2236,7 +2236,7 @@ function takeUrdfPart(file,mjcfText){
         const names=Object.keys(URDF_IN.files), gl=names.filter(n=>/\.(gltf|glb)$/i.test(n));
         if(gl.length===1&&names.every(n=>/\.(gltf|glb|bin)$/i.test(n))){
           const files=URDF_IN.files; URDF_IN.files={};
-          let p; try{ p=gltfToPayload(files[gl[0]],files,gl[0].replace(/\.(gltf|glb)$/i,"")); }
+          let p; try{ p=gltfToPayload(files[gl[0]],files,gl[0].replace(/\.(gltf|glb)$/i,""),meshOpts()); }
           catch(e){ $("#cadStatus").textContent="couldn't read "+gl[0]+" — "+e.message; $("#cadDrop").className="drop bad"; return; }
           if(loadOnshapeRobot(p)) $("#cadStatus").textContent=gl[0]+" · shapes from glTF · "+CAD.solids.length+" parts · no joints yet";
           return;
@@ -2244,7 +2244,7 @@ function takeUrdfPart(file,mjcfText){
         $("#cadStatus").textContent=names.length+" mesh file(s) waiting for their URDF or MJCF"; return; }
       const mj=URDF_IN.kind==="mjcf", what=mj?"MJCF":"URDF";
       let p;
-      try{ p=mj?mjcfToPayload(URDF_IN.text,URDF_IN.files,URDF_IN.name):urdfToPayload(URDF_IN.text,URDF_IN.files,URDF_IN.name); }
+      try{ p=mj?mjcfToPayload(URDF_IN.text,URDF_IN.files,URDF_IN.name):urdfToPayload(URDF_IN.text,URDF_IN.files,URDF_IN.name,meshOpts()); }
       catch(e){ $("#cadStatus").textContent="couldn't read this "+what+" — "+e.message; $("#cadDrop").className="drop bad"; return; }
       // gathered once: a lone .stl dropped later waits for its own model, it doesn't rebuild this one
       const nm=URDF_IN.name; URDF_IN.text=null; URDF_IN.name=null; URDF_IN.files={}; URDF_IN.kind="urdf";
@@ -2261,6 +2261,8 @@ function takeUrdfPart(file,mjcfText){
   r.onload=()=>{ read(); if(isModel) model(r.result); else { URDF_IN.files[file.name]=r.result; settle(); } };
   if(isModel) r.readAsText(file); else r.readAsArrayBuffer(file);
 }
+/* what a URDF's meshes are cut down to on this device (src/tier.js budgets; src/urdf.js urdfDecimate) */
+function meshOpts(){ const b=View.tier&&View.tier.budget; return {triangles:b&&Number.isFinite(b.ownTris)&&b.ownTris>0?b.ownTris:null}; }
 /* A zip holds the whole robot: Onshape's URDF or glTF export, a ROS package from
    onshape-to-robot or Fusion, a zipped STEP or robot package (src/zipin.js). The
    team drops the zip as it downloaded; nothing is unzipped by hand. */
@@ -2280,8 +2282,11 @@ function takeZip(file){
       return;
     }
     if(z.kind==="step"){ takeStepText(z.name,z.text); return; }
+    const nFiles=z.files?Object.keys(z.files).length/2|0:0;
+    $("#cadStatus").textContent="reading "+(z.kind==="gltf"?"the shapes":"the "+z.kind.toUpperCase()+(nFiles?" and "+nFiles+" meshes":""))+" in "+file.name+" …";
+    await new Promise(r=>setTimeout(r,30));                        // let that show before the page is busy
     let p;
-    try{ p=z.kind==="mjcf"?mjcfToPayload(z.text,z.files,z.name):z.kind==="gltf"?gltfToPayload(z.bytes,z.files,z.name):urdfToPayload(z.text,z.files,z.name); }
+    try{ p=z.kind==="mjcf"?mjcfToPayload(z.text,z.files,z.name):z.kind==="gltf"?gltfToPayload(z.bytes,z.files,z.name,meshOpts()):urdfToPayload(z.text,z.files,z.name,meshOpts()); }
     catch(e){ bad("couldn't read the "+(z.kind==="gltf"?"glTF":z.kind.toUpperCase())+" in "+file.name+" — "+(e&&e.message||e)); return; }
     const what=z.kind==="mjcf"?"MJCF":z.kind==="gltf"?"glTF (shapes only)":z.onshape?"Onshape's URDF export":"URDF";
     if(loadOnshapeRobot(p)) $("#cadStatus").textContent=file.name+" · "+what+" · "+CAD.solids.length+" parts · "+CAD.mechs.filter(m=>m.fromMate).length+" joints";
