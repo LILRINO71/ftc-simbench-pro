@@ -2597,8 +2597,9 @@ const NetUI={
       if(Online.mySlot()&&Sim.phase==="init"){ Sim.start(); updateDS(); }
     }
     if(Online.state==="joining"&&this.joinT&&performance.now()-this.joinT>15000){
-      this.joinT=0; Online.leave();
-      this.say("Nobody answered. Check the code; the host may have closed the room, or a network between you blocks direct connections.","warn");
+      // a "no" heard before the host was known is the answer, if there was one
+      this.joinT=0;
+      if(!Online.giveUp()) this.say("Nobody answered. Check the code; the host may have closed the room, or a network between you blocks direct connections.","warn");
     }
   },
   slow(){
@@ -2685,7 +2686,8 @@ const NetUI={
     const rows=F.stats.map(s=>`<tr class="${netAl(s.slot)}"><td>${esc(s.name)}</td><td class="n">${s.fired}</td><td class="n">${s.scored}</td></tr>`).join("");
     setHTML($("#onpFinal"),`<div class="onp-final"><div class="red"><b>${r}</b><small>RED</small></div><div class="blue"><b>${b}</b><small>BLUE</small></div></div>`+
       `<p class="onp-verdict">${esc(verdict)}</p><table class="onp-stats"><tr><th>Robot</th><th class="n">Shots</th><th class="n">In</th></tr>${rows}</table>`+
-      (Online.role==="host"?"":`<p class="onp-wait">The host can start another match with everyone in the same places.</p>`));
+      (Online.role==="host"?"":Online.hostGone?`<p class="onp-wait">The host has left, so there's no next match here. Leave the match to drive on your own.</p>`:
+        `<p class="onp-wait">The host can start another match with everyone in the same places.</p>`));
     $("#onpAgain").hidden=Online.role!=="host";
   },
   renderChat(){
@@ -3017,6 +3019,7 @@ const Session={
     const text=packSession(sessionFromBench({
       cad:CAD, code:CODE, java:e?e.source:"", opName:e?e.file:"", map:MAP, opts:OPTS,
       chassis:Sim.chassis, alliance:Shots.alliance, rig:exportRig(),
+      shots:{seed:Shots.seed, spreadScale:Shots.spreadScale, fired:Shots.fired, scored:Shots.scored, cfg:Shots.cfg},
       savedISO:new Date().toISOString(),
     }));
     download(this.name(),text,"application/json");
@@ -3035,18 +3038,29 @@ const Session={
         const cad=s.cad; cad.name=cad.name||fileName;
         classifyMechs(cad.mechs);
         loadCAD(cad,(cad.name||fileName)+" · from workspace","ok");
+        // the rig panel as it was saved (devices, hardware, drive base, setup), but not its
+        // joints: the workspace's own CAD carries those, and more exactly
+        if(s.rig&&applyRig(Object.assign({},s.rig,{joints:[]}))) saveRig();
       }
       // the file name if the workspace kept one, else what the OpMode calls itself
       if(s.java) addOpModeFromText(s.opName||((s.code&&s.code.opmode)||"Workspace").replace(/[^\w.-]+/g,"")+".java",s.java);
-      if(s.map&&Object.keys(s.map).length) { MAP=s.map; rebuild(); }
-      if(s.opts){ for(const k of ["payloadKg","duty","trust","front","baseModel","shooterModel","mu","physics"]) if(s.opts[k]!==undefined) OPTS[k]=s.opts[k]; syncOptionControls(); Physics.sync(); }
+      // mu and physics are null in a workspace that didn't say: the bench keeps its own
+      if(s.opts){ for(const k of ["payloadKg","duty","trust","front","baseModel","shooterModel","mu","physics"]) if(s.opts[k]!=null) OPTS[k]=s.opts[k]; syncOptionControls(); }
+      if(s.map&&Object.keys(s.map).length) MAP=s.map;
+      // the shooter as it was set up
+      if(s.shots){
+        const S=s.shots; if(S.cfg) Shots.cfg=Object.assign(Shots.defaults(),S.cfg);
+        Shots.seed=S.seed; Shots.spreadScale=S.spreadScale; Shots.fired=S.fired; Shots.scored=S.scored;
+        shotChanged();
+      }
+      rebuild(); Physics.sync();                       // the simulation on all of the above
       if(s.alliance) setAlliance(s.alliance,false);
       if(s.chassis&&isFinite(s.chassis.x)){
         Sim.chassis={x:s.chassis.x,y:s.chassis.y,h:s.chassis.h||0};
         if(Field.ok&&Sim.footprint) Field.collide(Sim.chassis,Sim.footprint,Sim.obstacles);
         OPTS.startPose=Object.assign({},Sim.chassis);
       }
-      this.toast("opened "+(fileName||"workspace")+(s.saved?" · saved "+String(s.saved).slice(0,10):""));
+      this.toast("opened "+(fileName||"workspace")+(s.savedISO?" · saved "+String(s.savedISO).slice(0,10):""));
     }catch(e){ this.toast("that workspace didn't load — "+e.message); }
   },
   toast(msg){

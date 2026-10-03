@@ -75,6 +75,73 @@ test('online: a public match shows up in the lobby, a guest joins it by its code
   assert.equal(C.O.openMatches().length, 0);
 });
 
+test('online: a stranger in the lobby can neither hide a listed match nor take over its listing', () => {
+  const hub = loadWithField().netLoopback();
+  const H = computer(hub, 'h'), B = computer(hub, 'b');
+  B.O.browse();
+  H.O.host({ name: 'Team 12345', pub: true, period: 'TeleOp' });
+  const X = hub.endpoint('x').join('lobby');
+  hub.flush();
+  const code = H.O.code, P = H.E.NET_PROTO;
+  X.send({ k: 'ad', code, gone: true }); hub.flush();
+  assert.equal(B.O.openMatches().length, 1, 'still listed after a stranger says it is gone');
+  X.send({ k: 'ad', code, name: 'Free robots', n: 1, open: 4, proto: P }); hub.flush();
+  assert.equal(B.O.ads[code].hid, 'h', 'joining it still asks the real host');
+  assert.equal(B.O.ads[code].name, "Team 12345's match");
+  // the host re-advertising keeps it fresh; its own "gone" is believed
+  run(hub, [H, B], 3);
+  assert.equal(B.O.openMatches().length, 1);
+  H.O.leave(); hub.flush();
+  assert.equal(B.O.openMatches().length, 0, 'the host unlisted it');
+  // an ad nobody repeats goes stale and is dropped; after that the code is free again
+  X.send({ k: 'ad', code, name: 'Another match', n: 1, open: 3, proto: P }); hub.flush();
+  assert.equal(B.O.ads[code].hid, 'x');
+  B.clock.t += 8000;
+  assert.equal(B.O.openMatches().length, 0);
+  assert.equal(B.O.ads[code], undefined, 'pruned');
+});
+
+test('online: only the host can turn a joiner away; a "no" from anyone else is held, and shown only if nobody lets them in', () => {
+  const hub = loadWithField().netLoopback();
+  const H = computer(hub, 'h');
+  H.O.host({ name: 'Host' });
+  const X = hub.endpoint('x').join('m-' + H.O.code);
+  hub.flush();
+  // joining by code, the host not known yet: a stranger answers first
+  const G = computer(hub, 'g');
+  G.O.join(H.O.code, { name: 'Guest' });
+  X.send({ k: 'nope', why: 'go away' }, 'g');
+  hub.flush();
+  assert.equal(G.O.state, 'room', 'the host let them in');
+  assert.equal(G.O.hostId, 'h');
+  // joining from the lobby (the host known): a stranger's "no" is nothing, the host's is the answer
+  const G2 = computer(hub, 'g2');
+  G2.O.join(H.O.code, { name: 'Two', hid: 'h' });
+  X.send({ k: 'nope', why: 'go away' }, 'g2');
+  hub.flush();
+  assert.equal(G2.O.state, 'room');
+  const G3 = computer(hub, 'g3');
+  G3.O.join(H.O.code, { name: 'Three', hid: 'h' });
+  H.O.room.send({ k: 'nope', why: 'the room is full' }, 'g3');
+  hub.flush();
+  assert.equal(G3.O.state, 'off');
+  assert.match(G3.O.why, /room is full/);
+  // nobody but a stranger in the room: its "no" is the reason given when the wait runs out
+  const Y = hub.endpoint('y').join('m-ZZZZZ'); hub.flush();
+  const G4 = computer(hub, 'g4');
+  G4.O.join('ZZZZZ', { name: 'Four' });
+  Y.send({ k: 'nope', why: 'version' }, 'g4');
+  hub.flush();
+  assert.equal(G4.O.state, 'joining', 'still waiting for the host');
+  assert.equal(G4.O.giveUp(), true);
+  assert.equal(G4.O.state, 'off');
+  assert.match(G4.O.why, /version/);
+  const G5 = computer(hub, 'g5');
+  G5.O.join('ZZZZY', { name: 'Five' }); hub.flush();
+  assert.equal(G5.O.giveUp(), false, 'no answer at all: nothing to show');
+  assert.equal(G5.O.state, 'off');
+});
+
 test('online: places, ready and the right kind of OpMode hold the start; START deals the same match to everyone', () => {
   const hub = loadWithField().netLoopback();
   const H = computer(hub, 'h'), G = computer(hub, 'g'), W = computer(hub, 'w');
@@ -123,9 +190,11 @@ test('online: each sees the other\'s robot where it is, and the AI robots and th
   // the guest drives up the field; the host sits. The host's AI robots, step by step, to compare with
   // where the guest draws them: a tenth of a second behind, on purpose (between two snapshots heard)
   const past = [];
+  // the field as one key: the HIVEs, the TIPs, what's on the floor and the score
+  const field = (pc, score) => JSON.stringify([pc.F.hive, pc.F.tips, pc.M.floor.map((e) => e.id).sort((a, b) => a - b), score]);
   run(hub, [H, G], 6, (pc) => {
     if (pc === G) { pc.sim.chassis.y += 0.6 * 0.02; pc.sim.vel = { x: 0, y: 0.6 }; }
-    else past.push({ t: H.clock.t, bots: H.M.bots.map((b) => ({ x: b.x, y: b.y })) });
+    else past.push({ t: H.clock.t, bots: H.M.bots.map((b) => ({ x: b.x, y: b.y })), field: field(H, H.O.scoreOut(H.M.score(H.sim))) });
   });
   const hp = G.M.players.find((p) => p.id === 'host'), gp = H.M.players.find((p) => p.id === 'guest');
   assert.ok(hp && gp, 'each has the other');
@@ -137,10 +206,10 @@ test('online: each sees the other\'s robot where it is, and the AI robots and th
     const m = G.M.bots.find((x) => x.id === b.id), d = Math.hypot(m.x - then.bots[i].x, m.y - then.bots[i].y);
     assert.ok(d < 0.04, `${b.name}: ${(d * 100).toFixed(1)} cm from where the host had it 0.1 s before`);
   });
-  assert.deepEqual(G.F.hive, H.F.hive);
-  assert.deepEqual(G.F.tips, H.F.tips);
-  assert.deepEqual(G.M.floor.map((e) => e.id).sort(), H.M.floor.map((e) => e.id).sort());
-  assert.deepEqual(G.O.score, H.O.scoreOut(H.M.score(H.sim)));
+  // the field too is shown as the host had it a moment ago (the newest snapshot at least 0.1 s old),
+  // not as it is now: an AI robot may have picked something up since
+  const recent = past.filter((p) => p.t >= H.clock.t - 250).map((p) => p.field);
+  assert.ok(recent.includes(field(G, G.O.score)), 'the guest\'s field is one the host had in the last quarter second');
 });
 
 test('online: two robots that meet push each other apart, each computer moving its own', () => {
@@ -181,6 +250,23 @@ test('online: a guest\'s shot is flown again by the host, decided there, and the
   const far = G.M.params('red', -sp.x, -sp.y, 'pollen');
   G.O.shot(far, 70, sp.v, sp.yaw); hub.flush();
   assert.equal(H.O.players.guest.fired, 1, 'a shot from 2 m away from the robot is thrown out');
+});
+
+test('online: a ball flown on a guest takes as long as on the host, its last stretch included', () => {
+  const hub = loadWithField().netLoopback();
+  const { H, G } = twoInAMatch(hub);
+  run(hub, [H, G], 3.3);
+  // 10 points, 9 steps: sent as points 0, 4, 8 and 9, so the last stretch is one step, not four
+  const path = Array.from({ length: 10 }, (_, i) => [i * 10, 0, 20]);
+  H.O.fly({ path, fid: 999, owner: '', kind: 'pollen' });
+  hub.flush();
+  let f = null;
+  for (let i = 0; i < 10 && !f; i++) { G.clock.t += 20; G.O.drain(); f = G.M.flying.find((x) => x.fid === 999); }
+  assert.ok(f, 'the guest flies it');
+  const step = f.step / 4;                                       // one of the host's steps
+  assert.ok(Math.abs(f.dur - 9 * step) < 1e-9, `${(f.dur / step).toFixed(2)} steps long, not 9`);
+  f.t = 8.5 * step; G.O.mirror(0, G.sim);
+  assert.ok(Math.abs(f.pos[0] - 85) < 1e-6, `half way along the last stretch at 8.5 steps: x ${f.pos[0]}`);
 });
 
 test('online: an AUTO to the end: the same final score and each robot\'s shots on both', () => {
@@ -263,6 +349,23 @@ test('online: the host leaving ends it for the guest, with a reason', () => {
   assert.match(G.O.why, /host left/);
   assert.ok(!G.M.net && !G.M.mirror, 'back to a match on its own');
   assert.ok(G.events.some((e) => e.what === 'error'));
+});
+
+test('online: the host leaving after the final buzzer leaves everyone the final score', () => {
+  const hub = loadWithField().netLoopback();
+  const { H, G } = twoInAMatch(hub, 'Autonomous');
+  run(hub, [H, G], 3 + 30.5);
+  assert.equal(G.O.state, 'done');
+  const final = structuredClone(G.O.final);
+  H.O.leave(); hub.flush();
+  assert.equal(G.O.state, 'done', 'still the end of the match');
+  assert.deepEqual(G.O.final, final, 'the result stays');
+  assert.ok(G.O.hostGone);
+  assert.equal(G.O.room, null, 'out of the room: there is nobody to play again with');
+  run(hub, [G], 0.2);                                                         // and nothing breaks
+  G.O.leave();
+  assert.equal(G.O.state, 'off');
+  assert.ok(!G.O.hostGone && !G.O.final);
 });
 
 test('online: peer ids like __proto__, constructor and toString are only ever ordinary keys', () => {
@@ -445,4 +548,30 @@ test('network: players meet on a fixed set of working relays, and a CDN that fai
   assert.deepEqual(cfg.relayConfig.urls, E.NET_RELAYS, 'every player uses the same, explicit relays');
   assert.ok(E.NET_RELAYS.length >= 5 && E.NET_RELAYS.every((u) => /^wss:\/\//.test(u)));
   for (const dead of ['relay.agorist.space', 'bucket.coracle.social']) assert.ok(!E.NET_RELAYS.some((u) => u.includes(dead)), dead + ' is not used');
+});
+
+test('online: someone arriving mid-match watches the match as it is now: no robot for a player who left, and no place of their own', () => {
+  const hub = loadWithField().netLoopback();
+  const { H, G } = twoInAMatch(hub);
+  run(hub, [H, G], 3.5);
+  const aiIds = H.M.bots.map((b) => b.id).sort();
+  // the guest leaves mid-match: its robot leaves the field, and no AI robot takes its place
+  G.O.leave(); hub.flush();
+  run(hub, [H], 0.5);
+  const L = computer(hub, 'late');
+  L.O.join(H.O.code, { name: 'Late' }); hub.flush();
+  run(hub, [H, L], 0.5);
+  assert.equal(L.O.state, 'playing');
+  assert.equal(L.O.mySlot(), null, 'a late joiner watches');
+  assert.deepEqual(L.M.bots.map((b) => b.id).sort(), aiIds, 'the same AI robots as the host: none where the guest was');
+  assert.equal(L.O.slots.red2, 'gone');
+  // the guest comes back with the same id (a Trystero selfId doesn't change): it watches too
+  const G2 = computer(hub, 'guest');
+  G2.O.join(H.O.code, { name: 'Team 222' }); hub.flush();
+  run(hub, [H, L, G2], 0.5);
+  assert.equal(G2.O.state, 'playing');
+  assert.equal(G2.O.mySlot(), null, 'no robot that nobody else would see');
+  assert.ok(G2.M.noUser);
+  assert.deepEqual(G2.M.bots.map((b) => b.id).sort(), aiIds);
+  assert.equal(H.M.players.length, 0, 'and the host sees no robot of theirs');
 });

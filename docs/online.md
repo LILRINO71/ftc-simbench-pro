@@ -24,7 +24,7 @@ Open **Online** in the top bar.
 | | |
 |---|---|
 | **Your robot** | Runs on your computer, from your code, with your gamepad, exactly as it does on its own. |
-| **The other robots** | Drawn at their real size with their team on the bumpers. Robots that touch push each other apart. |
+| **The other robots** | Drawn from their own CAD, their mechanisms moving as their drivers move them, with their team over them. Until a robot's copy has arrived, a stand-in robot of its real size takes its place. Robots that touch push each other apart. |
 | **Chat** | To everyone, or to your **Alliance** only. The other alliance never receives alliance messages. |
 | **Marks** | Pick **Go here**, **Shoot from here** or **Defend here**, then click the map of the field. A ring shows on your partner's map and on their field for 8 seconds. Only your alliance sees it. |
 | **The end** | Everyone sees the same final score and each robot's shots and hits. The host can press **Play again** with everyone in the same places. |
@@ -34,7 +34,8 @@ Open **Online** in the top bar.
 `src/net.js`, with the protocol tested in `tests/net.test.mjs`.
 
 - **Who runs what.** One player hosts. The host's bench runs everything that isn't a player's robot: the AI robots, the HUMAN PLAYERS, every loose element, the FLOWERs, the HIVEs and the score. It sends that to everyone 12 times a second. Every other bench mirrors it and runs only its own robot.
-- **Robot positions.** Each player sends where their robot is 20 times a second. Everyone draws the other robots a little ahead of where they were last heard, so they move smoothly.
+- **Robot positions.** Each player sends where their robot is 20 times a second, and where each of its mechanisms is 10 times a second. Everyone draws the other robots a tenth of a second behind (`NET_DELAY`), between two positions actually heard, so they move smoothly however the network bunches messages. A guest shows the host's match (the AI robots, the elements, the HIVEs) on the same delayed clock, so a ball leaves the floor as the robot reaches it.
+- **Each robot's own CAD.** When players meet, each robot goes to the others once as a light copy (`src/robotlite.js`): a simplified mesh of the chassis and of each mechanism, packed and checked against its hash. A robot the other computer already has (the default robot, say) isn't sent at all.
 - **Shots.** A player's shot is launched on their own computer (their flywheel, their hood, their aim, the same scatter). The launch goes to the host, whose Shot Sim flies that exact launch again and decides it. Every TIP is decided in one place, and a ball still in the air when its HIVE tips doesn't count, whoever threw it.
 - **Contact.** When two robots touch, each computer moves its own robot half the way out, and the host moves the AI robots.
 - **One clock.** Each guest measures how far its clock is from the host's, from the quickest of several round trips. That way the countdown ends at the same moment everywhere, even on a computer whose clock is seconds off.
@@ -51,8 +52,7 @@ Open **Online** in the top bar.
 
 ## What it isn't yet
 
-- **The host leaving ends the match.** It ends for everyone; nobody takes over as host.
-- **A player leaving mid-match.** Their robot leaves the field, and no AI robot takes their place.
-- **Other teams' robots are boxes.** They're drawn at their real size, not from their CAD.
+- **The host leaving ends the match.** It ends for everyone; nobody takes over as host. After the final buzzer, everyone keeps the result.
+- **A player leaving mid-match.** Their robot leaves the field, and no AI robot takes their place. If they come back before the end, they watch.
 - **Unlimited balls.** Players' robots still launch from an endless supply, the same as on your own; only the AI robots have to pick elements up.
 - **No voice chat.** Trystero can carry it, but SimBench doesn't use it yet.

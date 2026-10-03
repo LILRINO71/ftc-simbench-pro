@@ -2,6 +2,7 @@
 // file get turned away instead of crashing the bench?
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { loadEngine, sampleBench, fixture } from './load.mjs';
 
 const E = loadEngine();
@@ -278,4 +279,116 @@ test('a CAD with no solids keeps its point cloud instead', () => {
   assert.deepEqual(r.session.cad.points, cad.points);
   assert.match(E.packSession(E.sessionFromBench({ cad })), /"points":\[625,1250,2500,-625,-1250,-2500\]/,
     'flat integers in tenths of a millimetre');
+});
+
+test('numbers out of any physical range are clamped: no 1e9 kg payload, no robot off the field', () => {
+  const raw = JSON.parse(E.packSession(E.sessionFromBench(bench())));
+  Object.assign(raw.opts, { payloadKg: 1e9, duty: -3, mu: 50, startPose: { x: -40, y: 7, h: 100 } });
+  raw.chassis = { x: 1e6, y: -1e6, h: -7 };
+  Object.assign(raw.shots, { spreadScale: 1e9 });
+  Object.assign(raw.shots.cfg, { wheelMm: 1e5, gear: 0, hoodDeg: 400, h0In: -2 });
+  const s = E.unpackSession(JSON.stringify(raw)).session;
+  assert.equal(s.opts.payloadKg, 20); assert.equal(s.opts.duty, 0); assert.equal(s.opts.mu, 2);
+  assert.deepEqual([s.chassis.x, s.chassis.y], [1.83, -1.83], 'on the field (half of 12 ft)');
+  assert.deepEqual([s.opts.startPose.x, s.opts.startPose.y], [-1.83, 1.83]);
+  const wrapped = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+  assert.ok(Math.abs(s.opts.startPose.h - wrapped(100)) < 1e-12 && Math.abs(s.chassis.h - wrapped(-7)) < 1e-12, 'headings into -pi..pi');
+  assert.equal(s.shots.spreadScale, 5);
+  assert.deepEqual([s.shots.cfg.wheelMm, s.shots.cfg.gear, s.shots.cfg.hoodDeg, s.shots.cfg.h0In], [200, 0.1, 90, 4]);
+  const low = JSON.parse(JSON.stringify(raw));
+  Object.assign(low.opts, { mu: 0 }); Object.assign(low.shots.cfg, { wheelMm: 1, gear: 99, hoodDeg: -5, h0In: 99 });
+  const t = E.unpackSession(JSON.stringify(low)).session;
+  assert.equal(t.opts.mu, 0.05);
+  assert.deepEqual([t.shots.cfg.wheelMm, t.shots.cfg.gear, t.shots.cfg.hoodDeg, t.shots.cfg.h0In], [30, 10, 0, 30]);
+  // and values in range come back exactly as they were
+  const b = bench(), back = E.unpackSession(E.packSession(E.sessionFromBench(b))).session;
+  assert.deepEqual(back.chassis, b.chassis); assert.deepEqual(back.opts.startPose, b.opts.startPose); assert.deepEqual(back.shots.cfg, b.shots.cfg);
+});
+
+// The rig panel's own document, shaped as exportRig() in src/app.js writes it.
+function rigOf(b) {
+  return { format: 'ftc-sim-bench.rig', version: 1, cad: 'sample', opmode: 'WORKSHOP', trust: 'cad', payloadKg: 0.3, duty: 0.4,
+    turretScale: 0.6, front: '-y', baseModel: 'show', shooterModel: 'auto', shot: { ...b.shots.cfg },
+    joints: [{ id: 'Arm', label: 'Arm', kind: 'revolute', parent: 'chassis', dir: -1, pivotMm: [10.5, -20, 130.2], axis: [0, 1, 0],
+      leverMm: 250, part: 'REV-41-1300', manual: false, inferred: true }],
+    devices: { armMotor: 'Arm', clawServo: null }, hardware: { armMotor: { role: 'Motor', kind: 'motor', stallNm: 3.2 } },
+    ignored: ['finding-1'], up: '+y', shift: [0.01, -0.02, 0],
+    drive: { kind: 'mecanum', n: 4, d: 0.104, track: 0.38, base: 0.3, pattern: 'X' }, setup: { up: true, front: true } };
+}
+
+test('the OpMode file name, the rig panel, tile grip and the physics mode come back, each one checked', () => {
+  const b = bench();
+  b.opName = 'TeleOpMain.java';
+  b.opts.mu = 0.7; b.opts.physics = 'kinematic';
+  b.rig = rigOf(b);
+  const text = E.packSession(E.sessionFromBench(b));
+  const s = E.unpackSession(text).session;
+  assert.equal(s.opName, 'TeleOpMain.java');
+  assert.equal(s.opts.mu, 0.7);
+  assert.equal(s.opts.physics, 'kinematic');
+  assert.deepEqual(s.rig, b.rig);
+  assert.equal(E.packSession(s), text, 'and they pack back to the same bytes');
+  // a workspace that doesn't say keeps the bench's own grip and physics
+  const plain = E.unpackSession(E.packSession(E.sessionFromBench(bench()))).session;
+  assert.equal(plain.opts.mu, null); assert.equal(plain.opts.physics, null); assert.equal(plain.rig, null);
+  // a hostile one is clamped and cleaned, not believed
+  const raw = JSON.parse(text);
+  raw.opName = '../../TeamCode/\u0000Evil.java';
+  raw.opts.mu = 50; raw.opts.physics = 'warp';
+  Object.assign(raw.rig, { payloadKg: 1e6, duty: -2, up: 'sideways', shift: [9, -9, 0],
+    drive: { kind: 'hover', n: 7, d: 9, track: 0, base: 1, pattern: 'Z' },
+    hardware: { armMotor: { role: 'Motor', stallNm: 3, deeper: { a: 1 } } }, devices: { armMotor: 7 } });
+  raw.rig.joints[0].pivotMm = [1e9, 0, 0];
+  const h = E.unpackSession(JSON.stringify(raw)).session;
+  assert.equal(h.opName, '....TeamCodeEvil.java', 'a file name, never a path');
+  assert.equal(h.opts.mu, 2); assert.equal(h.opts.physics, null);
+  assert.equal(h.rig.payloadKg, 20); assert.equal(h.rig.duty, 0);
+  assert.equal(h.rig.up, null); assert.deepEqual(h.rig.shift, [0.4, -0.4, 0]);
+  assert.deepEqual(h.rig.drive, { kind: 'mecanum', n: 4, d: 0.2, track: 0.1, base: 0.6, pattern: 'X' });
+  assert.deepEqual(h.rig.hardware, { armMotor: { role: 'Motor', stallNm: 3 } });
+  assert.deepEqual(h.rig.devices, {});
+  assert.deepEqual(h.rig.joints[0].pivotMm, [5000, 0, 0]);
+  raw.rig.joints = Array.from({ length: 401 }, (_, i) => ({ id: 'j' + i }));
+  assert.equal(E.unpackSession(JSON.stringify(raw)).detail, 'too-big', 'a rig with more joints than a CAD may have');
+  raw.rig = { format: 'something else', payloadKg: 1 };
+  assert.equal(E.unpackSession(JSON.stringify(raw)).session.rig, null, 'only a rig document is a rig');
+});
+
+/* Session from src/app.js, run as the page runs it, with the rest of the page
+   stood in for: what it saves and what it puts back. */
+function appSession(env) {
+  const src = fs.readFileSync(new URL('../src/app.js', import.meta.url), 'utf8');
+  const a = src.indexOf('const Session={'), z = src.indexOf('\n};\n', a);
+  const names = Object.keys(env).filter((n) => n !== 'MAP');
+  return new Function('__map', ...names, `let MAP=__map;\n${src.slice(a, z + 3)}\nreturn { Session, MAP: () => MAP };`)(env.MAP, ...names.map((n) => env[n]));
+}
+test('saving a workspace and opening it again puts back the shooter, grip, physics, rig and OpMode name', () => {
+  const b = bench(), rig = rigOf(b), cfg = { ...b.shots.cfg };
+  const defaults = () => ({ shooter: null, feeder: null, motorId: null, hoodDeg: 75, h0In: 16, wheelMm: 96, gear: 1, mountDeg: 0, ball: 'pollen', type: 'single', precision: 'typical' });
+  const engine = { packSession: E.packSession, sessionFromBench: E.sessionFromBench, unpackSession: E.unpackSession };
+  let file = null;
+  const A = appSession({ ...engine, CAD: b.cad, CODE: b.code, MAP: b.map, CURRENT_ID: 'u1',
+    entry: () => ({ source: b.java, file: 'TeleOpMain.java' }),
+    OPTS: { ...b.opts, mu: 0.7, physics: 'kinematic' }, Sim: { chassis: { ...b.chassis } },
+    Shots: { alliance: 'blue', seed: 11, spreadScale: 1.25, fired: 9, scored: 4, cfg, defaults },
+    exportRig: () => rig, download: (name, text) => { file = text; }, $: () => null });
+  A.Session.save();
+  const r = E.unpackSession(file);
+  assert.equal(r.ok, true, r.error);
+  // a fresh bench opens it
+  const got = { rig: null, op: null }, toast = { textContent: '' };
+  const Shots = { alliance: 'red', seed: 7, spreadScale: 1, fired: 0, scored: 0, cfg: null, defaults };
+  const OPTS = { payloadKg: 0.18, duty: 0.3, trust: 'code', front: '+x', baseModel: 'auto', shooterModel: 'auto', mu: 0.9, physics: 'rigid' };
+  const B = appSession({ ...engine, CAD: null, CODE: null, MAP: {}, OPTS, Shots, Sim: { chassis: { x: 0, y: 0, h: 0 } }, Field: { ok: false },
+    classifyMechs: E.classifyMechs, loadCAD: () => { Shots.cfg = null; }, applyRig: (x) => { got.rig = x; return true; }, saveRig: () => {},
+    addOpModeFromText: (name, text) => { got.op = { name, text }; }, rebuild: () => {}, syncOptionControls: () => {},
+    Physics: { sync() {} }, setAlliance: (al) => { Shots.alliance = al; }, shotChanged: () => {}, $: () => toast });
+  B.Session.apply(r.session, 'robot.ftcsim');
+  assert.deepEqual(Shots.cfg, cfg, 'the shooter setup');
+  assert.equal(Shots.seed, 11); assert.equal(Shots.spreadScale, 1.25);
+  assert.equal(OPTS.mu, 0.7); assert.equal(OPTS.physics, 'kinematic');
+  assert.equal(got.op.name, 'TeleOpMain.java', 'the OpMode under its own file name');
+  assert.deepEqual(got.rig.devices, rig.devices, 'the rig panel');
+  assert.deepEqual(got.rig.joints, [], 'not its joints: the CAD in the workspace has those');
+  assert.match(toast.textContent, /saved \d{4}-\d\d-\d\d/, 'and when it was saved');
 });

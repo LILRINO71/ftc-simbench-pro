@@ -47,6 +47,7 @@ const NET_ABC="ABCDEFGHJKLMNPQRSTUVWXYZ23456789";   // no 0/O or 1/I to misread
 const NET_HZ={pose:20, snap:12};
 const NET_LEAD_MS=3000;                            // START to the match: a countdown, and time to INIT
 const NET_MAX_PLAYERS=8;                           // four drivers, the rest watch
+const NET_AD_MS=7000;                              // a listed match says so every 2 s: this long silent, it's gone
 const NET_DELAY=100;                               // ms behind the newest robot pose and snapshot, to draw between two
 const NET_MODEL_MAX=6*1024*1024;                   // a robot's light copy, packed: bigger isn't one
 const netAl=s=>/^blue/.test(s||"")?"blue":"red";
@@ -187,6 +188,8 @@ const Online={
   remote:netMap(),       // the other drivers' robots as last heard
   slots:null, seed:1, startAt:0, started:false, lastStart:null, fieldKey:null,
   ads:netMap(), chat:[], marks:[], score:null, final:null, why:null,
+  hostGone:false,        // the host left after the final buzzer: the result stays, the room is gone
+  nope:null,             // joining: a "no" heard before the host was known, held (see giveUp)
   offset:0, rtt:0, syncs:[], acc:null, fid:0, heard:netMap(),
   // robots' light copies: mine (packed, and its hash), every one heard of by hash, and whose is whose
   model:null, models:netMap(), modelOf:netMap(), asked:netMap(), shown:netMap(), jointsOf:null,
@@ -216,17 +219,22 @@ const Online={
     L.onJoin(id=>{ if(this.pub&&this.role==="host"&&this.state==="room") L.send(this.ad(),id); });
   },
   unbrowse(){ if(this.lobby){ try{ this.lobby.leave(); }catch(e){} this.lobby=null; } this.ads=netMap(); },
+  /* A code's listing belongs to whoever advertised it first: only that computer
+     may update it or take it down, until it has said nothing for NET_AD_MS. */
   lobbyMsg(m,from){
     if(!m||m.k!=="ad"||!netIdOk(from)||!netCodeOk(m.code)) return;
-    if(m.gone){ delete this.ads[m.code]; this.emit("ads"); return; }
+    const old=this.ads[m.code], t=this.now();
+    if(old&&old.hid!==from&&t-old.at<NET_AD_MS) return;
+    if(m.gone){ if(old){ delete this.ads[m.code]; this.emit("ads"); } return; }
     this.ads[m.code]={code:m.code, hid:from, name:netStr(m.name,40)||"An FTC match",
       period:m.period==="Autonomous"?"Autonomous":"TeleOp", skill:MATCH_SKILL[m.skill]?m.skill:"typical",
-      n:netNum(m.n,0,NET_MAX_PLAYERS,0)|0, open:netNum(m.open,0,4,0)|0, proto:m.proto, at:this.now()};
+      n:netNum(m.n,0,NET_MAX_PLAYERS,0)|0, open:netNum(m.open,0,4,0)|0, proto:m.proto, at:t};
     this.emit("ads");
   },
   openMatches(){
     const t=this.now();
-    return Object.values(this.ads).filter(a=>a.proto===NET_PROTO&&a.open>0&&t-a.at<7000&&a.code!==this.code)
+    for(const c in this.ads) if(t-this.ads[c].at>=NET_AD_MS) delete this.ads[c];    // silent too long: gone
+    return Object.values(this.ads).filter(a=>a.proto===NET_PROTO&&a.open>0&&a.code!==this.code)
       .sort((a,b)=>b.n-a.n||b.at-a.at);
   },
   ad(){
@@ -238,7 +246,7 @@ const Online={
 
   /* ---- hosting and joining ---- */
   reset(){
-    this.state="off"; this.role=null; this.code=null; this.pub=false; this.hostId=null; this.why=null;
+    this.state="off"; this.role=null; this.code=null; this.pub=false; this.hostId=null; this.why=null; this.hostGone=false; this.nope=null;
     this.players=netMap(); this.remote=netMap(); this.slots=null; this.started=false; this.score=null; this.final=null;
     this.chat=[]; this.marks=[]; this.syncs=[]; this.offset=0; this.rtt=0; this.heard=netMap(); this.lastStart=null; this.fieldKey=null;
     this.modelOf=netMap(); this.asked=netMap(); this.shown=netMap(); this.pend=[];
@@ -291,6 +299,14 @@ const Online={
   /* The field goes back to this bench's own (between matches, or after leaving). */
   unmatch(){ if(typeof Match!=="undefined"){ Match.players=[]; Match.net=false; Match.mirror=false; Match.noUser=false; } },
   lost(why){ const w=why; this.leave(); this.why=w; this.emit("error",w); },
+  /* The app's join timeout: nobody let this computer in. A "no" held from someone
+     who may have been the host is the reason, if one came (true: said, as an error). */
+  giveUp(){
+    if(this.state!=="joining") return false;
+    const why=this.nope;
+    if(why){ this.lost("The host couldn't take you: "+why); return true; }
+    this.leave(); return false;
+  },
 
   peerJoin(id){
     // whoever arrives hears which robot this is, and asks for it if it doesn't have it
@@ -305,8 +321,16 @@ const Online={
       delete this.players[id]; delete this.remote[id];
       if(this.inMatch()&&typeof Match!=="undefined") Match.note(p.name+" left the match",p.slot?netAl(p.slot):null);
       this.sendRoster();
-    }else if(id===this.hostId&&this.state!=="joining") this.lost("The host left, so the match is over.");
+    }else if(id===this.hostId&&this.state==="done") this.hostLeft();
+    else if(id===this.hostId&&this.state!=="joining") this.lost("The host left, so the match is over.");
     else if(this.players[id]){ delete this.remote[id]; }
+  },
+  /* The host left after the final buzzer: out of the room (nobody is left to
+     start another), but the result stays until this player leaves too. */
+  hostLeft(){
+    if(this.room){ try{ this.room.leave(); }catch(e){} this.room=null; }
+    this.hostGone=true;
+    this.emit("room");
   },
 
   /* ---- messages ---- */
@@ -321,7 +345,13 @@ const Online={
         if(typeof m.now==="number"&&isFinite(m.now)) this.offset=m.now-this.now();
         this.onRoster(m,from); this.sync();
         return;
-      case "nope": if(this.role==="guest"&&this.state==="joining") this.lost("The host couldn't take you: "+(netStr(m.why,80)||"no reason given")); return;
+      case "nope":
+        if(this.role!=="guest"||this.state!=="joining") return;
+        if(from===this.hostId) this.lost("The host couldn't take you: "+(netStr(m.why,80)||"no reason given"));
+        // the host not known yet, so anyone here could have said it: held, and the
+        // reason given only if nobody lets this computer in before the wait runs out
+        else if(!this.hostId) this.nope=netStr(m.why,80)||"no reason given";
+        return;
       case "roster": if(fromHost) this.onRoster(m,from); return;
       case "pick": if(this.role==="host") this.assign(from,m.slot); return;
       case "ready":
@@ -359,7 +389,16 @@ const Online={
     this.sendRoster();
     this.wantModels();
     // arriving mid-match: they watch (after the end, they're simply in the room for the next one)
-    if(this.state==="playing"&&this.lastStart) this.room.send(Object.assign({},this.lastStart,{late:true}),from);
+    if(this.state==="playing"&&this.lastStart) this.room.send(this.lateStart(),from);
+  },
+  /* START for someone arriving mid-match: the match as it is now, not as it was
+     dealt. A place whose player has left is "gone" (no robot there, and no AI
+     robot either), and so is the newcomer's own old place if they're back with
+     the same id: the host no longer takes their robot, so they watch. */
+  lateStart(){
+    const S=this.lastStart, slots={};
+    for(const s of NET_SLOTS){ const v=S.slots[s], p=v!=="ai"&&this.players[v]; slots[s]=v==="ai"||(p&&p.slot===s)?v:"gone"; }
+    return Object.assign({},S,{slots, late:true});
   },
   rosterMsg(){
     return {k:"roster", state:this.state, settings:this.settings,
@@ -443,11 +482,14 @@ const Online={
     return true;
   },
   onStart(m){
-    const slots={};
-    for(const s of NET_SLOTS){ const v=m.slots&&m.slots[s]; slots[s]=typeof v==="string"&&(v==="ai"||this.players[v])?v:"ai"; }
+    // each place: "ai" (an AI robot), a player here, or "gone" (nobody: its player
+    // left). Only "ai" makes an AI robot. Arriving late, this computer watches.
+    const slots={}, late=m.late===true;
+    for(const s of NET_SLOTS){ const v=m.slots&&m.slots[s];
+      slots[s]=v==="ai"?"ai":typeof v==="string"&&this.players[v]&&!(late&&v===this.self)?v:"gone"; }
     // the host places everyone: whatever this computer thought its place was, it's this
     for(const id in this.players){ const p=this.players[id]; p.slot=null; }
-    for(const s of NET_SLOTS) if(slots[s]!=="ai") this.players[slots[s]].slot=s;
+    for(const s of NET_SLOTS) if(slots[s]!=="ai"&&slots[s]!=="gone") this.players[slots[s]].slot=s;
     this.begin({seed:netNum(m.seed,1,1e6,1)|0, period:m.period==="Autonomous"?"Autonomous":"TeleOp",
       skill:MATCH_SKILL[m.skill]?m.skill:"typical", slots, at:netNum(m.at,0,1e16,this.now()+this.offset)});
   },
@@ -630,21 +672,24 @@ const Online={
     for(const f of Match.flying) if(!f.fid){ f.fid=++this.fid; f.owner=""; this.fly(f); }
     if(typeof Shots!=="undefined") for(const b of Shots.flying) if(!b.fid){ b.fid=++this.fid; b.owner=this.self; this.fly(b); }
   },
+  /* Every 4th point of the path and the last one. Each stretch between two is 4
+     steps, but the last, which is whatever was left over (1 to 4): `last` says how long. */
   fly(f){
-    if(!this.room) return;
-    const P=[], n=f.path.length, every=4, r1=v=>Math.round(v*10)/10;
+    const n=f.path.length; if(!this.room||n<2) return;
+    const P=[], every=4, r1=v=>Math.round(v*10)/10, k=Math.floor((n-2)/every)*every;
     for(let i=0;i<n-1;i+=every) P.push(f.path[i].map(r1));
     P.push(f.path[n-1].map(r1));
-    this.room.send({k:"fly", ht:Math.round(this.now()), fid:f.fid, owner:f.owner||"", kind:f.kind, color:f.color||"", step:SHOT_STEP_S*every, path:P});
+    this.room.send({k:"fly", ht:Math.round(this.now()), fid:f.fid, owner:f.owner||"", kind:f.kind, color:f.color||"",
+      step:SHOT_STEP_S*every, last:SHOT_STEP_S*(n-1-k), path:P});
   },
   onFly(m){
     if(m.owner===this.self||!this.inMatch()) return;
     const path=(Array.isArray(m.path)?m.path:[]).slice(0,600)
       .filter(q=>Array.isArray(q)&&q.length===3).map(q=>q.map(v=>netNum(v,-400,400,0)));
     if(path.length<2) return;
-    const step=netNum(m.step,0.001,0.1,0.02), kind=m.kind==="nectar"?"nectar":"pollen";
+    const step=netNum(m.step,0.001,0.1,0.02), last=netNum(m.last,0.001,step,step), kind=m.kind==="nectar"?"nectar":"pollen";
     // it leaves when the robot that fired it is seen to fire: on the robots' clock
-    this.hold(this.heardAt(m.ht),{fly:{path, step, t:0, dur:(path.length-1)*step, kind, color:kind==="nectar"?(m.color==="blue"?"blue":"red"):null,
+    this.hold(this.heardAt(m.ht),{fly:{path, step, last, t:0, dur:(path.length-2)*step+last, kind, color:kind==="nectar"?(m.color==="blue"?"blue":"red"):null,
       pos:path[0].slice(), fid:netNum(m.fid,0,1e9,0), mirror:true}});
   },
   /* A guest shows the host's match as it was NET_DELAY ago, the robots and what
@@ -740,8 +785,9 @@ const Online={
     }
     for(const al of ["red","blue"]){ const A=M.humans[al].anim; if(A) A.t=Math.min(A.dur,A.t+dt); }
     for(const f of M.flying){
-      const step=f.step||SHOT_STEP_S; f.t+=dt;
-      const q=Math.min(f.path.length-1,f.t/step), i=Math.floor(q), fr=q-i, a=f.path[i], c=f.path[Math.min(f.path.length-1,i+1)];
+      // each stretch `step` long, but the last: f.last
+      const step=f.step||SHOT_STEP_S, n=f.path.length-1, end=(n-1)*step; f.t+=dt;
+      const q=f.t<end?f.t/step:Math.min(n,n-1+(f.t-end)/(f.last||step)), i=Math.floor(q), fr=q-i, a=f.path[i], c=f.path[Math.min(n,i+1)];
       f.pos=[a[0]+(c[0]-a[0])*fr, a[1]+(c[1]-a[1])*fr, a[2]+(c[2]-a[2])*fr];
       if(f.t>=f.dur) f.done=true;
     }
