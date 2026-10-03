@@ -42,6 +42,16 @@ const Sim={
     this.dstate=this.rig?Dyn.reset(this.rig):null;
     this.slipping=false;
     this.rr=code.rr&&typeof RRRuntime==="function"?RRRuntime(this,code.rr):null;
+    // solved mechanisms (src/joltmech.js): the joints in Jolt Physics, when chosen and
+    // loaded. Only the live sim gets one: a probe (Object.create(Sim)) must neither
+    // build its own nor tear down the live one it inherits
+    if(Object.prototype.hasOwnProperty.call(this,"mechWorld")&&this.mechWorld){ try{ this.mechWorld.destroy(); }catch(e){} }
+    this.mechWorld=null; this.mechNote=null;
+    const J=(opts&&opts.jolt)||(typeof JOLT!=="undefined"?JOLT:null);
+    if(opts&&opts.mechanisms==="jolt"&&J&&typeof JoltMech!=="undefined"&&(this===Sim||(opts&&opts.jolt))){
+      try{ this.mechWorld=JoltMech.build(J,cad,{armature:JoltMech.armatureOf(this.dev)}); if(!this.mechWorld.joints.size){ this.mechWorld.destroy(); this.mechWorld=null; } }
+      catch(e){ this.mechWorld=null; this.mechNote=String(e&&e.message||e); }
+    }
     this.phase="loaded";
   },
   /* One device's state: what the code commands and what the mechanism does. */
@@ -338,6 +348,8 @@ const Sim={
      busy-waits for a mechanism to arrive (src/jvmrun.js drain) */
   stepDevices(dt){
     const wheeled=this.rigidDrive();
+    // a joint the solver moves takes its device's command, not the posing below
+    const W=this.mechWorld, solved=s=>!!(W&&s.mech&&W.joints.has(s.mech.id));
     for(const name in this.dev){
       const s=this.dev[name];
       if(s.kind==="motor"){
@@ -364,7 +376,7 @@ const Sim={
         let act=s.act+Math.sign(drive-s.act)*Math.min(Math.abs(drive-s.act),slew);
         const lin=s.mech&&isLinearKind(s.mech.kind);
         // a slide asked to lift more than its motor holds doesn't climb; it can still lower
-        if(lin&&s.spec.stallNm&&act){
+        if(lin&&s.spec.stallNm&&act&&!solved(s)){
           const up=slideLiftSign(s.mech);
           if(up&&Math.sign(act)===up&&slideHoldNm(s,this.opts)>s.spec.stallNm*(this.opts.duty||1)){ act=0; s.stalled=true; }
         }
@@ -372,6 +384,7 @@ const Sim={
         // a drive motor under the chassis physics: its encoder counts what its
         // wheel really turns, after the step (stepRigid), not free speed x power
         if(wheeled&&wheeled.indexOf(name)>=0) continue;
+        if(solved(s)) continue;                             // Jolt turns it, below
         const prev=s.ticks;
         /* a drive motor's encoder counts what its wheel did, not its free speed:
            rigid physics sets it from the wheel's own spin (stepRigid), and the
@@ -398,6 +411,7 @@ const Sim={
         continue;
       }
       if(s.kind!=="servo") continue;                        // sensors and the IMU don't move
+      if(solved(s)){ s.stalled=false; continue; }          // Jolt drives it to its command, below
       const rate=60/(s.sec60*s.travelDeg);
       const err=s.cmd-s.act;
       const step=Math.sign(err)*Math.min(Math.abs(err), rate*dt);
@@ -417,6 +431,9 @@ const Sim={
         if(qc!==q){ s.act=s.restPos+qc/k; s.stalled=true; }
       }
     }
+    // the solver: every solved joint's motor curve, gravity, limits, gears and loops at
+    // once, then each device's encoder from where its joint went
+    if(W){ W.step(dt,JoltMech.deviceCommands(this.dev,W),(this.opts&&this.opts.substeps)||4); JoltMech.readBack(this.dev,W,dt); }
   },
   /* A slide carrying its load out moves the centre of mass with it. The shift
      is the carried mass over the mass the dynamics actually runs on — never the

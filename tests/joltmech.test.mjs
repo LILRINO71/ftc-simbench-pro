@@ -59,8 +59,8 @@ test('jolt: a slide stops at its travel limit', () => {
 
 test('jolt: two gears on the frame turn in their ratio, through a gear constraint', () => {
   const cad = { solids: [part('g1', [0.3, 0, 0.3], [0.02, 0.02, 0.005], 0.05), part('g2', [0.36, 0, 0.3], [0.04, 0.04, 0.005], 0.1)],
-    mechs: [{ id: 'g1', kind: 'revolute-yaw', axis: [0, 0, 1], pivot: [0.3, 0, 0.3], parent: 'chassis' },
-      { id: 'g2', kind: 'revolute-yaw', axis: [0, 0, 1], pivot: [0.36, 0, 0.3], parent: 'chassis', couple: { to: 'g1', ratio: -0.5, via: 'gear' } }] };
+    mechs: [{ id: 'g1', kind: 'revolute-yaw', axis: [0, 0, 1], pivot: [0.3, 0, 0.3], parent: 'chassis', limits: [-3, 3] },
+      { id: 'g2', kind: 'revolute-yaw', axis: [0, 0, 1], pivot: [0.36, 0, 0.3], parent: 'chassis', limits: [-3, 3], couple: { to: 'g1', ratio: -0.5, via: 'gear' } }] };
   const w = E.JoltMech.build(J, cad);
   assert.equal(w.joints.get('g2').follow, 'gear');
   run(w, { g1: { mode: 'dc', duty: 0.5, stall: 2, free: 10 } }, 0.3);
@@ -162,4 +162,37 @@ test('jolt: a guessed lift turns the way the kinematic view draws it; a mate joi
   assert.equal(E.JoltMech.jointSign({ kind: 'revolute-lift', dir: -1 }), 1);
   assert.equal(E.JoltMech.jointSign({ kind: 'revolute-lift', fromMate: {} }), 1);
   assert.equal(E.JoltMech.jointSign({ kind: 'linear', dir: -1 }), -1);
+});
+
+test('jolt: gears that turn the same way, or by a ratio that isn\'t whole, follow stably', () => {
+  for (const r of [1, 0.5, 2, -1.5]) {
+    const cad = { solids: [part('g1', [0.3, 0, 0.3], [0.02, 0.02, 0.005], 0.05), part('g2', [0.36, 0, 0.3], [0.04, 0.04, 0.005], 0.1)],
+      mechs: [{ id: 'g1', kind: 'revolute-yaw', axis: [0, 0, 1], pivot: [0.3, 0, 0.3], parent: 'chassis' },
+        { id: 'g2', kind: 'revolute-yaw', axis: [0, 0, 1], pivot: [0.36, 0, 0.3], parent: 'chassis', couple: { to: 'g1', ratio: r, via: 'gear' } }] };
+    const w = E.JoltMech.build(J, cad);
+    assert.equal(w.joints.get('g2').follow, 'track', 'ratio ' + r);
+    run(w, { g1: { mode: 'dc', duty: 0.5, stall: 2, free: 10 } }, 2);
+    assert.ok(Math.abs(w.q('g2') - r * w.q('g1')) < 0.05 * Math.max(1, Math.abs(r * w.q('g1'))), 'ratio ' + r + ': ' + w.q('g2') + ' vs ' + r * w.q('g1'));
+    w.destroy();
+  }
+});
+
+test('jolt: a flip arm that travels past half a turn stops at its own stop, held by its motor', () => {
+  const cad = armCad([0, 0, 1], [0, 4.0]);
+  const w = E.JoltMech.build(J, cad);
+  assert.ok(w.notes.some((n) => /half a turn/.test(n)));
+  run(w, { arm: { mode: 'dc', duty: 1, stall: 9, free: 6 } }, 2);
+  assert.ok(Math.abs(w.q('arm') - 4.0) < 0.05, 'reaches 4 rad, not pi: ' + w.q('arm'));
+  w.destroy();
+});
+
+test('jolt: a linkage follower reads its leader in the drawn angle (a spec\'s offsetDeg)', () => {
+  const cad = { solids: [part('a', [0.1, 0, 0.3], [0.1, 0.01, 0.01], 0.2), part('b', [0.1, 0.1, 0.3], [0.1, 0.01, 0.01], 0.2)],
+    mechs: [{ id: 'a', kind: 'revolute-yaw', axis: [0, 0, 1], pivot: [0, 0, 0.3], parent: 'chassis', fromMate: {}, q0: 0.3 },
+      { id: 'b', kind: 'revolute-yaw', axis: [0, 0, 1], pivot: [0, 0.1, 0.3], parent: 'chassis', couple: { to: 'a', ratio: 1 } }] };
+  const w = E.JoltMech.build(J, cad);
+  run(w, { a: { mode: 'servo', target: 0.2, stall: 5, rate: 3 } }, 1);
+  assert.ok(Math.abs(w.q('a') - 0.2) < 0.01);
+  assert.ok(Math.abs(w.q('b') - (0.2 + 0.3)) < 0.02, 'follows the drawn angle 0.5: ' + w.q('b'));
+  w.destroy();
 });

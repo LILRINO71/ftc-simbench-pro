@@ -46,6 +46,8 @@ const JoltMech=(function(){
   const ROTOR={motor:5e-6, servo:1e-7};
   const FRICTION_SHARE=0.02;                 // gearbox drag: a share of the stall torque at the joint
   const UNDRIVEN_HOLD=50;                    // N m (or N): a joint no device drives holds its drawn pose
+  const TRACK_CAP=2000;                      // N m (or N): what a follower may use to stay with its leader
+  const LIMIT_HOLD=200;                      // N m (or N): a stop Jolt's hinge can't hold (past +-pi), held by the motor
 
   /* Each joint's rigid body from the parts that ride it: mass from the CAD
      where it has one (partMass), the centre of mass, and a box the size of
@@ -101,13 +103,15 @@ const JoltMech=(function(){
     const o=opts||{};
     const mechs=((cad&&cad.mechs)||[]).filter(m=>!m.drive&&m.kind!=="fixed"&&m.axis&&m.pivot);
     const notes=[];
-    const live=[];                               // every Jolt object to free
-    const keep=x=>{ live.push(x); return x; };
-    const V3=v=>new J.Vec3(v[0],v[1],v[2]), R3=v=>new J.RVec3(v[0],v[1],v[2]);
+    // vectors handed to Jolt are copied in; the wrappers are freed once built
+    const tmp=[];
+    const V3=v=>{ const x=new J.Vec3(v[0],v[1],v[2]); tmp.push(x); return x; };
+    const R3=v=>{ const x=new J.RVec3(v[0],v[1],v[2]); tmp.push(x); return x; };
 
     // one layer, nothing collides: these are a robot's own parts, held by joints
     const pair=new J.ObjectLayerPairFilterTable(1);
-    const bpi=new J.BroadPhaseLayerInterfaceTable(1,1); bpi.MapObjectToBroadPhaseLayer(0,new J.BroadPhaseLayer(0));
+    const bpl=new J.BroadPhaseLayer(0); tmp.push(bpl);
+    const bpi=new J.BroadPhaseLayerInterfaceTable(1,1); bpi.MapObjectToBroadPhaseLayer(0,bpl);
     const st=new J.JoltSettings(); st.mMaxWorkerThreads=0; st.mObjectLayerPairFilter=pair; st.mBroadPhaseLayerInterface=bpi;
     st.mObjectVsBroadPhaseLayerFilter=new J.ObjectVsBroadPhaseLayerFilterTable(st.mBroadPhaseLayerInterface,1,st.mObjectLayerPairFilter,1);
     st.mMaxBodies=Math.max(64,mechs.length+8);
@@ -146,7 +150,8 @@ const JoltMech=(function(){
       const I=[[0,0,0],[0,0,0],[0,0,0]];
       for(let r=0;r<3;r++) for(let c=0;c<3;c++){ let s=0; for(let k=0;k<3;k++) s+=R[r][k]*d[k]*R[c][k]; I[r][c]=s+a*j.axis[r]*j.axis[c]; }
       const D=diagonalize(I);
-      mp.SetInverseInertia(new J.Vec3(1/D.d[0],1/D.d[1],1/D.d[2]),new J.Quat(D.q[0],D.q[1],D.q[2],D.q[3]));
+      const qq=new J.Quat(D.q[0],D.q[1],D.q[2],D.q[3]); tmp.push(qq);
+      mp.SetInverseInertia(V3([1/D.d[0],1/D.d[1],1/D.d[2]]),qq);
       j.armature=a;
     }
 
@@ -157,6 +162,12 @@ const JoltMech=(function(){
       // Jolt measures from where the joint was built (the drawn pose) and wants 0 inside the range
       if(lo!=null&&lo>0){ notes.push("\""+id+"\" is drawn outside its travel; its lower stop is taken at the drawn pose."); lo=0; }
       if(hi!=null&&hi<0){ notes.push("\""+id+"\" is drawn outside its travel; its upper stop is taken at the drawn pose."); hi=0; }
+      j.lo=lo; j.hi=hi;
+      // a hinge's stops must lie within half a turn of where it's built; travel past
+      // that (a flip arm) is stopped by the joint's motor instead
+      if(!j.lin&&((lo!=null&&lo<-Math.PI)||(hi!=null&&hi>Math.PI))){
+        j.soft=true; notes.push("\""+id+"\" travels more than half a turn; its stops are held by its motor.");
+      }
       let c;
       if(j.lin){
         const s=new J.SliderConstraintSettings(); s.mSpace=J.EConstraintSpace_WorldSpace; s.mAutoDetectPoint=false;
@@ -166,7 +177,7 @@ const JoltMech=(function(){
       }else{
         const s=new J.HingeConstraintSettings(); s.mSpace=J.EConstraintSpace_WorldSpace;
         s.mPoint1=s.mPoint2=R3(m.pivot); s.mHingeAxis1=s.mHingeAxis2=V3(j.axis); s.mNormalAxis1=s.mNormalAxis2=V3(n);
-        if(lo!=null||hi!=null){ s.mLimitsMin=Math.max(-Math.PI,lo!=null?lo:-Math.PI); s.mLimitsMax=Math.min(Math.PI,hi!=null?hi:Math.PI); }
+        if((lo!=null||hi!=null)&&!j.soft){ s.mLimitsMin=lo!=null?lo:-Math.PI; s.mLimitsMax=hi!=null?hi:Math.PI; }
         c=J.castObject(s.Create(parent,j.body),J.HingeConstraint); J.destroy(s);
       }
       c.SetNumVelocityStepsOverride(20); c.SetNumPositionStepsOverride(8);
@@ -182,7 +193,11 @@ const JoltMech=(function(){
       const L=joints.get(cp.to); if(!L){ notes.push("\""+id+"\" follows \""+cp.to+"\", which isn't simulated; it holds still."); continue; }
       const r=fin(cp.ratio)?cp.ratio:1, sameFrame=j.parentId==="chassis"&&L.parentId==="chassis";
       const off=Number.isFinite(cp.offset)&&cp.offset!==0;        // a gear or rack constraint has no offset: those track
-      if(!cp.link&&!off&&sameFrame&&r!==0&&!L.lin&&!j.lin){
+      // Jolt's gear wraps its error to whole turns of the first gear: right only for
+      // gears that reverse, by a whole-number ratio, inside half a turn either way
+      const whole=r<0&&Math.abs(1/r-Math.round(1/r))<1e-9;
+      const within=x=>!x.soft&&x.lo!=null&&x.hi!=null&&x.lo>=-Math.PI&&x.hi<=Math.PI;
+      if(!cp.link&&!off&&sameFrame&&whole&&within(L)&&within(j)&&!L.lin&&!j.lin){
         // Jolt's gear: angle2 = -angle1 / ratio
         const s=new J.GearConstraintSettings(); s.mSpace=J.EConstraintSpace_WorldSpace;
         s.mHingeAxis1=V3(L.axis); s.mHingeAxis2=V3(j.axis); s.mRatio=-1/r;
@@ -220,6 +235,11 @@ const JoltMech=(function(){
       j.raw=raw; return j.q+d;
     };
     const values=()=>{ const out=new Map(); for(const [id,j] of joints) out.set(id,j.q); return out; };
+    // a joint's drawn-pose fix (a spec's offsetDeg): followers and linkages work in
+    // the drawn angle, the solver and the encoders in the joint's own
+    const q0=j=>j.lin?0:(fin(j.m.q0)?j.m.q0:0);
+    for(const x of tmp) try{ J.destroy(x); }catch(e){}
+    tmp.length=0;
     const hold=o.hold!==false;
 
     /* cmds: id -> {mode:"dc", duty, stall, free, brake} (stall N m or N at the
@@ -227,7 +247,7 @@ const JoltMech=(function(){
        rate}, or nothing (held, or free with opts.hold false). */
     function step(dt,cmds,substeps){
       const n=Math.max(1,Math.min(16,substeps|0||4)), h=dt/n, C=cmds||{};
-      const get=id=>{ const j=joints.get(id); return j?j.q:null; };
+      const get=id=>{ const j=joints.get(id); return j?j.q+q0(j):null; };
       for(let k=0;k<n;k++){
         for(const [id,j] of joints){
           const c=Object.prototype.hasOwnProperty.call(C,id)?C[id]:null;
@@ -235,10 +255,12 @@ const JoltMech=(function(){
           let target=0, cap=0, fr=0;
           if(j.follow==="track"){
             // where the leader puts it, how fast that's moving, and a gentle pull onto it
-            const want=typeof followQ==="function"?followQ(j.m,get):null;
+            let want=typeof followQ==="function"?followQ(j.m,get):null;
+            // never past its own stops: a stage whose leader overreaches it waits at its stop
+            if(want!=null){ want-=q0(j); if(j.lo!=null) want=Math.max(j.lo,want); if(j.hi!=null) want=Math.min(j.hi,want); }
             if(want==null){ target=-j.q/(3*h); j.wantPrev=null; }
             else { const rate=j.wantPrev==null?0:(want-j.wantPrev)/h; j.wantPrev=want; target=rate+(want-j.q)/(3*h); }
-            cap=1e4;
+            cap=TRACK_CAP;
           }else if(c&&c.mode==="dc"&&fin(c.duty)&&c.stall>0&&c.free>0){
             const d=Math.max(-1,Math.min(1,c.duty)), tf=FRICTION_SHARE*c.stall;
             target=d*c.free;
@@ -255,6 +277,10 @@ const JoltMech=(function(){
             cap=c.stall;
           }else if(hold&&!j.passive){ target=-j.q/Math.max(h,0.02); cap=UNDRIVEN_HOLD; }
           else if(j.passive){ target=0; cap=0; fr=0.002; }    // a pin in a linkage: it goes where the loop puts it
+          if(j.soft){                                      // the stops past half a turn
+            if(j.hi!=null&&j.q>=j.hi){ target=Math.min(target,(j.hi-j.q)/h); cap=Math.max(cap,LIMIT_HOLD); }
+            if(j.lo!=null&&j.q<=j.lo){ target=Math.max(target,(j.lo-j.q)/h); cap=Math.max(cap,LIMIT_HOLD); }
+          }
           j.c.SetMotorState(J.EMotorState_Velocity);
           if(j.lin){ j.motor.mMinForceLimit=-cap; j.motor.mMaxForceLimit=cap; j.c.SetTargetVelocity(target); j.c.SetMaxFrictionForce(fr); }
           else { j.motor.mMinTorqueLimit=-cap; j.motor.mMaxTorqueLimit=cap; j.c.SetTargetAngularVelocity(target); j.c.SetMaxFrictionTorque(fr); }

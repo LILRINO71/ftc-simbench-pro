@@ -2974,6 +2974,7 @@ function boot(){
   ShotUI.arc=store.get("ftcbench.arc","1")!=="0"; $("#arcToggle").checked=ShotUI.arc;
   View.init($("#viewport"));
   Perf.pr=Math.min(devicePixelRatio||1,View.tier.budget.pixelRatio);
+  OPTS.substeps=View.tier.budget.substeps;          // the solver's substeps per 20 ms tick, by tier
   View.setView("iso");
   initTabs(); initCollapsibles(); initRails();
   Editor.init(); Pads.init();
