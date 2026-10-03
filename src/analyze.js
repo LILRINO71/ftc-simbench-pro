@@ -1,6 +1,11 @@
 /* ============================================================
    6.  ANALYSIS
    ============================================================ */
+/* A finding's title, body and fix are HTML (the Checks tab puts them in the
+   page as they are). Every name in one is the team's text, not ours: device
+   and config names from the Java, part numbers and joint names from the CAD,
+   names from the config .xml or a session. Each goes through escHTML. */
+function escHTML(s){ return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c]); }
 function analyze(code,cad,map,opts){
   const F=[];
   const add=(key,sev,title,body,math,fix)=>F.push({key,sev,title,body,math,fix});
@@ -13,12 +18,12 @@ function analyze(code,cad,map,opts){
     "Add <code>@TeleOp(name = \"…\")</code> above the class.");
   const hasAuto = code.auto && code.auto.length>0;
   if(code.rr){
-    const S=code.rr.summary||{}, esc2=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"})[c]);
+    const S=code.rr.summary||{};
     add("rr:plan","info","Road Runner: "+(S.trajectories||0)+" trajector"+(S.trajectories===1?"y":"ies")+", "+(S.actions||0)+" action"+(S.actions===1?"":"s"),
       "About "+(S.seconds||0).toFixed(1)+" s of driving and waiting from ("+code.rr.start.slice(0,2).map(v=>+v.toFixed(1)).join(", ")+") at "+
       Math.round(code.rr.start[2]*180/Math.PI)+"°. The path, its timing and every action are the team's; the follower uses their gains"+
       " with a feedforward from the CAD's motors and wheels, and knows exactly where the robot is."+
-      (code.rr.notes.length?"<br>"+code.rr.notes.map(esc2).join("<br>"):""),null,null);
+      (code.rr.notes.length?"<br>"+code.rr.notes.map(escHTML).join("<br>"):""),null,null);
   }
   else if(!code.hasLoop && !hasAuto) add("struct:loop","fail","Nothing to run after START",
     "The bench couldn't find a <code>while (opModeIsActive())</code> loop, a <code>loop()</code> method, or any statements after <code>waitForStart()</code>.",null,
@@ -28,8 +33,8 @@ function analyze(code,cad,map,opts){
     "Call <code>waitForStart();</code> before the main loop.");
   // a motor told to move while it is still in STOP_AND_RESET_ENCODER doesn't move
   const held=code.vm&&code.vm.an&&code.vm.an.heldByReset||[];
-  if(held.length) add("mode:reset","fail",(held.length===1?"<code>"+held[0]+"</code> is":held.length+" motors are")+" left in <code>STOP_AND_RESET_ENCODER</code>, so setPower does nothing",
-    "Your code sets power on "+held.map(n=>"<code>"+n+"</code>").join(", ")+" while "+(held.length===1?"it is":"they are")+" still in <code>STOP_AND_RESET_ENCODER</code>. "+
+  if(held.length) add("mode:reset","fail",(held.length===1?"<code>"+escHTML(held[0])+"</code> is":held.length+" motors are")+" left in <code>STOP_AND_RESET_ENCODER</code>, so setPower does nothing",
+    "Your code sets power on "+held.map(n=>"<code>"+escHTML(n)+"</code>").join(", ")+" while "+(held.length===1?"it is":"they are")+" still in <code>STOP_AND_RESET_ENCODER</code>. "+
     "In that mode the SDK removes power from the motor, so it stays still, here and on your robot.",
     null,"After resetting, switch the mode back: <code>setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER)</code> (or <code>RUN_USING_ENCODER</code>).");
   if(!code.devices.length) add("struct:dev","warn","No hardware devices found",
@@ -38,7 +43,7 @@ function analyze(code,cad,map,opts){
 
   for(const d of code.devices){
     if(!/Servo|DcMotor/i.test(d.type||"")) continue;          // sensors are read, not driven
-    if(!isCommanded(code,d.name)) add("idle:"+d.name,"warn","<code>"+d.name+"</code> is never commanded",
+    if(!isCommanded(code,d.name)) add("idle:"+d.name,"warn","<code>"+escHTML(d.name)+"</code> is never commanded",
       "It's declared and pulled out of <code>hardwareMap</code>, but nothing in the loop moves it.",null,
       "Bind it to a control, or drop the declaration.");
   }
@@ -70,18 +75,19 @@ load      ${(distal*1000).toFixed(0)} g = ${(payload*1000).toFixed(0)} held + 60
 needed    ${req.toFixed(3)} N·m   m·g·r·cos θ
 usable    ${usable.toFixed(3)} N·m   ${spec.stallNm.toFixed(2)} stall × ${(duty*100).toFixed(0)}%
 headroom  ${ratio.toFixed(2)}×${ratio<1?"  ◄ SHORT":""}`;
+    const jl=escHTML(mlabel(mech).toLowerCase());
     if(sev==="fail")
-      add("torque:"+d.name,"fail","The "+mlabel(mech).toLowerCase()+" servo cannot hold the load it's carrying",
-        "<code>"+d.name+"</code> drives a <b>"+(lever*1000).toFixed(0)+" mm</b> lever with the end effector on it. "+
-        "The <b>"+spec.role.toLowerCase()+"</b> servo here gives <b>"+usable.toFixed(2)+" N·m</b> usable against <b>"+
+      add("torque:"+d.name,"fail","The "+jl+" servo cannot hold the load it's carrying",
+        "<code>"+escHTML(d.name)+"</code> drives a <b>"+(lever*1000).toFixed(0)+" mm</b> lever with the end effector on it. "+
+        "The <b>"+escHTML(String(spec.role).toLowerCase())+"</b> servo here gives <b>"+usable.toFixed(2)+" N·m</b> usable against <b>"+
         req.toFixed(2)+" N·m</b> needed. It will buzz, sag under load, or refuse to lift.",math,
         "Fit a higher-torque servo, shorten the lever, or add a counterbalance spring at the pivot.");
     else if(sev==="warn")
-      add("torque:"+d.name,"warn","The "+mlabel(mech).toLowerCase()+" joint has very little torque margin",
+      add("torque:"+d.name,"warn","The "+jl+" joint has very little torque margin",
         "Headroom is <b>"+ratio.toFixed(2)+"×</b>. It will lift on a fresh battery and start sagging as voltage drops.",math,
         "Move to a higher-torque servo or reduce the payload.");
     else
-      add("torque:"+d.name,"pass","The "+mlabel(mech).toLowerCase()+" joint has torque headroom",
+      add("torque:"+d.name,"pass","The "+jl+" joint has torque headroom",
         "<b>"+ratio.toFixed(2)+"×</b> margin between what the servo can hold and what the joint demands.",math,null);
   }
 
@@ -123,11 +129,11 @@ headroom  ${ratio.toFixed(2)}×${ratio<1?"  ◄ SHORT":""}`;
     if(spec.kind!=="servo") continue;
     const span=r.hi-r.lo, deg=span*travelDegOf(spec);
     if(span<0.05)
-      add("travel:"+d.name,"warn","<code>"+d.name+"</code> barely moves",
+      add("travel:"+d.name,"warn","<code>"+escHTML(d.name)+"</code> barely moves",
         "Commanded positions span only <b>"+span.toFixed(2)+"</b> &mdash; about <b>"+deg.toFixed(0)+"°</b>. If the mechanism isn't reaching, this is why.",null,
         "Widen the two constants and check the mechanism clears its frame.");
     else
-      add("travel:"+d.name,"info","<code>"+d.name+"</code> sweeps "+deg.toFixed(0)+"°",
+      add("travel:"+d.name,"info","<code>"+escHTML(d.name)+"</code> sweeps "+deg.toFixed(0)+"°",
         "Travel <b>"+r.lo.toFixed(2)+" → "+r.hi.toFixed(2)+"</b> on a "+travelDegOf(spec)+"° servo.",null,null);
   }
 
@@ -146,13 +152,13 @@ headroom  ${ratio.toFixed(2)}×${ratio<1?"  ◄ SHORT":""}`;
       "every motor keeps the last power it was given (the drive coasts on at whatever speed it had), no button is read, "+
       "and PID loops stop correcting. The bench runs it the same way: the loop stops for that long, then finishes the pass.";
     if(bare.length)
-      add("sleep","warn","<code>sleep("+(bare[0].ms||"…")+")</code> runs on every pass of the loop",
+      add("sleep","warn","<code>sleep("+escHTML(bare[0].ms||"…")+")</code> runs on every pass of the loop",
         what+" This one isn't behind a button, so the robot answers the driver at most every <b>"+(bare.reduce((a,x)=>a+(x.ms||0),0)+20)+" ms</b>.",
         sleeps.map(x=>(x.on?x.on:"(every pass)")+"   sleep("+x.ms+")").join("\n"),
         "Drive the delay off a timer instead: latch a state, note the time, and act on it in a later pass of the same loop.");
     else
-      add("sleep","info","<code>sleep()</code> on "+sleeps.map(x=>"<code>"+x.on+"</code>").join(", ")+" pauses the whole loop",
-        what+" Pressing "+(sleeps.length===1?"it":"one")+" holds the robot's controls for <b>"+(sleeps.length===1?sleeps[0].ms:total)+" ms</b>.",
+      add("sleep","info","<code>sleep()</code> on "+sleeps.map(x=>"<code>"+escHTML(x.on)+"</code>").join(", ")+" pauses the whole loop",
+        what+" Pressing "+(sleeps.length===1?"it":"one")+" holds the robot's controls for <b>"+escHTML(sleeps.length===1?sleeps[0].ms:total)+" ms</b>.",
         sleeps.map(x=>x.on+"   sleep("+x.ms+")").join("\n"),
         "If the drive mustn't coast, run the sequence off a timer so the loop keeps going.");
   }
@@ -162,7 +168,7 @@ headroom  ${ratio.toFixed(2)}×${ratio<1?"  ◄ SHORT":""}`;
     if(st.kind!=="if") continue;
     const r=padRefs(st.condAst).map(splitPadRef).filter(Boolean)[0];
     if(r && !st.then.length && !(st.else&&st.else.length))
-      add("empty:"+r.pad+r.btn,"warn","<code>gamepad"+r.pad+"."+r.btn+"</code> is wired to an empty block",
+      add("empty:"+r.pad+r.btn,"warn","<code>gamepad"+escHTML(r.pad+"."+r.btn)+"</code> is wired to an empty block",
         "The button is tested but the body does nothing, so pressing it has no effect.",null,
         "Fill it in or delete the block &mdash; an empty one reads like an unfinished binding.");
     findEmpty(st.then); if(st.else) findEmpty(st.else);
@@ -186,7 +192,7 @@ headroom  ${ratio.toFixed(2)}×${ratio<1?"  ◄ SHORT":""}`;
   const badPairs=pairs.filter(p=>p.ra===p.rb);
   if(badPairs.length)
     add("mirror","warn","A mirrored pair is set the same way round",
-      "<b>"+badPairs.map(p=>p.a+"/"+p.b).join(", ")+"</b> read as a left/right pair, but "+
+      "<b>"+badPairs.map(p=>escHTML(p.a+"/"+p.b)).join(", ")+"</b> read as a left/right pair, but "+
       (badPairs[0].ra?"both are reversed":"neither is reversed")+". A mirrored pair usually needs exactly one "+
       "<code>setDirection(REVERSE)</code>, or the two halves fight each other.",
       pairs.map(p=>(p.a+"        ").slice(0,10)+(p.ra?"REVERSED":"forward")+"   "+
@@ -194,7 +200,7 @@ headroom  ${ratio.toFixed(2)}×${ratio<1?"  ◄ SHORT":""}`;
       "Check how they're physically mounted — if they face opposite ways, one of them needs reversing.");
   else if(pairs.length)
     add("mirror","pass","Mirrored pairs are set opposite ways round",
-      pairs.map(p=>"<b>"+p.a+"/"+p.b+"</b>").join(", ")+" &mdash; exactly one of each pair is reversed, which is what a mirrored mounting needs.",
+      pairs.map(p=>"<b>"+escHTML(p.a+"/"+p.b)+"</b>").join(", ")+" &mdash; exactly one of each pair is reversed, which is what a mirrored mounting needs.",
       pairs.map(p=>(p.a+"        ").slice(0,10)+(p.ra?"REVERSED":"forward")+"   "+
                    (p.b+"        ").slice(0,10)+(p.rb?"REVERSED":"forward")).join("\n"),null);
 
@@ -244,12 +250,12 @@ headroom  ${ratio.toFixed(2)}×${ratio<1?"  ◄ SHORT":""}`;
     const cadSpec=mech.part?hwFromPart(mech.part,mech.partName):null;
     const actuator=cadSpec&&/^(motor|servo|crservo)$/.test(cadSpec.kind);
     if(mech.fromMate&&mech.kind!=="fixed")
-      add("unmapped:"+mech.id,"warn","The Onshape joint <b>"+mlabel(mech)+"</b> has nothing driving it",
-        "It's a "+((JOINT_KINDS[mech.kind]||{label:mech.kind}).label)+" in your mates, but no device in this OpMode maps to it, so it stays where it was drawn.",null,
+      add("unmapped:"+mech.id,"warn","The Onshape joint <b>"+escHTML(mlabel(mech))+"</b> has nothing driving it",
+        "It's a "+escHTML((JOINT_KINDS[mech.kind]||{label:mech.kind}).label)+" in your mates, but no device in this OpMode maps to it, so it stays where it was drawn.",null,
         "Pick the device that drives it in the hardware table.");
     else if(actuator||mech.hasActuator&&mech.kind!=="fixed")
-      add("unmapped:"+mech.id,"warn","CAD has an actuator on <b>"+mlabel(mech)+"</b> with no code behind it",
-        "The assembly mounts "+(cadSpec?"<code>"+mech.part+"</code>":"an actuator")+" on this mechanism, but no device in this OpMode maps to it.",null,
+      add("unmapped:"+mech.id,"warn","CAD has an actuator on <b>"+escHTML(mlabel(mech))+"</b> with no code behind it",
+        "The assembly mounts "+(cadSpec?"<code>"+escHTML(mech.part)+"</code>":"an actuator")+" on this mechanism, but no device in this OpMode maps to it.",null,
         "Map it in the hardware table, or add the device if it really is unused.");
   }
 
@@ -268,7 +274,7 @@ headroom  ${ratio.toFixed(2)}×${ratio<1?"  ◄ SHORT":""}`;
       chain, "Everything in that panel is editable: rename a joint, change its type, change what it moves with, or flip its direction.");
   }
 
-  const cfgs=code.devices.filter(d=>d.cfg).map(d=>'"'+d.cfg+'"');
+  const cfgs=code.devices.filter(d=>d.cfg).map(d=>escHTML('"'+d.cfg+'"'));
   if(opts.robotConfig) checkRobotConfig(code,opts.robotConfig).forEach(f=>F.push(f));
   else if(cfgs.length) add("cfg","info","Config names aren't checked yet",
     "This OpMode asks the Robot Controller for "+cfgs.join(", ")+". No CAD file can confirm those — but the robot's configuration file can.",null,

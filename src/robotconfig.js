@@ -67,6 +67,8 @@ function checkRobotConfig(code, cfg){
   const used={};
   const TYPED={servo:1,crservo:1,motor:1,imu:1};
   const where=d=>(d.module?d.module+" · ":"")+(d.bus!=null?"I²C bus "+d.bus:d.port!=null?"port "+d.port:"");
+  // names from the Java and from the .xml are the team's text: escaped into the HTML (src/analyze.js escHTML)
+  const q=s=>"<code>"+escHTML('"'+s+'"')+"</code>";
   const ok=[];
   let problems=0;
   for(const d of code.devices){
@@ -78,8 +80,8 @@ function checkRobotConfig(code, cfg){
       if(TYPED[ck]&&TYPED[hit.kind]&&ck!==hit.kind){
         problems++;
         add("cfgtype:"+d.name,"fail",
-          "<code>\""+d.cfg+"\"</code> is configured as a "+hit.kind+" but the code asks for a "+d.type,
-          "The name matches, so the lookup gets past the first check, but the device on <b>"+where(hit)+"</b> is a <b>"+hit.tag+"</b>. "+
+          q(d.cfg)+" is configured as a "+escHTML(hit.kind)+" but the code asks for a "+escHTML(d.type),
+          "The name matches, so the lookup gets past the first check, but the device on <b>"+escHTML(where(hit))+"</b> is a <b>"+escHTML(hit.tag)+"</b>. "+
           (ck==="servo"&&hit.kind==="crservo" ? "A continuous-rotation servo can't hold a position — <code>setPosition</code> sets its speed." :
            "The SDK rejects the lookup when the type doesn't fit, and the OpMode stops during INIT."),
           null,
@@ -91,16 +93,16 @@ function checkRobotConfig(code, cfg){
     if(near){
       used[near.name]=1; problems++;
       add("cfgcase:"+d.name,"fail",
-        "<code>\""+d.cfg+"\"</code> doesn't match <code>\""+near.name+"\"</code> — names are case-sensitive",
+        q(d.cfg)+" doesn't match "+q(near.name)+" — names are case-sensitive",
         "The configuration has a device that differs only in capitalisation. <code>hardwareMap</code> compares names exactly, so the lookup fails and the OpMode stops during INIT.",
-        null, "Use <code>\""+near.name+"\"</code> in the code, or rename the device in the configuration.");
+        null, "Use "+q(near.name)+" in the code, or rename the device in the configuration.");
       continue;
     }
     problems++;
     add("cfgmiss:"+d.name,"fail",
-      "<code>\""+d.cfg+"\"</code> isn't in the robot configuration",
+      q(d.cfg)+" isn't in the robot configuration",
       "<code>hardwareMap</code> throws when it can't find a name, so the OpMode stops during INIT before anything moves.",
-      null, "Add <code>"+d.cfg+"</code> to the configuration on the Driver Station, or fix the name in the code.");
+      null, "Add <code>"+escHTML(d.cfg)+"</code> to the configuration on the Driver Station, or fix the name in the code.");
   }
   const unused=cfg.devices.filter(d=>!used[d.name]&&d.kind!=="camera"&&d.kind!=="imu");
   if(unused.length)

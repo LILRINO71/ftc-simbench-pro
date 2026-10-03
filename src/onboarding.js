@@ -69,4 +69,8 @@ function statusOf(findings, runtime) {
   return { level, label, headline, items, counts, rank: STATUS_RANK[level] };
 }
 
-const stripTags = (s) => String(s == null ? "" : s).replace(/<[^>]*>/g, "");
+/* A finding's HTML title as plain text: tags out, and the entities its names were
+   escaped to back to characters (whoever shows the text escapes it again). */
+const HTML_ENTITY = { amp: "&", lt: "<", gt: ">", quot: '"', "#39": "'", mdash: String.fromCharCode(0x2014), nbsp: " " };
+const stripTags = (s) => String(s == null ? "" : s).replace(/<[^>]*>/g, "")
+  .replace(/&(amp|lt|gt|quot|#39|mdash|nbsp);/g, (m, e) => HTML_ENTITY[e]);

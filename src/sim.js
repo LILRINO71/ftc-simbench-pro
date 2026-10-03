@@ -613,17 +613,18 @@ function driveVerdict(pr,add){
     " positive power "+(m.mount<0?"backward":"forward ")+"   code: "+(pr.reversed.indexOf(m.dev)>=0?"REVERSE":"forward")).join("\n");
   const src=pr.mounts.some(m=>m.from==="cad")?"from the CAD":pr.mounts.some(m=>m.from==="code")?"from your code's own forward (the CAD has no drive motors to measure)":"assumed (the standard build)";
   const how="Measured on a private copy of the sim: this OpMode's own INIT and loop, this robot's motor mounting "+src+", "+
-    "and every <code>setDirection</code> call, half a second per push, front <b>"+pr.front+"</b>.";
+    "and every <code>setDirection</code> call, half a second per push, front <b>"+escHTML(pr.front)+"</b>.";
   if(!bad.length){
     add("drive:feel","pass","The sticks drive this robot the way a driver expects",
       how+" Stick up goes forward, right stick turns right"+(pr.strafeR?", left stick right strafes right":"")+".",rows,null);
     return;
   }
-  const flip=pr.mounts.filter(m=>m.mount<0).map(m=>m.dev);
+  // device names are the team's text, and this is HTML (src/analyze.js escHTML)
+  const flip=pr.mounts.filter(m=>m.mount<0).map(m=>escHTML(m.dev)), rev=pr.reversed.map(escHTML);
   add("drive:feel","fail","On this robot, "+bad.join(", "),
     how+" Positive power turns a motor clockwise seen from its shaft (FTC SDK), so on this build "+
     (flip.length?"<code>"+flip.join("</code>, <code>")+"</code> push backward until reversed":"every wheel pushes forward as mounted")+
-    ". Your code reverses "+(pr.reversed.length?"<code>"+pr.reversed.join("</code>, <code>")+"</code>":"nothing")+".",rows,
+    ". Your code reverses "+(rev.length?"<code>"+rev.join("</code>, <code>")+"</code>":"nothing")+".",rows,
     "Reverse exactly the motors marked \"backward\", or flip the stick signs in the code. If only the direction is off, check the CAD front in the Robot panel.");
 }
 

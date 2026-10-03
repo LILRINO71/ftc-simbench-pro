@@ -435,7 +435,7 @@ function renderBindList(){
       const i=CONTROL_ORDER.indexOf(x), j=CONTROL_ORDER.indexOf(y); return (i<0?99:i)-(j<0?99:j); })
     .map(btn=>{
       const g=byBtn[btn];
-      return `<div class="bindrow" data-btn="${btn}">
+      return `<div class="bindrow" data-btn="${esc(btn)}">
         <span class="bk">${esc(CONTROL_LABEL(btn).slice(0,7))}</span>
         <span class="bd">${esc(describe(g))}
         <span class="edge">${g[0].analog?"analog — follows the stick":(g[0].cond?"when "+esc(g[0].cond.trim().slice(0,52)):"while held")}</span></span></div>`;
@@ -779,6 +779,7 @@ function renderFindings(){
   cc.textContent=cnt.fail?String(cnt.fail):(cnt.warn?String(cnt.warn):"");
   cc.className="count"+(cnt.fail?" fail":cnt.warn?" warn":"");
   const SEVL={fail:"WON'T WORK",warn:"RISKY",pass:"OK",info:"NOTE"};
+  // title, body and fix are HTML: every name in them was escaped where the finding was built (escHTML)
   $("#findings").innerHTML=live.length?live.map(f=>`<div class="finding ${f.sev}">
       <div class="fhead"><span class="fsev">${SEVL[f.sev]}</span><span class="ftitle">${f.title}</span>
         <button class="fignore" data-ig="${esc(f.key)}" title="Hide this finding — it stays hidden next time too">Ignore</button></div>
@@ -789,7 +790,7 @@ function renderFindings(){
     :`<p class="cmp-note">Nothing to report${hidden.length?" — "+hidden.length+" finding"+(hidden.length>1?"s":"")+" ignored":""}.</p>`;
   $("#ignoredWrap").innerHTML=hidden.length
     ?`<div class="ignored-head"><h4>Ignored · ${hidden.length}</h4><span class="spacer"></span><button class="btn-sm" id="clearIgnored">Restore all</button></div>`+
-      hidden.map(f=>`<div class="ign-row"><span class="t">${esc(f.title.replace(/<[^>]+>/g,""))}</span><button class="btn-sm" data-unig="${esc(f.key)}">Restore</button></div>`).join(""):"";
+      hidden.map(f=>`<div class="ign-row"><span class="t">${esc(stripTags(f.title))}</span><button class="btn-sm" data-unig="${esc(f.key)}">Restore</button></div>`).join(""):"";
   $$("[data-ig]").forEach(b=>b.addEventListener("click",()=>{ IGNORED[b.dataset.ig]=1; saveIgnored(); renderFindings(); saveRig(); }));
   $$("[data-unig]").forEach(b=>b.addEventListener("click",()=>{ delete IGNORED[b.dataset.unig]; saveIgnored(); renderFindings(); saveRig(); }));
   const ci=$("#clearIgnored"); if(ci) ci.addEventListener("click",()=>{ IGNORED={}; saveIgnored(); renderFindings(); saveRig(); });
