@@ -7,6 +7,8 @@
 const FIELD_COL={tile:0x303336, seam:0x474b50, ground:0x0e0c09, alu:0xa9b0b8, rail:0x7c848d, poly:0xc9d8e3,
   red:0xe0453c, blue:0x2f7dea, redTape:0xd8372f, blueTape:0x2a6ad8, pollen:0xf2c230, flower:0xe4e7ea,
   arm:0x4a4f55, logo:0x1b1d20, honey:0xf2b230};
+// the most triangles one material group of the robot gets edge lines for (see mkSolids)
+const VIEW_EDGE_TRIS=200000;
 const ROBOT_MAT={
   metal:{color:0xa9b1ba, metalness:0.55, roughness:0.42},
   motor:{color:0x2b2d31, metalness:0.45, roughness:0.45},
@@ -657,8 +659,12 @@ const View={
         geo.setAttribute("normal",new THREE.BufferAttribute(nor,3));
         const mesh=new THREE.Mesh(geo,this.robotMat(k)); mesh.castShadow=true; mesh.receiveShadow=true;
         g.add(mesh);
-        const lines=new THREE.LineSegments(new THREE.EdgesGeometry(geo,30),this.edgeMat());
-        lines.userData.edges=true; lines.visible=this.edgesOn!==false; g.add(lines);
+        // the edge lines are a look, not the robot: EdgesGeometry hashes every edge of the
+        // group (hundreds of megabytes on a dense Onshape export), so a huge group goes without
+        if(n/9<=VIEW_EDGE_TRIS){
+          const lines=new THREE.LineSegments(new THREE.EdgesGeometry(geo,30),this.edgeMat());
+          lines.userData.edges=true; lines.visible=this.edgesOn!==false; g.add(lines);
+        }
       }
       return g;
     };
