@@ -175,6 +175,7 @@ const View={
 
   load(cad){
     if(this.onLoad) this.onLoad();
+    this.loadN=(this.loadN||0)+1;                 // a new scene: whoever cached its objects (CadView.hid) looks again
     // another robot: the last one's exact surfaces go, GPU buffers and all, or a
     // hide click would redraw the old robot over this one
     if(this.exact&&this.exact.cad!==cad){ this.exact=null; this.exactG=[]; this.dropShapes(); this.shapeRes=null; this.spinWheels=[]; this.instHolder=null; }

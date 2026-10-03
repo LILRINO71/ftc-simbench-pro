@@ -121,7 +121,8 @@ const CadView={
     const V=View; if(!V.cad||!this.target) return;
     // nothing but the model: every other thing in the world (field, HIVEs,
     // balls — they don't all live under one group) steps out of the way
-    if(!this.hid){ this.hid=[]; for(const o of V.world.children) if(o!==V.chassisG&&o.visible){ o.visible=false; this.hid.push(o); } }
+    // (again after any View.load: a joint, mate or rig change, the turret slider, all build a new world)
+    if(!this.hid||this.hidN!==V.loadN){ this.hid=[]; this.hidN=V.loadN; for(const o of V.world.children) if(o!==V.chassisG&&o.visible){ o.visible=false; this.hid.push(o); } }
     for(const o of [V.fieldG,V.dynG,V.footG,V.baseG,V.shooterG]) if(o) o.visible=false;
     for(const m of V.markers||[]) m.visible=false;
     for(const J of V.jawSets||[]){ J.a.visible=false; J.b.visible=false; }
