@@ -27,20 +27,21 @@ Onshape** pop-up, sign in through Onshape's own page once, then paste the assemb
 reads the same API calls as the bookmark below, through a small Cloudflare Pages Function, and works
 on school computers, which block bookmarks. Setting it up for a site is in `DEPLOY.md`.
 
-**In one click** (`src/onshapelink.js`): drag **Send to SimBench** from the **Mates & joints**
-panel to the bookmarks bar once. Then, on the robot's assembly tab in Onshape, click the bookmark.
-It reads that assembly's definition and mate features from Onshape's API with the team's own
-sign-in (the same two pages as below) and opens SimBench with them packed into the address's
-`#fragment`. A fragment never leaves the browser, so no server sees the robot, and no API key is
+**In one click, on a home computer** (`onshapeGrab` in `src/onshapelink.js`): drag **Send to
+SimBench** from the **Get my robot from Onshape** pop-up (under *Or use the bookmark*) to the
+bookmarks bar once. Then, on the robot's assembly tab in Onshape, click the bookmark. It opens a
+SimBench tab and reads the whole robot from Onshape's API with the team's own sign-in, the same
+calls Sign in with Onshape makes: the assembly definition (parts, placements, mates), its features
+(mate limits and relations), and each part studio's shapes, colours and masses. When the SimBench
+tab says it's ready, the bookmark hands it the robot with `postMessage`, straight from tab to tab,
+and it is built there, joints and all, with no STEP. No server sees the robot and no API key is
 needed.
-- **Robot already open:** if the team's robot is open in another SimBench tab, that tab offers
-  **Apply**, and the new tab closes.
-- **Robot not open yet:** the mates wait for the STEP of the same assembly and apply as soon as it's
-  dropped. They never go onto the default robot.
-- **Very big assembly:** it doesn't fit in an address, so the bookmark saves one `.onshape.json`
-  file to drop instead.
+- **No SimBench tab** (a pop-up blocker stopped it) **or no answer from it within 30 seconds:** the
+  bookmark saves the robot as one `.onshape.json` file instead. Drop it on SimBench, or use **Open a
+  file**: it's the same robot.
+- **Clicking it again** reuses the same SimBench tab.
 
-**By hand**, the same panel builds the two API links from an assembly URL. Open them in a browser
+**By hand**, the **Mates & joints** panel builds the two API links from an assembly URL. Open them in a browser
 that's signed in to Onshape, save the pages, and drop them on the panel. For scripting there's
 `tools/onshape-mates.mjs`.
 
