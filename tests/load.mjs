@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { buildRobot } from '../tools/stepgen.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const ENGINE = ['hardware', 'samples', 'step', 'hull', 'inertia', 'expr', 'jvm', 'jvmlib', 'jvmprelude', 'jvmrun', 'java', 'roadrunner', 'mapping', 'robotconfig', 'compare', 'analyze', 'drivetrain', 'frame', 'mates', 'onshapelink', 'onshapecad', 'meshfiles', 'urdf', 'jointspec', 'jointsheet', 'autorig-lib', 'autorig', 'robotcheck', 'bind', 'dynamics', 'joltmech', 'field', 'shots', 'match', 'robotlite', 'net', 'controllers', 'session', 'mathdoc', 'gitimport', 'onboarding', 'sim', 'tier'];
+const ENGINE = ['hardware', 'samples', 'step', 'hull', 'inertia', 'expr', 'jvm', 'jvmlib', 'jvmprelude', 'jvmrun', 'java', 'roadrunner', 'mapping', 'robotconfig', 'compare', 'analyze', 'drivetrain', 'frame', 'mates', 'onshapelink', 'onshapecad', 'meshfiles', 'urdf', 'jointspec', 'jointsheet', 'autorig-lib', 'autorig', 'robotcheck', 'bind', 'dynamics', 'joltmech', 'field', 'shots', 'match', 'robotlite', 'net', 'netrelay', 'controllers', 'session', 'mathdoc', 'gitimport', 'onboarding', 'sim', 'tier'];
 const EXPORTS = [
   'Field', 'Shots', 'IN', 'TIP_GRAMS', 'FRONTS', 'footprintOf', 'capsulePush', 'nearestMotorId', 'SHOOTER_JAVA',
   'convexHull', 'boxCorners', 'solidTriangles', 'thinPoints', 'solidKind', 'sampleSolids', 'robotBase', 'makeRng',
@@ -21,7 +21,7 @@ const EXPORTS = [
   'JOINT_KINDS', 'leverOf', 'holdTorque', 'armAngleDeg',
   'jvParse', 'jvLex', 'JVM', 'JvProgram', 'jvCompile', 'jvAnalyze', 'jvProbeRun', 'jvProbeHost', 'netTrystero', 'NET_RELAYS', 'jvCodeFor', 'jvMaybe', 'jvPrelude',
   'parseExpr', 'evalNode', 'parseJava', 'deriveBindings', 'travelRange', 'isCommanded',
-  'Match', 'MATCH_SKILL', 'MATCH_PTS', 'boxPush', 'Online', 'netLoopback', 'netGzip', 'netGunzip', 'netHash', 'netSample', 'netAB', 'netKeep', 'dtWheelGeom', 'dtCompositeWheels', 'dtWheelOfParts', 'dtRollerHand', 'dtFrame', 'dtBaseSet', 'dtSymmetricSet', 'dtDriveComposites', 'driveFromSpec', 'liteCluster', 'liteBuild', 'liteEncode', 'liteDecode', 'LITE_FORMAT', 'netCode', 'netSlotPose', 'netSlotY', 'netEl', 'netEls', 'NET_SLOTS', 'NET_PROTO', 'autoMap', 'wheelCorner', 'detectDrivetrain', 'analyze', 'checkRobot', 'setupAuto', 'isDriveDevice', 'Sim', 'driveProbe', 'driveVerdict', 'motorTpr', 'normalizeExpr',
+  'Match', 'MATCH_SKILL', 'MATCH_PTS', 'boxPush', 'Online', 'netRelay', 'netConnect', 'netPackBin', 'netUnpackBin', 'netRandomId', 'netLoopback', 'netGzip', 'netGunzip', 'netHash', 'netSample', 'netAB', 'netKeep', 'dtWheelGeom', 'dtCompositeWheels', 'dtWheelOfParts', 'dtRollerHand', 'dtFrame', 'dtBaseSet', 'dtSymmetricSet', 'dtDriveComposites', 'driveFromSpec', 'liteCluster', 'liteBuild', 'liteEncode', 'liteDecode', 'LITE_FORMAT', 'netCode', 'netSlotPose', 'netSlotY', 'netEl', 'netEls', 'NET_SLOTS', 'NET_PROTO', 'autoMap', 'wheelCorner', 'detectDrivetrain', 'analyze', 'checkRobot', 'setupAuto', 'isDriveDevice', 'Sim', 'driveProbe', 'driveVerdict', 'motorTpr', 'normalizeExpr',
   'AUTO_JAVA', 'coverage', 'lineAt', 'collectStaticFields',
   'parseRobotConfig', 'checkRobotConfig', 'configKind', 'codeKind', 'diffOpModes',
   // Pro

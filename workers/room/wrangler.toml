@@ -1,0 +1,14 @@
+# The match rooms (workers/room/room.js). Deploy once with
+#   npx wrangler deploy --config workers/room/wrangler.toml
+# then bind it to the Pages project as ROOMS (DEPLOY.md, "Online rooms").
+name = "ftc-simbench-rooms"
+main = "index.js"
+compatibility_date = "2026-09-01"
+
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "RoomDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RoomDO"]

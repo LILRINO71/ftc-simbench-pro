@@ -2226,18 +2226,22 @@ const NetUI={
     if(await this.connect()&&Online.state==="off") Online.browse();
     this.render();
   },
-  /* Trystero, the first time: from jsDelivr, pinned to one version */
+  /* The network, the first time (src/netrelay.js netConnect): this site's own
+     match rooms over HTTPS when it has them, which school filters let through;
+     else WebRTC between the browsers, through TURN on port 443 when the site
+     has TURN, else as it always was. */
   connect(){
     if(Online.T) return Promise.resolve(true);
-    if(!this.loading) this.loading=netTrystero().then(T=>{
-      Online.use(T);
+    if(!this.loading) this.loading=netConnect().then(({T,via})=>{
+      Online.use(T); this.via=via;
       T.onError=d=>{
+        if(d&&d.fatal&&via==="room"){ this.say("Lost the connection to the match room. Check the internet connection and try again.","warn"); return; }
         if(!d||!Online.code||d.room!=="m-"+Online.code) return;       // a stranger in the lobby, not this match
         this.say("A player couldn't connect: "+String((d.error&&d.error.message)||d.error||"no reason given")+
-          ". Some school and company networks block direct connections between browsers.","warn");
+          (via==="room"?".":". Some school and company networks block direct connections between browsers."),"warn");
       };
       return true;
-    }).catch(e=>{ this.loading=null; this.say("Couldn't load the online library ("+String(e&&e.message||e)+"). Check the internet connection and try again.","fail"); return false; });
+    }).catch(e=>{ this.loading=null; this.say("Couldn't go online ("+String(e&&e.message||e)+"). Check the internet connection and try again.","fail"); return false; });
     return this.loading;
   },
   say(text,kind){ const m=$("#onpMsg"); m.hidden=!text; m.textContent=text||""; m.className="onp-msg"+(kind?" "+kind:""); },
