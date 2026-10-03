@@ -1572,10 +1572,13 @@ function waitForOnshape(){
 function parseAndLoad(done){
   if(!LAST_STEP) return;
   if(LAST_STEP.onshape){ loadOnshapeRobot(LAST_STEP.onshape,true); if(done&&CAD) done(CAD); return; }
-  const {name,text}=LAST_STEP, mb=(text.length/1048576).toFixed(1);
+  // a workspace's robot has no STEP to read again: it comes back as the workspace had it
+  if(LAST_STEP.session){ loadSessionCAD(LAST_STEP); if(done&&CAD) done(CAD); return; }
+  const step=LAST_STEP, {name,text}=step, mb=(text.length/1048576).toFixed(1);
   SetupUI.beforeParse(name);
   $("#cadStatus").textContent="parsing "+mb+" MB …";
   setTimeout(()=>{
+    if(LAST_STEP!==step) return;               // another robot came in while this one waited: that one wins
     try{
       const cad=parseSTEP(text,msg=>{ $("#cadStatus").textContent=msg; },{up:OPTS.up, shift:OPTS.shift});
       cad.name=name;
@@ -2947,6 +2950,14 @@ function download(name,text,mime){
   a.href=url; a.download=name; document.body.appendChild(a); a.click();
   setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); },0);
 }
+/* A workspace's robot onto the bench, from the copy LAST_STEP keeps of it. */
+function loadSessionCAD(step){
+  const cad=JSON.parse(step.session);
+  classifyMechs(cad.mechs);
+  loadCAD(cad,step.label,"ok");
+  renderFrameNote();
+  return cad;
+}
 const Session={
   name(){ return ((CAD&&CAD.name)||"robot").replace(/\.(step|stp)$/i,"").replace(/[^\w.-]+/g,"-")+".ftcsim"; },
   save(){
@@ -2970,9 +2981,13 @@ const Session={
   apply(s,fileName){
     try{
       if(s.cad){
-        const cad=s.cad; cad.name=cad.name||fileName;
-        classifyMechs(cad.mechs);
-        loadCAD(cad,(cad.name||fileName)+" · from workspace","ok");
+        const name=s.cad.name||fileName; s.cad.name=name;
+        // this is the robot now: the default robot still downloading must not replace it,
+        // and Up, "Back to what the CAD shows" or clearing mates reload it, not the last STEP
+        LAST_STEP={name, text:"", session:JSON.stringify(s.cad), label:name+" · from workspace"};
+        // a joint spec belongs to the robot it was written for
+        if(JOINTS.spec&&JOINTS.step!==name){ JOINTS.spec=JOINTS.report=JOINTS.devices=null; JOINTS.name=JOINTS.step=null; }
+        loadSessionCAD(LAST_STEP);
       }
       // the file name if the workspace kept one, else what the OpMode calls itself
       if(s.java) addOpModeFromText(s.opName||((s.code&&s.code.opmode)||"Workspace").replace(/[^\w.-]+/g,"")+".java",s.java);
