@@ -2094,7 +2094,8 @@ function showJoint(id){
 }
 function robotCheckAct(act,a){
   if(act==="show") return showJoint(a);
-  if(act==="pair"){ const [dev,joint]=a.split("|"); changeJoint(joint,{device:dev}); return; }
+  // "device|joint": a joint id (a mate's or a part's name) may have a "|" of its own
+  if(act==="pair"){ const i=a.indexOf("|"), dev=a.slice(0,i), joint=a.slice(i+1); changeJoint(joint,{device:dev}); return; }
   if(act==="drop"){ removeJoint(a); return; }
   if(act==="click"){ CadView.pendingDevice=a; if(!CadView.on) CadView.enter();
     const h=document.querySelector(".cad-hint"); if(h){ h.textContent="Click the part "+a+" moves, then 'New joint from this part'"; h.classList.add("ask"); } return; }
