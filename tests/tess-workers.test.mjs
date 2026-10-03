@@ -16,8 +16,9 @@ import { buildRobot } from '../tools/stepgen.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-function load(WorkerImpl) {
-  const g = { Worker: WorkerImpl, URL: { createObjectURL: () => 'blob:x' }, Blob: class {}, navigator: { hardwareConcurrency: 4 } };
+function load(WorkerImpl, urls = { made: 0, revoked: 0 }) {
+  const URL = { createObjectURL: () => 'blob:x' + (++urls.made), revokeObjectURL: () => { urls.revoked++; } };
+  const g = { Worker: WorkerImpl, URL, Blob: class {}, navigator: { hardwareConcurrency: 4 } };
   const names = Object.keys(g);
   return new Function(...names, '"use strict";\n' + engineBundle().replace(/^"use strict";\n/, '') + '\n' +
     fs.readFileSync(path.join(ROOT, 'src', 'tessellate.js'), 'utf8') + '\nreturn { parseSTEP, Tess };')(...names.map((k) => g[k]));
@@ -86,4 +87,18 @@ test('exact geometry: one worker stopping costs one part, and nothing is meshed 
   assert.equal(onPage, 0, 'no part meshed on the page thread');
   assert.equal(M.Tess.noWorker, undefined, 'workers are still in use');
   assert.equal(res.failedShapes, 1, 'only the stopped worker\'s part is missing');
+});
+
+/* Every worker made its own blob URL for the same script and none was ever
+   revoked, so each robot's three or four workers (and every replacement for a
+   stalled one) kept a blob alive for the life of the page. */
+test('exact geometry: the workers share one blob URL, however many are started', async () => {
+  const urls = { made: 0, revoked: 0 };
+  const M = load(fakeWorkers(3), urls);
+  const text = buildRobot('mecanum-zup').text;
+  const cad = M.parseSTEP(text);
+  M.Tess.mainThread = () => Promise.reject(new Error('page thread'));
+  await M.Tess.perShape(cad, text);
+  await M.Tess.perShape(cad, text);               // a second robot: a fresh pool
+  assert.ok(urls.made - urls.revoked <= 1, `${urls.made} blob URLs made, ${urls.revoked} revoked`);
 });
