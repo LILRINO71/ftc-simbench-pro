@@ -41,14 +41,16 @@ project. There are four layers, from exact to automatic:
 
 | Layer | What it is | Status |
 |---|---|---|
-| **Onshape mates** | Read the assembly's own mates from Onshape: exact axes, travel limits and gear relations, with no guessing. A **Send to SimBench** bookmark brings them over in one click from the team's Onshape tab, with their own sign-in and no API key. | ✅ `src/mates.js`, `src/onshapelink.js` |
+| **Onshape mates** | Read the assembly's own mates from Onshape: exact axes, travel limits (measured from each mate's zero) and gear, rack, screw and linear relations, with no guessing. **Sign in with Onshape** works on school computers; part studios already read are kept in the browser, so reading the robot again costs two API calls. Mates named after the code's devices (or `dof_` names) bind by themselves. | ✅ `src/mates.js`, `src/onshapelink.js` |
+| **URDF and MJCF** | A URDF or MuJoCo model with its STL meshes, as Fusion, SolidWorks, FreeCAD and onshape-to-robot export it. MJCF also carries gear couplings and loop closures. A Fusion script writes one (`tools/exporters`). | ✅ `src/urdf.js`, `src/mjcf.js` |
+| **Robot package** | The whole robot in one `.simbot` file: instanced glTF geometry, the joints with their couplings and loop closures, device bindings, masses, and a list of what to check. Made once, opened anywhere with nothing to re-parse or re-fetch. | ✅ `src/simbot.js`, [docs/robot-package.md](docs/robot-package.md) |
 | **Joint spec** | A small JSON file that says the same by hand: parts, axis, pivot, travel, which device drives it. It also covers cascade slides and servo slider-crank linkages. | ✅ `src/jointspec.js`, [docs/joints.md](docs/joints.md) |
 | **Click-to-fix editor** | In the CAD view: click parts, pick what they ride on, make a joint (the axis is suggested from the selected spline, gear or rail), flip it, try it. Every edit is a joint spec you can download. | ✅ `src/cadview.js` |
 | **Automatic joint finder** | Finds actuators, slide stacks and the parts each joint carries, straight from geometry, for any STEP. Runs by itself when a robot has no mates and no spec, and lists what a person should check. | ✅ `src/autorig.js`, from the measured prototypes in [research/autorig](research/autorig/README.md) |
 
 | **The match** | An alliance partner and two opponents the bench drives, and both alliances' human players, playing AUTO or TELEOP by the manual's rules, sharing the HIVEs with the team's robot, with a live scoreboard. | ✅ `src/match.js`, [docs/match.md](docs/match.md) |
 | **Robot setup** | Four checks, once per robot: up, front, drive base (or its numbers typed in), joints. Saved for the robot and as one file to share with the team, so no robot needs the bench changed for it. | ✅ [docs/robot-setup.md](docs/robot-setup.md) |
-| **Online matches** | One match with other teams, each on their own computer with their own robot and code: Quick match, a room code or an invite link, alliance chat, marks on the field. Browsers connect directly; the host's bench keeps the score. | ✅ `src/net.js`, [docs/online.md](docs/online.md) |
+| **Online matches** | One match with other teams, each on their own computer with their own robot and code: Quick match, a room code or an invite link, alliance chat, marks on the field. Players meet in match rooms on SimBench's own address, over HTTPS, which school filters let through (WebSocket, or Server-Sent Events where upgrades are stripped); without them, browsers connect directly, through TURN on port 443 where configured. The lockstep bookkeeping for running every robot on every computer is built and tested. | ✅ `src/net.js`, `src/netrelay.js`, `workers/room`, `src/lockstep.js`, [docs/online.md](docs/online.md) |
 | **Robot check** | Checks the joints, wherever they came from, against the team's own OpMode: every motor and servo it moves has a joint, every joint carries parts and is driven, nothing swings through the frame. What it can't confirm becomes a question in the team's device names, with the likely answers and a button to see each one move. | ✅ `src/robotcheck.js`, [docs/robot-check.md](docs/robot-check.md) |
 
 The goal is that every robot ends up right: exact from Onshape mates when there are any, and
@@ -65,6 +67,8 @@ is the test set.
 | **Real code, unmodified** | `java.js` + `expr.js` interpret LinearOpMode/OpMode TeleOps and autos: hardware maps, directions, encoders, `RUN_TO_POSITION`, FTCLib PID (with its real integral bounds), timers, sleeps, switch/enum state machines. Gamepads map to gamepad1/2, with rumble. |
 | **Road Runner 1.0 autos** | `roadrunner.js` reads `TrajectoryActionBuilder` chains, `Actions.runBlocking` trees, and the team's own `Action` classes from their helper files (an `Arm` class, a PID class, `MecanumDrive` and its `PARAMS`). It builds the paths, time-profiles them, and follows them with the team's gains. See [docs/code-support.md](docs/code-support.md). |
 | **Rigid-body physics** | `dynamics.js` models motor torque curves, per-wheel normal loads with load transfer, and slip-limited friction. Motor direction follows the FTC SDK: FORWARD turns the shaft clockwise seen from the shaft end, and the CAD says how each motor is mounted. |
+| **Mechanisms in Jolt Physics** | Choose **solved (Jolt)** in Physics and the arms, slides and claws run in a constraint solver: the CAD's masses under gravity, each motor's curve as a torque limit, its rotor reflected through the gearbox, the joints' limits, gears and racks as real constraints, and linkage loops pinned closed. A weak motor sags; a cut motor back-drives. | ✅ `src/joltmech.js` |
+| **Any school computer** | A device tier is read before the first frame (no shadows and a light robot on a 4 GB Chromebook). three.js, OpenCascade and Jolt are served from the site, not a CDN a filter may block, and a service worker lets the bench open offline after one visit. | ✅ `src/tier.js`, `tools/sw.mjs` |
 | **Checks** | `analyze.js` reads the code against the robot: devices mapped or not, servos that stall, sleeps that freeze a TeleOp, slides the code never powers, a drive probe that says whether the sticks drive this robot the way a driver expects, and a lookup with a stray space in its config name. |
 | **Show the math** | `mathdoc.js` prints the equations for *your* robot with your numbers in them (gear ratios, holding torque, traction limits, feedforward) and exports Markdown for an Engineering Portfolio. |
 | **BIOBUZZ field** | The measured 2026-27 field from the [BIOBUZZ Shot Sim](https://github.com/LILRINO71/biobuzz-shot-sim), vendored in `vendor/`: HIVEs, CELLs, FLOWERs, POLLEN and NECTAR, and a shot model. |
@@ -123,21 +127,25 @@ exactly as it ships, so the whole simulator is tested without a browser. The mod
 | Path | What's there |
 |---|---|
 | [`src/`](src/README.md) | The app: engine modules, the 3D and CAD views, the UI. |
-| [`tests/`](tests/README.md) | 556 `node:test` tests: the robot corpus, physics, parser, Road Runner, the real robot end to end, the match, online play. |
+| [`tests/`](tests/README.md) | `node:test` tests: the robot corpus, physics, parser, Road Runner, the real robot end to end, the match, online play, robot packages, Jolt, the rooms, lockstep. |
+| `functions/` | Cloudflare Pages Functions: Sign in with Onshape (`onshape/`) and the match rooms' front door and TURN credentials (`room/`). |
+| `workers/room/` | The match rooms' Durable Object, deployed as its own Worker (DEPLOY.md). |
+| `tools/exporters/` | Getting a robot out of other CAD tools with its joints: the Fusion script. |
 | [`tools/`](tools/README.md) | The build, the minifier, the test runner, the robot corpus generator, the Onshape mates CLI. |
 | [`assets/robots/`](assets/robots/into-the-deep/README.md) | The default robot: GearGurus 7832's STEP (gzipped), its joint spec, and the team's OpModes. |
 | [`research/autorig/`](research/autorig/README.md) | The automatic joint finder study: three prototypes, measured against the real robot. |
 | [`docs/`](docs/README.md) | Guides ([joints](docs/joints.md), [code support](docs/code-support.md)) and the screenshots. |
 | `vendor/biobuzz-shot-sim/` | The BIOBUZZ field and shot engine (MIT, ours), synced by `tools/sync-shot-sim.mjs`. |
+| `vendor/three/` | three.js r128 (MIT), served from the site. |
 | [`AGENTS.md`](AGENTS.md) | How the two coding agents on this repo work together: rules, file claims, shared conventions. |
 | [`DEPLOY.md`](DEPLOY.md) | Hosting on Cloudflare Pages. |
 
 ## Build and test
 
 ```bash
-npm install            # dev dependency only: occt-import-js, for the geometry tests
+npm install            # dev dependencies: occt-import-js and jolt-physics, for the tests and the page's vendor copies
 npm run build          # dev build  -> dist/index.html (open it, or serve dist/)
-npm test               # the whole suite: 556 tests
+npm test               # the whole suite
 npm run build:ship     # what Cloudflare Pages builds: comments and layout stripped
 ```
 
@@ -159,6 +167,11 @@ check the live build by comparing its `SIMBENCH_BUILD` hash with a local ship bu
   The follower uses the team's gains, but its feedforward is the bench's own, taken from the CAD's
   motors and wheels, and the localizer is perfect. Tuned `kS`/`kV`/`kA` values belong to one real
   robot's encoders and battery.
+- **Solved mechanisms are new.** Jolt's motor model is checked against hand-worked answers, not
+  yet against a real arm on a scale. Rotor inertia is a typical goBILDA figure, not each motor's.
+- **Online matches don't run in lockstep yet.** The rooms, the ledger and determinism are built
+  and tested; matches still send poses, with the host running the rest.
+- **The Fusion exporter hasn't been run in Fusion.** It's written against the API reference.
 - **Shipped code can be read.** The ship build strips comments, which is not encryption. Nothing
   secret belongs in a browser bundle.
 
