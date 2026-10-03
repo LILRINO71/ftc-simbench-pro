@@ -139,6 +139,18 @@ test('ship build: the string-table pass is still the same engine', () => {
   assert.deepEqual(digest(loadWithField(hidden)), plain);
 });
 
+/* The bundle starts with "use strict";. The string pass used to hide that in
+   the table and put its prelude first, so a --strings build ran sloppy. */
+test('string table: a leading "use strict" stays a directive', () => {
+  const src = '"use strict";\n// a comment\nreturn [(function () { return this === undefined; })(), "some string"];';
+  const h = minifyJS(src, { strings: true });
+  assert.ok(h.startsWith('"use strict";'), `the directive comes first: ${h.slice(0, 40)}`);
+  assert.ok(!h.includes('"some string"'), 'the other strings are still in the table');
+  assert.deepEqual(new Function(h)(), [true, 'some string'], 'strict mode holds');
+  assert.throws(() => new Function(minifyJS('"use strict";\nundeclaredName = 1;', { strings: true }))(), ReferenceError);
+  assert.ok(minifyJS(engineBundle(), { strings: true }).startsWith('"use strict";'), 'the engine bundle keeps its directive');
+});
+
 test('string table: a string before a ternary or case colon is hidden; an object key is not', () => {
   const src = 'function f(x){ const o = {\n "alpha": 1, "beta" : 2 }; switch(x){ case "gamma": return x ? "delta" : o["alpha"]; } return "epsilon"; }\nreturn f;';
   const h = minifyJS(src, { strings: true });
