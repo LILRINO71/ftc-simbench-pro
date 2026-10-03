@@ -2676,6 +2676,7 @@ const Session={
     const text=packSession(sessionFromBench({
       cad:CAD, code:CODE, java:e?e.source:"", opName:e?e.file:"", map:MAP, opts:OPTS,
       chassis:Sim.chassis, alliance:Shots.alliance, rig:exportRig(),
+      shots:{seed:Shots.seed, spreadScale:Shots.spreadScale, fired:Shots.fired, scored:Shots.scored, cfg:Shots.cfg},
       savedISO:new Date().toISOString(),
     }));
     download(this.name(),text,"application/json");
@@ -2697,18 +2698,29 @@ const Session={
         JOINTS.spec=JOINTS.report=JOINTS.devices=null; JOINTS.name=JOINTS.step=null;
         MATES.asm=MATES.features=MATES.name=MATES.report=null;
         loadCAD(cad,(cad.name||fileName)+" · from workspace","ok");
+        // the rig panel as it was saved (devices, hardware, drive base, setup), but not its
+        // joints: the workspace's own CAD carries those, and more exactly
+        if(s.rig&&applyRig(Object.assign({},s.rig,{joints:[]}))) saveRig();
       }
       // the file name if the workspace kept one, else what the OpMode calls itself
       if(s.java) addOpModeFromText(s.opName||((s.code&&s.code.opmode)||"Workspace").replace(/[^\w.-]+/g,"")+".java",s.java);
-      if(s.map&&Object.keys(s.map).length) { MAP=s.map; rebuild(); }
-      if(s.opts){ for(const k of ["payloadKg","duty","trust","front","baseModel","shooterModel","mu","physics"]) if(s.opts[k]!==undefined) OPTS[k]=s.opts[k]; syncOptionControls(); Physics.sync(); }
+      // mu and physics are null in a workspace that didn't say: the bench keeps its own
+      if(s.opts){ for(const k of ["payloadKg","duty","trust","front","baseModel","shooterModel","mu","physics"]) if(s.opts[k]!=null) OPTS[k]=s.opts[k]; syncOptionControls(); }
+      if(s.map&&Object.keys(s.map).length) MAP=s.map;
+      // the shooter as it was set up
+      if(s.shots){
+        const S=s.shots; if(S.cfg) Shots.cfg=Object.assign(Shots.defaults(),S.cfg);
+        Shots.seed=S.seed; Shots.spreadScale=S.spreadScale; Shots.fired=S.fired; Shots.scored=S.scored;
+        shotChanged();
+      }
+      rebuild(); Physics.sync();                       // the simulation on all of the above
       if(s.alliance) setAlliance(s.alliance,false);
       if(s.chassis&&isFinite(s.chassis.x)){
         Sim.chassis={x:s.chassis.x,y:s.chassis.y,h:s.chassis.h||0};
         if(Field.ok&&Sim.footprint) Field.collide(Sim.chassis,Sim.footprint,Sim.obstacles);
         OPTS.startPose=Object.assign({},Sim.chassis);
       }
-      this.toast("opened "+(fileName||"workspace")+(s.saved?" · saved "+String(s.saved).slice(0,10):""));
+      this.toast("opened "+(fileName||"workspace")+(s.savedISO?" · saved "+String(s.savedISO).slice(0,10):""));
     }catch(e){ this.toast("that workspace didn't load — "+e.message); }
   },
   toast(msg){
