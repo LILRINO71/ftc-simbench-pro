@@ -111,6 +111,9 @@ const JoltMech=(function(){
     const st=new J.JoltSettings(); st.mMaxWorkerThreads=0; st.mObjectLayerPairFilter=pair; st.mBroadPhaseLayerInterface=bpi;
     st.mObjectVsBroadPhaseLayerFilter=new J.ObjectVsBroadPhaseLayerFilterTable(st.mBroadPhaseLayerInterface,1,st.mObjectLayerPairFilter,1);
     st.mMaxBodies=Math.max(64,mechs.length+8);
+    // nothing here collides: the default buffers (65536 pairs, 10240 contacts) would
+    // hold memory for nothing, and a lockstep match runs one world per robot
+    st.mMaxBodyPairs=256; st.mMaxContactConstraints=256;
     const jolt=new J.JoltInterface(st); J.destroy(st);
     const ps=jolt.GetPhysicsSystem(), bi=ps.GetBodyInterface();
     ps.SetGravity(V3(Array.isArray(o.gravity)?o.gravity:[0,0,-9.81]));
