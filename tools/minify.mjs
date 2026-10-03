@@ -19,9 +19,15 @@ const ID_START = /[A-Za-z_$]/;
 const ID_PART = /[A-Za-z0-9_$]/;
 
 /** JS -> tokens: {t, v} where t is ws|lc|bc|str|tmpl|regex|num|id|punc. */
-export function tokenize(src) {
+export function tokenize(src) { return lex(src, 0, false).out; }
+
+/* Tokens from `start`. Inside a template's ${…} (inTemplate) it stops at the
+   brace that closes the expression and returns that brace's index as `end`:
+   the expression is code like any other, with its own strings, regexes and
+   comments. */
+function lex(src, start, inTemplate) {
   const out = [];
-  let i = 0;
+  let i = start, depth = 0;
   const n = src.length;
   const last = () => { for (let k = out.length - 1; k >= 0; k--) { const t = out[k].t; if (t !== 'ws' && t !== 'lc' && t !== 'bc') return out[k]; } return null; };
 
@@ -69,9 +75,11 @@ export function tokenize(src) {
     let v = null;
     if (P4.includes(four)) v = four; else if (P3.includes(three)) v = three;
     else if (P2.includes(src.substr(i, 2))) v = src.substr(i, 2); else v = c;
+    if (inTemplate && v === '{') depth++;
+    else if (inTemplate && v === '}' && depth-- === 0) return { out, end: i };
     out.push({ t: 'punc', v }); i += v.length; continue;
   }
-  return out;
+  return { out, end: n };
 }
 
 function templateEnd(src, start) {
@@ -80,19 +88,9 @@ function templateEnd(src, start) {
     const c = src[i];
     if (c === '\\') { i += 2; continue; }
     if (c === '`') return i + 1;
-    if (c === '$' && src[i + 1] === '{') {           // nested expression: walk braces, strings and templates
-      let depth = 1; i += 2;
-      while (i < src.length && depth > 0) {
-        const d = src[i];
-        if (d === '\\') { i += 2; continue; }
-        if (d === '`') { i = templateEnd(src, i); continue; }
-        if (d === '"' || d === "'") { i++; while (i < src.length) { if (src[i] === '\\') i += 2; else if (src[i] === d) { i++; break; } else i++; } continue; }
-        if (d === '{') depth++;
-        if (d === '}') depth--;
-        i++;
-      }
-      continue;
-    }
+    // a ${…} expression is tokenized like the code around it, so a quote in a
+    // regex (/can't/) or a comment can't end it early or run it past its brace
+    if (c === '$' && src[i + 1] === '{') { i = lex(src, i + 2, true).end + 1; continue; }
     i++;
   }
   return src.length;
