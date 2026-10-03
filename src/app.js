@@ -1336,9 +1336,18 @@ function readText(file,cb,err){
   r.readAsText(file);
 }
 let LAST_STEP=null;                 // the dropped file's text, for the Up override and the exact geometry
+let STEP_READS=0;                       // STEP files being read right now
 function takeCAD(file){
   $("#cadStatus").textContent="reading "+file.name+" …"; $("#cadDrop").className="drop";
-  readText(file,text=>{ LAST_STEP={name:file.name, text}; parseAndLoad(); },m=>{ $("#cadStatus").textContent=m; });
+  STEP_READS++;
+  readText(file,text=>{
+    STEP_READS=Math.max(0,STEP_READS-1);
+    LAST_STEP={name:file.name, text};
+    // a joint spec dropped with this STEP (see takeMates) is this robot's, ahead of joints saved for it before
+    const P=JOINTS.pending; JOINTS.pending=null;
+    if(P){ MATES.asm=MATES.features=MATES.name=MATES.report=null; JOINTS.spec=P.spec; JOINTS.name=P.name; JOINTS.step=JOINTS.dropped=file.name; }
+    parseAndLoad();
+  },m=>{ STEP_READS=Math.max(0,STEP_READS-1); if(!STEP_READS) JOINTS.pending=null; $("#cadStatus").textContent=m; });
 }
 /* A robot read whole from Onshape (src/onshapelink.js, src/onshapecad.js), built
    again off the page: the first time from the link (ImportFlow.fromLink), and
@@ -1380,8 +1389,9 @@ function parseAndLoad(done){
       cad.name=name;
       // a joint spec belongs to the file it was written for; another robot drops it
       if(JOINTS.spec&&JOINTS.step!==name){ JOINTS.spec=JOINTS.report=JOINTS.devices=null; JOINTS.name=JOINTS.step=null; }
-      // joints fixed by hand for this file before, in this browser
-      const mine=savedJoints(name);
+      // joints fixed by hand for this file before, in this browser (unless a spec was just dropped with it)
+      const mine=JOINTS.dropped===name&&JOINTS.spec?null:savedJoints(name);
+      JOINTS.dropped=null;
       if(mine&&(!JOINTS.spec||!JOINTS.spec.edited)){ JOINTS.spec=mine; JOINTS.step=name; JOINTS.name="your joints"; }
       loadCAD(cad, (LAST_STEP.label||name+" · "+mb+" MB")+" · "+cad.mechs.length+" mechanism"+(cad.mechs.length===1?"":"s"), cad.mechs.length?"ok":"bad");
       if(JOINTS.spec) applyJoints();
@@ -1503,7 +1513,8 @@ function takeRobotConfig(file){ readText(file,text=>setRobotConfig(text,file.nam
    ============================================================ */
 const MATES={name:null, url:null, report:null};
 const ownRobot=()=>!!(LAST_STEP&&CAD&&LAST_STEP.name!==DEFAULT_ROBOT.step);
-const JOINTS={spec:null, name:null, step:null, report:null, devices:null};
+// pending: a spec that came while a STEP was still being read; dropped: the STEP it was given to
+const JOINTS={spec:null, name:null, step:null, report:null, devices:null, pending:null, dropped:null};
 /* a .json dropped anywhere: a saved Onshape read, a setup file, a joint sheet or a joint spec */
 function takeJson(file){
   readText(file,text=>{
@@ -1516,6 +1527,9 @@ function takeJson(file){
     if(j&&j.format===SETUP_FORMAT){ SetupUI.take(j,file.name); return; }
     if(j&&j.format===JOINT_SHEET_FORMAT){ ImportFlow.takeSheet(j,file.name); return; }
     if(j&&j.format===JOINT_SPEC_FORMAT){
+      // dropped together with its STEP, the small spec is read first: it waits for
+      // that robot (takeCAD), not the one on the bench, which would then drop it
+      if(STEP_READS>0){ JOINTS.pending={spec:j, name:file.name}; $("#mateStatus").textContent=file.name+" is waiting for its robot"; return; }
       MATES.name=MATES.url=MATES.report=null;
       JOINTS.spec=j; JOINTS.name=file.name; JOINTS.step=LAST_STEP?LAST_STEP.name:null;
       applyJoints(); return;
