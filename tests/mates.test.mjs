@@ -285,3 +285,74 @@ test('re-typing the mechanisms (as opening a session does) leaves mate joints al
   E.classifyMechs(cad.mechs);
   assert.deepEqual(cad.mechs.map((m) => [m.id, m.kind, m.parent]), before);
 });
+
+/* ---- what Onshape's URDF export and a part bolted to a moving part taught the body builder ---- */
+const jointsOf = (cad) => Object.fromEntries(cad.mechs.filter((j) => j.fromMate).map((j) => [j.id, j]));
+test('mates: Onshape\'s exported joint names (revolute_3, cylindrical_1_2) are default names, so the joint takes its body\'s name', () => {
+  for (const n of ['Revolute 3', 'revolute_3', 'cylindrical_1_2', 'Fastened 12', 'slider_4', 'Pin slot 1', 'pin_slot_2']) assert.ok(E.MATE_DEFAULT_NAME.test(n), n);
+  for (const n of ['lift', 'dof_arm', 'revolute arm', 'closing_revolute_5']) assert.ok(!E.MATE_DEFAULT_NAME.test(n), n);
+});
+
+test('mates: a part fastened to a moving part at the root rides it, it doesn\'t drag that part into the frame', () => {
+  // a camera bolted to the arm: in a URDF every link is a root-level occurrence, and the
+  // camera is the moving end of no mate. It must ride the arm, not pin the arm to the base.
+  const u = `<robot name="cam"><link name="base"><visual><geometry><box size="0.4 0.4 0.05"/></geometry></visual><inertial><mass value="5"/></inertial></link>
+    <link name="arm"><visual><origin xyz="0.15 0 0"/><geometry><box size="0.3 0.04 0.04"/></geometry></visual><inertial><mass value="0.5"/></inertial></link>
+    <link name="camera"><visual><geometry><box size="0.03 0.03 0.03"/></geometry></visual><inertial><mass value="0.05"/></inertial></link>
+    <joint name="arm" type="revolute"><parent link="base"/><child link="arm"/><origin xyz="0 0 0.1"/><axis xyz="0 1 0"/><limit lower="-1" upper="1"/></joint>
+    <joint name="cam_mount" type="fixed"><parent link="arm"/><child link="camera"/><origin xyz="0.3 0 0.03"/></joint></robot>`;
+  const cad = E.cadFromUrdf(u, {});
+  const J = jointsOf(cad);
+  assert.ok(J.arm, 'the arm turns: ' + cad.onshape.why.filter((w) => /ignored/.test(w)).join(' | '));
+  assert.deepEqual(cad.solids.filter((s) => s.mech === 'arm').map((s) => s.name).sort(), ['arm', 'camera']);
+});
+
+/* ---- the chassis when nothing is fixed, and still parts a path reaches late (review findings) ---- */
+const boxTri = (s) => { const [x, y, z] = s.map((v) => v / 2), V = [[-x, -y, -z], [x, -y, -z], [x, y, -z], [-x, y, -z], [-x, -y, z], [x, -y, z], [x, y, z], [-x, y, z]], T = [];
+  for (const [a, b, c, d] of [[0, 3, 2, 1], [4, 5, 6, 7], [0, 1, 5, 4], [1, 2, 6, 5], [2, 3, 7, 6], [3, 0, 4, 7]]) T.push(...V[a], ...V[b], ...V[c], ...V[a], ...V[c], ...V[d]); return T; };
+// an Onshape payload by hand: parts as boxes placed by translation, mates with a pivot and an axis in the world
+const asmPayload = (parts, mates) => {
+  const instances = [], occurrences = [], geom = {}, at = {};
+  parts.forEach((p, i) => {
+    const eid = 'E' + i; at[p.id] = p.at;
+    geom['T/m/MV/e/' + eid + '|default'] = { parts: { ['P' + i]: { name: p.name, tri: boxTri(p.size), color: null } }, mass: {} };
+    instances.push({ id: p.id, name: p.name, type: 'Part', suppressed: false, documentId: 'T', elementId: eid, configuration: 'default', documentMicroversion: 'MV', partId: 'P' + i });
+    occurrences.push({ path: [p.id], transform: [1, 0, 0, p.at[0], 0, 1, 0, p.at[1], 0, 0, 1, p.at[2], 0, 0, 0, 1], fixed: !!p.fixed, hidden: false });
+  });
+  const cs = (id, pivot, axis) => { const z = axis, x0 = Math.abs(z[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0], d = dot(x0, z), x = x0.map((v, k) => v - d * z[k]), L = Math.hypot(...x);
+    const xn = x.map((v) => v / L), y = [z[1] * xn[2] - z[2] * xn[1], z[2] * xn[0] - z[0] * xn[2], z[0] * xn[1] - z[1] * xn[0]];
+    return { origin: pivot.map((v, k) => v - at[id][k]), xAxis: xn, yAxis: y, zAxis: z }; };
+  const features = mates.map((m, i) => ({ id: 'M' + i, suppressed: false, featureType: 'mate', featureData: { name: m.name, mateType: m.type,
+    matedEntities: [{ matedOccurrence: [m.a], matedCS: cs(m.a, m.pivot || [0, 0, 0], m.axis || [0, 0, 1]) }, { matedOccurrence: [m.b], matedCS: cs(m.b, m.pivot || [0, 0, 0], m.axis || [0, 0, 1]) }] } }));
+  return { format: E.ONSHAPE_FORMAT, name: 'test', url: '', geom, notes: [], features: { features: [] },
+    asm: { rootAssembly: { documentId: 'T', elementId: 'EROOT', configuration: 'default', fullConfiguration: 'default', documentMicroversion: 'MV', instances, occurrences, features, patterns: [] }, subAssemblies: [], parts: [] } };
+};
+const solidsOf = (cad) => Object.fromEntries(cad.solids.map((s) => [s.name, s]));
+
+test('mates: a lift whose mount was never mated to the chassis still hangs off the chassis (still parts fold in one at a time)', () => {
+  const cad = E.cadFromOnshape(asmPayload([
+    { id: 'B', name: 'base', size: [0.4, 0.4, 0.05], at: [0, 0, 0], fixed: true },
+    { id: 'RM', name: 'railmount', size: [0.05, 0.05, 0.05], at: [0.3, 0, 0.05] },
+    { id: 'R', name: 'rail', size: [0.03, 0.03, 0.4], at: [0.3, 0, 0.25] },
+    { id: 'C', name: 'carriage', size: [0.06, 0.06, 0.06], at: [0.33, 0, 0.2] },
+    { id: 'K', name: 'bracket', size: [0.04, 0.04, 0.04], at: [0.38, 0, 0.2] }],
+  [{ name: 'Fastened 1', type: 'FASTENED', a: 'RM', b: 'R' }, { name: 'lift', type: 'SLIDER', a: 'R', b: 'C', pivot: [0.3, 0, 0.2], axis: [0, 0, 1] }, { name: 'Fastened 2', type: 'FASTENED', a: 'C', b: 'K' }]));
+  const J = jointsOf(cad), S = solidsOf(cad);
+  assert.ok(J.lift, 'the lift is a joint: ' + cad.onshape.why.filter((w) => /ignored|no mate path/.test(w)).join(' | '));
+  assert.equal(J.lift.kind, 'linear');
+  assert.equal(S.bracket.mech, 'lift');
+  assert.ok(!S.rail.mech && !S.railmount.mech, 'the rail and its mount are frame');
+});
+
+test('mates: with nothing fixed, the biggest body a mate touches is the chassis, so a camera on the arm does not make the arm the ground', () => {
+  const cad = E.cadFromOnshape(asmPayload([
+    { id: 'CH', name: 'chassis plate', size: [0.4, 0.4, 0.05], at: [0, 0, 0] },
+    { id: 'A', name: 'arm', size: [0.3, 0.04, 0.04], at: [0.15, 0, 0.1] },
+    { id: 'CAM', name: 'camera', size: [0.03, 0.03, 0.03], at: [0.3, 0, 0.14] }],
+  [{ name: 'arm', type: 'REVOLUTE', a: 'CH', b: 'A', pivot: [0, 0, 0.1], axis: [0, 1, 0] }, { name: 'Fastened 1', type: 'FASTENED', a: 'A', b: 'CAM' }]));
+  const J = jointsOf(cad), S = solidsOf(cad);
+  assert.ok(J.arm, Object.keys(J).join(','));
+  assert.equal(J.arm.parent, 'chassis');
+  assert.equal(S.camera.mech, 'arm');
+  assert.ok(!S['chassis plate'].mech);
+});

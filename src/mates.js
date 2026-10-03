@@ -33,7 +33,8 @@ function onshapeApiLinks(url){
 }
 
 const MATE_MOVING = {REVOLUTE:1, SLIDER:1, CYLINDRICAL:1, PIN_SLOT:1, PLANAR:1, BALL:1, PARALLEL:1};
-const MATE_DEFAULT_NAME = /^(revolute|slider|fastened|cylindrical|pin[ _]?slot|planar|ball|parallel|tangent|width)\s*\d*$/i;
+// Onshape's own mate names ("Revolute 3"), and the same as its URDF export writes them ("revolute_3", "cylindrical_1_2")
+const MATE_DEFAULT_NAME = /^(revolute|slider|fastened|cylindrical|pin[ _]?slot|planar|ball|parallel|tangent|width)[\s_]*\d*(?:_\d+)*$/i;
 
 /* ---- transforms, in the parser's convention: r = the local x, y, z axes in
    world coordinates, t = the origin; applied as x*v0 + y*v1 + z*v2 + t */
@@ -110,7 +111,7 @@ function parseOnshapeAssembly(json){
       if(f.featureType==="mate"){
         const ends=(d.matedEntities||[]).map(e=>({path:prefix.concat(e.matedOccurrence||[]), cs:osCS(e.matedCS)}));
         if(ends.length!==2){ why.push("mate \""+(d.name||f.id)+"\" has "+ends.length+" ends; skipped."); continue; }
-        const m={id, fid:f.id, name:d.name||String(d.mateType||"mate"), type:String(d.mateType||"").toUpperCase(), ends, limits:null};
+        const m={id, fid:f.id, name:d.name||String(d.mateType||"mate"), type:String(d.mateType||"").toUpperCase(), ends, limits:null, continuous:d.continuous===true};
         // some API versions carry the limits on the mate itself
         const L=d.limits||d.mateLimits;
         if(L) m.limits=L;
@@ -298,9 +299,17 @@ function applyOnshapeMates(cad,json,opts){
   const solidOf=i=>map.get(keys[i]);
   const movingEnd=new Set();
   for(const m of moving) for(const e of m.ends) for(const i of under(e.path)) movingEnd.add(i);
-  const frameSeed=keys.map((k,i)=>i).filter(i=>A.occ.get(keys[i]).fixed)
-    .concat(partsOf([]).filter(i=>!movingEnd.has(i)));
-  unionAll(frameSeed);
+  // A root-level part no moving mate touches is frame only if nothing it's fastened to
+  // moves either: a camera bolted to the arm rides the arm (Onshape's URDF export
+  // also puts a shapeless frame link for each subassembly at the root, fastened to
+  // whatever carries it). Of the bodies that hold such parts, the biggest is the
+  // ground when no part is fixed.
+  const fixedIdx=keys.map((k,i)=>i).filter(i=>A.occ.get(keys[i]).fixed);
+  const rootStill=partsOf([]).filter(i=>!movingEnd.has(i));
+  const movingBody=new Set([...movingEnd].map(i=>find(i)));
+  // parts no moving mate reaches, directly or through what they're fastened to, are frame
+  const loose=rootStill.filter(i=>!movingBody.has(find(i)));
+  unionAll(fixedIdx.concat(loose));
   // a part nothing mates to rides with the body its own subassembly is
   // attached by: the touched part there that's joined to something outside it
   for(const s of A.inst.values()) if(s.type==="Assembly"){
@@ -312,12 +321,36 @@ function applyOnshapeMates(cad,json,opts){
     const anchor=touchedIn.find(i=>outside.some(o=>find(o)===find(i)))??touchedIn[0];
     if(anchor!=null) for(const i of loose) union(anchor,i);
   }
+  const sizeIn=i=>{ const s=solidOf(i); return (s!=null&&cad.solids[s]?(cad.solids[s].size||0):0)+1e-6; };
   let ground;
-  if(frameSeed.length) ground=find(frameSeed[0]);
+  if(fixedIdx.length) ground=find(fixedIdx[0]);
   else{
-    const w=keys.map((k,i)=>i).find(i=>wheelIdx.includes(solidOf(i)));
-    ground=find(w!=null?w:0);
+    // the chassis: the biggest body a moving mate touches, over all its parts (the
+    // drivetrain with what's bolted to it, the rail a lift is fastened to); the loose
+    // parts ride it
+    const size=new Map(); keys.forEach((k,i)=>{ const b=find(i); size.set(b,(size.get(b)||0)+sizeIn(i)); });
+    const pool=[...movingBody];
+    if(pool.length) ground=pool.sort((a,b)=>(size.get(b)||0)-(size.get(a)||0))[0];
+    else if(loose.length) ground=find(loose[0]);
+    else{ const w=keys.map((k,i)=>i).find(i=>wheelIdx.includes(solidOf(i))); ground=find(w!=null?w:0); }
+    if(loose.length) union(ground,loose[0]);
   }
+  // A body of root-level still parts that no path of moving mates reaches from the
+  // chassis is chassis too (the right rail, when only the left one is mated). One a
+  // path does reach rides what moves it: a camera bolted to the arm stays on the arm,
+  // and Onshape's URDF export puts a shapeless frame link for each subassembly at the
+  // root, fastened to whatever carries it. Folding one in can open the path to the
+  // next (a lift whose mount was never mated to the chassis), so this repeats.
+  for(let pass=0;pass<=rootStill.length;pass++){
+    const adj=new Map(), link=(a,b)=>{ (adj.get(a)||adj.set(a,new Set()).get(a)).add(b); };
+    for(const m of moving){ const a=under(m.ends[0].path), b=under(m.ends[1].path); if(!a.length||!b.length) continue;
+      const ba=find(a[0]), bb=find(b[0]); if(ba!==bb){ link(ba,bb); link(bb,ba); } }
+    const g=find(ground), reach=new Set([g]), q=[g];
+    while(q.length){ const b=q.pop(); for(const n of adj.get(b)||[]) if(!reach.has(n)){ reach.add(n); q.push(n); } }
+    const i=rootStill.find(i=>!reach.has(find(i))); if(i==null) break;
+    union(ground,i);
+  }
+  ground=find(ground);
   const bodyOf=i=>find(i);
 
   // ---- joints: moving mates between two bodies, a tree out from the ground
@@ -447,6 +480,7 @@ function applyOnshapeMates(cad,json,opts){
       if(inv){ const a=lo; lo=Number.isFinite(hi)?-hi:hi; hi=Number.isFinite(a)?-a:a; }
       if(Number.isFinite(lo)||Number.isFinite(hi)) m.limits=[Number.isFinite(lo)?lo:null, Number.isFinite(hi)?hi:null];
     }
+    if(j.m.continuous) m.continuous=true;
     if(t==="CYLINDRICAL") why.push("\""+j.m.name+"\" is cylindrical (turns and slides); it's simulated as the turn.");
     if(t==="PIN_SLOT") why.push("\""+j.m.name+"\" is a pin-slot; it's simulated as the pin's turn.");
     if(kind==="fixed"){
