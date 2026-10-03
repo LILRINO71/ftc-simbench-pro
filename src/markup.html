@@ -286,11 +286,14 @@
         <div class="form2">
           <span>Chassis</span>
           <div class="seg" id="physSeg" title="How the drive base moves"><button data-phys="rigid">rigid body</button><button data-phys="kinematic">kinematic</button></div>
+          <span>Mechanisms</span>
+          <div class="seg" id="mechSeg" title="How arms, slides and claws move"><button data-mech="posed">posed</button><button data-mech="jolt">solved (Jolt)</button></div>
           <label for="muSlider">Tile grip μ</label>
           <div class="slide"><input type="range" id="muSlider" min="0.2" max="1.4" step="0.05" value="0.9"><span class="v" id="muVal">0.90</span></div>
         </div>
         <div class="mass-read" id="massRead"></div>
         <p class="hint">Rigid body: the CAD's mass, centre of mass and wheel grip, so it accelerates and slips like the build. Kinematic: instant and perfect.</p>
+        <p class="hint" id="mechNote">Posed: each joint goes where its motor's turns put it. Solved: Jolt Physics works out what the motors can actually do against gravity, the joints' limits, gears and linkages.</p>
       </div>
       <div class="sec" data-sec="cfgvars">
         <div class="sec-head"><h3>Config variables</h3><span class="pill" id="cfgVarPill">—</span></div>

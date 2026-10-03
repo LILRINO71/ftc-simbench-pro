@@ -332,5 +332,18 @@ const JoltMech=(function(){
       }
     }
   }
-  return {build, bodiesOf, deviceCommands, readBack, diagonalize, ROTOR};
+  /* Each turning joint's motor rotors as the joint feels them, before the world
+     exists: I_rotor x (gearbox ratio x the joint's own reduction)^2. */
+  function armatureOf(dev){
+    const arm={};
+    for(const name in dev){
+      const s=dev[name], m=s&&s.mech; if(!m||s.kind!=="motor") continue;
+      const lin=typeof normJointKind==="function"?normJointKind(m.kind)==="linear":/^(linear|prismatic|linear-slide)$/.test(m.kind);
+      if(lin) continue;
+      const N=((s.spec&&s.spec.ratio)||19.2)*(+m.gear>0?+m.gear:1);
+      arm[m.id]=(arm[m.id]||0)+ROTOR.motor*N*N;
+    }
+    return arm;
+  }
+  return {build, bodiesOf, deviceCommands, readBack, armatureOf, diagonalize, ROTOR};
 })();

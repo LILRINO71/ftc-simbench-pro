@@ -147,3 +147,12 @@ test('jolt: the bench\'s devices drive their joints and read their encoders back
   assert.ok(armature.arm > 0);
   w.destroy();
 });
+
+test('jolt: the rotors two motors put on one joint add up, through the gearbox squared', () => {
+  const m = { id: 'arm', kind: 'revolute-lift', gear: 2 };
+  const dev = { a: { kind: 'motor', mech: m, spec: { ratio: 50.9 } }, b: { kind: 'motor', mech: m, spec: { ratio: 50.9 } },
+    s: { kind: 'motor', mech: { id: 'lift', kind: 'linear' }, spec: { ratio: 19.2 } }, v: { kind: 'servo', mech: m, spec: {} } };
+  const a = E.JoltMech.armatureOf(dev);
+  assert.ok(Math.abs(a.arm - 2 * E.JoltMech.ROTOR.motor * (50.9 * 2) ** 2) < 1e-12);
+  assert.equal(a.lift, undefined, 'a slide\'s spool isn\'t a turning joint');
+});

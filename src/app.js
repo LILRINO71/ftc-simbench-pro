@@ -11,6 +11,7 @@ const store={
 };
 
 let CODE=null, CAD=null, MAP={}, FINDINGS=[], activePad=2;
+let JOLT=null;                     // Jolt Physics once loaded (Physics.loadJolt), for solved mechanisms
 const OPTS={payloadKg:0.180, duty:0.30, trust:"code", robotConfig:null, front:"+x", baseModel:"auto", shooterModel:"auto", shift:null};
 let IGNORED={};
 try{ IGNORED=JSON.parse(store.get("ftcbench.ignored","{}"))||{}; }catch(e){ IGNORED={}; }
@@ -3140,6 +3141,7 @@ const Physics={
   },
   sync(){
     $$("#physSeg button").forEach(b=>b.classList.toggle("on",b.dataset.phys===(OPTS.physics||"rigid")));
+    $$("#mechSeg button").forEach(b=>b.classList.toggle("on",b.dataset.mech===(OPTS.mechanisms==="jolt"?"jolt":"posed")));
     const mu=OPTS.mu==null?0.9:OPTS.mu;
     $("#muSlider").value=mu; $("#muVal").textContent=mu.toFixed(2);
     this.recompute();
@@ -3159,7 +3161,33 @@ const Physics={
       (p.confidence!=null&&!p.assumed)?`<span><i>mass confidence ${Math.round(p.confidence*100)} %</i></span>`:"",
     ].join(""));
   },
+  /* Jolt Physics for the mechanisms (src/joltmech.js): loaded the first time
+     it's chosen, from this site's own copy, else jsDelivr */
+  async loadJolt(){
+    if(typeof JOLT!=="undefined"&&JOLT) return JOLT;
+    if(!this.joltLoading) this.joltLoading=(async()=>{
+      const urls=[typeof SIMBENCH_VENDOR!=="undefined"&&SIMBENCH_VENDOR&&SIMBENCH_VENDOR.jolt, JOLT_LIB.cdn].filter(Boolean);
+      let last=null;
+      for(const u of urls){ try{ const mod=await import(u); JOLT=await mod.default(); return JOLT; }catch(e){ last=e; } }
+      throw last||new Error("no copy of Jolt Physics could be loaded");
+    })().catch(e=>{ this.joltLoading=null; throw e; });
+    return this.joltLoading;
+  },
+  async mechanisms(mode){
+    OPTS.mechanisms=mode==="jolt"?"jolt":"posed"; store.set("ftcbench.mechanisms",OPTS.mechanisms); this.sync();
+    const note=$("#mechNote");
+    if(OPTS.mechanisms==="jolt"){
+      if(note) note.textContent="Loading Jolt Physics …";
+      try{ await this.loadJolt(); }
+      catch(e){ OPTS.mechanisms="posed"; this.sync(); if(note) note.textContent="Jolt Physics couldn't load ("+String(e&&e.message||e)+"); the mechanisms stay posed."; return; }
+    }
+    reloadSim();
+    if(note) note.textContent=OPTS.mechanisms==="jolt"
+      ?(Sim.mechWorld?"Solved: Jolt Physics moves "+Sim.mechWorld.joints.size+" joint"+(Sim.mechWorld.joints.size===1?"":"s")+" with the CAD's masses, the motors' curves, the joints' limits and their gears and linkages."+(Sim.mechWorld.notes.length?" "+Sim.mechWorld.notes.join(" "):""):"Solved: Jolt Physics is ready; it runs once a robot and an OpMode are loaded.")
+      :"Posed: each joint goes where its motor's turns put it. Solved: Jolt Physics works out what the motors can actually do against gravity, the joints' limits, gears and linkages.";
+  },
   wire(){
+    $("#mechSeg").addEventListener("click",e=>{ const b=e.target.closest("button"); if(b) this.mechanisms(b.dataset.mech); });
     $("#physSeg").addEventListener("click",e=>{ const b=e.target.closest("button"); if(!b) return;
       OPTS.physics=b.dataset.phys; store.set("ftcbench.physics",OPTS.physics); this.sync(); reloadSim(); });
     $("#muSlider").addEventListener("input",e=>{ OPTS.mu=+e.target.value; $("#muVal").textContent=OPTS.mu.toFixed(2);
@@ -3236,6 +3264,8 @@ const MathTab={
 /* ---------- Pro boot ------------------------------------- */
 function proBoot(){
   OPTS.physics=store.get("ftcbench.physics","rigid")==="kinematic"?"kinematic":"rigid";
+  OPTS.mechanisms=store.get("ftcbench.mechanisms","posed")==="jolt"?"jolt":"posed";
+  if(OPTS.mechanisms==="jolt") setTimeout(()=>Physics.mechanisms("jolt"),0);   // loads Jolt, then reloads the sim with it
   OPTS.mu=+store.get("ftcbench.mu","0.9")||0.9;
   Status.wire(); Tour.wire(); GH.wire(); Physics.wire(); MathTab.wire();
   $("#sessionBtn").addEventListener("click",()=>Menu.open());
