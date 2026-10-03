@@ -185,3 +185,12 @@ test('package: the robot check calls a package made from mates exact, and a draf
   const draft = (await roundTrip(E.parseSTEP(fixture('robots/mecanum-zup.step')))).robot.cad;
   assert.equal(src(draft).sev, 'note', 'a draft is still asked about');
 });
+
+test('package: the robot check shows what the CAD leaves open as notes, never questions', async () => {
+  const cad = onshapeCad();
+  cad.mechs.find((m) => m.id === 'Claw').limits = null;
+  const R = E.checkRobot(cad, null, {}, {});
+  const n = R.items.find((i) => i.key === 'cad:no-limits:Claw');
+  assert.ok(n, R.items.map((i) => i.key).join());
+  assert.equal(n.sev, 'note');
+});

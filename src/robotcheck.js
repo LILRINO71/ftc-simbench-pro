@@ -83,6 +83,15 @@ const {checkRobot, setupAuto}=(function(){
     else put({key:"source", sev:"note", ask:"mates", text:(src==="spec"?"Joints were found from the geometry":"Joints are guessed from the assembly")+
       ". The Onshape bookmark or a URDF would make them exact."});
 
+    // what the CAD itself leaves open (src/simbot.js validateRobot): shown, never asked.
+    // Drafted joints are the source line above; devices are the lines below.
+    if(typeof validateRobot==="function"&&cad&&cad.mates&&(cad.mates.source==="onshape"||cad.mates.exact)){
+      for(const i of validateRobot(cad,{}).items){
+        if(i.code==="draft"||i.code==="no-device") continue;
+        put({key:"cad:"+i.code+(i.joint?":"+i.joint:""), sev:"note", joint:i.joint||undefined, text:i.text});
+      }
+    }
+
     // every device the code moves
     const driven=new Map();                          // joint id -> device
     for(const d of acts){
