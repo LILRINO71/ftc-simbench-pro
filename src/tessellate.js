@@ -13,7 +13,8 @@
    solid's mechanism: the arm's exact meshes swing with the arm. The matching
    is pure and tested in Node against the corpus; only Tess touches the DOM.
    ============================================================ */
-const OCCT_CDN="https://cdn.jsdelivr.net/npm/occt-import-js@0.0.23/dist/";
+// this site's own copy when the build shipped one (tools/build.mjs SIMBENCH_VENDOR), else jsDelivr
+const OCCT_CDN=(typeof SIMBENCH_VENDOR!=="undefined"&&SIMBENCH_VENDOR&&SIMBENCH_VENDOR.occt)||"https://cdn.jsdelivr.net/npm/occt-import-js@0.0.23/dist/";
 const OCCT_PARAMS={linearUnit:"meter", linearDeflectionType:"bounding_box_ratio", linearDeflection:0.001, angularDeflection:0.5};
 
 /* Which mechanism carries a point, the rule the view has always used: the
