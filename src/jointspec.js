@@ -153,11 +153,20 @@ const {applyJointSpec, jointSpecSelect, followQ, linkPin, sliderCrank, rodAngle,
     if(!spec||spec.format!==JOINT_SPEC_FORMAT) throw new Error("not a joint spec (format "+JOINT_SPEC_FORMAT+")");
     const joints=Array.isArray(spec.joints)?spec.joints:[];
     const ids=new Set(), why=[];
+    // part picks are a list of objects; checked before anything is changed
+    const picks=(list,who)=>{
+      if(list==null) return;
+      if(!Array.isArray(list)) throw new Error(who+": \"parts\" must be a list of part picks, like [{\"in\": \"Arm/\"}], not "+(typeof list==="object"?"an object":JSON.stringify(list).slice(0,60)));
+      for(const sel of list) if(!sel||typeof sel!=="object"||Array.isArray(sel))
+        throw new Error(who+": each part pick is an object, like {\"in\": \"Arm/\"} or {\"solid\": [3, 4]}, not "+JSON.stringify(sel).slice(0,60));
+    };
     for(const j of joints){
       if(!j||typeof j.id!=="string"||!j.id) throw new Error("every joint needs an id");
       if(ids.has(j.id)) throw new Error("two joints are called \""+j.id+"\"");
       ids.add(j.id);
+      picks(j.parts,"\""+j.id+"\"");
     }
+    for(const a of Array.isArray(spec.assign)?spec.assign:[]) picks(a&&a.parts,"the hand fix for \""+(a&&a.joint)+"\"");
     const info=partInfo(cad), solids=cad.solids||[];
     for(const s of solids) delete s.mech;         // a spec or mates applied before this one
     // parts: a later joint's pick wins, so a child can take parts out of its parent's

@@ -97,6 +97,19 @@ test('joint kinds: every name for a slide is a slide, in mm', () => {
   assert.ok(Math.abs(t.limits[1] - Math.PI / 2) < 1e-12);
 });
 
+test('a spec whose part picks are not a list says so, and leaves the robot as it was', () => {
+  const cad = E.parseSTEP(fixture('robots/nested.step'));
+  E.applyJointSpec(cad, { format: 'ftc-sim-bench.joints', joints: [{ id: 'all', kind: 'slider', parts: [{ z: [-1e6, 1e6] }] }] });
+  const before = cad.solids.map((s) => s.mech);
+  const bad = (spec, re) => assert.throws(() => E.applyJointSpec(cad, Object.assign({ format: 'ftc-sim-bench.joints' }, spec)),
+    (e) => !(e instanceof TypeError) && re.test(e.message), JSON.stringify(spec));
+  bad({ joints: [{ id: 'lift', kind: 'slider', parts: { in: 'Lift/' } }] }, /"lift".*"parts" must be a list/);
+  bad({ joints: [{ id: 'lift', kind: 'slider', parts: 'Lift/' }] }, /"lift".*"parts" must be a list/);
+  bad({ joints: [{ id: 'lift', kind: 'slider', parts: ['Lift/'] }] }, /"lift".*part pick/);
+  bad({ joints: [{ id: 'lift', kind: 'slider' }], assign: [{ joint: 'lift', parts: { solid: [1] } }] }, /hand fix.*"parts" must be a list/);
+  assert.deepEqual(cad.solids.map((s) => s.mech), before, 'nothing was changed by the spec that was refused');
+});
+
 test('the joint editor: any robot\'s joints become an editable spec, and hand fixes win', () => {
   const cad = E.parseSTEP(fixture('robots/nested.step'));
   // a robot with guessed joints: written down with its exact parts
