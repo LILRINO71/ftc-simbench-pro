@@ -182,6 +182,7 @@ const View={
     // hide click would redraw the old robot over this one
     if(this.exact&&this.exact.cad!==cad){ this.exact=null; this.exactG=[]; this.dropShapes(); this.shapeRes=null; this.spinWheels=[]; this.instHolder=null; }
     while(this.world.children.length){ const o=this.world.children[0]; this.world.remove(o); this.dispose(o); }
+    if(this.cad&&this.cad!==cad) this.dropColourMats();
     const bb=cad.bbox;
     // A canonical CAD (src/frame.js) already has its origin at the drivetrain
     // centre on the floor — the point the physics turns the robot about — so it
@@ -307,6 +308,14 @@ const View={
       polygonOffset:true, polygonOffsetFactor:1, polygonOffsetUnits:1});
     mat.userData.shared=true;
     return this._mats[key]=mat;
+  },
+  /* Another robot: the last one's colours go. The material caches are keyed by
+     colour, so without this every robot loaded added its palette for good (an
+     Onshape robot has one per part colour). The fixed finishes stay. */
+  dropColourMats(){
+    for(const k in this._mats||{}) this._mats[k].dispose();
+    this._mats={};
+    for(const k in this._rmat||{}) if(/^rgb:/.test(k)){ this._rmat[k].dispose(); delete this._rmat[k]; }
   },
   /* A shape meshed once (src/tessellate.js tessExpand) as GPU geometry: one
      draw group per run of faces in one colour, plus its edges. Shared by every
