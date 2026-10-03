@@ -171,6 +171,28 @@ function applyMateLimits(A,featuresJson){
   return n;
 }
 
+/* Where a moving mate was drawn, measured from its zero (where its two
+   connectors meet), the way its limits are: the child end against the parent
+   end, metres along the parent connector's z for a slider, radians
+   right-handed about it for a turn. 0 when an end has no placement. */
+function mateDrawnValue(m,parentEnd,occ){
+  const P=m.ends[parentEnd], C=m.ends[1-parentEnd];
+  const op=P&&occ.get(pathKey(P.path)), oc=C&&occ.get(pathKey(C.path));
+  if(!op||!oc) return 0;
+  const Wp=mMul(op.T,P.cs), Wc=mMul(oc.T,C.cs);
+  const d=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+  const n=Math.hypot(Wp.r[2][0],Wp.r[2][1],Wp.r[2][2]); if(!(n>1e-12)) return 0;
+  const z=Wp.r[2].map(v=>v/n);
+  let v;
+  if(m.type==="SLIDER") v=d([Wc.t[0]-Wp.t[0],Wc.t[1]-Wp.t[1],Wc.t[2]-Wp.t[2]],z);
+  else{
+    const flat=a=>{ const k=d(a,z); return [a[0]-k*z[0],a[1]-k*z[1],a[2]-k*z[2]]; };
+    const a=flat(Wp.r[0]), b=flat(Wc.r[0]);
+    v=Math.atan2(d([a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]],z),d(a,b));
+  }
+  return Number.isFinite(v)&&Math.abs(v)>1e-9?v:0;   // drawn at zero, to rounding
+}
+
 /* ---- Onshape part occurrences -> STEP solids, by placement.
    The STEP export and the API describe the same assembly in the same world
    frame, but a STEP export of a different level of the tree — or one wrapped
@@ -392,6 +414,12 @@ function applyOnshapeMates(cad,json,opts){
              fromMate:{name:j.m.name, type:t, id:j.m.fid}};
     if(j.m.limits){
       let lo=Array.isArray(j.m.limits)?j.m.limits[0]:mateQty(j.m.limits.min), hi=Array.isArray(j.m.limits)?j.m.limits[1]:mateQty(j.m.limits.max);
+      // Onshape counts a limit from the mate's zero, where its two connectors
+      // meet; the bench counts q from the pose the CAD was drawn in. A carriage
+      // drawn 100 mm up a 0-300 mm rail has 100 mm down and 200 mm up left.
+      const v0=mateDrawnValue(j.m,j.parentEnd,A.occ);
+      if(Number.isFinite(lo)) lo-=v0;
+      if(Number.isFinite(hi)) hi-=v0;
       // an axis turned round runs the same travel the other way
       if(inv){ const a=lo; lo=Number.isFinite(hi)?-hi:hi; hi=Number.isFinite(a)?-a:a; }
       if(Number.isFinite(lo)||Number.isFinite(hi)) m.limits=[Number.isFinite(lo)?lo:null, Number.isFinite(hi)?hi:null];
