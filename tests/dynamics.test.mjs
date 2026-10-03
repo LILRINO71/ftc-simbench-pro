@@ -161,6 +161,23 @@ test('a traction wheel has one friction circle: shoved sideways it slides at mu 
   }
 });
 
+test('a steady turn loads the outside wheels: load transfer comes from force / mass', () => {
+  // The acceleration kept for the next step's loads was d(v_body)/dt, which
+  // in a steady turn is zero (the speed only changes direction), so a tall
+  // robot cornering hard had the same load on every wheel.
+  const R = rig({ kg: 12, stallNm: 2.38, mu: 0.9, comZ: 0.25 });
+  let st = E.Dyn.reset(R);
+  for (let i = 0; i < 100; i++) st = E.Dyn.step(st, fwd, R, 0.02);
+  for (let i = 0; i < 75; i++) st = E.Dyn.step(st, [0.4, 1, 0.4, 1], R, 0.02);   // a steady left-hand arc
+  const a = st.omega * st.v.x;                                   // centripetal, m/s^2, to the left
+  assert.ok(a > 1.5, `cornering at ${a.toFixed(2)} m/s^2`);
+  const inside = st.loads[0] + st.loads[2], outside = st.loads[1] + st.loads[3];
+  assert.ok(outside > inside * 1.3, `outside (right) wheels ${outside.toFixed(1)} N, inside ${inside.toFixed(1)} N`);
+  // m a h / track moves from the inside pair to the outside pair
+  const want = 12 * a * 0.25 / 0.36, got = (outside - inside) / 2;
+  assert.ok(Math.abs(got - want) < 0.2 * want, `transfer ${got.toFixed(1)} N, m a h / t says ${want.toFixed(1)} N`);
+});
+
 test('a two-motor tank stands on the middle of each side, so it spins in place', () => {
   // the motor's wheel was whichever CAD wheel the pick landed on: the back
   // one, so with sideways grip the robot turned about its back axle

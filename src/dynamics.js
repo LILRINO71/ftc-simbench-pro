@@ -680,6 +680,10 @@ const Dyn = {
     al = dynClamp(dynFin(al), -DYN_DEFAULTS.omegaMax / dt, DYN_DEFAULTS.omegaMax / dt);
 
     let nvx = vx + dt * ax, nvy = vy + dt * ay, nom = om + dt * al;
+    // what the body really accelerates at, for next step's load transfer:
+    // force over mass. ax, ay above are d(v_body)/dt, which in a steady turn
+    // is zero (the velocity only rotates) though the robot leans outward.
+    const lx = dynClamp(dynFin(Fx / m), -aMax, aMax), ly = dynClamp(dynFin(Fy / m), -aMax, aMax);
 
     // ---- losses, as a decrement rather than a force: a robot that has
     // stopped must stay stopped, not jitter across the tile
@@ -722,7 +726,7 @@ const Dyn = {
     return {
       v: { x: nvx, y: nvy }, omega: nom,
       wheelOmega: wo, slip: slip, loads: loads, force: F, side: Gs,
-      accel: { x: ax, y: ay }, alpha: al,
+      accel: { x: lx, y: ly }, alpha: al,
       wrench: { fx: dynFin(Fx), fy: dynFin(Fy), tz: dynFin(Tz) }
     };
   }
