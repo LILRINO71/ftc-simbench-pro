@@ -420,5 +420,9 @@ function applyOnshapeMates(cad,json,opts){
   const drives=cad.mechs?cad.mechs.filter(m=>m.drive):[];
   cad.mechs=mechs.concat(drives);
   cad.mates={source:"onshape", joints:mechs.length, matched:map.size, parts:keys.length, loops:loops.length, why};
+  // the team's own word, in the mates' names (src/jointsheet.js): "motor armMotor", "servo claw" ...
+  // With one, the declared joints are the mechanisms and nothing is guessed
+  cad.sheet=null;
+  if(typeof sheetFromTags==="function"){ const tags=sheetFromTags(cad); if(tags) why.push(...applyJointSheet(cad,tags).why); }
   return cad.mates;
 }
