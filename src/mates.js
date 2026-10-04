@@ -246,15 +246,27 @@ function applyOnshapeMates(cad,json,opts){
   for(const g of A.groups) for(const o of g.occ) for(const i of under(o)) touched.add(i);
   const partsOf=prefix=>keys.map((k,i)=>i).filter(i=>{ const p=A.parts[i].path; return p.length===prefix.length+1&&pathKey(p.slice(0,-1))===pathKey(prefix); });
 
-  // the frame: fixed parts, and every root-level part that isn't the moving
-  // end of a mate — plates, rails, hubs and the parts bolted to them
+  // the frame: fixed parts, and every root-level part no mate touches at all —
+  // plates, rails, hubs dropped in and never mated. A part that is only fastened
+  // to others hangs with them: taking "not the moving end" as frame welded every
+  // plate of an arm (fastened to the hub on the motor's shaft) to the chassis, and
+  // the shaft's revolute was then "a mate between parts also fastened together".
   const wheelIdx=[];
   (cad.solids||[]).forEach((s,i)=>{ if(s.kind==="wheel"||/wheel/i.test(s.name||"")) wheelIdx.push(i); });
   const solidOf=i=>map.get(keys[i]);
   const movingEnd=new Set();
   for(const m of moving) for(const e of m.ends) for(const i of under(e.path)) movingEnd.add(i);
-  const frameSeed=keys.map((k,i)=>i).filter(i=>A.occ.get(keys[i]).fixed)
-    .concat(partsOf([]).filter(i=>!movingEnd.has(i)));
+  // The frame: the fixed parts, plus every root-level part no mate touches (dropped in and
+  // never mated: it rides along). With nothing fixed, the biggest root-level body as well.
+  // "Every root-level part that isn't the moving end of a mate" used to be frame too, which
+  // welded the plates of an arm (fastened to the hub on its motor's shaft) to the chassis.
+  const fixedIdx=keys.map((k,i)=>i).filter(i=>A.occ.get(keys[i]).fixed);
+  let frameSeed=fixedIdx.concat(partsOf([]).filter(i=>!touched.has(i)));
+  if(!fixedIdx.length){
+    const size=new Map(); for(const i of partsOf([])) if(touched.has(i)){ const b=find(i); size.set(b,(size.get(b)||0)+1); }
+    let big=null; for(const [b,c] of size) if(big==null||c>size.get(big)) big=b;
+    if(big!=null) frameSeed=frameSeed.concat(partsOf([]).filter(i=>find(i)===big));
+  }
   unionAll(frameSeed);
   // a part nothing mates to rides with the body its own subassembly is
   // attached by: the touched part there that's joined to something outside it
@@ -276,6 +288,11 @@ function applyOnshapeMates(cad,json,opts){
   const bodyOf=i=>find(i);
 
   // ---- joints: moving mates between two bodies, a tree out from the ground
+  // the joints with a real degree of freedom first: a planar, parallel or ball mate between two
+  // bodies (a guide, a loop closure) is walked last, so it is the one that closes a loop and the
+  // arm's revolute, not the plate it slides on, is the joint that moves it
+  const rank=m=>/^(REVOLUTE|SLIDER|CYLINDRICAL|PIN_SLOT)$/.test(m.type)?0:1;
+  moving.sort((a,b)=>rank(a)-rank(b));
   const edges=[];
   for(const m of moving){
     const a=under(m.ends[0].path), b=under(m.ends[1].path);

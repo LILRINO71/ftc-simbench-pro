@@ -208,6 +208,7 @@ const URDF2 = `<?xml version="1.0"?><robot name="reviver">
   <visual><origin xyz="-0.2 0 0.05"/><geometry><mesh filename="package://reviver/meshes/Bracket.glb"/></geometry></visual>
 </link>
 <link name="Arm_1"><visual><geometry><mesh filename="package://reviver/meshes/Arm.glb"/></geometry></visual><inertial><mass value="0.3"/></inertial></link>
+<link name="Arm_plate_1"><visual><geometry><mesh filename="package://reviver/meshes/Plate.glb"/></geometry></visual></link>
 <link name="Gear_1"><visual><geometry><mesh filename="package://reviver/meshes/Gear.glb"/></geometry></visual><inertial><mass value="0.000216"/></inertial></link>
 <link name="Race_1"><visual><geometry><mesh filename="package://reviver/meshes/Race.glb"/></geometry></visual></link>
 <link name="Plate_1"><visual><geometry><mesh filename="package://reviver/meshes/Plate.glb"/></geometry></visual></link>
@@ -216,6 +217,7 @@ const URDF2 = `<?xml version="1.0"?><robot name="reviver">
 <link name="Artifact_1"><visual><geometry><mesh filename="package://reviver/meshes/Ball.glb"/></geometry></visual><inertial><mass value="0.0005"/></inertial></link>
 <joint name="arm_pivot" type="continuous"><parent link="root"/><child link="Arm_1"/><origin xyz="0 0.1 0.3"/><axis xyz="1 0 0"/></joint>
 <joint name="gear_spin" type="continuous"><parent link="Arm_1"/><child link="Gear_1"/><origin xyz="0 0 0"/><axis xyz="1 0 0"/></joint>
+<joint name="fastened_arm_plate" type="fixed"><parent link="Arm_1"/><child link="Arm_plate_1"/><origin xyz="0 0.12 0"/></joint>
 <joint name="race_spin" type="continuous"><parent link="root"/><child link="Race_1"/><origin xyz="0.1 0.1 0.1"/><axis xyz="0 1 0"/></joint>
 <joint name="planar_1" type="prismatic"><parent link="root"/><child link="planar_1"/><origin xyz="0 -0.1 0.3"/><axis xyz="1 0 0"/><limit lower="-10000" upper="10000"/></joint>
 <joint name="planar_1_1" type="prismatic"><parent link="planar_1"/><child link="planar_1_1"/><axis xyz="0 1 0"/><limit lower="-10000" upper="10000"/></joint>
@@ -251,6 +253,8 @@ test('urdfRobot: every part of a many-part link is its own solid, and the link i
   assert.ok(root.every((s) => /^root\/root#\d$/.test(s.osPath)), 'each under the link: ' + root.map((s) => s.osPath));
   assert.equal(cad.mates.parts, cad.solids.length, 'every part is in the mate model');
   assert.ok(cad.mechs.find((m) => m.id === 'arm_pivot'), 'the arm joint landed');
+  // a plate fastened to the arm moves with the arm: it is not chassis just because it sits at the root level
+  assert.deepEqual(cad.solids.filter((s) => s.mech === 'arm_pivot').map((s) => s.link).sort(), ['Arm_1', 'Arm_plate_1'], 'the arm carries its plate');
   const ex = E.urdfExact(cad);
   assert.equal(ex.meshes.length, cad.solids.length, 'one placed mesh per part for the view');
 });
@@ -263,10 +267,10 @@ test('urdfRobot: a part hung off the root and sitting away from everything was n
   assert.ok(cad.bbox.max[0] < 0.5, 'and it no longer stretches the robot: ' + cad.bbox.max[0]);
 });
 
-test('urdfRobot: a planar mate written as two slides and a turn is held where it was drawn, not a joint', async () => {
+test('urdfRobot: a planar mate written as two slides and a turn is left free: not a joint, and not a fastening either', async () => {
   const { cad } = await E.urdfRobotFromZip(ZIP2(), 'reviver.zip');
   assert.equal(cad.urdf.collapsed, 2);
-  assert.ok(cad.onshape.why.some((w) => /1 of them planar or parallel mates, held/.test(w)), cad.onshape.why.join(' | '));
+  assert.ok(cad.onshape.why.some((w) => /1 of them planar or parallel mates or loop closures, left free/.test(w)), cad.onshape.why.join(' | '));
   assert.ok(!cad.mechs.some((m) => /planar/.test(m.id) && m.kind !== 'fixed'), 'no planar mechanism');
   assert.ok(cad.solids.some((s) => s.link === 'Plate_1'), 'the plate is still there');
 });

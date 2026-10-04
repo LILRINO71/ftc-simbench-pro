@@ -323,15 +323,17 @@ async function urdfRobot(text,files,name,opts){
       if(isTurn(jc.type)&&!isTurn(up.type)){ type=jc.type; }
       else if(isTurn(up.type)&&!isTurn(jc.type)){ type=up.type; axis=up.axis; lo=up.lo; hi=up.hi; }
       else if(isTurn(up.type)&&isTurn(jc.type)){ type=jc.type; }
-      else if(up.type==="prismatic"&&jc.type==="prismatic"){ type=par(up.axis,jc.axis)?"prismatic":"fixed"; }
+      else if(up.type==="prismatic"&&jc.type==="prismatic"){ type=par(up.axis,jc.axis)?"prismatic":"planar"; }
       else if(up.type==="fixed"){ type=jc.type; }
       else if(jc.type==="fixed"){ type=up.type; axis=up.axis; lo=up.lo; hi=up.hi; }
       else type="fixed";
       // the slide directions gathered along the chain: two that aren't parallel make it a planar or
-      // parallel mate (a part free to slide about a plane and turn), which is no mechanism — held as drawn
+      // parallel mate (a part free about a plane), or a loop closure written as free slides. No
+      // mechanism, but no fastening either: read as "fixed" it welded an arm to the chassis and
+      // the arm's real pivot was "a mate between parts also fastened together", ignored.
       const slides=(up.slides||[]).concat(up.type==="prismatic"?[up.axis]:[],jc.type==="prismatic"?[jc.axis]:[])
         .filter((a,i,arr)=>arr.findIndex(b=>par(a,b))===i);
-      if(slides.length>=2&&type!=="fixed"){ type="fixed"; held++; }
+      if((slides.length>=2||/loop_closure/i.test(up.name+" "+jc.name))&&type!=="planar"){ type="planar"; held++; }
       return {name:jc.name, type, parent:up.parent, child:jc.child, axis, lo, hi, mimic:jc.mimic||up.mimic, collapsed:true, slides};
     });
     J=J.filter(j=>j!==up&&!kids.includes(j)).concat(merged); collapsed++;
@@ -510,7 +512,7 @@ async function urdfRobot(text,files,name,opts){
   const why=[];
   if(missing.size) why.push(missing.size+" mesh file(s) named in the URDF weren't in the zip: "+[...missing].slice(0,5).join(", ")+(missing.size>5?" …":""));
   if(collapsed) why.push(collapsed+" connector link"+(collapsed===1?"":"s")+" (a planar or cylindrical mate written as a chain, a loop closure) folded into single joints"+
-    (held?"; "+held+" of them planar or parallel mates, held where they were drawn":"")+".");
+    (held?"; "+held+" of them planar or parallel mates or loop closures, left free (not a joint, not a fastening)":"")+".");
   why.push(shapes.length+" unique shapes placed "+solids.length+" times, thinned from "+(triBefore/1e6).toFixed(1)+" M to "+(triAfter/1e6).toFixed(2)+" M triangles.");
   if(stray.length) why.push(stray.length+" part"+(stray.length===1?" was":"s were")+" never mated to the robot and "+(stray.length===1?"sits":"sit")+" away from it (below the wheels, or off to one side, where "+(stray.length===1?"it was":"they were")+" inserted), so "+(stray.length===1?"it is":"they are")+" left off: "+[...new Set(stray)].slice(0,4).join(", ")+(new Set(stray).size>4?" …":"")+".");
   if(kgParts) why.push("Mass from the export: "+kgSum.toFixed(2)+" kg over "+kgParts+" of "+solids.length+" parts"+(kgParts<solids.length*0.7?" (parts with no material weigh nothing there; those are weighed by their shape instead)":"")+".");
