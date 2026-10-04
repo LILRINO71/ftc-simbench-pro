@@ -643,7 +643,7 @@ function onshapeAssembly(top, R) {
   ] } })) };
   return { assembly, features: features2, geom: onshapeGeom(top) };
 }
-/* What the bookmark fetches per part studio (src/onshapecad.js): each part's
+/* What the Onshape link reads per part studio (src/onshapelink.js): each part's
    triangles in its own frame, its colour and its mass, keyed the same way. */
 function primTris(b) {
   const T = [], push = (a, c, d) => { const A = fPt(b.F, a), B = fPt(b.F, c), C = fPt(b.F, d); T.push(...A, ...B, ...C); };

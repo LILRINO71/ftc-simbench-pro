@@ -155,16 +155,15 @@ test('what is not an Onshape assembly, or not this STEP, says so', () => {
   assert.throws(() => E.applyOnshapeMates(other, R.onshape.assembly), /line up/);
 });
 
-test('the URL box only ever builds links to onshape.com', () => {
-  const L = E.onshapeApiLinks('https://cad.onshape.com/documents/0123456789abcdef01234567/w/89abcdef0123456789abcdef/e/fedcba9876543210fedcba98');
-  assert.equal(L.def, 'https://cad.onshape.com/api/assemblies/d/0123456789abcdef01234567/w/89abcdef0123456789abcdef/e/fedcba9876543210fedcba98?includeMateFeatures=true&includeMateConnectors=true&includeNonSolids=false');
-  assert.ok(L.features.endsWith('/e/fedcba9876543210fedcba98/features'));
-  assert.ok(E.onshapeApiLinks('https://acme.onshape.com/documents/0123456789abcdef01234567/v/89abcdef0123456789abcdef/e/fedcba9876543210fedcba98'), 'company subdomains work');
+test('a pasted address is read only when it is an onshape.com assembly address', () => {
+  const r = E.onshapeRef('https://cad.onshape.com/documents/0123456789abcdef01234567/w/89abcdef0123456789abcdef/e/fedcba9876543210fedcba98?configuration=List_abc%3DSim#x');
+  assert.deepEqual(r, { host: 'https://cad.onshape.com', did: '0123456789abcdef01234567', wvm: 'w', wvmid: '89abcdef0123456789abcdef', eid: 'fedcba9876543210fedcba98', config: 'List_abc=Sim' });
+  assert.equal(E.onshapeRef('https://acme.onshape.com/documents/0123456789abcdef01234567/v/89abcdef0123456789abcdef/e/fedcba9876543210fedcba98').wvm, 'v', 'company subdomains and versions work');
   for (const bad of ['https://evil.com/documents/0123456789abcdef01234567/w/89abcdef0123456789abcdef/e/fedcba9876543210fedcba98',
     'https://cad.onshape.com.evil.com/documents/0123456789abcdef01234567/w/89abcdef0123456789abcdef/e/fedcba9876543210fedcba98',
     'http://cad.onshape.com/documents/0123456789abcdef01234567/w/89abcdef0123456789abcdef/e/fedcba9876543210fedcba98',
-    'javascript:alert(1)//onshape.com/documents/'])
-    assert.equal(E.onshapeApiLinks(bad), null, bad);
+    'https://cad.onshape.com/documents/0123456789abcdef01234567', 'javascript:alert(1)//onshape.com/documents/'])
+    assert.equal(E.onshapeRef(bad), null, bad);
 });
 
 test('the view draws a mate joint the way the sim stops it, and a cascade stage follows its leader', async () => {

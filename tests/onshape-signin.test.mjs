@@ -1,9 +1,7 @@
 // Sign in with Onshape (functions/onshape/[[path]].js and onshapeFromLink in
-// src/onshapelink.js). School Chromebooks block bookmarklets (their admins list
-// javascript: URLs as blocked: a click does nothing, a drop shows
-// about:blank#blocked), so the bookmark can't get a team's robot there. This is
-// the way that needs no bookmark: OAuth with Onshape through a small Pages
-// Function, then the page reads the same API calls through it.
+// src/onshapelink.js): the import route. Onshape's API answers no cross-site
+// call from a browser and the sign-in needs the app's secret, so a small Pages
+// Function does OAuth with Onshape and passes the robot reader's calls through.
 // Here Onshape (its OAuth server and its API) is a stand-in serving the
 // `mated` robot; the page side and the function run for real.
 import test from 'node:test';
@@ -108,7 +106,7 @@ async function onPage(b, f) {
   try { return await f(); } finally { g.fetch = was.fetch; Object.defineProperty(g, 'location', { value: was.location, configurable: true, writable: true }); }
 }
 
-test('sign in with Onshape: pasting the assembly\'s address brings the whole robot, no bookmark', async () => {
+test('sign in with Onshape: pasting the assembly\'s address brings the whole robot', async () => {
   const os = onshape(), b = browser(os);
   assert.deepEqual(await onPage(b, () => E.onshapeSignInState()), { ready: true, signedIn: false });
   const back = await b.signIn();
@@ -126,7 +124,7 @@ test('sign in with Onshape: pasting the assembly\'s address brings the whole rob
   assert.deepEqual(p.asm, R.onshape.assembly);
   assert.ok(os.calls.every((c) => c.auth === 'Bearer at-1'));
   assert.ok(said.some((t) => /part studios/.test(t)), 'progress for the pop-up');
-  // the same robot the bookmark brings: every part with its colour, every joint from a mate
+  // the whole robot: every part with its colour, every joint from a mate
   const cad = E.cadFromOnshape(p);
   assert.equal(cad.solids.length, R.truth.leafParts);
   assert.equal(cad.mechs.filter((m) => m.fromMate).length, R.truth.joints.length);
@@ -194,7 +192,7 @@ test('sign in with Onshape: a Part Studio link or a link that isn\'t Onshape\'s 
   assert.equal(E.onshapeRef('https://cad.onshape.com.evil.example/documents/' + D + '/w/' + W + '/e/' + EL), null);
 });
 
-test('sign in with Onshape: not switched on (no app secrets), the page falls back to the bookmark', async () => {
+test('sign in with Onshape: not switched on (no app secrets), the page says so and offers the export', async () => {
   const os = onshape(), b = browser(os, {});
   assert.deepEqual(await onPage(b, () => E.onshapeSignInState()), { ready: false, signedIn: false });
   assert.equal((await b.go('/onshape/login')).status, 501);

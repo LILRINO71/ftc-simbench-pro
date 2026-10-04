@@ -171,7 +171,9 @@ function isPlateShape(pts){
 function partMass(solid, opts){
   opts = opts || {};
   const pts = (solid && solid.pts) || [];
-  const vol = hullVolume(pts);
+  // the CAD's own volume when it came with the part (Onshape's mass properties, src/onshapecad.js):
+  // exact, where a hull of the sample points reads a channel as a solid box
+  const vol = (solid && Number.isFinite(solid.vol) && solid.vol > 0) ? solid.vol : hullVolume(pts);
   if(opts.vendor !== false){
     const v = vendorMassFor(solid, vol);
     // density here is the back-computed effective density, for display only
@@ -239,11 +241,14 @@ function inertiaOf(parts){
   for(const p of (parts||[])){
     if(!p) continue;
     const c = p.com || {}, b = p.box || {}, g = (v)=>Number.isFinite(+v) ? +v : 0;
+    // a part with its own tensor about its centre (Onshape's mass properties, row-major, 9 numbers) uses it instead of a box
+    const T = Array.isArray(p.I) && p.I.length === 9 && p.I.every(Number.isFinite) ? p.I : null;
     list.push({kg:(Number.isFinite(p.kg) && p.kg>0 ? p.kg : 0), x:g(c.x), y:g(c.y), z:g(c.z),
-               L:Math.max(0,g(b.L)), W:Math.max(0,g(b.W)), H:Math.max(0,g(b.H))});
+               L:Math.max(0,g(b.L)), W:Math.max(0,g(b.W)), H:Math.max(0,g(b.H)), T});
   }
   const I = {xx:0, yy:0, zz:0, xy:0, xz:0, yz:0};
   const products = {xy:0, xz:0, yz:0};
+  const own = {xy:0, xz:0, yz:0};                                     // the parts' own off-diagonals (already negated products)
   let M=0, cx=0, cy=0, cz=0;
   for(const p of list){ M+=p.kg; cx+=p.kg*p.x; cy+=p.kg*p.y; cz+=p.kg*p.z; }
   if(!(M>0)){
@@ -254,12 +259,19 @@ function inertiaOf(parts){
   cx/=M; cy/=M; cz/=M;
   for(const p of list){
     const m=p.kg, dx=p.x-cx, dy=p.y-cy, dz=p.z-cz;
-    I.xx += m/12*(p.W*p.W + p.H*p.H) + m*(dy*dy + dz*dz);
-    I.yy += m/12*(p.L*p.L + p.H*p.H) + m*(dx*dx + dz*dz);
-    I.zz += m/12*(p.L*p.L + p.W*p.W) + m*(dx*dx + dy*dy);
+    if(p.T){
+      I.xx += p.T[0] + m*(dy*dy + dz*dz);
+      I.yy += p.T[4] + m*(dx*dx + dz*dz);
+      I.zz += p.T[8] + m*(dx*dx + dy*dy);
+      own.xy += p.T[1]; own.xz += p.T[2]; own.yz += p.T[5];
+    } else {
+      I.xx += m/12*(p.W*p.W + p.H*p.H) + m*(dy*dy + dz*dz);
+      I.yy += m/12*(p.L*p.L + p.H*p.H) + m*(dx*dx + dz*dz);
+      I.zz += m/12*(p.L*p.L + p.W*p.W) + m*(dx*dx + dy*dy);
+    }
     products.xy += m*dx*dy; products.xz += m*dx*dz; products.yz += m*dy*dz;
   }
-  I.xy = -products.xy; I.xz = -products.xz; I.yz = -products.yz;
+  I.xy = own.xy - products.xy; I.xz = own.xz - products.xz; I.yz = own.yz - products.yz;
   for(const k in I) if(!Number.isFinite(I[k])) I[k]=0;
   for(const k in products) if(!Number.isFinite(products[k])) products[k]=0;
   return {I, products, kg:M, com:{x:cx, y:cy, z:cz}};
@@ -286,7 +298,13 @@ function massProps(cad, opts){
     if(!s) continue;
     const pm = partMass(s, opts), b = massBoxOf(s.pts || []);
     parts.push({name:s.name || "part", kg:pm.kg, how:pm.how});
-    items.push({kg:pm.kg, com:{x:b.c[0], y:b.c[1], z:b.c[2]}, box:{L:b.L, W:b.W, H:b.H}});
+    // Onshape's own centre of mass and tensor (src/onshapecad.js) when the part keeps the CAD's mass;
+    // a volume weighed at an implied density scales the tensor with it (same geometry, other density)
+    const exact = pm.how === "cad" && Array.isArray(s.com) && s.com.length === 3 && s.com.every(Number.isFinite);
+    const scale = exact && Number.isFinite(s.kg) && s.kg > 0 ? pm.kg/s.kg : 1;
+    const own = exact && Array.isArray(s.I) && s.I.length === 9 ? s.I.map(v => v*scale) : null;
+    items.push(exact ? {kg:pm.kg, com:{x:s.com[0], y:s.com[1], z:s.com[2]}, box:{L:own ? 0 : b.L, W:own ? 0 : b.W, H:own ? 0 : b.H}, I:own}
+                     : {kg:pm.kg, com:{x:b.c[0], y:b.c[1], z:b.c[2]}, box:{L:b.L, W:b.W, H:b.H}});
     if(pm.how === "vendor" || pm.how === "cad") vendorKg += pm.kg;
     const top = b.c[2] + b.H/2; if(top > zTop) zTop = top;
   }
