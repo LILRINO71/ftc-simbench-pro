@@ -1,6 +1,6 @@
 # tests/
 
-610 tests on Node's built-in runner (`node:test`). There's no browser, no mocks and no transpile
+628 tests on Node's built-in runner (`node:test`). There's no browser, no mocks and no transpile
 step: the tests run the same engine code that ships.
 
 ```bash
@@ -32,7 +32,7 @@ pure, to test how joints are drawn.
 | `anyrobot.test.mjs` | **"Will any robot work?"** 14 generated robots (every drivetrain, Y-up, inch units, offset origins, unnamed parts, 4-deep nesting, 1,500 parts) go through the whole engine. Each spins in place, and the true drivetrain centre must stay within 5 mm. |
 | `into-the-deep.test.mjs` | **The real robot**, end to end: the team's STEP, joint spec, TeleOp and Road Runner auto. The right parts ride each joint. Gamepad buttons move the lift, arm, linkage and claws the right amounts. The fixed linkage stays above the floor. The auto passes all 9 waypoints within 2 in, in order. |
 | `autorig.test.mjs` | **The automatic joint finder**, from geometry alone. On the real robot it finds all 9 driven joints on their true axis lines, both claw gears as followers, and both slides; no frame part moves; over 90% of the moving parts are found. On the 14 generated robots with no mechanisms it finds nothing. |
-| `onshapelink.test.mjs` | The **Send to SimBench** bookmark, run against a stand-in Onshape tab serving the `mated` robot's assembly: it asks for exactly the two API pages with the browser's own sign-in, and what it opens SimBench with unpacks to those documents and rebuilds the robot's joints. The minified ship build's bookmark works the same. A too-big assembly becomes one file; a non-assembly tab gets a message; a damaged or foreign link is refused. |
+| `onshapelink.test.mjs` | The **pasted Onshape link**, against a stand-in Onshape API serving the `mated` robot: the address read as copied (configuration included), each Part Studio read once with the browser's own cookies, every part a placed copy of one thinned shape, the mates the joints, each rigid link's mass, centre of mass and inertia tensor equal to its parts' summed by hand, a part with no material weighed by its volume, 429s retried, a Part Studio address refused, a payload checked as untrusted. `onshape-signin.test.mjs` runs the relay function itself (OAuth, the cookie, the pass-through, the edge cache). |
 | `robotcheck-mutations.test.mjs` | **Is the robot check enough?** GearGurus 7832's robot set up right must come back with nothing to ask; then 12 realistic set-up mistakes (a missing joint, a wrong axis, swapped servos, wrong units, a bad spool...) must each be caught by the check that names it. |
 | `wheels-composite.test.mjs` | **Wheels made of many parts**: unnamed plates and rollers found as one wheel, mecanum vs omni from the rollers' angle, each wheel's hand from its floor roller, an O pattern flagged, a flattened file, one wheel drawn and mirrored by its drive motors. |
 | `robot-setup.test.mjs` | **The robot setup's engine side**: a drive base set by numbers (mecanum, tank, X-drive) on a CAD with no wheels, clamped input, and moving the drive base's centre. |

@@ -11,10 +11,8 @@ that team's own robot and code, and that it never shows a wrong robot without sa
 pieces do that together:
 
 1. **Exact joints when they exist.** Onshape mates (`src/mates.js`) give exact axes, pivots,
-   limits and the parts each joint carries. The **Send to SimBench** bookmark
-   (`src/onshapelink.js`) brings them over in one click from the team's Onshape tab, using their
-   own sign-in. The robot travels inside the link, so nothing is uploaded, and no API key is needed.
-   There's still a by-hand way: two links to open while signed in, with the saved pages dropped back in.
+   limits and the parts each joint carries. The pasted assembly link (`src/onshapelink.js`) reads
+   them straight from Onshape with the team's own sign-in; the export zip carries the same mates.
 2. **A robot check against the team's own code** (`src/robotcheck.js`, the **Robot check** section
    of the Robot tab). Whatever the joints came from, it checks them against the OpMode:
    - every motor and servo the code moves drives a joint
@@ -81,14 +79,3 @@ names it:
 
 A mistake the check doesn't catch yet belongs in that table first, as a failing test.
 
-## The real-team test set
-
-[`research/realcad`](../research/realcad/README.md) lists eight CAD files real teams published on
-GitHub: FTC 8375's 2016 World Championship robot, FTC 8400's 2024 arm, a CENTERSTAGE deposit and
-intake, FTC 19234's INTO THE DEEP claw, FTC 30843's DECODE intake, and two drivebases.
-`fetch.mjs` downloads them outside the repo; `run.mjs` runs the parser, the finder and the robot
-check on each. It already found two bugs, both fixed:
-- a pinion driving two gears gave both followers the same name, so the joint list didn't load
-- joints that ended up with no parts
-
-`tests/autorig-zoo.test.mjs` now has a generated robot for the first bug.
