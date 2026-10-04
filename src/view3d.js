@@ -4,9 +4,13 @@
    on a drawn drive base when the CAD has no wheels of its own, with a
    drawn flywheel shooter when the code shoots and the CAD has none.
    ============================================================ */
-const FIELD_COL={tile:0x303336, seam:0x474b50, ground:0x0e0c09, alu:0xa9b0b8, rail:0x7c848d, poly:0xc9d8e3,
-  red:0xe0453c, blue:0x2f7dea, redTape:0xd8372f, blueTape:0x2a6ad8, pollen:0xf2c230, flower:0xe4e7ea,
-  arm:0x4a4f55, logo:0x1b1d20, honey:0xf2b230};
+/* Colours as they look on screen (sRGB; linearize() turns them into light once).
+   The venue floor and the sky come from the page's theme (View.applyTheme). */
+const FIELD_COL={tile:0x303336, seam:0x474b50, ground:0xc9cbd1, alu:0xb6bcc4, rail:0x8b929a, poly:0xd8e5ee,
+  red:0xe0453c, blue:0x2f7dea, redTape:0xd8372f, blueTape:0x2a6ad8, pollen:0xf2c230, flower:0xe9ecef,
+  arm:0x4f545a, logo:0x1b1d20, honey:0xf2b230};
+// the system's UI face for anything drawn on a canvas and shown in the scene
+const VIEW_FONT="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif";
 // the most triangles one material group of the robot gets edge lines for (see mkSolids)
 const VIEW_EDGE_TRIS=200000;
 const ROBOT_MAT={
@@ -58,11 +62,19 @@ const View={
     // a camera's colour pipeline: light adds up in linear space, then a filmic curve
     // keeps white parts in the sun from blowing out and the shadows from going black
     this.ren.outputEncoding=THREE.sRGBEncoding;
-    this.ren.toneMapping=THREE.ACESFilmicToneMapping; this.ren.toneMappingExposure=1.0;
+    // a touch over unity: the filmic curve takes a little off the midtones, and the
+    // field has to read bright with the page around it light
+    this.ren.toneMapping=THREE.ACESFilmicToneMapping; this.ren.toneMappingExposure=1.05;
     el.appendChild(this.ren.domElement);
     // after three.js's own handler (added first, so it runs first)
     this.ren.domElement.addEventListener("webglcontextrestored",()=>this.contextRestored());
-    this.hemi=new THREE.HemisphereLight(0xfff3dc,0x26221c,0.55); this.scene.add(this.hemi);
+    // sky and ground bounce, in the theme's colours (applyTheme sets them)
+    this.hemi=new THREE.HemisphereLight(0xffffff,0x888888,0.6); this.scene.add(this.hemi);
+    // the studio the robot reflects (envMap) is the soft light on everything else too:
+    // what has no reflection map of its own, the field's aluminium and plastic
+    // included, picks it up through the scene, so nothing is flat or black
+    const env=this.envMap(); if(env) this.scene.environment=env;
+    this.applyTheme();
     const sun=new THREE.DirectionalLight(0xfff1df,2.1); this.sun=sun;
     sun.position.set(-2.2,5.5,3.0); sun.castShadow=B.shadows>0;
     sun.shadow.mapSize.set(B.shadows||512,B.shadows||512);
@@ -80,6 +92,26 @@ const View={
     this.ray=new THREE.Raycaster();
     this.theta=-0.7; this.phi=1.15; this.rad=0.95; this.size=0.5;
     this.bind(); this.resize();
+  },
+  /* The venue takes the page's theme: the floor around the field is the page's
+     --vp-ground, so a light page has a light venue and a dark page a dim one,
+     and the light that floor bounces up follows it. The sky light stays the
+     same warm white either way, so the field is as bright in the dark theme as
+     in the light one; the tiles, the tape and the game pieces keep their real
+     colours. Called by the theme switch (src/app.js setTheme) and before the
+     field is built. */
+  applyTheme(){
+    let ground=FIELD_COL.ground;
+    try{
+      const v=getComputedStyle(document.documentElement).getPropertyValue("--vp-ground").trim();
+      if(/^#[0-9a-f]{6}$/i.test(v)) ground=parseInt(v.slice(1),16);
+    }catch(e){}
+    this.theme={ground};
+    if(this.hemi){ this.hemi.color.setHex(0xfff6e8).convertSRGBToLinear();
+      // the bounce never goes darker than a mid grey, or a dark venue would dim the robot's underside
+      const b=new THREE.Color(ground).convertSRGBToLinear(); b.r=Math.max(b.r,0.22); b.g=Math.max(b.g,0.22); b.b=Math.max(b.b,0.24); this.hemi.groundColor.copy(b); }
+    if(this.groundMat) this.groundMat.color.setHex(ground).convertSRGBToLinear();
+    return this.theme;
   },
   /* The machine, as the browser describes it: memory, cores, and the GPU's own
      name (asked of a throwaway WebGL context, so the real renderer can be built
@@ -258,6 +290,7 @@ const View={
     if(old){
       this._env=undefined; const env=this.envMap();
       for(const m of seen) if(m.isMaterial&&m.envMap===old){ m.envMap=env; m.needsUpdate=true; }
+      if(this.scene&&this.scene.environment===old) this.scene.environment=env;
     }
   },
   /* A studio to reflect: a dim room with a big overhead softbox and side
@@ -525,9 +558,11 @@ const View={
     g.computeVertexNormals(); g.computeBoundingBox(); g.computeBoundingSphere();
     return g;
   },
-  /* lit like the full robot's own materials (robotMat), so switching copies doesn't change how it looks */
+  /* lit like the full robot's own materials (robotMat), so switching copies doesn't
+     change how it looks: brushed metal, not a mirror. A mirror-bright copy reflected
+     the studio's lamps and read as a white blob on a Chromebook, which draws it. */
   liteMat(){ if(!this._liteMat){ const env=this.envMap(); this._liteMat=new THREE.MeshStandardMaterial({vertexColors:true, flatShading:true,
-      metalness:env?0.75:0.2, roughness:env?0.38:0.5, envMap:env||null, envMapIntensity:1.0}); this._liteMat.userData.shared=true; } return this._liteMat; },
+      metalness:env?0.55:0.2, roughness:env?0.46:0.5, envMap:env||null, envMapIntensity:0.75}); this._liteMat.userData.shared=true; } return this._liteMat; },
   /* drawn into the shadow map only */
   shadowMat(){ if(!this._shadowMat){ this._shadowMat=new THREE.MeshBasicMaterial({colorWrite:false, depthWrite:false}); this._shadowMat.userData.shared=true; } return this._shadowMat; },
   /* Which copy draws: the exact one up close, the light one in the driver's view
@@ -577,7 +612,7 @@ const View={
     const cv=document.createElement("canvas"); cv.width=512; cv.height=112;
     const c=cv.getContext("2d"); c.fillStyle=al==="red"?"rgba(196,52,44,.92)":"rgba(40,96,200,.92)";
     const r=40; c.beginPath(); c.moveTo(r,8); c.arcTo(504,8,504,104,r); c.arcTo(504,104,8,104,r); c.arcTo(8,104,8,8,r); c.arcTo(8,8,504,8,r); c.fill();
-    fitFont(c,text,440,60,24,"'Instrument Sans', Arial, sans-serif");
+    fitFont(c,text,440,60,24,VIEW_FONT);
     c.fillStyle="#fff"; c.textAlign="center"; c.textBaseline="middle"; c.fillText(text,256,60);
     const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(cv), depthWrite:false}));
     sp.scale.set(0.46,0.1,1); sp.renderOrder=6;
@@ -744,8 +779,25 @@ const View={
     g.add(new THREE.Mesh(tri,new THREE.MeshBasicMaterial({color:FIELD_COL.honey,transparent:true,opacity:0.75,side:THREE.DoubleSide})));
     const hb=new THREE.Mesh(new THREE.BoxGeometry(2*fp.hx,Math.max(0.1,fp.h),2*fp.hy),new THREE.MeshBasicMaterial({visible:false}));
     hb.position.set(ox,Math.max(0.1,fp.h)/2,-oy); g.add(hb);
+    // a soft dark pool under the chassis: the light a robot's underside keeps off
+    // the tiles. One quad that rides the chassis, so it costs nothing per frame and
+    // sits the robot on the floor on a Chromebook (tier 0) that draws no shadow map
+    const pool=new THREE.Mesh(new THREE.PlaneGeometry(2*fp.hx*1.5,2*fp.hy*1.5),this.poolMat());
+    pool.rotation.x=-Math.PI/2; pool.position.set(ox,0.0015,-oy); pool.renderOrder=-1; g.add(pool);
     this.hitBox=hb; this.footG=g; this.fpShown=fp.hx+"|"+fp.hy+"|"+fp.h+"|"+ox+"|"+oy;
     this.chassisG.add(g);
+  },
+  /* The pool's falloff, painted once and shared: dark in the middle, gone at the edge. */
+  poolMat(){
+    if(this._poolMat) return this._poolMat;
+    const N=128, cv=document.createElement("canvas"); cv.width=cv.height=N;
+    const c=cv.getContext("2d"), g=c.createRadialGradient(N/2,N/2,N*0.08,N/2,N/2,N/2);
+    g.addColorStop(0,"rgba(0,0,0,.55)"); g.addColorStop(0.45,"rgba(0,0,0,.3)"); g.addColorStop(1,"rgba(0,0,0,0)");
+    c.fillStyle=g; c.fillRect(0,0,N,N);
+    const t=new THREE.CanvasTexture(cv); t.userData={shared:true};
+    const m=new THREE.MeshBasicMaterial({map:t, transparent:true, opacity:0.8, depthWrite:false, polygonOffset:true, polygonOffsetFactor:-1, polygonOffsetUnits:-1});
+    m.userData.shared=true; m.userData.lin=true;             // black is black in any encoding
+    return this._poolMat=m;
   },
 
   /* A goBILDA-style mecanum base: frame rails, cross members, four motors,
@@ -849,15 +901,18 @@ const View={
   /* ---------------- the field ---------------- */
   buildPlainField(){
     const FIELD=3.6576, WALL=0.31;
-    const floor=new THREE.Mesh(new THREE.PlaneGeometry(FIELD,FIELD),this.mat(0x2b2d30,{roughness:0.96,metalness:0}));
+    const floor=new THREE.Mesh(new THREE.PlaneGeometry(FIELD,FIELD),this.mat(0x5a5e63,{roughness:0.92,metalness:0}));
     floor.rotation.x=-Math.PI/2; floor.position.y=-0.002; floor.receiveShadow=true; this.fieldG.add(floor);
-    const seams=new THREE.GridHelper(FIELD,6,0x484b50,0x484b50); this.fieldG.add(seams);
+    const seams=new THREE.GridHelper(FIELD,6,0x6d7178,0x6d7178); this.fieldG.add(seams);
     const wall=new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(FIELD,WALL,FIELD)),
-      new THREE.LineBasicMaterial({color:0x5d6066}));
+      new THREE.LineBasicMaterial({color:0x8b929a}));
     wall.position.y=WALL/2; this.fieldG.add(wall);
     this.fieldSize=FIELD;
   },
   mat(c,o){ o=o||{}; return new THREE.MeshStandardMaterial(Object.assign({color:c, roughness:0.62, metalness:0.1},o)); },
+  /* Moulded plastic: a matte body under a thin gloss, which is what a clear coat
+     is. The field's game pieces and the FLOWER rings are drawn with this. */
+  plastic(c,o){ o=o||{}; return new THREE.MeshPhysicalMaterial(Object.assign({color:c, roughness:0.42, metalness:0, clearcoat:0.3, clearcoatRoughness:0.4, envMapIntensity:0.7},o)); },
   /* The grey foam tiles, painted once: each tile a slightly different grey, the
      foam's fine grain, and a soft dark seam where two tiles meet (drawn into the
      texture, so it doesn't shimmer the way a thin line does) */
@@ -867,13 +922,13 @@ const View={
     const cuts=[-H].concat(seams.slice().sort((a,b)=>a-b),[H]);
     let seed=7; const rnd=()=>((seed=(seed*16807)%2147483647)/2147483647);
     for(let i=0;i<cuts.length-1;i++) for(let j=0;j<cuts.length-1;j++){
-      const g=Math.round(70+rnd()*9); c.fillStyle=`rgb(${g},${g+1},${g+3})`;
+      const g=Math.round(86+rnd()*9); c.fillStyle=`rgb(${g},${g+1},${g+3})`;
       c.fillRect(at(cuts[i]),at(cuts[j]),(cuts[i+1]-cuts[i])*k+1,(cuts[j+1]-cuts[j])*k+1); }
     // the foam's grain
     const img=c.getImageData(0,0,N,N), d=img.data;
     for(let p=0;p<d.length;p+=4){ const n=(rnd()-0.5)*7; d[p]+=n; d[p+1]+=n; d[p+2]+=n; }
     c.putImageData(img,0,0);
-    c.strokeStyle="rgba(18,19,22,0.55)"; c.lineWidth=Math.max(2,k*0.12);
+    c.strokeStyle="rgba(22,23,26,0.5)"; c.lineWidth=Math.max(2,k*0.12);
     for(const v of seams){ c.beginPath(); c.moveTo(at(v),0); c.lineTo(at(v),N); c.moveTo(0,at(v)); c.lineTo(N,at(v)); c.stroke(); }
     const t=new THREE.CanvasTexture(cv); t.encoding=THREE.sRGBEncoding;
     t.anisotropy=this.ren?Math.min(8,this.ren.capabilities.getMaxAnisotropy()):1;
@@ -901,27 +956,32 @@ const View={
     const c=kind==="nectar"?(color==="blue"?FIELD_COL.blue:FIELD_COL.red):FIELD_COL.pollen;
     const key=kind+"|"+c;
     this._ballGeo=this._ballGeo||{}; this._ballMat=this._ballMat||{};
-    if(!this._ballGeo[kind]){ this._ballGeo[kind]=new THREE.SphereGeometry(r,18,12); this._ballGeo[kind].userData.shared=true; }
-    if(!this._ballMat[key]){ this._ballMat[key]=this.mat(c,{roughness:0.5, map:this.ballTex(c)}); this._ballMat[key].userData.shared=true; }
+    // enough segments that the ball is round, not a faceted gem, up close in the robot's intake
+    if(!this._ballGeo[kind]){ this._ballGeo[kind]=new THREE.SphereGeometry(r,32,20); this._ballGeo[kind].userData.shared=true; }
+    if(!this._ballMat[key]){ this._ballMat[key]=this.plastic(c,{map:this.ballTex(c)}); this._ballMat[key].userData.shared=true; }
     const m=new THREE.Mesh(this._ballGeo[kind],this._ballMat[key]);
     m.castShadow=true; m.userData.ball=true;
     return m;
   },
   /* POLLEN and NECTAR are 26-hole pickleball shells: rows of dark holes on the
-     colour, so a ball that rolls or spins visibly does. */
+     colour, so a ball that rolls or spins visibly does. Each hole has a soft
+     rim, so the texture doesn't alias into a flicker as the ball turns. */
   ballTex(hex){
     this._ballTex=this._ballTex||{};
     if(this._ballTex[hex]) return this._ballTex[hex];
-    const cv=document.createElement("canvas"); cv.width=128; cv.height=64;
+    const W=256, H=128, cv=document.createElement("canvas"); cv.width=W; cv.height=H;
     const c=cv.getContext("2d");
-    c.fillStyle="#ffffff"; c.fillRect(0,0,128,64);
-    c.fillStyle="rgba(40,36,30,.78)";
+    c.fillStyle="#ffffff"; c.fillRect(0,0,W,H);
+    const hole=(x,y,w,h)=>{ const g=c.createRadialGradient(x,y,0,x,y,Math.max(w,h));
+      g.addColorStop(0,"rgba(38,34,28,.9)"); g.addColorStop(0.72,"rgba(38,34,28,.86)"); g.addColorStop(1,"rgba(38,34,28,0)");
+      c.fillStyle=g; c.beginPath(); c.ellipse(x,y,w,h,0,0,7); c.fill(); };
     // 26 holes: one at each pole, and four rings of six, each ring turned half a step from the last
-    c.fillRect(0,0,128,4); c.fillRect(0,60,128,4);
-    [54,18,-18,-54].forEach((lat,i)=>{ const y=32-lat/90*32, w=4/Math.cos(lat*Math.PI/180);
-      for(let k=0;k<6;k++){ const x=((k+(i%2)*0.5)/6)*128;
-        for(const xx of [x,x-128,x+128]){ c.beginPath(); c.ellipse(xx,y,w,3.6,0,0,7); c.fill(); } } });
+    c.fillStyle="rgba(38,34,28,.86)"; c.fillRect(0,0,W,8); c.fillRect(0,H-8,W,8);
+    [54,18,-18,-54].forEach((lat,i)=>{ const y=H/2-lat/90*(H/2), w=8/Math.cos(lat*Math.PI/180);
+      for(let k=0;k<6;k++){ const x=((k+(i%2)*0.5)/6)*W;
+        for(const xx of [x,x-W,x+W]) hole(xx,y,w,7.2); } });
     const t=new THREE.CanvasTexture(cv); t.userData={shared:true};
+    t.anisotropy=this.ren?Math.min(4,this.ren.capabilities.getMaxAnisotropy()):1;
     return this._ballTex[hex]=t;
   },
   /* Free what an object owns; geometry and materials shared between
@@ -936,7 +996,7 @@ const View={
   label(g,text,x,y,rot,w,color){
     const cv=document.createElement("canvas"); cv.width=512; cv.height=64;
     const ctx=cv.getContext("2d");
-    ctx.font="600 40px 'Barlow Semi Condensed', 'Arial Narrow', sans-serif";
+    ctx.font="600 38px "+VIEW_FONT;
     ctx.fillStyle=color||"#8a97a6"; ctx.textAlign="center"; ctx.textBaseline="middle";
     ctx.fillText(text,256,34);
     const tex=new THREE.CanvasTexture(cv);
@@ -950,8 +1010,12 @@ const View={
     const D=Field.data.field, F=D.field, H=F.half, g=this.fieldG, WH=F.wallHeight, WT=F.wallThickness||1;
     this.fieldSize=2*H*IN;
 
-    // venue floor, alliance areas, labels
-    const ground=new THREE.Mesh(new THREE.PlaneGeometry(60,60),this.mat(FIELD_COL.ground,{roughness:1,metalness:0}));
+    // venue floor (in the theme's colour), alliance areas, labels
+    const theme=this.theme||this.applyTheme();
+    this.groundMat=this.mat(0xffffff,{roughness:0.96,metalness:0,envMapIntensity:0.25}); this.groundMat.userData.lin=true;
+    this.groundMat.color.setHex(theme.ground).convertSRGBToLinear();
+    // far enough out that its edge never shows as a horizon from the driver's view
+    const ground=new THREE.Mesh(new THREE.PlaneGeometry(160,160),this.groundMat);
     ground.rotation.x=-Math.PI/2; ground.position.y=-0.004; ground.receiveShadow=true; g.add(ground);
     for(const al of ["red","blue"]){
       const a=D.allianceAreas[al], col=al==="red"?FIELD_COL.redTape:FIELD_COL.blueTape;
@@ -959,15 +1023,15 @@ const View={
       const edge=this.flat(col,0.8), outer=al==="red"?a.x0:a.x1;
       this.rect(g,a.x0,a.x1,a.y0,a.y0+2,edge,0.02); this.rect(g,a.x0,a.x1,a.y1-2,a.y1,edge,0.02);
       this.rect(g,Math.min(outer,outer-(al==="red"?-2:2)),Math.max(outer,outer-(al==="red"?-2:2)),a.y0,a.y1,edge,0.02);
-      this.label(g,al.toUpperCase()+" ALLIANCE",(al==="red"?-1:1)*(H+14),0,al==="red"?-Math.PI/2:Math.PI/2,40,al==="red"?"#e0746c":"#6e9ff0");
+      this.label(g,al.toUpperCase()+" ALLIANCE",(al==="red"?-1:1)*(H+14),0,al==="red"?-Math.PI/2:Math.PI/2,40,al==="red"?"#d9453a":"#2f6fd6");
       // the NECTAR tray each alliance starts with
-      this.box(g,[(al==="red"?-1:1)*(H+30),0,1],[5,20,2],this.mat(0x2a2926),true);
+      this.box(g,[(al==="red"?-1:1)*(H+30),0,1],[5,20,2],this.mat(0x3a3b3f,{roughness:0.7}),true);
       for(let i=0;i<5;i++){ const b=this.ball("nectar",al); b.position.copy(this.fv([(al==="red"?-1:1)*(H+30),-7.2+i*3.6,3.9])); b.userData.staged=true; g.add(b); }
     }
-    this.label(g,"AUDIENCE",0,-H-12,0,34,"#8f8672");
+    this.label(g,"AUDIENCE",0,-H-12,0,34,"#7d8188");
 
-    // foam tiles and their seams
-    const tiles=new THREE.Mesh(new THREE.PlaneGeometry(2*H*IN,2*H*IN),this.mat(0xffffff,{roughness:0.94,metalness:0,map:this.tileTexture(F.tileSeams||[],H)}));
+    // foam tiles and their seams: matte foam, with just enough of the room in it not to look painted on
+    const tiles=new THREE.Mesh(new THREE.PlaneGeometry(2*H*IN,2*H*IN),this.mat(0xffffff,{roughness:0.9,metalness:0,envMapIntensity:0.35,map:this.tileTexture(F.tileSeams||[],H)}));
     tiles.rotation.x=-Math.PI/2; tiles.receiveShadow=true; g.add(tiles);
     const sp=[], yS=0.001;
     for(const s of F.tileSeams||[]){
@@ -975,10 +1039,11 @@ const View={
     }
     void sp; void yS;                                   // the seams are painted into tileTexture()
 
-    // perimeter: polycarbonate panels on aluminium, a post at every seam
-    const poly=this.mat(FIELD_COL.poly,{transparent:true,opacity:0.13,roughness:0.15,depthWrite:false,side:THREE.DoubleSide});
-    const alu=this.mat(FIELD_COL.alu,{metalness:0.55,roughness:0.38});
-    const rail=this.mat(FIELD_COL.rail,{metalness:0.45,roughness:0.5});
+    // perimeter: polycarbonate panels on aluminium, a post at every seam. The metals
+    // are metal (they reflect the room, scene.environment); the panels are glass-smooth
+    const poly=this.mat(FIELD_COL.poly,{transparent:true,opacity:0.16,roughness:0.08,metalness:0,envMapIntensity:0.9,depthWrite:false,side:THREE.DoubleSide});
+    const alu=this.mat(FIELD_COL.alu,{metalness:0.85,roughness:0.3});
+    const rail=this.mat(FIELD_COL.rail,{metalness:0.7,roughness:0.38});
     const L=2*H+2*WT, o=H+WT/2;
     for(const w of [[0,o,L,WT],[0,-o,L,WT],[o,0,WT,2*H],[-o,0,WT,2*H]]){
       this.box(g,[w[0],w[1],WH/2],[w[2],w[3],WH],poly);
@@ -1006,7 +1071,7 @@ const View={
     }
 
     // FLOWERs: rings on four pipes, POLLEN stacked inside from the tile
-    const fm=this.mat(FIELD_COL.flower,{roughness:0.45});
+    const fm=this.plastic(FIELD_COL.flower,{roughness:0.38,clearcoat:0.2});
     for(const fl of D.flowers){
       const ax=[fl.x,fl.y], R=fl.openingDia/2+0.25;
       const ring=(z,r,tube)=>{ const t=new THREE.Mesh(new THREE.TorusGeometry(r*IN,tube*IN,8,28),fm);
@@ -1021,7 +1086,7 @@ const View={
     }
 
     // HIVE frame: two leaning A-frames joined by a crossbar
-    const fr=Field.model().frame, frame=this.mat(FIELD_COL.alu,{metalness:0.55,roughness:0.4});
+    const fr=Field.model().frame, frame=this.mat(FIELD_COL.alu,{metalness:0.85,roughness:0.32});
     for(const s of fr.legs) this.rod(g,s[0],s[1],fr.tubeRadius,frame,8);
     this.rod(g,fr.crossbar[0],fr.crossbar[1],fr.tubeRadius,frame,8);
     if(fr.cornerBlocks) for(const s of fr.cornerBlocks.segments) this.rod(g,s[0],s[1],fr.cornerBlocks.radius,frame,10);
@@ -1056,7 +1121,7 @@ const View={
       idx.push(0,1,2, 0,2,3, 0,3,4);
       const geo=new THREE.BufferGeometry();
       geo.setAttribute("position",new THREE.Float32BufferAttribute(pos,3)); geo.setIndex(idx); geo.computeVertexNormals();
-      const shell=new THREE.Mesh(geo,this.mat(col,{transparent:true,opacity:up?0.46:0.30,side:THREE.DoubleSide,depthWrite:false,roughness:0.35}));
+      const shell=new THREE.Mesh(geo,this.mat(col,{transparent:true,opacity:up?0.46:0.30,side:THREE.DoubleSide,depthWrite:false,roughness:0.3,metalness:0,envMapIntensity:0.6}));
       shell.castShadow=true; inner.add(shell);
       const lp=[]; const seg=(a,b)=>lp.push(v[a].x,v[a].y,v[a].z,v[b].x,v[b].y,v[b].z);
       for(let k=0;k<5;k++){ seg(k,(k+1)%5); seg(5+k,5+(k+1)%5); seg(k,5+k); }
@@ -1471,7 +1536,7 @@ const View={
     // "AI" on the bumpers, so nobody mistakes it for the team's robot
     const cv=document.createElement("canvas"); cv.width=256; cv.height=64;
     const c2=cv.getContext("2d"), text=b.label||"AI "+b.id.slice(2);
-    fitFont(c2,text,240,44,18,"'Barlow Semi Condensed', Arial, sans-serif");
+    fitFont(c2,text,240,44,18,VIEW_FONT);
     c2.fillStyle="#fff"; c2.textAlign="center"; c2.textBaseline="middle"; c2.fillText(text,128,34);
     const lab=new THREE.Mesh(new THREE.PlaneGeometry(0.2,0.05),new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(cv),transparent:true}));
     lab.position.set(0,0.06,W/2+0.001); g.add(lab);
