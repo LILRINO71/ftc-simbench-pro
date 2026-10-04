@@ -99,7 +99,7 @@ function autoMap(devices,mechs,opts){
     if(MAP_NOT_ACTUATOR.test(dev.type||"")||isDriveDevice(dev)) continue;
     acts.push(dev);
     // a joint tied to another by a gear, rack or cascade is driven through that one
-    for(const mech of mechs){ if(mech.couple) continue; const v=score(dev,mech); if(v>=45) pairs.push({dev:dev.name, mech:mech.id, v}); }
+    for(const mech of mechs){ if(mech.couple||mech.internal) continue; const v=score(dev,mech); if(v>=45) pairs.push({dev:dev.name, mech:mech.id, v}); }
   }
   pairs.sort((a,b)=>b.v-a.v);
   for(const p of pairs) if(map[p.dev]===null&&!used[p.mech]){ map[p.dev]=p.mech; used[p.mech]=p.dev; }

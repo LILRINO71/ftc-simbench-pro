@@ -67,7 +67,7 @@ const {checkRobot, setupAuto}=(function(){
     opts=opts||{};
     const items=[], put=o=>items.push(o);
     const S=(cad&&cad.solids)||[];
-    const mechs=((cad&&cad.mechs)||[]).filter(m=>!m.drive&&m.kind!=="fixed");
+    const mechs=((cad&&cad.mechs)||[]).filter(m=>!m.drive&&m.kind!=="fixed"&&!m.internal);   // internal: a shaft or bearing turn (src/bind.js), never a question
     const byId=new Map(mechs.map(m=>[m.id,m]));
     const label=m=>m.label||m.id;
     const devs=((code&&code.devices)||[]).filter(d=>/servo|dcmotor/i.test(d.type||""));
