@@ -45,32 +45,65 @@ const View={
     this.el=el;
     this.scene=new THREE.Scene();
     this.cam=new THREE.PerspectiveCamera(42,1,0.01,200);
-    this.ren=new THREE.WebGLRenderer({antialias:true});
+    this.ren=new THREE.WebGLRenderer({antialias:true, powerPreference:"high-performance", stencil:false});
     this.ren.setPixelRatio(Math.min(devicePixelRatio,2));
     this.ren.setClearColor(0x000000,0);
     this.ren.shadowMap.enabled=true;
-    this.ren.shadowMap.type=THREE.PCFSoftShadowMap;
+    this.ren.shadowMap.type=THREE.PCFShadowMap;            // PCFSoft is gone in r186; the sun's radius softens PCF
     // a camera's colour pipeline: light adds up in linear space, then a filmic curve
     // keeps white parts in the sun from blowing out and the shadows from going black
-    this.ren.outputEncoding=THREE.sRGBEncoding;
+    this.ren.outputColorSpace=THREE.SRGBColorSpace;
     this.ren.toneMapping=THREE.ACESFilmicToneMapping; this.ren.toneMappingExposure=1.0;
     el.appendChild(this.ren.domElement);
-    this.hemi=new THREE.HemisphereLight(0xfff3dc,0x26221c,0.55); this.scene.add(this.hemi);
-    const sun=new THREE.DirectionalLight(0xfff1df,2.1); this.sun=sun;
+    // light in physical units (three r155+): a bright hall, a warm key light, a cool fill
+    this.hemi=new THREE.HemisphereLight(0xfff3dc,0x3a362f,1.4); this.scene.add(this.hemi);
+    const sun=new THREE.DirectionalLight(0xfff1df,5.2); this.sun=sun;
     sun.position.set(-2.2,5.5,3.0); sun.castShadow=true;
     sun.shadow.mapSize.set(2048,2048);
     // the shadow box follows the robot (render()): 2048 pixels over 3.6 m instead of
     // the whole 6.4 m around the field, so the robot's own shadows come out crisp
     const sc=sun.shadow.camera; sc.left=-1.8; sc.right=1.8; sc.top=1.8; sc.bottom=-1.8; sc.near=1; sc.far=14;
-    sun.shadow.bias=-0.0003; sun.shadow.normalBias=0.015; sun.shadow.radius=3;
+    sun.shadow.bias=-0.0003; sun.shadow.normalBias=0.02; sun.shadow.radius=4;
     this.sunOff=sun.position.clone();
     this.scene.add(sun); this.scene.add(sun.target);
     // a cool fill from the other side: what the sun leaves in shade still shows its shape
-    const fill=new THREE.DirectionalLight(0xcfdcff,0.55); fill.position.set(2.6,2.4,-2.8); this.scene.add(fill); this.fill=fill;
+    const fill=new THREE.DirectionalLight(0xcfdcff,1.5); fill.position.set(2.6,2.4,-2.8); this.scene.add(fill); this.fill=fill;
+    // everything reflects the same studio (envMap), so metal reads as metal
+    this.scene.environment=this.envMap()||null; this.scene.environmentIntensity=0.55;
     this.world=new THREE.Group(); this.scene.add(this.world);
     this.ray=new THREE.Raycaster();
     this.theta=-0.7; this.phi=1.15; this.rad=0.95; this.size=0.5;
+    this.post=this.makePost(); this.postOn=true;
     this.bind(); this.resize();
+  },
+  /* Post-processing: ambient occlusion (GTAO) grounds the robot on the tiles and
+     darkens the gaps between parts, the way Onshape's viewport does; SMAA
+     smooths the edges the MSAA buffer can't once a pass is in the chain. Off
+     when the add-ons didn't load, and off when the frame-rate watchdog says so. */
+  makePost(){
+    const A=typeof window!=="undefined"&&window.THREE_ADDONS; if(!A||!A.EffectComposer) return null;
+    try{
+      const mk=cam=>{
+        const c=new A.EffectComposer(this.ren);
+        const rp=new A.RenderPass(this.scene,cam); c.addPass(rp);
+        const ao=new A.GTAOPass(this.scene,cam,1,1); ao.output=A.GTAOPass.OUTPUT.Default; ao.blendIntensity=1;
+        ao.updateGtaoMaterial({radius:0.06, distanceExponent:1, thickness:0.02, scale:1, samples:12, distanceFallOff:1, screenSpaceRadius:false});
+        ao.updatePdMaterial({lumaPhi:10, depthPhi:2, normalPhi:3, radius:4, radiusExponent:1, rings:2, samples:16});
+        c.addPass(ao);
+        const smaa=new A.SMAAPass(); c.addPass(smaa);
+        c.addPass(new A.OutputPass());
+        return {c, rp, ao, smaa, cam};
+      };
+      return {mk, field:mk(this.cam), cad:null};
+    }catch(e){ console.warn("bench: post-processing off",e); return null; }
+  },
+  /* draw the scene through a camera: with the passes when they're on, plain when not */
+  draw(cam){
+    const P=this.post;
+    if(!P||!this.postOn||this.lowGfx){ this.ren.render(this.scene,cam); return; }
+    let S=cam===this.cam?P.field:P.cad;
+    if(!S||S.cam!==cam){ S=P.mk(cam); if(cam===this.cam) P.field=S; else P.cad=S; S.c.setSize(this.el.clientWidth||1,this.el.clientHeight||1); }
+    S.c.render();
   },
   /* Drag the robot to move it, shift- or right-drag to turn it; drag
      anywhere else to orbit, wheel to zoom. */
@@ -116,7 +149,8 @@ const View={
   },
   setCursor(k){ this.ren.domElement.style.cursor=k; },
   resize(){ const w=this.el.clientWidth,h=this.el.clientHeight; if(!w||!h) return;
-    this.cam.aspect=w/h; this.cam.updateProjectionMatrix(); this.ren.setSize(w,h,false); },
+    this.cam.aspect=w/h; this.cam.updateProjectionMatrix(); this.ren.setSize(w,h,false);
+    const P=this.post; if(P) for(const S of [P.field,P.cad]) if(S) S.c.setSize(w,h); },
   ndc(e){ const r=this.ren.domElement.getBoundingClientRect();
     return new THREE.Vector2(((e.clientX-r.left)/r.width)*2-1, -((e.clientY-r.top)/r.height)*2+1); },
   hitsRobot(e){
@@ -178,9 +212,10 @@ const View={
 
   robotMat(k){
     this._rmat=this._rmat||{};
-    // a part's own colour (a robot read from Onshape): "rgb:r,g,b" in 0..255
+    // a part's own colour (a robot read from Onshape): "rgb:r,g,b" in 0..255, as seen (sRGB)
     if(!this._rmat[k]&&/^rgb:/.test(k)){ const c=k.slice(4).split(",").map(Number), env=this.envMap();
-      const m=new THREE.MeshStandardMaterial({color:new THREE.Color(c[0]/255,c[1]/255,c[2]/255),metalness:0.3,roughness:0.55,envMap:env||null,envMapIntensity:0.7});
+      const col=new THREE.Color(c[0]/255,c[1]/255,c[2]/255); if(col.setRGB&&THREE.SRGBColorSpace) col.setRGB(c[0]/255,c[1]/255,c[2]/255,THREE.SRGBColorSpace);
+      const m=new THREE.MeshStandardMaterial({color:col,metalness:0.3,roughness:0.55,envMap:env||null,envMapIntensity:0.7});
       m.userData.shared=true; this._rmat[k]=m; return m; }
     if(!this._rmat[k]){ const m=new THREE.MeshStandardMaterial(Object.assign({},ROBOT_MAT[k]||ROBOT_MAT.metal));
       // the same room to reflect as the light copy (liteMat): without it a metal part
@@ -206,6 +241,9 @@ const View={
      believable highlights. Robot materials only; the field keeps its look. */
   envMap(){
     if(this._env!==undefined) return this._env;
+    // three's own studio room (RoomEnvironment) when the add-ons loaded: soft, even, believable
+    const A=typeof window!=="undefined"&&window.THREE_ADDONS;
+    if(A&&A.RoomEnvironment){ try{ const pm=new THREE.PMREMGenerator(this.ren); this._env=pm.fromScene(new A.RoomEnvironment(),0.04).texture; pm.dispose(); return this._env; }catch(e){} }
     try{
       const pm=new THREE.PMREMGenerator(this.ren), room=new THREE.Scene(), box=new THREE.BoxGeometry(1,1,1);
       const shell=new THREE.Mesh(box,new THREE.MeshBasicMaterial({color:0x5c6068, side:THREE.BackSide}));
@@ -449,10 +487,11 @@ const View={
   /* A light copy's segment as flat-shaded triangles in its palette colours. */
   liteGeo(s,pal){
     const nt=s.t.length/3, pos=new Float32Array(nt*9), col=new Float32Array(nt*9);
+    // vertex colours are linear light; the palette is as seen (sRGB)
     for(let f=0;f<nt;f++){ const c=pal[s.tc[f]]||pal[0];
       for(let k=0;k<3;k++){ const v=s.t[3*f+k], o=9*f+3*k;
         pos[o]=s.v[3*v]; pos[o+1]=s.v[3*v+1]; pos[o+2]=s.v[3*v+2];
-        col[o]=c[0]/255; col[o+1]=c[1]/255; col[o+2]=c[2]/255; } }
+        col[o]=toLin(c[0]/255); col[o+1]=toLin(c[1]/255); col[o+2]=toLin(c[2]/255); } }
     const g=new THREE.BufferGeometry();
     g.setAttribute("position",new THREE.BufferAttribute(pos,3)); g.setAttribute("color",new THREE.BufferAttribute(col,3));
     g.computeVertexNormals(); g.computeBoundingBox(); g.computeBoundingSphere();
@@ -510,9 +549,9 @@ const View={
     const cv=document.createElement("canvas"); cv.width=512; cv.height=112;
     const c=cv.getContext("2d"); c.fillStyle=al==="red"?"rgba(196,52,44,.92)":"rgba(40,96,200,.92)";
     const r=40; c.beginPath(); c.moveTo(r,8); c.arcTo(504,8,504,104,r); c.arcTo(504,104,8,104,r); c.arcTo(8,104,8,8,r); c.arcTo(8,8,504,8,r); c.fill();
-    fitFont(c,text,440,60,24,"'Instrument Sans', Arial, sans-serif");
+    fitFont(c,text,440,60,24,"Inter, -apple-system, system-ui, Arial, sans-serif");
     c.fillStyle="#fff"; c.textAlign="center"; c.textBaseline="middle"; c.fillText(text,256,60);
-    const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(cv), depthWrite:false}));
+    const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:srgbTex(new THREE.CanvasTexture(cv)), depthWrite:false}));
     sp.scale.set(0.46,0.1,1); sp.renderOrder=6;
     return sp;
   },
@@ -605,7 +644,7 @@ const View={
         const v=this.v3(list[i]);
         pos[i*3]=v.x; pos[i*3+1]=v.y; pos[i*3+2]=v.z;
         const t=0.62+0.5*Math.max(0,Math.min(1,(list[i][2]-zmin)/zspan));
-        col[i*3]=0.74*t; col[i*3+1]=0.72*t; col[i*3+2]=0.68*t;
+        col[i*3]=toLin(0.74*t); col[i*3+1]=toLin(0.72*t); col[i*3+2]=toLin(0.68*t);
       }
       const g=new THREE.BufferGeometry();
       g.setAttribute("position",new THREE.BufferAttribute(pos,3));
@@ -804,7 +843,7 @@ const View={
     c.putImageData(img,0,0);
     c.strokeStyle="rgba(18,19,22,0.55)"; c.lineWidth=Math.max(2,k*0.12);
     for(const v of seams){ c.beginPath(); c.moveTo(at(v),0); c.lineTo(at(v),N); c.moveTo(0,at(v)); c.lineTo(N,at(v)); c.stroke(); }
-    const t=new THREE.CanvasTexture(cv); t.encoding=THREE.sRGBEncoding;
+    const t=srgbTex(new THREE.CanvasTexture(cv));
     t.anisotropy=this.ren?Math.min(8,this.ren.capabilities.getMaxAnisotropy()):1;
     return t;
   },
@@ -850,7 +889,7 @@ const View={
     [54,18,-18,-54].forEach((lat,i)=>{ const y=32-lat/90*32, w=4/Math.cos(lat*Math.PI/180);
       for(let k=0;k<6;k++){ const x=((k+(i%2)*0.5)/6)*128;
         for(const xx of [x,x-128,x+128]){ c.beginPath(); c.ellipse(xx,y,w,3.6,0,0,7); c.fill(); } } });
-    const t=new THREE.CanvasTexture(cv); t.userData={shared:true};
+    const t=srgbTex(new THREE.CanvasTexture(cv)); t.userData={shared:true};
     return this._ballTex[hex]=t;
   },
   /* Free what an object owns; geometry and materials shared between
@@ -865,10 +904,10 @@ const View={
   label(g,text,x,y,rot,w,color){
     const cv=document.createElement("canvas"); cv.width=512; cv.height=64;
     const ctx=cv.getContext("2d");
-    ctx.font="600 40px 'Barlow Semi Condensed', 'Arial Narrow', sans-serif";
+    ctx.font="600 40px Inter, -apple-system, system-ui, 'Arial Narrow', sans-serif";
     ctx.fillStyle=color||"#8a97a6"; ctx.textAlign="center"; ctx.textBaseline="middle";
     ctx.fillText(text,256,34);
-    const tex=new THREE.CanvasTexture(cv);
+    const tex=srgbTex(new THREE.CanvasTexture(cv));
     const m=new THREE.Mesh(new THREE.PlaneGeometry(w*IN,w/8*IN),
       new THREE.MeshBasicMaterial({map:tex,transparent:true,depthWrite:false}));
     m.rotation.x=-Math.PI/2; m.rotation.z=rot||0;
@@ -1181,7 +1220,7 @@ const View={
       const step=f.step||SHOT_STEP_S, q=Math.max(0,Math.min(f.path.length-1,(f.t-0.03*k)/step)), a=f.path[Math.floor(q)], c=f.path[Math.min(f.path.length-1,Math.floor(q)+1)], u=q-Math.floor(q);
       m.position.copy(this.fv([a[0]+(c[0]-a[0])*u, a[1]+(c[1]-a[1])*u, a[2]+(c[2]-a[2])*u]));
       const sc=(f.kind==="nectar"?1.81:1.4)*IN*(1-k*0.17); m.scale.set(sc,sc,sc);
-      m.material.color.setHex(f.kind==="nectar"?(f.color==="blue"?0x6aa8ff:0xff7a5c):0xffe27a).convertSRGBToLinear(); m.material.opacity=0.42-k*0.09;
+      m.material.color.setHex(f.kind==="nectar"?(f.color==="blue"?0x6aa8ff:0xff7a5c):0xffe27a); m.material.opacity=0.42-k*0.09;
     });
   },
   /* Short effects: a puff where a ball leaves, a flash where one goes in. */
@@ -1300,7 +1339,7 @@ const View={
     }
     const tt=now/1000;
     this.markG.forEach((m,i)=>{ const k=marks[i]; m.visible=!!k; if(!k) return;
-      m.material.color.setHex(k.what==="shoot"?0xf0b54a:k.what==="defend"?0x6fd3e0:0xffffff).convertSRGBToLinear();
+      m.material.color.setHex(k.what==="shoot"?0xf0b54a:k.what==="defend"?0x6fd3e0:0xffffff);
       m.position.set(k.x,0.012,-k.y); const s=1+0.18*Math.sin(tt*5); m.scale.set(s,s,s); });
     // FLOWERs: the stack from the tile up
     Match.flowers.forEach((f,i)=>{
@@ -1396,9 +1435,9 @@ const View={
     // "AI" on the bumpers, so nobody mistakes it for the team's robot
     const cv=document.createElement("canvas"); cv.width=256; cv.height=64;
     const c2=cv.getContext("2d"), text=b.label||"AI "+b.id.slice(2);
-    fitFont(c2,text,240,44,18,"'Barlow Semi Condensed', Arial, sans-serif");
+    fitFont(c2,text,240,44,18,"Inter, -apple-system, system-ui, Arial, sans-serif");
     c2.fillStyle="#fff"; c2.textAlign="center"; c2.textBaseline="middle"; c2.fillText(text,128,34);
-    const lab=new THREE.Mesh(new THREE.PlaneGeometry(0.2,0.05),new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(cv),transparent:true}));
+    const lab=new THREE.Mesh(new THREE.PlaneGeometry(0.2,0.05),new THREE.MeshBasicMaterial({map:srgbTex(new THREE.CanvasTexture(cv)),transparent:true}));
     lab.position.set(0,0.06,W/2+0.001); g.add(lab);
     const lab2=lab.clone(); lab2.position.set(0,0.06,-W/2-0.001); lab2.rotation.y=Math.PI; g.add(lab2);
     // a stripe on the flywheel and the roller, so they're seen to spin
@@ -1459,30 +1498,17 @@ const View={
                           this.look.y+r*Math.cos(this.phi),
                           this.look.z+r*Math.sin(this.phi)*Math.sin(this.theta));
     this.cam.lookAt(this.look);
-    // colours were picked as they look on screen: make anything new linear, once
-    if(((this.linN=(this.linN||0)+1)%20)===1) linearize(this.scene);
     // the sun's shadow box rides along with what the camera looks at
     if(this.sun){ const L=this.look; this.sun.position.set(L.x+this.sunOff.x,this.sunOff.y,L.z+this.sunOff.z); this.sun.target.position.set(L.x,0,L.z); this.sun.target.updateMatrixWorld(); }
-    this.ren.render(this.scene,this.cam);
+    this.draw(this.cam);
   }
 };
-/* The renderer works in linear light and writes sRGB (View.init). Every colour
-   in this file, a part's colour from its CAD, and every canvas drawn for a label
-   were picked as they look on screen (sRGB): turn each into linear light once, so
-   the screen shows what was picked. Flags keep it to once per material/geometry. */
+/* The renderer works in linear light and writes sRGB (View.init). three's colour
+   management (r152+) turns every hex and string colour into linear light by
+   itself; what it can't know about are canvases drawn for labels (srgbTex says
+   what they are) and vertex colours (toLin converts them where they're built). */
 const toLin=c=>c<=0.04045?c/12.92:Math.pow((c+0.055)/1.055,2.4);
-function linearize(root){
-  root.traverse(o=>{
-    const ms=o.material?(Array.isArray(o.material)?o.material:[o.material]):[];
-    for(const m of ms){ if(!m||m.userData.lin) continue; m.userData.lin=true;
-      if(m.color) m.color.convertSRGBToLinear();
-      if(m.emissive) m.emissive.convertSRGBToLinear();
-      if(m.map&&m.map.encoding!==THREE.sRGBEncoding){ m.map.encoding=THREE.sRGBEncoding; m.map.needsUpdate=true; }
-      m.needsUpdate=true; }
-    const g=o.geometry, col=g&&g.attributes&&g.attributes.color;
-    if(col&&!g.userData.lin){ g.userData.lin=true; const a=col.array; for(let i=0;i<a.length;i++) a[i]=toLin(a[i]); col.needsUpdate=true; }
-  });
-}
+function srgbTex(t){ if(t&&THREE.SRGBColorSpace) t.colorSpace=THREE.SRGBColorSpace; return t; }
 /* The biggest bold font, from px down to min, that fits text in maxW on canvas context c. */
 function fitFont(c,text,maxW,px,min,family){
   c.font="700 "+px+"px "+family;

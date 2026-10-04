@@ -24,8 +24,16 @@ export const SITE = 'https://ftc-simbench-pro.pages.dev';
 // Concatenation order matters: later files use functions and constants the
 // earlier ones define. The engine never touches the DOM; only view3d and app do.
 export const ORDER = ['hardware', 'samples', 'step', 'hull', 'inertia', 'expr', 'jvm', 'jvmlib', 'jvmprelude', 'jvmrun', 'java', 'roadrunner', 'mapping', 'robotconfig',
-  'compare', 'analyze', 'drivetrain', 'frame', 'mates', 'onshapelink', 'onshapecad', 'urdf', 'jointspec', 'autorig-lib', 'autorig', 'robotcheck', 'dynamics', 'field', 'shots', 'match', 'robotlite', 'net', 'controllers', 'session', 'mathdoc',
-  'gitimport', 'onboarding', 'sim', 'tessellate', 'view3d', 'cadview', 'app'];
+  'compare', 'analyze', 'drivetrain', 'frame', 'mates', 'onshapelink', 'onshapecad', 'meshfiles', 'urdf', 'jointspec', 'autorig-lib', 'autorig', 'robotcheck', 'bind', 'dynamics', 'field', 'shots', 'match', 'robotlite', 'net', 'controllers', 'session', 'mathdoc',
+  'gitimport', 'onboarding', 'sim', 'tessellate', 'view3d', 'cadview', 'engineworker', 'importflow', 'app'];
+// The browser-side files: everything before them is the engine, which also ships on
+// its own as dist/engine.js for the background worker (src/engineworker.js).
+export const BROWSER = ['tessellate', 'view3d', 'cadview', 'engineworker', 'importflow', 'app'];
+// three.js, as an ES module from the CDN (no UMD build exists any more). The page
+// loads it with an import map, puts it on window.THREE with the add-ons the view
+// uses, and only then boots the app (src/app.js waits for "three-ready").
+export const THREE_VERSION = '0.186.1';
+export const THREE_CDN = `https://cdn.jsdelivr.net/npm/three@${THREE_VERSION}/`;
 
 const argv = process.argv.slice(2);
 const MIN = argv.includes('--min');
@@ -39,15 +47,20 @@ const missing = ORDER.filter((n) => !fs.existsSync(path.join(ROOT, 'src', n + '.
 if (missing.length && MIN) { console.error(`ship build refused: src/${missing.join('.js, src/')}.js missing`); process.exit(1); }
 if (missing.length) console.warn(`  ! dev build without: ${missing.join(', ')}`);
 const engine = ORDER.filter((n) => !missing.includes(n)).map((n) => `// ---- src/${n}.js ----\n${rd('src', n + '.js')}`).join('\n');
+const engineOnly = ORDER.filter((n) => !missing.includes(n) && !BROWSER.includes(n)).map((n) => `// ---- src/${n}.js ----\n${rd('src', n + '.js')}`).join('\n');
 const build = crypto.createHash('sha256').update(engine).digest('hex').slice(0, 8);
 const banner = `/*! FTC SimBench Pro ${pkg.version} (${build}) — Copyright (c) 2026 LILRINO71. All rights reserved.\n` +
   `    Proprietary. Not open source. Includes the BIOBUZZ Shot Sim (MIT, (c) 2026 LILRINO71). */\n`;
 
-let js = '"use strict";\n' + engine + `\nvar SIMBENCH_BUILD=${JSON.stringify({ v: pkg.version, build })};\n`;
+// the engine alone, for the worker that parses CAD off the page's thread. Its name
+// carries the build hash so a new deploy never runs an old worker from the cache.
+const ENGINE_FILE = `engine-${build}.js`;
+let js = '"use strict";\n' + `var SIMBENCH_ENGINE_URL=${JSON.stringify(ENGINE_FILE)};\n` + engine + `\nvar SIMBENCH_BUILD=${JSON.stringify({ v: pkg.version, build })};\n`;
+let engineJs = '"use strict";\n' + engineOnly + `\nvar SIMBENCH_BUILD=${JSON.stringify({ v: pkg.version, build })};\n`;
 let css = rd('src', 'styles.css');
 let markup = rd('src', 'markup.html');
-if (MIN) { js = banner + minifyJS(js, { strings: STRINGS }); css = minifyCSS(css); markup = minifyHTML(markup); }
-else js = banner + js;
+if (MIN) { js = banner + minifyJS(js, { strings: STRINGS }); engineJs = banner + minifyJS(engineJs, { strings: STRINGS }); css = minifyCSS(css); markup = minifyHTML(markup); }
+else { js = banner + js; engineJs = banner + engineJs; }
 
 // The BIOBUZZ Shot Sim engine and its measured field, vendored by tools/sync-shot-sim.mjs.
 // Its own script tag: it's a UMD module that sets window.ShotEngine.
@@ -65,10 +78,23 @@ const fragment = [
   `<meta name="description" content="${DESC}">`,
   '<link rel="preconnect" href="https://fonts.googleapis.com">',
   '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>',
-  '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Barlow+Semi+Condensed:wght@600;700&family=JetBrains+Mono:wght@400;500;700&display=swap">',
-  // set the saved theme before anything paints, so there's no light flash
-  `<script>try{document.documentElement.setAttribute("data-theme",localStorage.getItem("ftcbench.theme")==="light"?"light":"dark")}catch(e){document.documentElement.setAttribute("data-theme","dark")}</script>`,
-  '<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>',
+  '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">',
+  // the saved theme before anything paints, so there's no flash; light is the default
+  `<script>try{var t=localStorage.getItem("ftcbench.theme");document.documentElement.setAttribute("data-theme",t==="dark"?"dark":t==="light"?"light":(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"))}catch(e){document.documentElement.setAttribute("data-theme","light")}</script>`,
+  // three.js and the add-ons the view uses, as ES modules; the app boots on "three-ready"
+  `<script type="importmap">${JSON.stringify({ imports: { three: THREE_CDN + 'build/three.module.min.js', 'three/addons/': THREE_CDN + 'examples/jsm/' } })}</script>`,
+  `<script type="module">
+import * as THREE from "three";
+import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
+import { GTAOPass } from "three/addons/postprocessing/GTAOPass.js";
+import { SMAAPass } from "three/addons/postprocessing/SMAAPass.js";
+import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
+import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+window.THREE = THREE;
+window.THREE_ADDONS = { EffectComposer, RenderPass, GTAOPass, SMAAPass, OutputPass, RoomEnvironment };
+window.dispatchEvent(new Event("three-ready"));
+</script>`,
   `<style>\n${css}</style>`,
   markup,
   `<script>\n${safe(shotJs)}</script>`,
@@ -78,6 +104,9 @@ const fragment = [
 const DIST = path.join(ROOT, 'dist');
 fs.mkdirSync(DIST, { recursive: true });
 fs.writeFileSync(path.join(DIST, 'fragment.html'), fragment, 'utf8');
+// the engine for the worker; old hashes are left behind by each deploy's clean build
+for (const f of fs.readdirSync(DIST)) if (/^engine-[0-9a-f]{8}\.js$/.test(f) && f !== ENGINE_FILE) fs.unlinkSync(path.join(DIST, f));
+fs.writeFileSync(path.join(DIST, ENGINE_FILE), engineJs, 'utf8');
 
 const favicon = 'data:image/svg+xml,' + encodeURIComponent(
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">' +
@@ -128,10 +157,13 @@ fs.writeFileSync(path.join(DIST, '_headers'),
   `/index.html\n` +
   `  Cache-Control: public, max-age=0, must-revalidate\n` +
   `/\n` +
-  `  Cache-Control: public, max-age=0, must-revalidate\n`, 'utf8');
+  `  Cache-Control: public, max-age=0, must-revalidate\n` +
+  `/engine-*.js\n` +
+  `  Cache-Control: public, max-age=31536000, immutable\n`, 'utf8');
 
 const kb = (s) => (s.length / 1024).toFixed(0) + ' KB';
 console.log(`FTC SimBench Pro ${pkg.version} build ${build}${MIN ? (STRINGS ? ' [ship +strings]' : ' [ship]') : ' [dev]'}`);
 console.log(`  dist/index.html    ${kb(page)}   (js ${kb(js)}, css ${kb(css)})`);
+console.log(`  dist/${ENGINE_FILE}  ${kb(engineJs)}   (the engine, for the worker)`);
 console.log(`  dist/fragment.html ${kb(fragment)}`);
 console.log(`  dist/CNAME         ${DOMAIN}`);
