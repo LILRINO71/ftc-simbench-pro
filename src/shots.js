@@ -73,8 +73,12 @@ const Shots={
     const mode=(Sim.opts&&Sim.opts.shooterModel)||"auto";
     if(mode==="hide") return null;
     if(mode!=="show"){
-      if(this._ownCad!==Sim.cad){ this._ownCad=Sim.cad;
-        this._own=((Sim.cad&&Sim.cad.parts)||[]).some(p=>/fly ?wheel|shooter|launcher/i.test(p.name||"")); }
+      // a robot read whole from its CAD (Onshape, a URDF, a package) is the real robot,
+      // shooter and all: nothing is drawn in for it
+      const cad=Sim.cad;
+      if(cad&&(cad.source==="urdf"||cad.source==="onshape"||cad.source==="mjcf"||cad.source==="gltf"||(cad.mates&&cad.mates.exact))) return null;
+      if(this._ownCad!==cad){ this._ownCad=cad;
+        this._own=((cad&&cad.parts)||[]).some(p=>/fly ?wheel|shooter|launcher/i.test(p.name||"")); }
       if(this._own) return null;
     }
     const fp=Sim.footprint||{hx:0.2};

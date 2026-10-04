@@ -538,3 +538,28 @@ test('loop closures a parallel mate makes are dummies named after the mate: left
   assert.equal(cad.solids.length, 10);
   assert.equal(E.checkRobot(cad, E.parseJava('import com.qualcomm.robotcore.eventloop.opmode.*; @TeleOp public class T extends LinearOpMode { public void runOpMode(){ waitForStart(); } }'), {}, {}).items.filter((i) => i.ask === 'drop-joint').length, 0);
 });
+
+test('colours: Onshape\'s default greys are no colour (the bench draws the part by what it is, as for a STEP); a chosen colour stays', () => {
+  const grey = URDF.replace('<color rgba="0.5 0.5 0.5 1"/>', '<color rgba="0.85098 0.85098 0.85098 1"/>');
+  const cad = E.cadFromUrdf(grey, MESHES, {});
+  const S = byName(cad);
+  assert.equal(S.chassis.color, null, 'the chassis\' default grey is dropped');
+  assert.ok(S.plate.color === null, 'a 0.5 grey too');
+  assert.deepEqual(S['gobilda 1310 0016 4008'].color.map((v) => +v.toFixed(2)), [0.9, 0.6, 0.1], 'goBILDA yellow stays');
+  assert.deepEqual(S.arm.color.map((v) => +v.toFixed(2)), [0.3, 0.3, 0.9], 'a chosen blue stays');
+});
+
+test('shooter: a robot read whole from its CAD brings its own shooter, so no stand-in is drawn for it', () => {
+  const cad = E.cadFromUrdf(URDF, MESHES, {});
+  const Sim = E.Sim, Shots = E.Shots;
+  const saved = { cad: Sim.cad, opts: Sim.opts, cfg: Shots.cfg, footprint: Sim.footprint };
+  try {
+    Shots.cfg = { shooter: 'outtake', mountDeg: 0 }; Sim.opts = { shooterModel: 'auto' }; Sim.footprint = { hx: 0.2 };
+    Sim.cad = cad;
+    assert.equal(Shots.module(), null, 'an exported robot: nothing drawn in');
+    Sim.cad = { source: 'step', parts: [{ name: 'Channel' }], solids: [] };
+    assert.ok(Shots.module(), 'a STEP with no flywheel part still gets the stand-in');
+    Sim.cad = cad; Sim.opts = { shooterModel: 'show' };
+    assert.ok(Shots.module(), 'asked to show it, it is drawn');
+  } finally { Sim.cad = saved.cad; Sim.opts = saved.opts; Shots.cfg = saved.cfg; Sim.footprint = saved.footprint; }
+});

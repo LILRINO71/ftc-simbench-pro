@@ -475,6 +475,9 @@ function urdfToPayload(text,files,name,opts){
     let color=null, key=null, tri=null, volOf=null;
     const visuals=urdfKids(l,"visual");
     for(const v of visuals){ const mat=urdfKid(v,"material"); if(mat&&!color){ const c=urdfKid(mat,"color"); color=c?urdfNums(c.attrs.rgba,3,null):(materials[mat.attrs.name]||null); } }
+    // Onshape's default appearances are neutral greys: nobody chose them, so the bench's own
+    // materials draw the part (aluminium, steel, rubber by what it is), the way a STEP is drawn
+    if(color&&Math.abs(color[0]-color[1])<0.04&&Math.abs(color[1]-color[2])<0.04) color=null;
     const one=visuals.length===1?visuals[0]:null, oneG=one&&urdfKid(one,"geometry"), oneShape=oneG&&oneG.kids[0];
     if(oneShape&&oneShape.tag==="mesh"){
       // one mesh, placed one way, in one colour, is one shape however many links wear
