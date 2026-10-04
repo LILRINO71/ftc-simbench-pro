@@ -62,19 +62,22 @@ const Sim={
      drive wheel; everything it touched is put back. */
   probeSense(code){
     const W=this.drivetrain.wheels, vars=Object.assign({},this.vars), pad=this.pad, t=this.t;
-    const before={}; for(const n in this.dev){ const s=this.dev[n]; before[n]=[s.cmd,s.act,s.target,s.reversed,s.mode]; }
-    this.probing=true;
+    const pids=this.pids, sleptMs=this.sleptMs, imuZero=this.imuZero, rumble=this.onRumble, timers=Object.assign({},this.timers);
+    const before={}; for(const n in this.dev){ const s=this.dev[n]; before[n]=[s.cmd,s.act,s.target,s.reversed,s.mode,s.zpb,s.offset]; }
+    this.probing=true; this.onRumble=null;
     try{
-      this.pad={1:{left_stick_y:-1},2:{}};
+      this.pids=pids?JSON.parse(JSON.stringify(pids)):pids;
+      // both sticks up: a tank's right side reads the right stick
+      this.pad={1:{left_stick_y:-1, right_stick_y:-1},2:{}};
       this.exec(code.inits||[],this.env());
       this.exec(code.stmts||[],this.env());
       for(const w of W){ const s=this.dev[w.dev]; if(!s) continue; const v=(s.cmd||0)*(s.reversed?-1:1); if(Math.abs(v)>0.05) w.sense=v>0?1:-1; }
     }catch(e){}
     finally{
-      this.probing=false; this.pad=pad; this.t=t;
+      this.probing=false; this.onRumble=rumble; this.pad=pad; this.t=t; this.pids=pids; this.sleptMs=sleptMs; this.imuZero=imuZero; this.timers=timers;
       for(const k in this.vars) if(!(k in vars)) delete this.vars[k];
       Object.assign(this.vars,vars);
-      for(const n in before){ const s=this.dev[n]; if(!s) continue; [s.cmd,s.act,s.target,s.reversed,s.mode]=before[n]; }
+      for(const n in before){ const s=this.dev[n]; if(!s) continue; [s.cmd,s.act,s.target,s.reversed,s.mode,s.zpb,s.offset]=before[n]; }
     }
   },
   /* One device's state: what the code commands and what the mechanism does. */
@@ -672,7 +675,7 @@ function driveProbe(code,cad,map,opts){
   const P=Object.create(Sim);
   const o=Object.assign({},opts,{startPose:{x:0,y:0,h:0}});
   const push=pad=>{
-    P.load(code,cad,map,o); P.obstacles=[]; P.onRumble=null;
+    P.onRumble=null; P.load(code,cad,map,o); P.obstacles=[];
     P.init(); P.start(); P.pad={1:Object.assign({},pad),2:Object.assign({},pad)};
     for(let i=0;i<25;i++) P.tick(0.02);
     return {fwd:P.chassis.x, left:P.chassis.y, turn:P.chassis.h};

@@ -314,3 +314,40 @@ test('when the code and the CAD disagree on a motor, the bench follows the code 
   bench(SDK_JAVA, null, { cad: structuredClone(cad) });
   assert.deepEqual(E.Sim.rig.drive.disagree, []);
 });
+
+test('the stick-up probe pushes both sticks (a tank reads the right one), and leaves the sim as it found it: no PID state, no sleep, no rumble', () => {
+  const cad = E.parseSTEP(fixture('robots/mecanum-zup.step'));
+  const TANK = `
+@TeleOp(name = "tank")
+public class Tank extends LinearOpMode {
+    @Override
+    public void runOpMode() {
+        DcMotor leftFront = hardwareMap.get(DcMotor.class, "leftFront");
+        DcMotor leftBack = hardwareMap.get(DcMotor.class, "leftBack");
+        DcMotor rightFront = hardwareMap.get(DcMotor.class, "rightFront");
+        DcMotor rightBack = hardwareMap.get(DcMotor.class, "rightBack");
+        leftFront.setDirection(DcMotor.Direction.REVERSE);
+        leftBack.setDirection(DcMotor.Direction.REVERSE);
+        waitForStart();
+        while (opModeIsActive()) {
+            double l = -gamepad1.left_stick_y;
+            double r = -gamepad1.right_stick_y;
+            leftFront.setPower(l); leftBack.setPower(l);
+            rightFront.setPower(r); rightBack.setPower(r);
+            if (gamepad1.a) gamepad1.rumble(200);
+            sleep(20);
+        }
+    }
+}`;
+  let buzzed = 0; E.Sim.onRumble = () => { buzzed++; };
+  bench(TANK, null, { cad });
+  const rig = E.Sim.rig;
+  assert.ok(rig.drive.wheels.every((w) => w.mountFrom === 'code'), 'every wheel, right side too, has the code\'s sense: ' + rig.drive.wheels.map((w) => w.mountFrom));
+  assert.deepEqual(rig.drive.disagree, []);
+  assert.equal(buzzed, 0, 'the probe never buzzed the controller');
+  assert.ok(!(E.Sim.sleptMs > 0), 'no sleep is counted before START: ' + E.Sim.sleptMs);
+  assert.ok(E.Sim.onRumble, 'the rumble handler is back');
+  E.Sim.onRumble = null;
+  const up = drive({ left_stick_y: -1, right_stick_y: -1 });
+  assert.ok(up.fwd > 0.25 && Math.abs(up.turn) < 0.2, `both sticks up drives the tank forward (fwd ${up.fwd.toFixed(3)}, turn ${up.turn.toFixed(2)})`);
+});
