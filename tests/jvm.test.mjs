@@ -225,20 +225,24 @@ test('vm: two programs sharing an OpMode file never see each other\'s classes (p
   assert.equal(senses(['lf', 'lb']), a1); assert.equal(senses(['rf', 'lb']), b1);
 });
 
-test('vm: a wrong setDirection still shows on a robot whose CAD has its drive motors (mounting from the CAD, not the code)', async () => {
+test('vm: a wrong setDirection on a robot whose CAD has its drive motors: the bench follows the code and warns that the CAD reads those motors the other way; told to follow the CAD, it fails', async () => {
   const { buildRobot } = await import('../tools/stepgen.mjs');
   const cad = E.parseSTEP(buildRobot('mecanum-zup').text);
   const verdict = (rev) => {
     const code = E.parseJava(MAIN_DIR, { libs: [{ file: 'Robot.java', src: ROBOT_DIR(rev) }] });
     assert.equal(code.engine, 'vm');
-    const pr = E.driveProbe(code, cad, {}, { front: E.frontFromWheels(cad) || '+x' });
+    const pr = E.driveProbe(code, cad, {}, { front: E.frontFromWheels(cad) || '+x', driveFrom: rev.driveFrom });
     let out = null; E.driveVerdict(pr, (k, sev, title, how) => { out = { sev, title, how }; });
     return out;
   };
   const right = verdict(['lf', 'lb']), wrong = verdict(['rf', 'lb']);
   assert.equal(right.sev, 'pass', right.title);
-  assert.equal(wrong.sev, 'fail', 'reversing the wrong motor is caught: ' + wrong.title);
-  assert.ok(/from the CAD/.test(right.how));
+  assert.ok(/checked against the CAD/.test(right.how), right.how);
+  assert.equal(wrong.sev, 'warn', 'reversing the wrong motor is caught as a disagreement with the CAD: ' + wrong.title);
+  assert.match(wrong.title, /CAD reads 2 motors the other way/);
+  const cadWay = Object.assign(['rf', 'lb'], { driveFrom: 'cad' });
+  const wrongCad = verdict(cadWay);
+  assert.equal(wrongCad.sev, 'fail', 'following the CAD, the wrong reversal fails outright: ' + wrongCad.title);
 });
 
 test('vm: setDirection alone isn\'t moving a device; the controls list comes from pressing them', () => {
