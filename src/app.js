@@ -1536,7 +1536,8 @@ function applyJoints(){
     // the headline counted the joints the parser guessed; these replace them
     const J=R.report.joints+" joint"+(R.report.joints===1?"":"s");
     for(const el of [$("#vpTitle"),$("#cadStatus")]) el.textContent=el.textContent.replace(/\d+ mechanisms?/,J);
-    drop.className="drop ok"; $("#mateClear").hidden=false;
+    // a robot that arrived whole keeps its mates whatever is removed: no Remove for it
+    drop.className="drop ok"; $("#mateClear").hidden=!!(LAST_STEP&&(LAST_STEP.onshape||LAST_STEP.urdfZip));
     note.innerHTML=(JOINTS.spec.review||[]).map(w=>"<li><b>Check:</b> "+esc(w)+"</li>").join("")+
       R.report.why.map(w=>"<li>"+esc(w)+"</li>").join("")+
       JOINTS.spec.joints.filter(j=>j.note).map(j=>"<li><b>"+esc(j.label||j.id)+"</b>: "+esc(j.note)+"</li>").join("");
@@ -1888,6 +1889,7 @@ function mapDevices(){
   }
 }
 function clearMates(){
+  if(LAST_STEP&&(LAST_STEP.onshape||LAST_STEP.urdfZip)) return;   // the mates are the robot: nothing to remove
   if(JOINTS.spec){ JOINTS.spec=JOINTS.report=JOINTS.devices=null; JOINTS.name=JOINTS.step=null; }
   MATES.name=MATES.url=MATES.report=null;
   $("#matePill").textContent="none"; $("#matePill").className="pill"; $("#mateClear").hidden=true;
@@ -2960,7 +2962,13 @@ function boot(){
   $("#addJoint").addEventListener("click",addManualJoint);
   $("#rigReset").addEventListener("click",()=>{
     store.del(rigKey()); HW_USER={}; RIG_DEVICES={};
-    if(MATES.report){ if(LAST_STEP&&LAST_STEP.onshape) parseAndLoad(); return; }   // the mates are the rig
+    // the mates are the rig: a link robot is read again; a zip robot's bytes are gone, so its hand edits are dropped and it is rebuilt
+    if(MATES.report){
+      if(LAST_STEP&&LAST_STEP.onshape){ parseAndLoad(); return; }
+      for(const m of CAD.mechs){ m.leverOverride=null; m.label=null; }
+      CAD.mechs=CAD.mechs.filter(m=>!m.manual);
+      classifyJoints(CAD); if(CODE) mapDevices(); rigChanged(); return;
+    }
     if(JOINTS.report){ applyJoints(); return; } // and so is a joint spec
     for(const m of CAD.mechs){ m.kind=m.hasActuator===false?"fixed":null; m.leverOverride=null; m.label=null; }
     CAD.mechs=CAD.mechs.filter(m=>!m.manual);

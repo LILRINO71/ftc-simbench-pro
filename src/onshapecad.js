@@ -158,7 +158,8 @@ function cadFromOnshape(p,opts){
     const grow=q=>{ for(let a=0;a<3;a++){ if(q[a]<smn[a]) smn[a]=q[a]; if(q[a]>smx[a]) smx[a]=q[a]; } };
     const n=S.pos.length/3, step=Math.max(1,Math.floor(n/400));
     for(let i=0;i<n;i+=step){ const q=place(T,[S.pos[3*i],S.pos[3*i+1],S.pos[3*i+2]]); pts.push(q); grow(q); }
-    if(n<48) for(let c=0;c<8;c++){ const q=place(T,[c&1?S.box.max[0]:S.box.min[0], c&2?S.box.max[1]:S.box.min[1], c&4?S.box.max[2]:S.box.min[2]]); pts.push(q); grow(q); }
+    // the shape's own box sets the extent exactly; its corners join the points only when the shape has few
+    for(let c=0;c<8;c++){ const q=place(T,[c&1?S.box.max[0]:S.box.min[0], c&2?S.box.max[1]:S.box.min[1], c&4?S.box.max[2]:S.box.min[2]]); grow(q); if(n<48) pts.push(q); }
     for(let a=0;a<3;a++){ if(smn[a]<mn[a]) mn[a]=smn[a]; if(smx[a]>mx[a]) mx[a]=smx[a]; }
     const thin=thinPoints(pts,120);
     const raw=inst.name||body.name||"", nm=String(raw).replace(/\s*<\d+>\s*$/,"");
