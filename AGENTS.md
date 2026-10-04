@@ -68,6 +68,12 @@ Those files are free again; read the conventions below before changing them.
   `dist/robots/` by the build. It is the one CAD file the repo tracks, at the
   owner's request; `tests/into-the-deep.test.mjs` runs the team's TeleOp and
   Road Runner auto on it (`src/roadrunner.js`).
+- **Exact joints** (`src/jointsheet.js`, format `ftc-simbench.jointsheet`): a mate named
+  `motor …`, `servo …`, `crservo …`, `follow …`, `free` or `fixed`, or an entry in the page's
+  joint sheet, sets `declared`, `declaredRole`, `sheetDevices` (and `couple` for a follower) on a
+  mate joint. While `isExact(cad)`, `classifyJoints` holds every undeclared joint and
+  `bindDevices` binds only what a declaration names. A sheet is undone by `applyJointSheet` itself
+  (it keeps what it changed in `sheetWas`), so apply it again rather than editing those fields.
 - **Joint kinds**: compare through `normJointKind(k)`; `prismatic` and
   `linear-slide` are aliases of `linear`. Slide travel per tick is
   `slideMmPerTick(mech, tpr)`, shared by the sim and the view.

@@ -3,6 +3,7 @@
 | Guide | What it covers |
 |---|---|
 | [HANDOFF.md](HANDOFF.md) | Start here: where the real-joints and real-Java work stands, the benchmark numbers, what's next, and two bugs worth knowing about. |
+| [exact-joints.md](exact-joints.md) | Exact joints: the team declares which joints move and what drives each, in the mates' names in Onshape or in the joint sheet on the page, and nothing is guessed. The name grammar and the file format. |
 | [joints.md](joints.md) | How a STEP file becomes a moving robot: Onshape mates, joint specs (with the format reference), the click-to-fix editor, and the automatic finder. |
 | [robot-setup.md](robot-setup.md) | Getting a robot in: Onshape's URDF export in two steps, the code, and the review card that shows what the bench found and asks only what it can't know. |
 | [online.md](online.md) | Online matches: finding or hosting one, the room, chat and marks, how the host keeps one match for everyone, the network and what it can't do yet. |
