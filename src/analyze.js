@@ -191,10 +191,10 @@ headroom  ${ratio.toFixed(2)}×${ratio<1?"  ◄ SHORT":""}`;
   }
   const badPairs=pairs.filter(p=>p.ra===p.rb);
   if(badPairs.length)
-    add("mirror","warn","A mirrored pair is set the same way round",
+    add("mirror","info","A mirrored pair is set the same way round",
       "<b>"+badPairs.map(p=>escHTML(p.a+"/"+p.b)).join(", ")+"</b> read as a left/right pair, but "+
       (badPairs[0].ra?"both are reversed":"neither is reversed")+". A mirrored pair usually needs exactly one "+
-      "<code>setDirection(REVERSE)</code>, or the two halves fight each other.",
+      "<code>setDirection(REVERSE)</code>; if the robot drives straight on the field, that's how its motors are mounted, and the bench follows the code.",
       pairs.map(p=>(p.a+"        ").slice(0,10)+(p.ra?"REVERSED":"forward")+"   "+
                    (p.b+"        ").slice(0,10)+(p.rb?"REVERSED":"forward")).join("\n"),
       "Check how they're physically mounted — if they face opposite ways, one of them needs reversing.");

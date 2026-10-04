@@ -67,11 +67,16 @@ test('composite wheels: each wheel’s hand is read off its floor roller, the st
   assert.ok(d.why.some((s) => /read off each wheel's own rollers.*the standard X pattern/.test(s)));
 });
 
-test('composite wheels: the same robot built "O" (every wheel the other hand) is modelled as drawn, and said to be wrong', () => {
+test('composite wheels: the same robot built "O" (every wheel the other hand) is modelled as the X a real base is, and said so', () => {
   const O = Object.fromEntries(Object.entries(XPAT).map(([k, v]) => [k, -v]));
   const d = E.driveFromCAD(robot({ hands: O }), { front: '+x' });
-  for (const w of d.wheels) assert.equal(w.roller, O[w.corner]);
-  assert.ok(d.why.some((s) => /can't turn in place/.test(s)));
+  for (const w of d.wheels) assert.equal(w.roller, XPAT[w.corner], w.corner + ' is modelled as the X pattern');
+  assert.ok(d.why.some((s) => /"O" pattern/.test(s) && /standard X is used/.test(s) && /FL, FR, BL, BR|read the other hand/.test(s)), d.why.join(' | '));
+  // one wheel drawn mirrored (the owner's back-right) is corrected too, by name
+  const one = Object.assign({}, XPAT, { BR: -XPAT.BR });
+  const d1 = E.driveFromCAD(robot({ hands: one }), { front: '+x' });
+  for (const w of d1.wheels) assert.equal(w.roller, XPAT[w.corner]);
+  assert.ok(d1.why.some((s) => /can't strafe/.test(s) && /\(BR read the other hand\)/.test(s)), d1.why.join(' | '));
 });
 
 test('composite wheels: a flattened file (no sub-assemblies) still has its four wheels', () => {

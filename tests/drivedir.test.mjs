@@ -91,7 +91,7 @@ function bench(java, cadName, opts = {}) {
   const cad = opts.cad || E.parseSTEP(fixture('robots/' + cadName + '.step'));
   const code = E.parseJava(java);
   const map = E.autoMap(code.devices, cad.mechs);
-  E.Sim.reset(code, cad, map, { payloadKg: 0, duty: 0.3, trust: 'code', physics: opts.physics || 'rigid', startPose: { ...START }, front: opts.front });
+  E.Sim.reset(code, cad, map, { payloadKg: 0, duty: 0.3, trust: 'code', physics: opts.physics || 'rigid', startPose: { ...START }, front: opts.front, driveFrom: opts.driveFrom });
   return cad;
 }
 
@@ -145,12 +145,18 @@ test('7832 BAL.java drive code (right reversed, sticks negated) drives right too
   expectDriverFeel(BAL_JAVA, 'mecanum-zup', 'BAL');
 });
 
-test('gm0-style code (right reversed, plain sticks) runs backwards on an inboard chassis, as on a real one', () => {
+test('gm0-style code (right reversed) on an inboard chassis: the bench follows the code and drives forward, and reports that the CAD reads every motor the other way', () => {
   bench(GM0_JAVA, 'mecanum-zup');
   const up = drive({ left_stick_y: -1 });
-  assert.ok(up.fwd < -0.25, `stick up drives backward (fwd ${up.fwd.toFixed(3)})`);
-  const right = drive({ right_stick_x: 1 });
-  assert.ok(right.turn > 0.4, `right stick turns counter-clockwise (turn ${right.turn.toFixed(2)})`);
+  assert.ok(up.fwd > 0.25 && Math.abs(up.turn) < 0.2, `stick up drives forward (fwd ${up.fwd.toFixed(3)}, turn ${up.turn.toFixed(2)})`);
+  assert.deepEqual([...E.Sim.rig.drive.disagree].sort(), ['leftBack', 'leftFront', 'rightBack', 'rightFront'], 'all four read the other way in the CAD');
+  const code = E.parseJava(GM0_JAVA), cad = E.parseSTEP(fixture('robots/mecanum-zup.step'));
+  const R = E.checkRobot(cad, code, E.autoMap(code.devices, cad.mechs), { mountDisagree: E.Sim.rig.drive.disagree });
+  assert.ok(R.items.some((i) => i.key === 'drive:mounts' && i.sev === 'warn' && /follows your code/.test(i.text)), R.items.map((i) => i.text).join(' | '));
+  // asked for the CAD's reading, it runs backwards, as the old bench did
+  bench(GM0_JAVA, 'mecanum-zup', { driveFrom: 'cad' });
+  const back = drive({ left_stick_y: -1 });
+  assert.ok(back.fwd < -0.25, `following the CAD, stick up drives backward (fwd ${back.fwd.toFixed(3)})`);
 });
 
 test('motors moved outboard flip the side that needs reversing', () => {
@@ -219,11 +225,18 @@ const verdict = (java) => {
 test('Checks: SDK-style and BAL-style code pass the drive check; gm0-style fails, saying what goes wrong', () => {
   assert.equal(verdict(SDK_JAVA).sev, 'pass');
   assert.equal(verdict(BAL_JAVA).sev, 'pass', 'BAL.java drives this robot correctly, so no stick-sign warning either');
+  // gm0 reverses the right side on an inboard chassis: it drives (the bench follows the
+  // code) but every motor reads the other way in the CAD, and the check says so
   const g = verdict(GM0_JAVA);
-  assert.equal(g.sev, 'fail');
-  assert.match(g.title, /backward/);
-  assert.match(g.title, /turns it <b>left<\/b>/);
-  assert.match(g.body, /leftFront/, 'names the motors that push backward as mounted');
+  assert.equal(g.sev, 'warn');
+  assert.match(g.title, /CAD reads 4 motors the other way/);
+  assert.match(g.body, /leftFront/, 'names the motors the CAD reads the other way');
+  assert.match(g.body, /follows your code/);
+  // told to follow the CAD, the same code fails the way a real inboard robot would
+  const cadWay = (() => { const cad = E.parseSTEP(fixture('robots/mecanum-zup.step')), code = E.parseJava(GM0_JAVA);
+    return E.analyze(code, cad, E.autoMap(code.devices, cad.mechs), { payloadKg: 0, duty: 0.3, trust: 'code', driveFrom: 'cad' }).find((f) => f.key === 'drive:feel'); })();
+  assert.equal(cadWay.sev, 'fail');
+  assert.match(cadWay.title, /backward/);
   const live = E.Sim.phase;
   verdict(SDK_JAVA);
   assert.equal(E.Sim.phase, live, 'the probe never touches the live sim');
@@ -273,4 +286,31 @@ public class S extends LinearOpMode {
   const bare = E.analyze(E.parseJava(java.replace('if (gamepad1.a) {', 'if (true) {')), E.parseSTEP(fixture('robots/mecanum-zup.step')), {}, { payloadKg: 0, duty: 0.3, trust: 'code' });
   const f = bare.find((x) => x.key === 'sleep');
   assert.ok(f, 'a sleep outside any button is found');
+});
+
+// A team's code drives their real robot, so it knows how the motors are mounted better
+// than the CAD does (a CAD is often drawn with a motor the other way round from the
+// build). The owner's robot reverses only one left motor and drives straight on the
+// field; read from the CAD alone the bench spun it.
+test('when the code and the CAD disagree on a motor, the bench follows the code (it drives on the field) and records the disagreement', () => {
+  const cad = E.parseSTEP(fixture('robots/mecanum-zup.step'));
+  const g = E.driveFromCAD(cad, { front: '+x' });
+  assert.ok(g.wheels.every((w) => w.mountHow === 'direct'), 'the CAD has a reading for every motor');
+  // only leftBack reversed: by the CAD's reading leftFront would push backward
+  const ODD_JAVA = SDK_JAVA.replace('leftFront.setDirection(DcMotor.Direction.REVERSE);', '');
+  assert.ok(!/leftFront\.setDirection/.test(ODD_JAVA));
+  bench(ODD_JAVA, null, { cad: structuredClone(cad) });
+  const up = drive({ left_stick_y: -1 });
+  assert.ok(up.fwd > 0.25 && Math.abs(up.turn) < 0.2, `following the code, stick up drives forward (fwd ${up.fwd.toFixed(3)} m, turn ${up.turn.toFixed(2)} rad)`);
+  const rig = E.Sim.rig;
+  assert.ok(rig && rig.drive.disagree.includes('leftFront'), 'the disagreement is recorded: ' + JSON.stringify(rig && rig.drive.disagree));
+  const lf = rig.drive.wheels[rig.devs.indexOf('leftFront')];
+  assert.equal(lf.mountFrom, 'code'); assert.equal(lf.cadMount, -1); assert.equal(lf.mount, 1);
+  // asked to follow the CAD instead, the same code does not drive straight
+  bench(ODD_JAVA, null, { cad: structuredClone(cad), driveFrom: 'cad' });
+  const up2 = drive({ left_stick_y: -1 });
+  assert.ok(!(up2.fwd > 0.25 && Math.abs(up2.turn) < 0.2), `following the CAD it misbehaves (fwd ${up2.fwd.toFixed(3)}, turn ${up2.turn.toFixed(2)})`);
+  // and when they agree, nothing is recorded
+  bench(SDK_JAVA, null, { cad: structuredClone(cad) });
+  assert.deepEqual(E.Sim.rig.drive.disagree, []);
 });

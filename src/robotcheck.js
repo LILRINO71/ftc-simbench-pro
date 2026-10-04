@@ -151,6 +151,10 @@ const {checkRobot, setupAuto}=(function(){
       it.candidates=loose.map(d=>({device:d.name, v:fits(d,m)})).filter(c=>c.v>0).sort((a,b)=>b.v-a.v).map(c=>({device:c.device}));
     }
 
+    // the drive motors the code and the CAD read differently: the bench follows the code
+    // (it drives the real robot), and says which motors the CAD would have the other way
+    const dis=Array.isArray(opts.mountDisagree)?opts.mountDisagree:[];
+    if(dis.length) put({key:"drive:mounts", sev:"warn", ask:"look", text:"Your code and the CAD disagree on which way "+dis.join(", ")+(dis.length===1?" is":" are")+" mounted: by the CAD's motor"+(dis.length===1?"":"s")+" positive power would push "+(dis.length===1?"it":"them")+" the other way. The bench follows your code, since it drives your robot; if the real robot spins or runs backward, this is where to look."});
     // the CAD itself: drawn at robot size, about a robot's weight
     const bb=cad&&cad.bbox;
     if(bb&&S.length){

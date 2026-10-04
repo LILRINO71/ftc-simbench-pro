@@ -475,10 +475,13 @@ function dtRollers(ws,why,F){
       why.push("The one mecanum wheel drawn is the other hand for its corner (read off its rollers), so the mirrored set would be an \"O\" base that can't turn in place. A real drive base is built in the standard X pattern, so that is used. Check that wheel in the CAD.");
       return;
     }
-    ws.forEach((w,i)=>{ w.roller=geo[i]; });
-    why.push("Roller handedness read off each wheel's own rollers in the CAD (the roller on the floor): "+(x?"the standard X pattern.":o?"an \"O\" pattern.":"not a standard pattern."));
-    if(o) why.push("In an \"O\" pattern every wheel pushes along a line through the middle of the robot, so it strafes but can't turn in place: each wheel is probably the other hand from the one it should be. Modelled as drawn.");
-    else if(!x) why.push("With these hands the real robot can't strafe properly: two wheels are probably on the wrong corners in the CAD. Modelled as drawn.");
+    if(x){ ws.forEach((w,i)=>{ w.roller=geo[i]; }); why.push("Roller handedness read off each wheel's own rollers in the CAD (the roller on the floor): the standard X pattern."); return; }
+    // the CAD reads an "O" (every wheel the other hand) or a mix: a real mecanum base is
+    // built X (an O strafes but can't turn in place, a mix can't strafe), so the wheels
+    // that read the other hand are taken as drawn mirrored and the standard X is used
+    const odd=ws.filter((w,i)=>geo[i]!==xPat(w)).map(w=>w.corner||"a wheel");
+    ws.forEach(w=>{ w.roller=xPat(w); });
+    why.push("Roller handedness read off the CAD's rollers gives "+(o?"an \"O\" pattern":"a pattern that can't strafe")+" ("+odd.join(", ")+" read the other hand). A real mecanum base is built X, so the standard X is used; those wheels are probably drawn mirrored in the CAD.");
     return;
   }
   const hand=ws.map(dtHandFromName);

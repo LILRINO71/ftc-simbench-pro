@@ -38,6 +38,10 @@ const Sim={
     // the physical rig underneath: mass, wheels, motors. Null means we fall
     // back to the old kinematic glide, which is also what "kinematic" asks for.
     this.physics=(opts&&opts.physics)||"rigid";
+    // the code's own forward: the sign each drive wheel is commanded with on "stick up",
+    // after setDirection, is how that wheel is mounted on the robot the code drives. The
+    // VM measures it (src/jvmrun.js jvDriveFrom); the line reader's path is probed here once
+    if(this.drivetrain&&this.drivetrain.ok&&!code.vm&&this.drivetrain.wheels.some(w=>w.sense!==1&&w.sense!==-1)) this.probeSense(code);
     this.rig=buildRig(cad,this.drivetrain,this.base,this.dev,opts);
     this.dstate=this.rig?Dyn.reset(this.rig):null;
     this.slipping=false;
@@ -53,6 +57,25 @@ const Sim={
       catch(e){ this.mechWorld=null; this.mechNote=String(e&&e.message||e); }
     }
     this.phase="loaded";
+  },
+  /* One pass of the code with the left stick up, to read which way it commands each
+     drive wheel; everything it touched is put back. */
+  probeSense(code){
+    const W=this.drivetrain.wheels, vars=Object.assign({},this.vars), pad=this.pad, t=this.t;
+    const before={}; for(const n in this.dev){ const s=this.dev[n]; before[n]=[s.cmd,s.act,s.target,s.reversed,s.mode]; }
+    this.probing=true;
+    try{
+      this.pad={1:{left_stick_y:-1},2:{}};
+      this.exec(code.inits||[],this.env());
+      this.exec(code.stmts||[],this.env());
+      for(const w of W){ const s=this.dev[w.dev]; if(!s) continue; const v=(s.cmd||0)*(s.reversed?-1:1); if(Math.abs(v)>0.05) w.sense=v>0?1:-1; }
+    }catch(e){}
+    finally{
+      this.probing=false; this.pad=pad; this.t=t;
+      for(const k in this.vars) if(!(k in vars)) delete this.vars[k];
+      Object.assign(this.vars,vars);
+      for(const n in before){ const s=this.dev[n]; if(!s) continue; [s.cmd,s.act,s.target,s.reversed,s.mode]=before[n]; }
+    }
   },
   /* One device's state: what the code commands and what the mechanism does. */
   makeDev(d){
@@ -644,7 +667,7 @@ const PROBE_CACHE=new WeakMap();
 function driveProbe(code,cad,map,opts){
   if(!code||!cad||!code.hasLoop) return null;
   const dtn=detectDrivetrain(code); if(!dtn||!dtn.ok) return null;
-  const key=JSON.stringify([map,opts&&opts.front,opts&&opts.baseModel,opts&&opts.physics,(cad.mechs||[]).length]);
+  const key=JSON.stringify([map,opts&&opts.front,opts&&opts.baseModel,opts&&opts.physics,opts&&opts.driveFrom,(cad.mechs||[]).length]);
   const hit=PROBE_CACHE.get(code); if(hit&&hit.cad===cad&&hit.key===key) return hit.res;
   const P=Object.create(Sim);
   const o=Object.assign({},opts,{startPose:{x:0,y:0,h:0}});
@@ -659,7 +682,7 @@ function driveProbe(code,cad,map,opts){
     res={style:dtn.style, up:push({left_stick_y:-1}), turnR:push({right_stick_x:1}),
          strafeR:dtn.style==="mecanum"?push({left_stick_x:1}):null};
     res.front=P.opts.front;
-    res.mounts=P.rig?P.rig.drive.wheels.map((w,i)=>({dev:P.rig.devs[i], corner:w.corner, mount:w.mount, from:w.mountFrom})):[];
+    res.mounts=P.rig?P.rig.drive.wheels.map((w,i)=>({dev:P.rig.devs[i], corner:w.corner, mount:w.mount, from:w.mountFrom, cad:w.cadMount})):[];
     res.reversed=Object.keys(P.dev).filter(n=>P.dev[n].reversed);
   }catch(e){ res=null; }
   PROBE_CACHE.set(code,{cad,key,res});
@@ -673,12 +696,18 @@ function driveVerdict(pr,add){
   if(!(t.turn<-0.25)) bad.push(t.turn>0.25?"right stick right turns it <b>left</b>":"right stick right <b>doesn't turn</b> it");
   if(s&&!(s.left<-0.05&&Math.abs(s.turn)<0.6)) bad.push(s.left>0.05?"left stick right strafes it <b>left</b>":Math.abs(s.turn)>=0.6?"left stick right makes it <b>spin</b>":"left stick right <b>doesn't strafe</b> it");
   const rows=pr.mounts.map(m=>(m.dev+"                ").slice(0,17)+((m.corner||"")+"  ").slice(0,3)+
-    " positive power "+(m.mount<0?"backward":"forward ")+"   code: "+(pr.reversed.indexOf(m.dev)>=0?"REVERSE":"forward")).join("\n");
-  const src=pr.mounts.some(m=>m.from==="cad")?"from the CAD":pr.mounts.some(m=>m.from==="code")?"from your code's own forward (the CAD has no drive motors to measure)":"assumed (the standard build)";
+    " positive power "+(m.mount<0?"backward":"forward ")+"   code: "+(pr.reversed.indexOf(m.dev)>=0?"REVERSE":"forward")+
+    (m.cad!=null&&m.cad!==m.mount?"   (the CAD's motor reads the other way; the bench follows the code)":"")).join("\n");
+  const src=pr.mounts.some(m=>m.from==="cad")?"from the CAD":pr.mounts.some(m=>m.from==="code")?(pr.mounts.some(m=>m.cad!=null)?"from your code's own forward, checked against the CAD's motors":"from your code's own forward (the CAD has no drive motors to measure)"):"assumed (the standard build)";
   const how="Measured on a private copy of the sim: this OpMode's own INIT and loop, this robot's motor mounting "+src+", "+
     "and every <code>setDirection</code> call, half a second per push, front <b>"+escHTML(pr.front)+"</b>.";
   if(!bad.length){
-    add("drive:feel","pass","The sticks drive this robot the way a driver expects",
+    const dis=pr.mounts.filter(m=>m.cad!=null&&m.cad!==m.mount).map(m=>escHTML(m.dev));
+    if(dis.length) add("drive:feel","warn","Drives as your code says; the CAD reads "+(dis.length===1?"one motor":dis.length+" motors")+" the other way",
+      how+" Stick up goes forward, right stick turns right"+(pr.strafeR?", left stick right strafes right":"")+". By the CAD's motor placement positive power would push <code>"+dis.join("</code>, <code>")+
+      "</code> the other way from what your <code>setDirection</code> calls assume. The bench follows your code, since it drives your robot.",rows,
+      "If the real robot drives straight, nothing to do: the CAD has a motor drawn the other way round. If it spins or runs backward on the field, swap which motors you reverse.");
+    else add("drive:feel","pass","The sticks drive this robot the way a driver expects",
       how+" Stick up goes forward, right stick turns right"+(pr.strafeR?", left stick right strafes right":"")+".",rows,null);
     return;
   }
@@ -783,7 +812,7 @@ function buildRig(cad,dtn,base,dev,opts){
   // centre, "leftFront" the one out front-left. Without this a kiwi (three
   // wheels, no corners) got three synthetic forward-facing wheels and could
   // not turn at all.
-  const taken=new Set();
+  const taken=new Set(), disagree=[];
   const pick=w=>{
     const corner=(w.front?"F":w.back?"B":"")+(w.left?"L":w.right?"R":"");
     if(corner.length===2&&corners[corner]&&!taken.has(corners[corner])) return corners[corner];
@@ -817,17 +846,24 @@ function buildRig(cad,dtn,base,dev,opts){
     // non-mecanum wheels roll along the CAD's own drive direction (a kiwi's
     // wheels point round the circle, an X-drive's at 45 degrees)
     const alpha=(kind!=="mecanum"&&g&&Number.isFinite(g.alpha))?g.alpha:0;
-    // which way positive power turns this wheel (src/drivetrain.js dtMounts):
-    // measured from the motor in the CAD, so the drive check can still catch a
-    // wrong setDirection. With no motor in the CAD to measure (a drawn base),
-    // the team's own code says best how their robot is built: whatever sign its
-    // "stick up" gives a wheel (src/jvmrun.js) rolls that wheel forward. Else
-    // the standard inboard build.
-    const mount=(g&&(g.mount===1||g.mount===-1))?g.mount
-      :(w.sense===1||w.sense===-1)?w.sense:(kind==="swerve"?1:(w.left?-1:1));
+    // Which way positive power turns this wheel. The team's own code says best how
+    // their robot is built: it drives on the real robot, so whatever sign "stick up"
+    // gives a wheel after setDirection (src/jvmrun.js) rolls that wheel forward. The
+    // CAD's reading of the motor (src/drivetrain.js dtMounts) is the cross-check: when
+    // the two disagree the bench follows the code and says so (a CAD is often drawn
+    // with a motor the other way round from the build), unless the team asks for the
+    // CAD's reading (driveFrom "cad"). With neither, the standard inboard build.
+    const fromCode=(w.sense===1||w.sense===-1), fromCad=!!(g&&(g.mount===1||g.mount===-1));
+    // only where "stick up" means "every wheel forward": a kiwi's or an X-drive's wheels
+    // sit at angles, so what the code gives each on stick up is kinematics, not mounting
+    const codeSays=fromCode&&(kind==="mecanum"||kind==="tank");
+    const useCad=o.driveFrom==="cad"?fromCad:(fromCad&&!codeSays);
+    const mount=useCad?g.mount:codeSays?w.sense:fromCad?g.mount:fromCode?w.sense:(kind==="swerve"?1:(w.left?-1:1));
     // c: the CAD wheel's centre in the canonical frame, for the view to turn its parts
-    const mountFrom=(g&&(g.mount===1||g.mount===-1))?"cad":(w.sense===1||w.sense===-1)?"code":"assumed";
-    wheels.push({x, y, z:0, r, roller, alpha, mount, mountFrom, corner:corner.length===2?corner:null, c:g&&g.c?g.c.slice():null});
+    const mountFrom=useCad?"cad":codeSays?"code":fromCad?"cad":fromCode?"code":"assumed";
+    const cadMount=fromCad?g.mount:null;
+    if(codeSays&&fromCad&&g.mount!==w.sense) disagree.push(w.dev);
+    wheels.push({x, y, z:0, r, roller, alpha, mount, mountFrom, cadMount, corner:corner.length===2?corner:null, c:g&&g.c?g.c.slice():null});
     devs.push(w.dev);
     const sd=dev&&dev[w.dev];
     motors.push((sd&&sd.spec)||null);
@@ -847,7 +883,7 @@ function buildRig(cad,dtn,base,dev,opts){
     if(!steer.some(Boolean)) steer=null;
   }
   const sw=o.swerve||{};
-  return {props, drive:{kind, wheels, from:g0(geo)}, motors, devs, gear:(Number.isFinite(o.gear)&&o.gear>0)?o.gear:1, steer,
+  return {props, drive:{kind, wheels, from:g0(geo), disagree}, motors, devs, gear:(Number.isFinite(o.gear)&&o.gear>0)?o.gear:1, steer,
           steerCfg:{zero:Number.isFinite(sw.zero)?sw.zero:0.5, travel:(Number.isFinite(sw.travelDeg)?sw.travelDeg:180)*Math.PI/180, sense:sw.sense===-1?-1:1},
           mu:(Number.isFinite(o.mu)&&o.mu>0)?o.mu:undefined};
 }
