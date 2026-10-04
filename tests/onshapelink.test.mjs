@@ -96,18 +96,20 @@ test('link: the robot: every part a placed copy of one thinned shape, the mates 
 test('link: the rigid links\' mass properties are the parts\' own, summed with the parallel-axis shift', async () => {
   const cad = E.cadFromOnshape(E.checkOnshapePayload(Object.assign({ format: E.ONSHAPE_FORMAT }, await read(onshape()))));
   assert.ok(cad.links.length >= 2, 'the chassis and at least one moving link');
+  // each part weighs what the bench weighs it (a vendor figure beats the CAD's), and every part is in exactly one link
+  const kgOf = (s) => E.partMass(s, {}).kg;
   const total = cad.links.reduce((a, l) => a + l.kg, 0);
-  assert.ok(Math.abs(total - R.truth.massKg) < 1e-3, 'every part is in exactly one link');
+  assert.ok(Math.abs(total - cad.solids.reduce((a, s) => a + kgOf(s), 0)) < 1e-9, 'every part is in exactly one link');
   for (const L of cad.links) {
     assert.ok(L.exact, L.id + ' has every part\'s tensor');
     const list = cad.solids.filter((s) => (s.mech && cad.mechs.some((m) => m.id === s.mech) ? s.mech : 'chassis') === L.id);
     assert.equal(list.length, L.parts);
     // the sum by hand: I = sum(I_i + m_i (d^2 E - d d^T)) about the link's centre of mass
-    const M = list.reduce((a, s) => a + s.kg, 0), c = [0, 1, 2].map((k) => list.reduce((a, s) => a + s.kg * s.com[k], 0) / M);
+    const M = list.reduce((a, s) => a + kgOf(s), 0), c = [0, 1, 2].map((k) => list.reduce((a, s) => a + kgOf(s) * s.com[k], 0) / M);
     for (let k = 0; k < 3; k++) assert.ok(Math.abs(c[k] - L.com[k]) < 1e-9);
     const I = new Array(9).fill(0);
-    for (const s of list) { const d = s.com.map((v, k) => v - c[k]), dd = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
-      for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) I[3 * i + j] += s.I[3 * i + j] + s.kg * ((i === j ? dd : 0) - d[i] * d[j]); }
+    for (const s of list) { const d = s.com.map((v, k) => v - c[k]), dd = d[0] * d[0] + d[1] * d[1] + d[2] * d[2], kg = kgOf(s);
+      for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) I[3 * i + j] += s.I[3 * i + j] + kg * ((i === j ? dd : 0) - d[i] * d[j]); }
     for (let k = 0; k < 9; k++) assert.ok(Math.abs(I[k] - L.I[k]) < 1e-9, L.id + ' tensor');
     // the tensor is positive on its diagonal and symmetric
     assert.ok(L.I[0] > 0 && L.I[4] > 0 && L.I[8] > 0 && Math.abs(L.I[1] - L.I[3]) < 1e-12);

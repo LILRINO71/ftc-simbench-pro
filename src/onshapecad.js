@@ -91,10 +91,9 @@ function osCompactMass(mp){
     const has=b.hasMass!==false&&Number.isFinite(m)&&m>0;
     const kg=has?m:(Number.isFinite(vol)&&vol>0?vol:NaN);
     if(!(kg>0)) continue;
-    const e={kg, com:first(b.centroid,3), I:has?first(b.inertia,9):null, vol:Number.isFinite(vol)&&vol>0?vol:null};
-    // a volume standing in for a mass: its tensor at density 1 is the geometry's, scaled later with the mass
-    if(!has&&first(b.inertia,9)&&vol>0) e.I=first(b.inertia,9);
-    out[id]=e;
+    // the tensor only when it is one: Onshape writes zeros for a body with no material
+    const I=first(b.inertia,9), real=I&&I.some(v=>v!==0)?I:null;
+    out[id]={kg, com:first(b.centroid,3), I:real, vol:Number.isFinite(vol)&&vol>0?vol:null};
   }
   return out;
 }
@@ -217,13 +216,15 @@ function onshapeLinks(cad){
   const solids=cad.solids||[], mechs=cad.mechs||[], ids=new Set(mechs.map(m=>m.id));
   const groups=new Map([["chassis",[]]]); for(const m of mechs) groups.set(m.id,[]);
   for(const s of solids) (groups.get(s.mech&&ids.has(s.mech)?s.mech:"chassis")).push(s);
+  // the part's weight as the bench weighs it (src/inertia.js): a volume standing in for a mass is weighed by kind
+  const mass=s=>{ if(typeof partMass==='function'){ try{ const p=partMass(s,{}); return p.kg>0?p.kg:0; }catch(e){} } return s.kg>0?s.kg:0; };
   const centre=s=>{ if(s.com) return s.com; const c=[0,0,0]; for(const q of s.pts){ c[0]+=q[0]; c[1]+=q[1]; c[2]+=q[2]; } return s.pts.length?c.map(v=>v/s.pts.length):[0,0,0]; };
   const sum=list=>{
     let M=0; const c=[0,0,0]; let exact=true;
-    for(const s of list){ const kg=s.kg>0?s.kg:0; if(!kg) continue; const q=centre(s); M+=kg; c[0]+=kg*q[0]; c[1]+=kg*q[1]; c[2]+=kg*q[2]; if(!s.I) exact=false; }
+    for(const s of list){ const kg=mass(s); if(!kg) continue; const q=centre(s); M+=kg; c[0]+=kg*q[0]; c[1]+=kg*q[1]; c[2]+=kg*q[2]; if(!s.I) exact=false; }
     if(!(M>0)) return {kg:0, com:null, I:null, exact:false};
     const com=c.map(v=>v/M), I=new Array(9).fill(0);
-    for(const s of list){ const kg=s.kg>0?s.kg:0; if(!kg) continue; const q=centre(s), d=[q[0]-com[0],q[1]-com[1],q[2]-com[2]], dd=d[0]*d[0]+d[1]*d[1]+d[2]*d[2];
+    for(const s of list){ const kg=mass(s); if(!kg) continue; const q=centre(s), d=[q[0]-com[0],q[1]-com[1],q[2]-com[2]], dd=d[0]*d[0]+d[1]*d[1]+d[2]*d[2];
       for(let i=0;i<3;i++) for(let j=0;j<3;j++) I[3*i+j]+=(s.I?s.I[3*i+j]:0)+kg*((i===j?dd:0)-d[i]*d[j]); }
     return {kg:M, com, I, exact};
   };
@@ -232,6 +233,6 @@ function onshapeLinks(cad){
   // what each joint carries: its own link and every link hanging from it
   const kids=new Map(); for(const m of mechs) if(m.parent&&m.parent!=="chassis"){ if(!kids.has(m.parent)) kids.set(m.parent,[]); kids.get(m.parent).push(m.id); }
   const under=(id,depth)=>{ let list=groups.get(id)||[]; if(depth<40) for(const k of kids.get(id)||[]) list=list.concat(under(k,depth+1)); return list; };
-  for(const m of mechs){ const r=sum(under(m.id,0)); m.carries={kg:r.kg, com:r.com, parts:under(m.id,0).length}; }
+  for(const m of mechs){ const L=under(m.id,0), r=sum(L); m.carries={kg:r.kg, com:r.com, parts:L.length}; }
   return cad.links;
 }

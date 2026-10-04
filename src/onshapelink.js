@@ -89,7 +89,7 @@ function onshapeRead(host, ref, opt){
         // 1.5 mm chords, 20 degrees per facet: the low-poly mesh the bench wants (src/meshfiles.js thins it further)
         get(ps+"/tessellatedfaces"+q+"&outputFaceAppearances=true&outputFacetNormals=false&chordTolerance=0.0015&angleTolerance=0.35"),
         get(ps+"/massproperties"+q+"&massAsGroup=false&useMassPropertyOverrides=true").catch(()=>null)
-      ]).then(t=>{ geom[j.key]={parts:osCompactTess(t[0]), mass:osCompactMass(t[1])}; },e=>{ if(e&&(e.status===401||e.status===403)) throw e; geom[j.key]=null; })
+      ]).then(t=>{ geom[j.key]={parts:osCompactTess(t[0]), mass:osCompactMass(t[1])}; },e=>{ if(e&&e.status===401) throw e; geom[j.key]=null; })   // a studio this user can't read (403) is left out, named by the builder
         .then(()=>{ done++; say("Reading part shapes: "+done+" of "+jobs.length+" part studios …",done,jobs.length); return one(); });
     };
     return Promise.all([one(),one(),one(),one()]).then(()=>({asm, features, geom}));
