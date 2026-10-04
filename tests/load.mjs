@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { buildRobot } from '../tools/stepgen.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const ENGINE = ['hardware', 'samples', 'step', 'hull', 'inertia', 'expr', 'jvm', 'jvmlib', 'jvmprelude', 'jvmrun', 'java', 'roadrunner', 'mapping', 'robotconfig', 'compare', 'analyze', 'drivetrain', 'frame', 'mates', 'onshapelink', 'onshapecad', 'urdf', 'mjcf', 'jointspec', 'simbot', 'zipin', 'autorig-lib', 'autorig', 'robotcheck', 'dynamics', 'joltmech', 'field', 'shots', 'match', 'robotlite', 'net', 'netrelay', 'lockstep', 'controllers', 'session', 'mathdoc', 'gitimport', 'onboarding', 'sim', 'tier'];
+const ENGINE = ['hardware', 'samples', 'step', 'hull', 'inertia', 'expr', 'jvm', 'jvmlib', 'jvmprelude', 'jvmrun', 'java', 'roadrunner', 'mapping', 'robotconfig', 'compare', 'analyze', 'drivetrain', 'frame', 'mates', 'onshapelink', 'onshapecad', 'urdf', 'mjcf', 'jointspec', 'simbot', 'zipin', 'autorig-lib', 'autorig', 'robotcheck', 'autobind', 'dynamics', 'joltmech', 'field', 'shots', 'match', 'robotlite', 'net', 'netrelay', 'lockstep', 'controllers', 'session', 'mathdoc', 'gitimport', 'onboarding', 'sim', 'tier'];
 const EXPORTS = [
   'Field', 'Shots', 'IN', 'TIP_GRAMS', 'FRONTS', 'footprintOf', 'capsulePush', 'nearestMotorId', 'SHOOTER_JAVA',
   'convexHull', 'boxCorners', 'solidTriangles', 'thinPoints', 'solidKind', 'sampleSolids', 'robotBase', 'makeRng',
@@ -31,7 +31,7 @@ const EXPORTS = [
   'driveFromCAD', 'DRIVE_KINDS', 'ikMatrix', 'fkFromIk', 'wheelSpeeds', 'chassisFromWheels',
   'Dyn', 'tractionLimit', 'motorTorque', 'wheelLoads', 'JoltMech', 'JOLT_LIB',
   'onshapeApiLinks', 'onshapeGrab', 'onshapeRead', 'onshapeGeomCache', 'onshapeRef', 'onshapeFromLink', 'onshapeSignInState', 'onshapeBookmarklet', 'readOnshapeHash', 'checkOnshapePayload', 'ONSHAPE_FORMAT', 'parseOnshapeAssembly', 'applyMateLimits', 'matchOnshapeParts', 'applyOnshapeMates', 'mateQty',
-  'cadFromOnshape', 'cadFromUrdf', 'cadFromMjcf', 'mjcfToPayload', 'urdfObj', 'urdfGltf', 'urdfGltfScene', 'urdfDae', 'urdfMesh', 'urdfPartNumber', 'urdfPrettyName', 'urdfDecimate', 'urdfTriBudget', 'urdfMeshCount', 'urdfVolume', 'urdfDensity', 'gltfToPayload', 'robotFromZip', 'ZIP_ROBOT_CAPS', 'MATE_DEFAULT_NAME', 'urdfToPayload', 'urdfStl', 'urdfXml', 'onshapeGeomKey', 'osColor', 'osCompactTess', 'osCompactMass',
+  'cadFromOnshape', 'cadFromUrdf', 'cadFromMjcf', 'mjcfToPayload', 'urdfObj', 'urdfGltf', 'urdfGltfScene', 'urdfDae', 'urdfMesh', 'urdfPartNumber', 'urdfPrettyName', 'urdfDecimate', 'urdfTriBudget', 'urdfMeshCount', 'urdfVolume', 'urdfDensity', 'gltfToPayload', 'robotFromZip', 'ZIP_ROBOT_CAPS', 'MATE_DEFAULT_NAME', 'autoBind', 'abUsage', 'abCandidates', 'urdfToPayload', 'urdfStl', 'urdfXml', 'onshapeGeomKey', 'osColor', 'osCompactTess', 'osCompactMass',
   'rrDetect', 'rrParseHelpers', 'rrAttach', 'rrBuildPlan', 'rrSample', 'RRRuntime',
   'autoRig', 'ARActuators', 'ARSlides', 'ARCarry',
   'SIMBOT_FORMAT', 'SIMBOT_VERSION', 'simbotFromCad', 'simbotPack', 'simbotUnpack', 'cadFromSimbot', 'validateRobot', 'zipWrite', 'zipRead', 'glbWrite', 'glbRead', 'sbCrc32', 'SIMBOT_CAPS', 'mateNameHint',

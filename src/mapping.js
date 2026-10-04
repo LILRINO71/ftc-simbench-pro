@@ -59,8 +59,11 @@ const mapGroupOf=w=>MAP_GROUPS.findIndex(g=>g.indexOf(w)>=0||(w.length>=4&&g.som
 function mapStem(n){ return String(n||"").replace(/([a-z0-9])([A-Z])/g,"$1 $2").toLowerCase().replace(/[_\-\s]*(left|right|l|r|[0-9]+)\b/g," ").replace(/[^a-z]+/g,""); }
 function autoMap(devices,mechs,opts){
   const map={}, used={};
-  // hardware that just spins (src/mates.js passive) is never a device's joint
-  mechs=(mechs||[]).filter(m=>!m.passive);
+  // hardware that just spins (src/mates.js passive) is never a device's joint, unless its
+  // mate carries the device's own name (the team said so)
+  const exactly=(d,m)=>{ const e=s=>String(s||"").toLowerCase().replace(/^dof_/,"").replace(/_inv$/,"").replace(/[^a-z0-9]/g,""); const id=e(m.id), al=e(m.alias);
+    return [d.name,d.cfg,d.alias].some(n=>n&&e(n).length>=2&&(e(n)===id||(al&&e(n)===al))); };
+  mechs=(mechs||[]).filter(m=>!m.passive||(devices||[]).some(d=>exactly(d,m)));
   // with a handful of joints, a device can take the one of its kind; among dozens
   // (an Onshape export of a whole robot) only a name can say
   const few=mechs.filter(m=>!m.couple).length<=8;

@@ -427,6 +427,8 @@ function applyOnshapeMates(cad,json,opts){
     const si=bodySolids(b).sort((x,y)=>(solids[y].size||0)-(solids[x].size||0))[0];
     return si!=null?solids[si].name:"part";
   };
+  // where the drive wheels are: a bearing on a wheel's axle is the wheel's, whatever motor shares it
+  const wheelCentres=[...wheelBody].map(b=>{ const ps=[]; for(const si of bodySolids(b)) for(const p of solids[si].pts) ps.push(p); return ps.length?ps.reduce((a,p)=>[a[0]+p[0],a[1]+p[1],a[2]+p[2]],[0,0,0]).map(v=>v/ps.length):null; }).filter(Boolean);
   const mechOf=new Map();
   const mechs=[];
   for(const j of joints){
@@ -485,7 +487,14 @@ function applyOnshapeMates(cad,json,opts){
     // Hardware spinning on an axle (a bearing, an idler, a hub, a shaft collar, an e-clip):
     // a continuous mate carrying a few small parts, nothing beneath it, no motor or servo
     // on it, and nothing in its names that a team drives. Kept as a joint, never asked about.
-    if(m.continuous&&!hw&&!joints.some(k=>k.parent===j.child)){
+    // a mate the team named (not Onshape's "Revolute 3") is theirs to drive: never passive.
+    // And a motor or servo counts only when it sits on the joint's axis, right by the pivot
+    const named_=!MATE_DEFAULT_NAME.test(hint.name);
+    const onAxis=(()=>{ for(const si of bodySolids(j.parent).concat(members)){ const s=solids[si]; if(!(s.kind==="motor"||s.kind==="servo")) continue;
+      const c=s.pts.reduce((a,p)=>[a[0]+p[0],a[1]+p[1],a[2]+p[2]],[0,0,0]).map(v=>v/s.pts.length), d=[c[0]-pivot[0],c[1]-pivot[1],c[2]-pivot[2]], t=d[0]*axis[0]+d[1]*axis[1]+d[2]*axis[2];
+      if(Math.abs(t)<0.15&&Math.hypot(d[0]-t*axis[0],d[1]-t*axis[1],d[2]-t*axis[2])<0.03) return true; } return false; })();
+    const nearWheel=wheelCentres.some(c=>Math.hypot(c[0]-pivot[0],c[1]-pivot[1],c[2]-pivot[2])<0.12);
+    if(m.continuous&&!named_&&(!onAxis||nearWheel)&&!joints.some(k=>k.parent===j.child)){
       const mn=[Infinity,Infinity,Infinity], mx=[-Infinity,-Infinity,-Infinity];
       for(const si of carried) for(const p of solids[si].pts) for(let k=0;k<3;k++){ if(p[k]<mn[k]) mn[k]=p[k]; if(p[k]>mx[k]) mx[k]=p[k]; }
       const span=carried.length?Math.hypot(mx[0]-mn[0],mx[1]-mn[1],mx[2]-mn[2]):0;

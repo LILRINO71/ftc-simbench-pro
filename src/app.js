@@ -172,7 +172,8 @@ function renderOpList(){
   $$(".oplist [data-oprm]").forEach(b=>b.addEventListener("click",()=>{
     const id=b.dataset.oprm;
     LIBRARY=LIBRARY.filter(e=>e.id!==id); saveLibrary();
-    if(id===CURRENT_ID) selectOpMode(LIBRARY[0].id); else { renderOpList(); renderOpSelect(); renderCompareSelects(); }
+    if(id===CURRENT_ID&&LIBRARY.length) selectOpMode(LIBRARY[0].id);
+    else { if(id===CURRENT_ID){ CODE=null; CURRENT_ID=null; Editor.set(""); } renderOpList(); renderOpSelect(); renderCompareSelects(); }
   }));
 }
 function renderOpSelect(){
@@ -656,6 +657,7 @@ function applyRig(r){
   if(r.front&&FRONTS[r.front]!==undefined) OPTS.front=r.front;
   if(/^(auto|show|hide)$/.test(r.baseModel||"")) OPTS.baseModel=r.baseModel;
   if(/^(auto|show|hide)$/.test(r.shooterModel||"")) OPTS.shooterModel=r.shooterModel;
+  if(/^(code|cad)$/.test(r.driveFrom||"")) OPTS.driveFrom=r.driveFrom;
   if(r.shot&&typeof r.shot==="object") Shots.cfg=Object.assign(Shots.defaults(),r.shot);
   if(r.drive&&typeof r.drive==="object") CAD.driveSpec=cleanDriveSpec(r.drive); else delete CAD.driveSpec;
   SETUP.done=Object.assign({},r.setup&&typeof r.setup==="object"?r.setup:{});
@@ -1613,7 +1615,7 @@ function parseAndLoad(done){
       else findJoints(cad,true);                  // no mates, no spec: find them from the geometry
       exactGeometry(cad,text);
       if(done) done(cad);
-    }catch(e){ $("#cadStatus").textContent="couldn't parse this STEP file — "+e.message; $("#cadDrop").className="drop bad"; }
+    }catch(e){ $("#cadStatus").textContent="couldn't parse this STEP file — "+e.message; $("#cadDrop").className="drop bad"; if(View.chassisG) View.chassisG.visible=true; }
     renderFrameNote();
   },30);
 }
@@ -2046,6 +2048,15 @@ const SetupUI={
    joint spec like any other edit, so it's asked once.
    ============================================================ */
 let RC=null;
+/* The devices the names didn't place, bound from the CAD's own evidence (src/autobind.js):
+   a motor or servo on the joint's axis, what it carries, how the code uses the device.
+   Each pick is shown with its reason, never asked. */
+let AUTO_PICKS=[];
+function bindRest(){
+  if(!CAD||!CODE||!CAD.mates||typeof autoBind!=="function") return [];
+  try{ const R=autoBind(CAD,CODE,MAP,{front:OPTS.front}); for(const k in R.map) if(R.map[k]&&!MAP[k]) MAP[k]=R.map[k]; return R.picks; }
+  catch(e){ return []; }
+}
 /* The robot check, and the setup step that counts its questions. */
 function renderRobotCheck(){ renderRobotCheckNow(); SetupUI.render(); }
 function renderRobotCheckNow(){
@@ -2054,7 +2065,7 @@ function renderRobotCheckNow(){
   const put=h=>boxes.forEach(b=>{ b.innerHTML=(b.id==="rcChecks"?rcHead():"")+h; });
   const rcHead=()=>`<div class="rc-title"><b>Robot check</b><span class="pill ${RC?(RC.ready?(RC.warn?"warnp":"ok"):"bad"):""}">${RC?(RC.ready?(RC.warn?RC.warn+" to confirm":"ready"):RC.need+" to answer"):"—"}</span></div>`;
   if(!CAD||!CODE){ RC=null; put(`<p class="hint">Load a robot and an OpMode to check them together.</p>`); if(pill){ pill.textContent="—"; pill.className="pill"; } return; }
-  try{ RC=checkRobot(CAD,CODE,MAP,{isCommanded:n=>isCommanded(CODE,n), front:OPTS.front, mountDisagree:(Sim.rig&&Sim.rig.drive&&Sim.rig.drive.disagree)||[]}); }
+  try{ RC=checkRobot(CAD,CODE,MAP,{isCommanded:n=>isCommanded(CODE,n), front:OPTS.front, mountDisagree:(Sim.rig&&Sim.rig.drive&&Sim.rig.drive.disagree)||[], autoPicks:AUTO_PICKS}); }
   catch(e){ RC=null; put(`<p class="hint">The robot check stopped: ${esc(e.message)}</p>`); return; }
   pill.textContent=RC.ready?(RC.warn?RC.warn+" to confirm":"ready"):RC.need+" to answer";
   pill.className="pill "+(RC.ready?(RC.warn?"warnp":"ok"):"bad");
@@ -2179,7 +2190,7 @@ function downloadJoints(){
    decide. Either way, what the user picked by hand in the table stays. */
 function mapDevices(){
   if(!CODE||!CAD) return;
-  MAP=autoMap(CODE.devices,CAD.mechs,{cad:CAD});
+  MAP=autoMap(CODE.devices,CAD.mechs,{cad:CAD}); AUTO_PICKS=bindRest();
   applyDeviceMemory();
   const J=JOINTS.report&&CAD.mates&&CAD.mates.source==="spec"?JOINTS.devices:null;
   if(J) for(const d of CODE.devices){
@@ -3478,7 +3489,7 @@ function proBoot(){
   if(!wantSample&&View.chassisG){ View.chassisG.visible=false; $("#cadStatus").textContent="loading "+DEFAULT_ROBOT.label+" …"; }
 
   const saved=store.get("ftcbench.current",null);
-  const first=entry(saved)?saved:(LIBRARY[0]&&LIBRARY[0].id);
+  const first=entry(saved)?saved:(LIBRARY.length?LIBRARY[0].id:null);
   if(first) selectOpMode(first);
   renderCompareSelects();
 
@@ -3550,7 +3561,7 @@ function proBoot(){
     for(const m of CAD.mechs){ m.kind=m.hasActuator===false?"fixed":null; m.leverOverride=null; m.label=null; }
     CAD.mechs=CAD.mechs.filter(m=>!m.manual);
     classifyMechs(CAD.mechs);
-    if(CODE) MAP=autoMap(CODE.devices,CAD.mechs,{cad:CAD});
+    if(CODE){ MAP=autoMap(CODE.devices,CAD.mechs,{cad:CAD}); AUTO_PICKS=bindRest(); }
     rigChanged();
   });
 

@@ -96,7 +96,11 @@ const {checkRobot, setupAuto}=(function(){
     const driven=new Map();                          // joint id -> device
     for(const d of acts){
       const j=map&&map[d.name]&&byId.get(map[d.name]);
-      if(j){ driven.set(j.id,d.name); put({key:"dev:"+d.name, sev:"ok", device:d.name, joint:j.id, ask:"look", text:d.name+" drives \""+label(j)+"\"."}); continue; }
+      if(j){ driven.set(j.id,d.name);
+        const pick=(opts.autoPicks||[]).find(p=>p.device===d.name&&p.joint===j.id);
+        if(pick) put({key:"dev:"+d.name, sev:"note", device:d.name, joint:j.id, ask:"look", text:d.name+" drives \""+label(j)+"\" (bound from the CAD: "+pick.why+"). If that's the wrong part, change it in the hardware table."});
+        else put({key:"dev:"+d.name, sev:"ok", device:d.name, joint:j.id, ask:"look", text:d.name+" drives \""+label(j)+"\"."});
+        continue; }
       if(!moved(d.name)) continue;
       put({key:"dev:"+d.name, sev:"note", device:d.name, ask:"pick-parts",
         text:d.name+" runs as a live gauge: your code moves it, and no joint in the CAD is tied to it yet. Click the part it moves to see it move."});
@@ -124,14 +128,19 @@ const {checkRobot, setupAuto}=(function(){
     // (above, with its likely joints); the joints are one line. Once every device is
     // placed, the joints left over are asked about one by one, up to a handful
     const unbound=acts.some(d=>!driven.has(map&&map[d.name])&&moved(d.name)&&!(map&&map[d.name]&&byId.get(map[d.name])));
-    const askMax=unbound?0:Math.max(6,2*acts.length);
+    // joints are never asked about one by one: a device with no joint is asked from its side,
+    // and once every device has one, what's left is hardware that just spins or a mate nothing
+    // in this OpMode moves, named in one line
+    const askMax=0; void unbound;
     const weight=m=>(m.hasActuator?1e3:0)+(m.lever||0)*10+S.filter(s=>s.mech===m.id).length;
     undriven.sort((a,b)=>weight(b)-weight(a));
     for(const m of undriven.slice(0,askMax)) put({key:"undriven:"+m.id, sev:"note", joint:m.id, ask:"pick-device",
       text:"\""+label(m)+"\" stays where it's drawn: nothing in your code drives it. Pick the device that moves it, if one does."});
     const rest=undriven.slice(askMax), spinners=mechs.filter(m=>m.passive&&!driven.has(m.id)).length;
-    if(rest.length||spinners) put({key:"undriven:more", sev:"note", text:(rest.length?rest.length+" more joint"+(rest.length===1?"":"s")+" ("+rest.slice(0,4).map(label).join(", ")+(rest.length>4?" …":"")+") and ":"")+
-      (spinners?spinners+" bearings, hubs and idlers that just spin":"")+" stay where they're drawn with nothing driving them. If a device moves one, pick it in the joint editor."});
+    if(rest.length||spinners){ const bits=[];
+      if(rest.length) bits.push(rest.length+(askMax?" more":"")+" joint"+(rest.length===1?"":"s")+" ("+rest.slice(0,4).map(label).join(", ")+(rest.length>4?" …":"")+")");
+      if(spinners) bits.push(spinners+" bearings, hubs and idlers that just spin");
+      put({key:"undriven:more", sev:"note", text:bits.join(" and ")+" stay where they're drawn with nothing driving them. If a device moves one, pick it in the joint editor."}); }
 
     // the likely answers: a device the code moves and the joints nothing drives, paired by kind
     // (a servo turns something; a motor turns an arm or pulls a slide through a spool)
@@ -172,6 +181,7 @@ const {checkRobot, setupAuto}=(function(){
     if(A.length) for(const m of mechs){
       if(normJointKind(m.kind)==="linear"||m.couple||!driven.has(m.id)||!m.axis) continue;
       const dv=acts.find(d=>d.name===driven.get(m.id)); if(!dv) continue;
+      if((opts.autoPicks||[]).some(p=>p.device===dv.name&&p.joint===m.id)) continue;   // bound from the CAD's own evidence already
       const hit=A.find(a=>onAxis(a,m));
       if(!hit){ put({key:"axis:"+m.id, sev:"warn", joint:m.id, device:dv.name, ask:"look",
         text:"No motor or servo in the CAD sits on \""+label(m)+"\"'s axis. If "+dv.name+" turns it through gears, a belt or a chain, that's fine; otherwise the joint's axis or pivot is off."}); continue; }
@@ -228,7 +238,7 @@ const {checkRobot, setupAuto}=(function(){
     }
 
     // swing each driven joint a little each way: its parts must not go through the frame both ways
-    if(opts.swing!==false) for(const it of swingChecks(S,mechs,byId,driven,opts,code,devs)) put(it);
+    if(opts.swing!==false) for(const it of swingChecks(S,mechs,byId,driven,Object.assign({},opts,{exact:!!(cad&&cad.mates&&cad.mates.source==="onshape")}),code,devs)) put(it);
 
     items.sort((a,b)=>sevRank[a.sev]-sevRank[b.sev]);
     const need=items.filter(i=>i.sev==="fail").length, warn=items.filter(i=>i.sev==="warn").length;
@@ -289,7 +299,7 @@ const {checkRobot, setupAuto}=(function(){
       const a=clashes(1), b=clashes(-1), bad=r=>r.n>=6;
       if(bad(a)&&bad(b)){
         const f=S[a.part!=null?a.part:b.part];
-        out.push({key:"swing:"+m.id, sev:"fail", joint:m.id, device:driven.get(m.id), ask:"look",
+        out.push({key:"swing:"+m.id, sev:opts.exact?"warn":"fail", joint:m.id, device:driven.get(m.id), ask:"look",
           text:"\""+(m.label||m.id)+"\" can't move either way: its parts hit "+(f&&f.name?"\""+f.name+"\"":"the frame")+
             ". It probably has a frame part on it, or the wrong axis."});
       }else if(bad(a)||bad(b)){
