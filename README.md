@@ -23,12 +23,14 @@ Teams don't have time for that, and the model drifts from the real robot.
 
 SimBench Pro starts from what a team already has:
 
-1. **The CAD** they built the robot from. From Onshape that is two steps: right-click the
-   assembly tab, **Export → URDF** (GLB meshes), and drop the zip on the page. Every mate becomes
-   an exact joint, every part keeps its colour and its material's mass, and nothing is uploaded or
-   signed into. Fusion, SolidWorks and FreeCAD teams drop a URDF with its meshes
-   ([tools/fusion](tools/fusion/README.md) writes one from Fusion); a plain STEP still works, with
-   the joints found from the geometry.
+1. **The CAD** they built the robot from. From Onshape that is one step: paste the assembly's
+   address. SimBench reads the assembly from Onshape's own API, signed in as the team: every mate
+   becomes an exact joint with its limits and relations, parts fastened together collapse into
+   rigid links, every part keeps its colour, and the mass, centre of mass and inertia come from
+   Onshape's own mass properties. Nothing is exported or uploaded. The export zip
+   (**Export → URDF**) still works where the link can't, Fusion, SolidWorks and FreeCAD teams drop
+   a URDF zip ([tools/fusion](tools/fusion/README.md) writes one from Fusion), and a plain STEP
+   still works, with the joints found from the geometry.
 2. **The OpModes** they already run on the Control Hub: TeleOps and Road Runner autos, as `.java`.
 
 From those two things alone it works out the robot:
@@ -46,23 +48,22 @@ project. There are four layers, from exact to automatic:
 
 | Layer | What it is | Status |
 |---|---|---|
-| **Onshape's URDF export** | The main way in. Onshape writes the assembly's mates as URDF joints (with limits), its mass properties as inertials, and every part as a GLB mesh in one zip. `src/meshfiles.js` unzips and reads GLB, glTF, OBJ and STL on the page; `src/urdf.js` turns it into the robot. The relations URDF can't carry (a cascade's stages, a two-gear claw) are inferred as hints and applied only when the code confirms them. No server, no sign-in, no quota; works on school Chromebooks. | ✅ `src/meshfiles.js`, `src/urdf.js` |
+| **The Onshape link** | The main way in. A team pastes its assembly's address; `src/onshapelink.js` reads the assembly definition (every mate, with its frame on each side), its features (limits, gear and rack relations) and, once per Part Studio, each part's tessellated faces and mass properties, through the **Sign in with Onshape** relay (`functions/onshape/`), in the engine worker. `src/onshapecad.js` makes the robot: one thinned shape per unique part, drawn as instances; `src/mates.js` collapses fastened parts into rigid links and walks the moving mates out as the joint tree; the links' mass properties are Onshape's own, summed. Works on school Chromebooks. | ✅ `src/onshapelink.js`, `src/onshapecad.js`, `src/mates.js` |
+| **The export zip** | Where the link can't be used: Onshape writes the assembly's mates as URDF joints, its mass properties as inertials, and every part as a GLB mesh in one zip. `src/meshfiles.js` unzips and reads GLB, glTF, OBJ and STL on the page; `src/urdf.js` turns it into the same robot. The relations URDF can't carry are inferred as hints and applied only when the code confirms them. | ✅ `src/meshfiles.js`, `src/urdf.js` |
 | **Which joints are mechanisms, and what drives them** | A library assembly carries a revolute inside every motor and bearing; exported, a real robot had 113. `src/bind.js` marks those internal from what they carry, then ties the code's devices to the real joints by name, by the actuator kind on each joint's axis, by the travel the code asks for, and by elimination. Only a device with two live candidates is a question. | ✅ `src/bind.js` |
-| **Onshape mates, live** | The advanced way: the assembly's own mates read from Onshape's API, with gear and rack relations the export leaves out. **Sign in with Onshape** through a Cloudflare Pages Function, or the **Send to SimBench** bookmark on a home computer. | ✅ `src/mates.js`, `src/onshapelink.js` |
 | **Exact joints** | Which of an export's joints are mechanisms, and what drives each, said once: in the mates' own names in Onshape (`motor armMotor`, `servo claw`, `follow liftL x2`) or in the joint sheet on the page. With a declaration, every other joint is held and no device is bound by guessing. | 🧪 `src/jointsheet.js`, [docs/exact-joints.md](docs/exact-joints.md) |
 | **Joint spec** | A small JSON file that says the same by hand: parts, axis, pivot, travel, which device drives it. It also covers cascade slides and servo slider-crank linkages. | ✅ `src/jointspec.js`, [docs/joints.md](docs/joints.md) |
 | **Click-to-fix editor** | In the CAD view: click parts, pick what they ride on, make a joint (the axis is suggested from the selected spline, gear or rail), flip it, try it. Every edit is a joint spec you can download. | ✅ `src/cadview.js` |
 | **Automatic joint finder** | Finds actuators, slide stacks and the parts each joint carries, straight from geometry, for any STEP. Runs by itself when a robot has no mates and no spec, and lists what a person should check. | ✅ `src/autorig.js`, from the measured prototypes in [research/autorig](research/autorig/README.md) |
 
 | **The match** | An alliance partner and two opponents the bench drives, and both alliances' human players, playing AUTO or TELEOP by the manual's rules, sharing the HIVEs with the team's robot, with a live scoreboard. | ✅ `src/match.js`, [docs/match.md](docs/match.md) |
-| **The import card** | One card over the field says the one thing to do next: bring the robot (two Onshape steps), add the code, then a review of what the bench worked out (up, front, drive base, mass, joints, device bindings) with the few questions only the team can answer, each with a "show me" that moves the part. Reading happens in a Web Worker, so the page never freezes. | ✅ `src/importflow.js`, `src/engineworker.js`, [docs/robot-setup.md](docs/robot-setup.md) |
+| **The import card** | One card over the field says the one thing to do next: bring the robot (paste the Onshape link, or drop the export), add the code, then a review of what the bench worked out (up, front, drive base, mass, joints, device bindings) with the few questions only the team can answer, each with a "show me" that moves the part. Reading happens in a Web Worker, so the page never freezes. | ✅ `src/importflow.js`, `src/engineworker.js`, [docs/robot-setup.md](docs/robot-setup.md) |
 | **Online matches** | One match with other teams, each on their own computer with their own robot and code: Quick match, a room code or an invite link, alliance chat, marks on the field. Browsers connect directly; the host's bench keeps the score. | ✅ `src/net.js`, [docs/online.md](docs/online.md) |
 | **Robot check** | Checks the joints, wherever they came from, against the team's own OpMode: every motor and servo it moves has a joint, every joint carries parts and is driven, nothing swings through the frame. What it can't confirm becomes a question in the team's device names, with the likely answers and a button to see each one move. | ✅ `src/robotcheck.js`, [docs/robot-check.md](docs/robot-check.md) |
 
 The goal is that every robot ends up right: exact from Onshape mates when there are any, and
 otherwise checked against the team's code, with a few questions only that team can answer.
-Nothing wrong is shown without saying so. Real teams' CAD ([research/realcad](research/realcad/README.md))
-is the test set.
+Nothing wrong is shown without saying so.
 
 ## What it does today
 
@@ -93,11 +94,12 @@ Open **https://ftc-simbench-pro.pages.dev**. It loads GearGurus 7832's Into The 
   written for the Into The Deep field, so it runs against the walls only.
 - The **CAD** button opens the CAD view. Click a part, and its panel shows the joint it rides on,
   the joint's axis, and a slider to try it.
-- **Bring your own robot:** in Onshape, right-click the assembly tab → **Export** → format
-  **URDF**, geometry **GLB**, compression off. Drop the zip anywhere on the page. Then drop your
-  `.java` OpModes and helper classes (or a zip of the TeamCode folder, or paste the GitHub repo).
-  The card over the field says what, if anything, is left to answer. A `.step`, a URDF with its
-  meshes, or a saved `.ftcsim` workspace work the same way.
+- **Bring your own robot:** open the assembly in Onshape, copy the address bar, paste it on the
+  card over the field and click **Get my robot** (Onshape asks once to let SimBench read your
+  documents). Then drop your `.java` OpModes and helper classes (or a zip of the TeamCode folder,
+  or paste the GitHub repo). The card says what, if anything, is left to answer. The export zip
+  (**Export → URDF**), a `.step` or a saved `.ftcsim` workspace drop in the same way. The
+  Sim-ready CAD standard is in [docs/robot-setup.md](docs/robot-setup.md).
 - `?robot=sample` opens the small built-in sample instead.
 - **Online** in the top bar plays one match with other teams, each on their own computer. Use
   **Quick match**, or host and send the invite link ([docs/online.md](docs/online.md)).
@@ -109,13 +111,13 @@ Open **https://ftc-simbench-pro.pages.dev**. It loads GearGurus 7832's Into The 
 ## How it works
 
 ```
- URDF zip ──► meshfiles.js ──► urdf.js ─┐                                  (in a Web Worker:
- (Onshape      unzip, GLB/OBJ   joints,  │                                   engineworker.js)
-  export)      /STL meshes      hints    ├──► frame.js ──► drivetrain.js · inertia.js ──► bind.js ──┐
- STEP file ──► step.js ────────────────┘    +z up,       wheels, drive type,         which joints  │
-               parts, assembly tree,         origin at    motor mounting,             move, which   │
-               the geometry's joints         drive centre mass & inertia              device drives │
-               (autorig.js)                                                           each          ▼
+ Onshape link ─► onshapelink.js ─► onshapecad.js ─┐                           (in a Web Worker:
+ (the API,       assembly, mates,   shapes, links,  │                            engineworker.js)
+  signed in)     features, masses   mates.js joints ├──► frame.js ──► drivetrain.js · inertia.js ──► bind.js ──┐
+ URDF zip ─────► meshfiles.js ─► urdf.js ───────────┤    +z up,       wheels, drive type,         which joints  │
+ STEP file ────► step.js ───────────────────────────┘    origin at    motor mounting,             move, which   │
+                 parts, assembly tree,                   drive centre mass & inertia              device drives │
+                 the geometry's joints (autorig.js)                                               each          ▼
  .java OpModes ──► java.js · jvm.js ──► robotcheck.js ────────────────────────────────► sim.js ──► dynamics.js
  + helper files    the team's code,     what only the team can answer                  50 Hz       rigid body,
                    run as written       (importflow.js asks, once)                     Driver      wheels, slip
@@ -138,21 +140,21 @@ the page runs in a Web Worker to read CAD without freezing. The module map is in
 | Path | What's there |
 |---|---|
 | [`src/`](src/README.md) | The app: engine modules, the 3D and CAD views, the UI. |
-| [`tests/`](tests/README.md) | 610 `node:test` tests: the robot corpus, physics, parser, Road Runner, the real robot end to end, the match, online play, the URDF zip import and the device binding. |
-| [`tools/`](tools/README.md) | The build, the minifier, the test runner, the robot corpus generator, the Onshape mates CLI, and the Fusion **Export to SimBench** script. |
+| [`tests/`](tests/README.md) | 628 `node:test` tests: the robot corpus, physics, parser, Road Runner, the real robot end to end, the match, online play, the Onshape link and the export zip, exact joints and the device binding. |
+| [`tools/`](tools/README.md) | The build, the minifier, the test runner, the robot corpus generator, and the Fusion **Export to SimBench** script. |
 | [`assets/robots/`](assets/robots/into-the-deep/README.md) | The default robot: GearGurus 7832's STEP (gzipped), its joint spec, and the team's OpModes. |
 | [`research/autorig/`](research/autorig/README.md) | The automatic joint finder study: three prototypes, measured against the real robot. |
 | [`docs/`](docs/README.md) | Guides ([joints](docs/joints.md), [code support](docs/code-support.md)) and the screenshots. |
 | `vendor/biobuzz-shot-sim/` | The BIOBUZZ field and shot engine (MIT, ours), synced by `tools/sync-shot-sim.mjs`. |
 | [`AGENTS.md`](AGENTS.md) | How the two coding agents on this repo work together: rules, file claims, shared conventions. |
-| [`DEPLOY.md`](DEPLOY.md) | Hosting on Cloudflare Pages. |
+| [`DEPLOY.md`](DEPLOY.md) | Hosting on Cloudflare Pages, and registering the Onshape app the link import needs. |
 
 ## Build and test
 
 ```bash
 npm install            # dev dependency only: occt-import-js, for the geometry tests
 npm run build          # dev build  -> dist/index.html (open it, or serve dist/)
-npm test               # the whole suite: 556 tests
+npm test               # the whole suite: 628 tests
 npm run build:ship     # what Cloudflare Pages builds: comments and layout stripped
 ```
 

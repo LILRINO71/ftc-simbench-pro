@@ -24,36 +24,18 @@ real joints. No sign-in, no server, no API quota. The export drops mate *relatio
 stages and a gear pair's followers are inferred as hints and coupled once the code says which is
 driven. See [robot-setup.md](robot-setup.md).
 
-## 1. Onshape mates, read live: exact, with relations
+## 1. Onshape mates: exact, with relations
 
-If the robot is in Onshape, its assembly already has every mate. `src/mates.js` reads the
-assembly definition (`GET /api/assemblies/d/…/w/…/e/…?includeMateFeatures=true`). It groups parts
-fastened together into rigid bodies and walks the moving mates (revolute, slider, cylindrical,
-pin-slot) out from the chassis as a joint tree. Each joint gets its true axis and pivot, the parts
-it carries, its limits from the features list, and any gear, rack or screw relation to another
-joint.
-
-**Sign in with Onshape** (`src/onshapelink.js`, `functions/onshape/`): in the **Get my robot from
-Onshape** pop-up, sign in through Onshape's own page once, then paste the assembly's address. It
-reads the same API calls as the bookmark below, through a small Cloudflare Pages Function, and works
-on school computers, which block bookmarks. Setting it up for a site is in `DEPLOY.md`.
-
-**In one click** (`src/onshapelink.js`): drag **Send to SimBench** from the **Mates & joints**
-panel to the bookmarks bar once. Then, on the robot's assembly tab in Onshape, click the bookmark.
-It reads that assembly's definition and mate features from Onshape's API with the team's own
-sign-in (the same two pages as below) and opens SimBench with them packed into the address's
-`#fragment`. A fragment never leaves the browser, so no server sees the robot, and no API key is
-needed.
-- **Robot already open:** if the team's robot is open in another SimBench tab, that tab offers
-  **Apply**, and the new tab closes.
-- **Robot not open yet:** the mates wait for the STEP of the same assembly and apply as soon as it's
-  dropped. They never go onto the default robot.
-- **Very big assembly:** it doesn't fit in an address, so the bookmark saves one `.onshape.json`
-  file to drop instead.
-
-**By hand**, the same panel builds the two API links from an assembly URL. Open them in a browser
-that's signed in to Onshape, save the pages, and drop them on the panel. For scripting there's
-`tools/onshape-mates.mjs`.
+If the robot is in Onshape, its assembly already has every mate. A team pastes the assembly's
+address on the import card; `src/onshapelink.js` reads the assembly definition
+(`GET /api/assemblies/d/…/w/…/e/…?includeMateFeatures=true`), its features and each Part Studio's
+shapes and mass properties through the **Sign in with Onshape** relay (`functions/onshape/`, set
+up in `DEPLOY.md`). `src/mates.js` groups parts fastened together into rigid links and walks the
+moving mates (revolute, slider, cylindrical, pin-slot) out from the chassis as a joint tree. Each
+joint gets its true axis and pivot, the parts it carries, its limits from the features list, and
+any gear, rack or screw relation to another joint. The export zip (**Export → URDF**) gives the
+same joints through `src/urdf.js`, without the relations. Which of those joints are mechanisms,
+and what drives each, is the team's to say: [exact-joints.md](exact-joints.md).
 
 ## 2. A joint spec: written down once
 

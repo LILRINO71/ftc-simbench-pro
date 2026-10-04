@@ -1,6 +1,64 @@
 # Handoff
 
-Two handoffs live here, the newer one first.
+The handoffs live here, the newest first. The two older ones below mention `research/fullrobots`,
+`research/realcad`, `research_notes/` and `reports/`: those folders were removed on 2026-10-04 as
+unused (nothing in the build or the tests read them); the measurements they held stay in the text.
+
+## 2026-10-04 (later): the pasted Onshape link is the way in, and the repo is swept
+
+Branch `claude/onshape-link`, on top of `claude/exact-joints`. The owner asked for the import the
+way a team thinks of it: paste the Onshape assembly's address, nothing to export.
+
+### What changed
+
+- **The link route is the main route** (`src/onshapelink.js`, `src/onshapecad.js`,
+  `src/engineworker.js` op `onshapelink`). The import card's first state is a link box. The read
+  (assembly definition, features, per Part Studio the tessellated faces and mass properties) and
+  the build both run in the engine worker; same-origin cookies travel with a worker's fetch, so the
+  relay (`functions/onshape/`) needs nothing new. `onshapeRef` keeps the `?configuration=` of the
+  address (the Sim configuration) and the definition is read in it.
+- **The robot comes out in the URDF route's shape**: `cad.shapes` (one thinned mesh per unique
+  Part Studio part, `meshReduce`) and solids with `shapes:[k]` + `occT`, so `urdfExact` and the
+  view's instancing draw it with no new case. Before, each occurrence carried its own full triangle
+  list and the view merged them per link.
+- **Exact mass properties**: `osCompactMass` keeps the centroid, the inertia tensor (nominal, about
+  the centroid) and the volume; `cadFromOnshape` rotates them into the robot frame per solid
+  (`s.com`, `s.I`, `s.vol`); `onshapeLinks` sums each rigid link (parallel axis) into `cad.links`
+  and gives each joint `carries` (kg, com, parts). `inertiaOf` takes a part's own tensor
+  (`p.I`) instead of its box; `partMass` prefers the CAD's exact volume to the hull's; `massProps`
+  uses the centre and tensor whenever the part keeps the CAD's mass. A part with no material
+  carries its volume as kg (density 1, what the URDF export writes) and is weighed by kind.
+  Vendor figures still beat CAD mass for recognised parts.
+- **Removed**: the "Send to SimBench" bookmarklet and its `#onshape=` / `#onshape-wait` paths, the
+  Onshape pop-up (`OnshapeHelp`, `#osOverlay`), the manual mates panel (saved API pages, the URL
+  box, `onshapeApiLinks`, `tools/onshape-mates.mjs`), loose URDF files (zip them), the legacy
+  eager URDF builder (`urdfToPayload`, `cadFromUrdf`, `urdfFromZip`; `urdfRobot` is the one),
+  the dock gauges that had no element, the portable-rig textarea, the turret slider, the hidden
+  Support link, the dead drop veil, `DOMAIN`/`dist/CNAME`, unreferenced names (`JV_LANG`, `jvGen`,
+  `SYNONYM`, `HIVE_KEEP`, `segCrossesBox`, `MESH_EXT`), six unreferenced screenshots, and the
+  research folders named above.
+- **Docs**: `docs/robot-setup.md` is the Sim-ready CAD standard (a Sim configuration with hardware
+  suppressed; mate sub-assemblies, not parts; name the mates that are mechanisms; set materials).
+  `DEPLOY.md` is the owner's checklist, with the Onshape app registration the link route needs.
+
+### Measured here
+
+- `npm test`: 628 green (`tests/onshapelink.test.mjs` rewritten for the link; the URDF tests moved
+  to `urdfRobot`). `npm run build` 1.7 MB page, 1.1 MB engine.
+
+### Still open
+
+- **Nothing here has touched Onshape's real API.** The reader is checked against a stand-in built
+  from Onshape's OpenAPI spec and the corpus robot. The owner has to register the OAuth app
+  (`DEPLOY.md`) before the link box even appears on the live site; then the first real import will
+  say whether `tessellatedfaces` at 1.5 mm chords is the right size for a 700-part robot, how long
+  a REVIVER-sized read takes against the quota, and whether linked (COTS) parts come with their
+  colours and masses. `inertia` as "about the centroid, nominal first" follows onshape-to-robot's
+  reading of the response; verify on a real part.
+- The `onshape` worker op re-sends the whole payload for a re-read (a new up or centre). Fine for
+  a corpus robot; a 100-studio robot may want the payload kept in the worker.
+- `src/autorig-lib.js` still carries ~470 generated lines nothing calls (`inferCarry` and its
+  helpers); cutting them means changing the research prototypes `tools/gen-autorig.mjs` wraps.
 
 ## 2026-10-04: the first real export, and what it taught the reader
 

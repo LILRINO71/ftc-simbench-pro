@@ -1,8 +1,9 @@
-# Deploying to app.ftc-simbench.com
+# Deploying FTC SimBench Pro
 
-The whole app is one static folder, so any static host works. What follows is the short path,
-the caveats that actually bite, and what you have to do yourself (I can't buy a domain or sign
-into a host for you).
+The app is one static folder plus one small server function (the Onshape sign-in relay). It is
+built and hosted on **Cloudflare Pages** from this repo; every push to `main` rebuilds the live
+site at <https://ftc-simbench-pro.pages.dev>. This file is the owner's checklist: what ships, how
+the Pages project is set up, and the one thing only the owner can do (register the Onshape app).
 
 ## What ships
 
@@ -15,157 +16,94 @@ That writes `dist/`:
 | file | what it is |
 |---|---|
 | `index.html` | the app, one file; three.js r186 and its add-ons load from jsDelivr as ES modules |
-| `engine-<hash>.js` | the engine alone, run in a Web Worker to read CAD off the page's thread; immutable, cached for a year |
+| `engine-<hash>.js` | the engine alone, run in a Web Worker to read CAD (and an Onshape assembly) off the page's thread; immutable, cached for a year |
 | `fragment.html` | the same app without `<html>`/`<head>`, for embedding |
-| `CNAME` | `app.ftc-simbench.com` — read by GitHub Pages; Cloudflare ignores it harmlessly |
-| `_headers` | cache and security headers, read by Cloudflare Pages and Netlify |
-| `.nojekyll` | stops Jekyll eating files that start with `_` |
+| `_headers` | cache and security headers, read by Cloudflare Pages |
+| `robots/`, `demo/`, `og.png` | the default robot, the demo STEP and the link-preview image |
 
-Three external requests remain at runtime: Google Fonts, the three.js CDN (jsDelivr) and OpenCascade (jsDelivr, the first time a STEP is dropped). To be fully
-self-hosted, download `three.min.js` into `vendor/` and inline the fonts — see "Going
-dependency-free" below.
+`functions/onshape/[[path]].js` is not in `dist/`: Cloudflare Pages picks up `functions/` by
+itself and serves it at `/onshape/*`.
 
-## Hosting: pick one
+Three external requests remain at runtime: Google Fonts, the three.js CDN (jsDelivr) and
+OpenCascade (jsDelivr, the first time a STEP is dropped). `dist/` is build output and is never
+committed (AGENTS.md).
 
-**Cloudflare Pages — this is the one to use.** Free, builds straight from the *private* repo, and it
-hands you a working `https://<project>.pages.dev` link before you own any domain. GitHub Pages
-cannot do this: it refuses Pages on a private repo unless you pay
-(`422: Your current plan does not support GitHub Pages for this repository`).
+## The Pages project
 
 1. Sign in at <https://dash.cloudflare.com> (a free account is enough).
 2. **Compute (Workers & Pages) → Create → Pages → Connect to Git.**
-3. Authorise GitHub, and when it asks which repositories, give it
-   **LILRINO71/ftc-simbench-pro**. It stays private; Cloudflare just reads it.
-4. Set up the build:
+3. Authorise GitHub and give it **LILRINO71/ftc-simbench-pro**. The repo can stay private;
+   Cloudflare only reads it.
+4. Build settings:
    - **Framework preset:** None
    - **Build command:** `npm run build:ship`
    - **Build output directory:** `dist`
-   - Nothing else. (`.node-version` in the repo pins Node 22, and there are no dependencies to
-     install.) Cloudflare also picks up `functions/` by itself: that's **Sign in with Onshape**,
-     which needs two secrets; see the next section.
-5. **Save and Deploy.** The first build takes about a minute. The link appears at the top of the
-   page as `https://ftc-simbench-pro.pages.dev` — that is your shareable link, and every push to
-   `main` rebuilds it automatically.
+   - Nothing else. `.node-version` pins Node 22; `npm install` is only the one dev dependency.
+5. **Save and Deploy.** The first build takes about a minute, and the link appears at the top of
+   the page. Every push to `main` rebuilds it.
 
-Later, when you own the domain: **Custom domains → Set up a domain → `app.ftc-simbench.com`**.
-If the domain's DNS is on Cloudflare the record is made for you; otherwise add the CNAME they show
-you at your registrar. TLS is automatic either way.
+What Cloudflare runs is exactly what runs locally (`npm install && npm run build:ship`), so there
+are no surprises.
 
-What Cloudflare runs is exactly what you can run locally, so there are no surprises:
+## Sign in with Onshape (the main import route needs this)
 
-```bash
-npm install
-npm run build:ship
-```
+A team imports its robot by pasting its Onshape assembly's address. SimBench reads the assembly
+from Onshape's API, signed in as the team. Onshape's API answers no cross-site call from a browser
+and the sign-in needs an app secret, so the read goes through `functions/onshape/[[path]].js`:
+Onshape's OAuth page, then a read-only pass-through of exactly the calls the robot reader makes
+(`ALLOWED` in that file), with the team's token in an encrypted HttpOnly cookie that only
+`/onshape/*` ever sees. Part Studio shapes and masses pinned to a version or microversion are kept
+in the edge cache (`CACHEABLE`), so a goBILDA part read by one team is served to the next from the
+cache and the app's API quota goes further.
 
-**Netlify.** Same shape: build `npm run build:ship`, publish `dist`, then Domain settings → add
-`app.ftc-simbench.com`.
+Until it is set up, `/onshape/status` answers `ready:false`, the import card hides the link box
+and offers the URDF export zip instead. Nothing else breaks.
 
-**GitHub Pages — read this first.** Pages from a *private* repository needs a paid GitHub plan. On
-the free plan, publishing this repo to Pages would mean making it public, which defeats the point.
-Use Cloudflare or Netlify instead, or publish only the built `dist/` to a separate public repo and
-accept that the bundle is readable (it is anyway — see below).
-
-## Sign in with Onshape (optional)
-
-The main way in needs none of this: a team exports URDF from Onshape and drops the zip. Sign in
-with Onshape is the advanced way, for the mate relations (gear and rack ratios) the export leaves
-out. The function keeps each Part Studio's shapes and masses in the edge cache by version or
-microversion (`CACHEABLE` in `functions/onshape/[[path]].js`), so a goBILDA part read once is served
-to the next team from the cache, which spares the app's API quota.
-
-### Setting it up
-
-School computers block the "Send to SimBench" bookmark: their admins list `javascript:` URLs as
-blocked, so clicking it does nothing and dragging it shows `about:blank#blocked`. **Sign in with
-Onshape** works there instead. The team signs in through Onshape's own page, pastes their
-assembly's address, and gets the whole robot. It runs in `functions/onshape/[[path]].js`, a
-Cloudflare Pages Function that ships with the site, and it needs an Onshape app of yours:
+### Register the Onshape app (owner, once)
 
 1. Go to <https://dev-portal.onshape.com>, sign in with your Onshape account, and open
    **OAuth applications → Create new OAuth application**.
    - **Name:** `FTC SimBench` (teams see this on Onshape's Allow page)
-   - **Primary format:** `com.ftcsimbench.app` (any unique name; it can't change later)
+   - **Primary format:** `com.ftcsimbench.app` (any unique reverse-domain name; it can't change later)
    - **Summary:** `Reads your robot's assembly so SimBench can simulate it.`
    - **Redirect URLs:** `https://ftc-simbench-pro.pages.dev/onshape/callback`
-     (add `https://app.ftc-simbench.com/onshape/callback` too once the domain is live)
+     (add every other hostname the site is served from, one per line)
    - **OAuth URL:** `https://ftc-simbench-pro.pages.dev/`
    - **Permissions:** tick only **Application can read your documents**.
 2. Click **Create application**. Copy the **Client ID** and the **Client secret** right away;
    Onshape shows the secret only once.
 3. In Cloudflare: **Workers & Pages → ftc-simbench-pro → Settings → Variables and Secrets → Add**,
-   for **Production**:
-   - `ONSHAPE_CLIENT_ID`: the Client ID
+   for **Production** (and Preview if you want preview deploys to work too):
+   - `ONSHAPE_CLIENT_ID`: the Client ID (type Text)
    - `ONSHAPE_CLIENT_SECRET`: the Client secret (type **Secret**)
 4. **Deployments → the latest one → Retry deployment**, so the function sees them.
-5. Open the site, click **Get my robot from Onshape → Sign in with Onshape**, click **Allow**, and
-   paste an assembly's address. Then try it with a teammate's Onshape account too. If Onshape
-   shows them an error instead of the Allow page, the app needs a store entry before others can use
-   it: open the app in the dev portal and create one.
+5. Open the site. The import card now shows the link box. Paste an assembly's address, click
+   **Get my robot**, click **Allow** on Onshape's page, and the robot arrives.
+6. Try it with a teammate's Onshape account too. A private OAuth app can be authorised by any
+   Onshape user, but if Onshape shows them an error instead of the Allow page, open the app in
+   the dev portal and add a **store entry** (it can stay unlisted).
 
-Until the secrets are set, the pop-up says Sign in with Onshape isn't switched on and offers the
-bookmark and STEP files instead. The secret never reaches the page. Each team's Onshape token is
-kept in an encrypted, HttpOnly cookie that only `/onshape/*` sees. The function only reads, and only
-the calls the robot reader makes, and only from `cad.onshape.com`.
+### Quota
 
-## The domain
-
-`ftc-simbench.com` has to be registered and paid for by you; I can't do that. Once it is:
-- point `app` at your host (Cloudflare Pages and Netlify both show you the exact record),
-- let the host issue the TLS certificate (both do it automatically),
-- keep `dist/CNAME` in sync if you also use GitHub Pages anywhere.
-
-## Donations
-
-The **Support** button in the header is a plain link. Set your real checkout URL once, in
-`src/markup.html`:
-
-```html
-<a class="hdr-btn support" id="supportBtn" href="https://buymeacoffee.com/YOURNAME" ...>
-```
-
-Buy Me a Coffee or Ko-fi needs nothing but that link. Stripe Payment Links are the same idea:
-create the link in the Stripe dashboard and paste it in. Do not put API keys or secrets in this
-app — it is client-side code, and anything in it is public to anyone who opens the page. A
-checkout link is safe; a secret key never is.
+Onshape meters API calls per app. A private app has a yearly allowance that counts against the
+app owner's plan; every import costs one call for the assembly, one for its features, and two per
+Part Studio the robot uses (one for shapes, one for masses). The edge cache absorbs the Part Studio
+calls for library parts after the first team reads them. If the allowance runs low, publishing the
+app in Onshape's App Store lifts the limit; teams can always fall back to the export zip meanwhile.
 
 ## About "protecting" the code
 
-The ship build strips every comment, collapses layout, and can move string literals into an
-encoded table (`--strings`). `tests/ship.test.mjs` runs the entire engine test suite against the
-minified bundle, so the ship build is proven to behave identically to the readable one.
+The ship build strips every comment and collapses layout, and `tests/ship.test.mjs` runs the whole
+engine suite against the minified bundle, so it is proven to behave like the readable one. That
+raises the effort of lifting the physics model. It is not security, and nothing that runs in a
+browser can be: anything in the page is readable by anyone who opens it. Nothing secret belongs in
+the bundle. The one secret this project has (the Onshape client secret) lives in Cloudflare, read
+only by the function.
 
-Measured on this build:
-
-| build | page | JS |
-|---|---|---|
-| `npm run build` (dev) | 615 KB | 435 KB |
-| `npm run build:ship` (`--min`) | 468 KB | 320 KB |
-| `--min --strings` | 547 KB | 400 KB |
-
-Note the last row: base64 costs a third on top of the strings it hides, so the obfuscated build is
-**80 KB bigger**, not smaller. Take it only if hiding strings is worth the download.
-
-That raises the effort of lifting the physics model. It is not security, and nothing that runs in
-a browser can be. If a part of this ever has to be genuinely unavailable to users, it has to move
-behind an API you control, with the browser sending inputs and receiving results.
-
-## Going dependency-free (optional)
-
-1. `curl -o vendor/three.min.js https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js`
-2. In `tools/build.mjs`, replace the three.js `<script src=...>` with an inline
-   `<script>${rd('vendor','three.min.js')}</script>`.
-3. Replace the Google Fonts `<link>` with locally hosted `@font-face` rules, or drop it — the app
-   falls back to system fonts.
-
-The bundle grows by roughly 600 KB and the app then works with no network at all, which is worth
-it for a competition venue with bad wifi.
-
-## Checklist before you announce it
+## Checklist before announcing it
 
 - [ ] `npm test` green, `npm run build:ship` clean
-- [ ] Sign in with Onshape set up (above), and tried on a school computer
-- [ ] Opened `dist/index.html` from the filesystem and driven a robot
-- [ ] Support link points at your real checkout
-- [ ] Tested on the laptop the team actually brings to competition
+- [ ] Sign in with Onshape set up (above), tried with the owner's robot and with a teammate's account
+- [ ] Tried on a school Chromebook: the pasted link, then INIT and START
 - [ ] A `.ftcsim` saved on one machine opens on another
+- [ ] Tested on the laptop the team actually brings to competition
