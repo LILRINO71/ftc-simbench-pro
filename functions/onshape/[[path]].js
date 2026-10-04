@@ -1,10 +1,8 @@
 /* ============================================================
    SIGN IN WITH ONSHAPE (Cloudflare Pages Function, /onshape/*)
-   School Chromebooks block bookmarklets (their admins list javascript:
-   URLs as blocked), so the "Send to SimBench" bookmark can't run there.
-   This is the way that works on any browser: the team signs in to Onshape
-   through Onshape's own OAuth page, pastes their assembly's link, and the
-   page reads the same API calls the bookmark makes, through here.
+   The import route: the team signs in to Onshape through Onshape's own
+   OAuth page, pastes their assembly's address, and the page (in its engine
+   worker) reads the assembly from Onshape's API through here.
 
    Why a server at all: Onshape's API doesn't answer cross-site calls from
    a browser (no CORS), and trading the sign-in code for a token needs the
@@ -25,12 +23,13 @@
    documents" and redirect URL https://<site>/onshape/callback, then give
    the Pages project two secrets: ONSHAPE_CLIENT_ID and
    ONSHAPE_CLIENT_SECRET. Without them, /onshape/status says ready:false
-   and the page offers the bookmark instead.
+   and the import card offers the export zip instead.
    ============================================================ */
 const OAUTH = "https://oauth.onshape.com/oauth";
 const API = "https://cad.onshape.com/api/";
 const COOKIE = "sb_os", STATE = "sb_os_state";
-// what the robot reader calls (src/onshapelink.js onshapeRead), and nothing else
+// what the robot reader calls (src/onshapelink.js onshapeRead), and nothing else; a query (configuration,
+// tolerances, massAsGroup) rides along
 const ALLOWED = /^(?:v\d+\/)?(?:assemblies\/d\/[0-9a-f]{24}\/[wvm]\/[0-9a-f]{24}\/e\/[0-9a-f]{24}(?:\/features)?|partstudios\/d\/[0-9a-f]{24}\/[wvm]\/[0-9a-f]{24}\/e\/[0-9a-f]{24}\/(?:tessellatedfaces|massproperties)|documents\/[0-9a-f]{24})$/i;
 // what may be kept at the edge: a Part Studio's shapes or masses at a version (v) or microversion (m); a workspace (w) moves
 const CACHEABLE = /^(?:v\d+\/)?partstudios\/d\/[0-9a-f]{24}\/[vm]\/[0-9a-f]{24}\/e\/[0-9a-f]{24}\/(?:tessellatedfaces|massproperties)$/i;

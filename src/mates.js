@@ -8,9 +8,9 @@
      GET https://cad.onshape.com/api/assemblies/d/{did}/w/{wid}/e/{eid}
          ?includeMateFeatures=true&includeMateConnectors=true
 
-   Opened in a browser tab that's signed in to Onshape, that URL returns the
-   JSON directly, with no API keys. This file turns it into the bench's
-   mechanisms:
+   src/onshapelink.js reads it through Sign in with Onshape, and src/urdf.js
+   writes the same document from a URDF export. This file turns it into the
+   bench's mechanisms:
    - rigid bodies: parts fastened together, or grouped, or sharing a
      subassembly that has nothing moving inside it
    - joints: the moving mates between bodies (revolute, slider, cylindrical,
@@ -21,16 +21,6 @@
    Every Onshape part occurrence is matched to a STEP part by where it sits
    (its world transform), with the part name breaking ties.
    ============================================================ */
-
-/* An assembly's URL -> the two API links the panel offers. Only ever an
-   onshape.com host (company subdomains included), so the URL box can't be
-   turned into a link to anywhere else. */
-function onshapeApiLinks(url){
-  const m=/^(https:\/\/(?:[a-z0-9-]+\.)*onshape\.com)\/documents\/([0-9a-f]{24})\/(w|v|m)\/([0-9a-f]{24})\/e\/([0-9a-f]{24})(?:[/?#]|$)/i.exec(String(url||"").trim());
-  if(!m) return null;
-  const base=m[1]+"/api/assemblies/d/"+m[2]+"/"+m[3]+"/"+m[4]+"/e/"+m[5];
-  return {def:base+"?includeMateFeatures=true&includeMateConnectors=true&includeNonSolids=false", features:base+"/features"};
-}
 
 const MATE_MOVING = {REVOLUTE:1, SLIDER:1, CYLINDRICAL:1, PIN_SLOT:1, PLANAR:1, BALL:1, PARALLEL:1};
 const MATE_DEFAULT_NAME = /^(revolute|slider|fastened|cylindrical|pin[ _]?slot|planar|ball|parallel|tangent|width)\s*\d*$/i;

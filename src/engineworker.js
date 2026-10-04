@@ -10,7 +10,8 @@
 
    Jobs:  step     text, name, opts            -> {cad, rig, units}
           urdfzip  bytes, name, opts           -> {cad, notes} or {entries} (no .urdf: the team's code, perhaps)
-          onshape  payload, opts               -> {cad}
+          onshape  payload, opts               -> {cad}   (a robot already read, built again)
+          onshapelink href, host, opts         -> {cad, payload}   (a pasted address: read through the relay, then built)
    Progress comes back as it happens. Anywhere a worker can't start (a file://
    page, a strict CSP, an old browser) the same work runs on the page, as it
    always did, so nothing is lost but the smoothness.
@@ -61,9 +62,16 @@ onmessage=async e=>{
       postMessage({id:d.id, ok:true, cad, notes:cad.onshape.why||[], name:cad.name},pack(cad));
     }else if(d.op==="onshape"){
       say(d.id,"building the robot …");
-      const cad=cadFromOnshape(d.payload,d.opts||{});
-      if(d.from==="urdf"){ cad.source="urdf"; if(d.payload.notes&&d.payload.notes.length) cad.onshape.why=d.payload.notes.concat(cad.onshape.why||[]); urdfApplyHints(cad,d.payload.hints); }
+      const cad=cadFromOnshape(d.payload,Object.assign({say:msg=>say(d.id,msg)},d.opts||{}));
       postMessage({id:d.id, ok:true, cad},pack(cad));
+    }else if(d.op==="onshapelink"){
+      // the whole read through the sign-in relay (same-origin cookies travel with a worker's fetch), then the build
+      const p=checkOnshapePayload(await onshapeFromLink(d.href,(t,n,k)=>say(d.id,t,n,k),d.host));
+      say(d.id,"Building your robot …");
+      const cad=cadFromOnshape(p,Object.assign({say:msg=>say(d.id,msg)},d.opts||{}));
+      // the payload goes back too (its shapes handed over, not copied): a new up or centre rebuilds from it without another read
+      const tr=pack(cad); for(const k in p.geom||{}){ const g=p.geom[k]; if(g) for(const id in g.parts){ const t=g.parts[id].tri; if(t&&t.buffer&&!tr.includes(t.buffer)) tr.push(t.buffer); } }
+      postMessage({id:d.id, ok:true, cad, payload:p},tr);
     }else postMessage({id:d.id, ok:false, error:"unknown job "+d.op});
   }catch(err){ postMessage({id:d.id, ok:false, error:String(err&&err.message||err)}); }
 };`;
@@ -129,9 +137,14 @@ onmessage=async e=>{
       return {ok:true, cad, notes:cad.onshape.why||[], name:cad.name};
     }
     if(msg.op==="onshape"){
-      const cad=cadFromOnshape(msg.payload,msg.opts||{});
-      if(msg.from==="urdf"){ cad.source="urdf"; if(msg.payload.notes&&msg.payload.notes.length) cad.onshape.why=msg.payload.notes.concat(cad.onshape.why||[]); urdfApplyHints(cad,msg.payload.hints); }
+      const cad=cadFromOnshape(msg.payload,Object.assign({say},msg.opts||{}));
       return {ok:true, cad};
+    }
+    if(msg.op==="onshapelink"){
+      const p=checkOnshapePayload(await onshapeFromLink(msg.href,(t,n,k)=>onProgress&&onProgress(t,n,k),msg.host));
+      say("Building your robot …");
+      const cad=cadFromOnshape(p,Object.assign({say},msg.opts||{}));
+      return {ok:true, cad, payload:p};
     }
     throw new Error("unknown job "+msg.op);
   },
@@ -142,5 +155,8 @@ onmessage=async e=>{
   parseStep(text,name,opts){ return this.job({op:"step", text, name, opts:opts.frame||{}, rig:opts.rig!==false, front:opts.front||"+x", units:opts.units!==false},[],opts.onProgress); },
   // the zip's bytes are handed over, not copied: a 500 MB export would otherwise sit in memory twice
   urdfZip(bytes,name,opts){ const u8=bytes instanceof Uint8Array?bytes:new Uint8Array(bytes); return this.job({op:"urdfzip", bytes:u8, name, opts:opts.frame||{}},[u8.buffer],opts.onProgress); },
-  onshape(payload,opts){ return this.job({op:"onshape", payload, from:opts.from||null, opts:opts.frame||{}},[],opts.onProgress); },
+  /* a payload already read (a new up or centre for the same robot): built again, off the page */
+  onshape(payload,opts){ return this.job({op:"onshape", payload, opts:opts.frame||{}},[],opts.onProgress); },
+  /* a pasted assembly address: read through the relay and built, both off the page */
+  onshapeLink(href,opts){ const host=new URL("onshape",location.href).href.replace(/\/$/,""); return this.job({op:"onshapelink", href, host, opts:opts.frame||{}},[],opts.onProgress); },
 };

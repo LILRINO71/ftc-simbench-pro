@@ -1,7 +1,7 @@
 // The whole robot from Onshape with no STEP (src/onshapecad.js): parts with
 // their own triangles, colours and masses, placed where Onshape says, and the
 // joints straight from the mates. The `mated` corpus robot's assembly, as the
-// "Send to SimBench" bookmark gathers it.
+// pasted-link reader gathers it.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { loadEngine } from './load.mjs';
@@ -16,10 +16,15 @@ test('onshape whole robot: every part arrives with real triangles, a colour and 
   const cad = E.cadFromOnshape(payload());
   assert.equal(cad.source, 'onshape');
   assert.equal(cad.solids.length, R.truth.leafParts);
+  // every part is a placed copy of a thinned shape, the way the URDF route draws them (urdfExact -> View.setExact)
   for (const s of cad.solids) {
-    assert.ok(s.tri && s.tri.pos.length >= 9 && s.tri.pos.length === s.tri.nor.length, s.name + ' has triangles');
+    assert.ok(s.shapes && s.shapes.length === 1 && cad.shapes[s.shapes[0]].pos.length >= 9, s.name + ' has a shape');
     assert.ok(Array.isArray(s.color) && s.color.length === 3, s.name + ' has a colour');
+    assert.ok(s.occT && s.occT.r.length === 3, s.name + ' has its placement');
   }
+  const ex = E.urdfExact(cad);
+  assert.equal(ex.meshes.length, cad.solids.length, 'one placed mesh per part for the view');
+  assert.ok(cad.shapes.length < cad.solids.length, 'a part placed twice is one shape: ' + cad.shapes.length + ' shapes, ' + cad.solids.length + ' parts');
   assert.ok(Math.abs(cad.onshape.kg - R.truth.massKg) < 1e-3, 'the mass is Onshape\'s, summed');
   // the same robot frame a STEP gets: up +z, standing on the floor
   assert.equal(cad.frame.up, R.truth.up);
@@ -49,7 +54,12 @@ test('onshape whole robot: a raw tessellatedfaces response compacts the same way
   const c = E.osCompactTess(raw);
   assert.equal(c.JHD.tri.length, 27);
   assert.deepEqual(c.JHD.color.map((v) => Math.round(v * 255)), [255, 128, 0], 'the colour covering most of the part');
-  assert.deepEqual(E.osCompactMass({ bodies: { JHD: { mass: [0.25, 0.24, 0.26], centroid: [0, 0, 0.1] } } }), { JHD: { kg: 0.25, com: [0, 0, 0.1] } });
+  assert.deepEqual(E.osCompactMass({ bodies: { JHD: { mass: [0.25, 0.24, 0.26], centroid: [0, 0, 0.1, 0, 0, 0.1, 0, 0, 0.1], volume: [1e-4, 1e-4, 1e-4] } } }), { JHD: { kg: 0.25, com: [0, 0, 0.1], I: null, vol: 1e-4 } });
+  // no material: the volume stands in for the mass (density 1), exactly as Onshape's URDF export writes it
+  assert.equal(E.osCompactMass({ bodies: { X: { hasMass: false, mass: [0, 0, 0], volume: [2e-5, 2e-5, 2e-5], centroid: [1, 2, 3] } } }).X.kg, 2e-5);
+  // the tensor comes through, nominal first
+  const I = Array.from({ length: 27 }, (_, i) => i + 1);
+  assert.deepEqual(E.osCompactMass({ bodies: { Y: { mass: [1, 1, 1], centroid: [0, 0, 0], inertia: I } } }).Y.I, I.slice(0, 9));
   assert.equal(E.onshapeGeomKey({ documentId: 'D', documentVersion: 'V', elementId: 'E', configuration: 'c=1' }), 'D/v/V/e/E|c=1');
 });
 
@@ -66,7 +76,7 @@ test('onshape whole robot: facet points written as {x,y,z} and colours as string
   const tess = [{ id: 'JHD', name: 'Plate', faces: [{ appearance: { color: ['255', '128', '0'], opacity: 255 },
     facets: [{ vertices: [{ x: 0, y: 0, z: 0 }, { x: 0.1, y: 0, z: 0 }, { x: 0, y: 0.1, z: 0 }] }] }] }];
   const c = E.osCompactTess(tess);
-  assert.deepEqual(Array.from(c.JHD.tri), [0, 0, 0, 0.1, 0, 0, 0, 0.1, 0]);
+  Array.from(c.JHD.tri).forEach((v, i) => assert.ok(Math.abs(v - [0, 0, 0, 0.1, 0, 0, 0, 0.1, 0][i]) < 1e-6));
   assert.deepEqual(c.JHD.color.map((x) => Math.round(x * 255)), [255, 128, 0]);
 });
 
