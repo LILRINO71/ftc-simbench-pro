@@ -18,9 +18,15 @@
 
 /* ---- zip ----
    The central directory at the end of the file lists every entry with its
-   method, sizes and local header offset. Resolves to [{name, data:Uint8Array}].
-   Directories and entries that can't be read are left out. */
-async function zipEntries(buf){
+   method, sizes and local header offset. Resolves to [{name, size, data}].
+   Directories and entries that can't be read are left out.
+
+   A Fine-resolution export is 200 MB zipped and half a gigabyte unpacked;
+   unpacking it all at once is what ran a browser tab out of memory. With
+   opts.lazy each entry comes back with data:null and a read() that inflates
+   it on demand, so a mesh is only in memory while it is being thinned. */
+async function zipEntries(buf,opts){
+  opts=opts||{};
   const u8=buf instanceof Uint8Array?buf:new Uint8Array(buf);
   const dv=new DataView(u8.buffer,u8.byteOffset,u8.byteLength);
   // the end-of-central-directory record: signature 0x06054b50, at most 65 KB from the end (the comment)
@@ -40,15 +46,17 @@ async function zipEntries(buf){
     if(loc+30>u8.length||dv.getUint32(loc,true)!==0x04034b50) continue;
     const lnlen=dv.getUint16(loc+26,true), lxlen=dv.getUint16(loc+28,true), start=loc+30+lnlen+lxlen;
     const raw=u8.subarray(start,Math.min(u8.length,start+csize));
+    if(method!==0&&method!==8) continue;
+    const read=method===0?async()=>raw:async()=>inflateRaw(raw,usize);
+    if(opts.lazy){ out.push({name, size:usize, data:null, read}); continue; }
     let data=null;
-    if(method===0) data=raw;
-    else if(method===8){
-      try{ data=await inflateRaw(raw,usize); }catch(e){ data=null; }
-    }
-    if(data) out.push({name, data});
+    try{ data=await read(); }catch(e){ data=null; }
+    if(data) out.push({name, size:usize, data, read:async()=>data});
   }
   return out;
 }
+/* an entry's bytes, whichever way it was listed */
+async function zipRead(e){ if(!e) return null; if(e.data) return e.data; return e.read?e.read():null; }
 /* raw deflate -> bytes, through the platform (browsers and Node 18+) */
 async function inflateRaw(raw,size){
   if(typeof DecompressionStream!=="function") throw new Error("this browser can't unzip");
@@ -181,11 +189,63 @@ function objRead(text,mtlText){
   return {tri:Float32Array.from(tris), color:best, colors:Uint16Array.from(tc), palette};
 }
 
-/* ---- any mesh file by name: STL (src/urdf.js urdfStl), glTF/GLB, OBJ ----
+/* ---- STL, binary or ASCII, straight into a Float32Array (a 6 MB STL as a
+   plain Array was 70 MB; an export has hundreds) ---- */
+function stlTriangles(buf){
+  const u8=buf instanceof Uint8Array?buf:new Uint8Array(buf);
+  const dv=new DataView(u8.buffer,u8.byteOffset,u8.byteLength);
+  const n=u8.length>=84?dv.getUint32(80,true):0;
+  if(u8.length>=84&&u8.length===84+n*50){
+    const out=new Float32Array(n*9);
+    for(let i=0,o=84+12;i<n;i++,o+=50){ for(let k=0;k<9;k++) out[i*9+k]=dv.getFloat32(o+k*4,true); }
+    return out;
+  }
+  return Float32Array.from(urdfStl(u8));
+}
+
+/* ---- decimation by vertex clustering ----
+   Onshape's "Fine" export draws a 48 mm channel with 200,000 triangles and a
+   whole robot with 85 million. Vertices are snapped to a grid of `cell` metres,
+   coincident ones merge, and triangles that collapse go; what is left is an
+   indexed mesh with the same silhouette. Flat faces keep their size; a 64-sided
+   hole becomes a 12-sided one. {pos: Float32Array, idx: Uint32Array}. */
+function meshDecimate(tri,cell){
+  const n=tri.length/3, inv=1/cell;
+  const key=new Map(), pos=[], idx=new Uint32Array(n);
+  // the grid key as one number: 21 bits per axis about the origin
+  for(let i=0;i<n;i++){
+    const x=tri[3*i], y=tri[3*i+1], z=tri[3*i+2];
+    const k=(Math.round(x*inv)+1048576)+(Math.round(y*inv)+1048576)*2097152+(Math.round(z*inv)+1048576)*4398046511104;
+    let v=key.get(k);
+    if(v===undefined){ v=pos.length/3; key.set(k,v); pos.push(x,y,z); }
+    idx[i]=v;
+  }
+  // drop the triangles that collapsed to a line or a point
+  let m=0; const out=new Uint32Array(n);
+  for(let t=0;t<n;t+=3){ const a=idx[t], b=idx[t+1], c=idx[t+2]; if(a===b||b===c||a===c) continue; out[m]=a; out[m+1]=b; out[m+2]=c; m+=3; }
+  return {pos:Float32Array.from(pos), idx:out.slice(0,m)};
+}
+/* The grid for a part: fine enough that an M4 hole still reads, coarse enough
+   that the whole robot stays a few million triangles. Starts from the part's
+   size and coarsens until the triangle budget is met. */
+function meshReduce(tri,opts){
+  opts=opts||{};
+  let mn=[Infinity,Infinity,Infinity], mx=[-Infinity,-Infinity,-Infinity];
+  for(let i=0;i<tri.length;i+=3) for(let k=0;k<3;k++){ const v=tri[i+k]; if(v<mn[k]) mn[k]=v; if(v>mx[k]) mx[k]=v; }
+  const diag=Math.hypot(mx[0]-mn[0],mx[1]-mn[1],mx[2]-mn[2])||0.01;
+  const budget=opts.budget||Math.max(1500,Math.min(24000,Math.round(diag*60000)));
+  let cell=Math.max(opts.minCell||0.0003,diag*0.004), r=null;
+  if(tri.length/9<=budget*0.6&&!opts.always){ // small already: just weld
+    r=meshDecimate(tri,Math.max(0.00005,diag*0.0005));
+  } else for(let k=0;k<6;k++){ r=meshDecimate(tri,cell); if(r.idx.length/3<=budget) break; cell*=1.6; }
+  return {pos:r.pos, idx:r.idx, box:{min:mn,max:mx}, diag, before:tri.length/9, after:r.idx.length/3};
+}
+
+/* ---- any mesh file by name: STL, glTF/GLB, OBJ ----
    files: {basename: Uint8Array|ArrayBuffer}; name is the mesh's file name. */
 function meshRead(name,data,files){
   const ext=String(name||"").toLowerCase().replace(/^.*\./,"");
-  if(ext==="stl") return {tri:Float32Array.from(urdfStl(data)), color:null};
+  if(ext==="stl") return {tri:stlTriangles(data), color:null};
   if(ext==="glb"||ext==="gltf") return gltfRead(data,files);
   if(ext==="obj"){
     const txt=new TextDecoder().decode(data instanceof Uint8Array?data:new Uint8Array(data));

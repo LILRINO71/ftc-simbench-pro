@@ -195,3 +195,103 @@ test('bind: the real robot, no joint spec: all eleven devices, nothing asked', a
   assert.equal(B.map.uppies1, 'lift'); assert.equal(B.map.linkR, 'crank R'); assert.equal(B.map.outClaw, 'outClaw');
   assert.equal(cad.mechs.filter((m) => m.internal).length, 0, 'a spec\'s joints are never demoted');
 });
+
+
+/* ---- the whole-robot builder (urdfRobot): what a real Onshape export throws at it ----
+   One link holding many parts, connector links, parts never mated, bearings with
+   their own joints, a gear on a gear, a game element in the hopper. Modelled on
+   the REVIVER export (1920 links, 463 continuous joints, 56 parts in the root). */
+const URDF2 = `<?xml version="1.0"?><robot name="reviver">
+<link name="root">
+  <visual><origin xyz="0 0 0.15"/><geometry><mesh filename="package://reviver/meshes/Chassis.glb"/></geometry></visual>
+  <visual><origin xyz="0.2 0 0.05"/><geometry><mesh filename="package://reviver/meshes/Bracket.glb"/></geometry></visual>
+  <visual><origin xyz="-0.2 0 0.05"/><geometry><mesh filename="package://reviver/meshes/Bracket.glb"/></geometry></visual>
+</link>
+<link name="Arm_1"><visual><geometry><mesh filename="package://reviver/meshes/Arm.glb"/></geometry></visual><inertial><mass value="0.3"/></inertial></link>
+<link name="Gear_1"><visual><geometry><mesh filename="package://reviver/meshes/Gear.glb"/></geometry></visual><inertial><mass value="0.000216"/></inertial></link>
+<link name="Race_1"><visual><geometry><mesh filename="package://reviver/meshes/Race.glb"/></geometry></visual></link>
+<link name="Plate_1"><visual><geometry><mesh filename="package://reviver/meshes/Plate.glb"/></geometry></visual></link>
+<link name="planar_1"/><link name="planar_1_1"/>
+<link name="Stray_1"><visual><geometry><mesh filename="package://reviver/meshes/Bracket.glb"/></geometry></visual></link>
+<link name="Artifact_1"><visual><geometry><mesh filename="package://reviver/meshes/Ball.glb"/></geometry></visual><inertial><mass value="0.0005"/></inertial></link>
+<joint name="arm_pivot" type="continuous"><parent link="root"/><child link="Arm_1"/><origin xyz="0 0.1 0.3"/><axis xyz="1 0 0"/></joint>
+<joint name="gear_spin" type="continuous"><parent link="Arm_1"/><child link="Gear_1"/><origin xyz="0 0 0"/><axis xyz="1 0 0"/></joint>
+<joint name="race_spin" type="continuous"><parent link="root"/><child link="Race_1"/><origin xyz="0.1 0.1 0.1"/><axis xyz="0 1 0"/></joint>
+<joint name="planar_1" type="prismatic"><parent link="root"/><child link="planar_1"/><origin xyz="0 -0.1 0.3"/><axis xyz="1 0 0"/><limit lower="-10000" upper="10000"/></joint>
+<joint name="planar_1_1" type="prismatic"><parent link="planar_1"/><child link="planar_1_1"/><axis xyz="0 1 0"/><limit lower="-10000" upper="10000"/></joint>
+<joint name="planar_1_2" type="continuous"><parent link="planar_1_1"/><child link="Plate_1"/><axis xyz="0 0 1"/></joint>
+<joint name="hanging_node_to_root_joint_1" type="fixed"><parent link="root"/><child link="Stray_1"/><origin xyz="1.5 0 0.05"/></joint>
+<joint name="ball_fix" type="fixed"><parent link="root"/><child link="Artifact_1"/><origin xyz="0 0 0.4"/></joint>
+</robot>`;
+const ZIP2 = () => zip([
+  { name: 'reviver/robot.urdf', data: URDF2, deflate: true },
+  { name: 'reviver/meshes/Chassis.glb', data: glb([0.7, 0.7, 0.72], 0.12), deflate: true },
+  { name: 'reviver/meshes/Bracket.glb', data: glb([0.2, 0.2, 0.2], 0.05), deflate: false },
+  { name: 'reviver/meshes/Arm.glb', data: glb([0.9, 0.6, 0.1], 0.15), deflate: true },
+  { name: 'reviver/meshes/Gear.glb', data: glb([0.5, 0.5, 0.5], 0.06), deflate: true },
+  { name: 'reviver/meshes/Race.glb', data: glb([0.5, 0.5, 0.5], 0.012), deflate: false },
+  { name: 'reviver/meshes/Plate.glb', data: glb([0.3, 0.3, 0.3], 0.1), deflate: true },
+  { name: 'reviver/meshes/Ball.glb', data: glb([0.2, 0.8, 0.2], 0.12), deflate: true },
+]);
+
+test('zip: read lazily, an entry stays packed until it is asked for (a 500 MB export never unpacks whole)', async () => {
+  const eager = await E.zipEntries(ZIP2()), lazy = await E.zipEntries(ZIP2(), { lazy: true });
+  assert.equal(lazy.length, eager.length);
+  for (const e of lazy) assert.equal(e.data, null, e.name + ' not unpacked yet');
+  const a = lazy.find((e) => /Arm\.glb/.test(e.name)), b = eager.find((e) => /Arm\.glb/.test(e.name));
+  assert.equal(a.size, b.data.length);
+  assert.deepEqual(await E.zipRead(a), b.data, 'read on demand gives the same bytes');
+});
+
+test('urdfRobot: every part of a many-part link is its own solid, and the link is a sub-assembly the mates land on', async () => {
+  const { cad } = await E.urdfRobotFromZip(ZIP2(), 'reviver.zip');
+  const root = cad.solids.filter((s) => s.link === 'root');
+  assert.equal(root.length, 3, 'three parts in the root link');
+  assert.deepEqual(root.map((s) => s.name).sort(), ['Bracket', 'Bracket', 'Chassis'], 'named after their meshes');
+  assert.ok(root.every((s) => /^root\/root#\d$/.test(s.osPath)), 'each under the link: ' + root.map((s) => s.osPath));
+  assert.equal(cad.mates.parts, cad.solids.length, 'every part is in the mate model');
+  assert.ok(cad.mechs.find((m) => m.id === 'arm_pivot'), 'the arm joint landed');
+  const ex = E.urdfExact(cad);
+  assert.equal(ex.meshes.length, cad.solids.length, 'one placed mesh per part for the view');
+});
+
+test('urdfRobot: a part hung off the root and sitting away from everything was never mated: left off, and said', async () => {
+  const { cad } = await E.urdfRobotFromZip(ZIP2(), 'reviver.zip');
+  assert.ok(!cad.solids.some((s) => s.link === 'Stray_1'), 'the stray is gone');
+  assert.deepEqual(cad.urdf.stray, ['Stray']);
+  assert.ok(cad.onshape.why.some((w) => /never mated to the robot/.test(w)), cad.onshape.why.join(' | '));
+  assert.ok(cad.bbox.max[0] < 0.5, 'and it no longer stretches the robot: ' + cad.bbox.max[0]);
+});
+
+test('urdfRobot: a planar mate written as two slides and a turn is held where it was drawn, not a joint', async () => {
+  const { cad } = await E.urdfRobotFromZip(ZIP2(), 'reviver.zip');
+  assert.equal(cad.urdf.collapsed, 2);
+  assert.ok(cad.onshape.why.some((w) => /1 of them planar or parallel mates, held/.test(w)), cad.onshape.why.join(' | '));
+  assert.ok(!cad.mechs.some((m) => /planar/.test(m.id) && m.kind !== 'fixed'), 'no planar mechanism');
+  assert.ok(cad.solids.some((s) => s.link === 'Plate_1'), 'the plate is still there');
+});
+
+test('classify: judged by what it carries: a gear on the arm\'s own axis turns with the arm, a bearing race is internal, the arm is a mechanism', async () => {
+  const { cad } = await E.urdfRobotFromZip(ZIP2(), 'reviver.zip');
+  const C = E.classifyJoints(cad);
+  const by = (id) => cad.mechs.find((m) => m.id === id);
+  assert.ok(!by('arm_pivot').internal, 'the arm');
+  assert.equal(by('gear_spin').internalWhy, 'coaxial');
+  assert.equal(by('race_spin').internalWhy, 'small');
+  assert.equal(C.mechanisms, 1);
+  assert.ok(C.why.some((w) => /same axis as the turn/.test(w)));
+});
+
+test('mass: the export\'s own figure when it has a material, its volume at the material\'s density when it has none, nothing for a game element', async () => {
+  const { cad } = await E.urdfRobotFromZip(ZIP2(), 'reviver.zip');
+  const S = (n) => cad.solids.find((s) => s.name === n);
+  const arm = E.partMass(S('Arm')), gear = E.partMass(S('Gear')), ball = E.partMass(S('Artifact'));
+  assert.equal(arm.how, 'cad'); assert.ok(Math.abs(arm.kg - 0.3) < 1e-9, 'the inertial mass, plausible for a 150 mm part');
+  assert.equal(gear.how, 'cad'); assert.ok(Math.abs(gear.kg - 0.000216 * 2700) < 1e-6, 'a 60 mm part at density 1 is its volume: aluminium, ' + gear.kg);
+  assert.equal(S('Artifact').kind, 'game'); assert.equal(ball.kg, 0); assert.equal(ball.how, 'game');
+  // a team-drawn "Part 3" of unknown material is printed or polycarbonate far more often than aluminium
+  const custom = E.partMass({ name: 'Part 3', part: null, kind: 'metal', kg: 0.0001, pts: S('Gear').pts });
+  assert.ok(Math.abs(custom.kg - 0.0001 * 1300) < 1e-9, custom.why);
+  const props = E.massProps(cad);
+  assert.ok(props.kg > 0.5 && props.kg < 3, 'a plausible little robot: ' + props.kg.toFixed(2));
+});
