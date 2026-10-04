@@ -1596,7 +1596,9 @@ const View={
     else if(this.chassisG){ target.copy(this.chassisG.position); target.y=(this.lift0||0.2)+(Sim.base?Sim.base.H:0); }
     if(!this.look) this.look=target.clone();
     if(!this.drag) this.look.lerp(target,0.18);          // hold still while the robot is being dragged
-    const r=this.rad;
+    // a narrow window (a half-screen browser, a Chromebook) sees the robot from further back,
+    // so it stays whole in the frame instead of cropped
+    const asp=(this.cam&&this.cam.aspect)||1.6, r=this.rad*(this.mode==="field"?1:Math.max(1,Math.sqrt(1.55/Math.max(0.5,asp))));
     this.cam.position.set(this.look.x+r*Math.sin(this.phi)*Math.cos(this.theta),
                           this.look.y+r*Math.cos(this.phi),
                           this.look.z+r*Math.sin(this.phi)*Math.sin(this.theta));

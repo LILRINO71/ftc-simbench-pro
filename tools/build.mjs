@@ -44,7 +44,8 @@ const build = crypto.createHash('sha256').update(engine).digest('hex').slice(0, 
 const banner = `/*! FTC SimBench Pro ${pkg.version} (${build}) — Copyright (c) 2026 LILRINO71. All rights reserved.\n` +
   `    Proprietary. Not open source. Includes the BIOBUZZ Shot Sim (MIT, (c) 2026 LILRINO71). */\n`;
 
-let js = '"use strict";\n' + engine + `\nvar SIMBENCH_BUILD=${JSON.stringify({ v: pkg.version, build })};\n`;
+// the build id first, so anything that runs as the bundle loads (the boot block) can read it
+let js = '"use strict";\n' + `var SIMBENCH_BUILD=${JSON.stringify({ v: pkg.version, build })};\n` + engine;
 let css = rd('src', 'styles.css');
 let markup = rd('src', 'markup.html');
 if (MIN) { js = banner + minifyJS(js, { strings: STRINGS }); css = minifyCSS(css); markup = minifyHTML(markup); }

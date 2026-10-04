@@ -1060,3 +1060,7 @@ button.rmbtn:hover{border-color:var(--fail); color:var(--fail);}
   :root{--line:rgba(60,60,67,.4); --line-2:rgba(60,60,67,.25); --tx-3:rgba(60,60,67,.7);}
   :root[data-theme="dark"]{--line:rgba(255,255,255,.35); --line-2:rgba(255,255,255,.2); --tx-3:rgba(235,235,245,.7);}
 }
+
+/* a side panel never scrolls sideways: whatever is too wide for it wraps or clips */
+.rail-left,.rail-right{overflow-x:hidden;}
+.rail-left .sec,.rail-left .load-row,.rail-left .drop{min-width:0; max-width:100%;}
