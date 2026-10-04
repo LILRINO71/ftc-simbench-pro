@@ -1052,7 +1052,7 @@ function setTheme(t){
   const next=t==="dark"?"light":"dark";
   b.innerHTML=t==="dark"?SUN:MOON;
   b.setAttribute("aria-label","Switch to "+next+" theme"); b.title="Switch to "+next+" theme";
-  Graph.draw();
+  Graph.draw(); if(typeof CadView!=="undefined"&&CadView.theme) CadView.theme();
 }
 
 /* ============================================================
@@ -1317,7 +1317,7 @@ function analyzeAll(){
   if(!CODE||!CAD) return;
   FINDINGS=analyze(CODE,CAD,MAP,OPTS);
   renderFindings(); renderTables(); renderRig(); renderCoverage(); renderRobotCheck();
-  Status.render(); MathTab.invalidate();
+  Status.render(); MathTab.invalidate(); ImportFlow.render();
 }
 /* Rebuild the simulation after a rig or hardware change, keeping the Driver
    Station where it was — a running OpMode restarts, like re-deploying code. */
@@ -1367,7 +1367,7 @@ function loadCAD(cad,label,cls){
   if(restored) $("#cadStatus").textContent=label+" · rig restored";
   syncOptionControls();
   DRIVE_CACHE={key:null,val:null}; Physics.sync(); MathTab.invalidate();
-  OnshapeHelp.chip();
+  OnshapeHelp.chip(); ImportFlow.render();
 }
 
 /* ============================================================
@@ -1539,7 +1539,7 @@ const OnshapeHelp={
     this.meter("bad",1); $("#osSeeRobot").hidden=true; $("#osShowSteps").hidden=false;
   },
   // the field's chip: while the sample robot is on the field, offer the team's own
-  chip(){ const c=$("#vpOnshape"); if(!c) return; let own=true; try{ own=ownRobot()||!!(CAD&&CAD.source==="onshape"); }catch(e){} c.hidden=own; },
+  chip(){ const c=$("#vpOnshape"); if(!c) return; let own=true; try{ own=ownRobot()||!!(CAD&&(CAD.source==="onshape"||CAD.source==="urdf")); }catch(e){} c.hidden=own||!$("#importCard").hidden; },
 };
 /* This tab was opened by the bookmark: say we're ready, then take the robot.
    A second click reuses this tab and only changes its #hash: wait again then. */
@@ -1574,9 +1574,17 @@ function parseAndLoad(done){
   const {name,text}=LAST_STEP, mb=(text.length/1048576).toFixed(1);
   SetupUI.beforeParse(name);
   $("#cadStatus").textContent="parsing "+mb+" MB …";
-  setTimeout(()=>{
+  const own=name!==DEFAULT_ROBOT.step;
+  if(own) ImportFlow.start("Reading "+name, mb+" MB of STEP: the parts, where they sit, and what moves.");
+  // off the page's thread (src/engineworker.js): the joints are found there too, and the
+  // file is cut into one small STEP per shape for the exact surfaces
+  const job=EngineWorker.parseStep(text,name,{frame:{up:OPTS.up, shift:OPTS.shift}, rig:true, front:OPTS.front, units:true,
+    onProgress:m=>{ $("#cadStatus").textContent=m; ImportFlow.progress(m); }});
+  job.then(r=>{
+    if(!LAST_STEP||LAST_STEP.name!==name||LAST_STEP.text!==text) return;      // another robot was dropped meanwhile
+    PARSED={rig:r.rig, units:r.units};         // promises: the joints and the shape units follow the robot
     try{
-      const cad=parseSTEP(text,msg=>{ $("#cadStatus").textContent=msg; },{up:OPTS.up, shift:OPTS.shift});
+      const cad=r.cad;
       cad.name=name;
       // a joint spec belongs to the file it was written for; another robot drops it
       if(JOINTS.spec&&JOINTS.step!==name){ JOINTS.spec=JOINTS.report=JOINTS.devices=null; JOINTS.name=JOINTS.step=null; }
@@ -1586,13 +1594,15 @@ function parseAndLoad(done){
       loadCAD(cad, (LAST_STEP.label||name+" · "+mb+" MB")+" · "+cad.mechs.length+" mechanism"+(cad.mechs.length===1?"":"s"), cad.mechs.length?"ok":"bad");
       if(MATES.asm) applyMates();
       else if(JOINTS.spec) applyJoints();
-      else findJoints(cad,true);                  // no mates, no spec: find them from the geometry
-      exactGeometry(cad,text);
+      else findJoints(cad,true);                  // no mates, no spec: the joints the worker found from the geometry
+      exactGeometry(cad,text,PARSED.units);
       if(done) done(cad);
-    }catch(e){ $("#cadStatus").textContent="couldn't parse this STEP file — "+e.message; $("#cadDrop").className="drop bad"; }
+    }catch(e){ $("#cadStatus").textContent="couldn't read this STEP file: "+e.message; $("#cadDrop").className="drop bad"; if(own) ImportFlow.fail("Couldn't read "+name+": "+e.message); return; }
     renderFrameNote();
-  },30);
+    if(own) ImportFlow.finish();
+  }).catch(e=>{ $("#cadStatus").textContent="couldn't parse this STEP file: "+(e&&e.message||e); $("#cadDrop").className="drop bad"; if(own) ImportFlow.fail("Couldn't read "+name+": "+(e&&e.message||e)); });
 }
+let PARSED={rig:null, units:null};               // what the engine worker found alongside the parse
 
 /* ============================================================
    THE DEFAULT ROBOT
@@ -1645,13 +1655,13 @@ async function loadDefaultRobot(){
    it can't (offline, blocked) — the robot stays drawn as simplified shapes,
    never blank. */
 let EXACT={state:"none", msg:null};        // the exact surfaces for the CAD panel: none (sample), loading, ok, failed
-function exactGeometry(cad,text){
+function exactGeometry(cad,text,units){
   const note=$("#exactNote"); if(note){ note.textContent="loading exact geometry (OpenCascade) …"; note.className="hint"; }
   EXACT={state:"loading", msg:null}; if(CadView.on) CadView.renderTree();
   const t0=performance.now();
   // one shape at a time across a few workers (src/tessellate.js Tess.exact)
   const progress=(done,total)=>{ if(CAD===cad&&note) note.textContent="exact geometry: "+done+" of "+total+" part shapes meshed …"; };
-  Tess.exact(cad,text,progress).then(res=>{
+  Promise.resolve(units).then(u=>Tess.exact(cad,text,progress,u||null)).then(res=>{
     if(CAD!==cad) return;                     // another file was dropped meanwhile
     EXACT={state:res&&res.meshes&&res.meshes.length?"ok":"failed", msg:"the file has no solid surfaces to mesh"};
     const n=View.setExact(cad,res);
@@ -1941,7 +1951,7 @@ const SetupUI={
     const A=this.auto(), done=k=>this.isDone(k,A);
     const F=CAD.frame||{}, n=SETUP_STEPS.filter(done).length, def=this.isDefault();
     pill.textContent=def?"ready":n===4?"set up":n+" of 4 checked"; pill.className="pill"+(def||n===4?" ok":"");
-    chip.hidden=def||n===4||!LAST_STEP||this.chipGone===CAD;
+    chip.hidden=true;                           // the review card's own chip (ImportFlow.chip) says when there is something to review
     const seg=(attr,vals,cur)=>`<div class="seg">${vals.map(([v,t])=>`<button type="button" data-${attr}="${v}" class="${v===cur?"on":""}">${t}</button>`).join("")}</div>`;
     const ok=k=>done(k)?"":`<button class="btn-sm primary" type="button" data-su-ok="${k}">Looks right</button>`;
     // a step that's done folds to one line; click it to change it
@@ -2093,13 +2103,17 @@ function findJoints(cad,quiet){
   st.textContent="finding the joints from the geometry …";
   setTimeout(()=>{
     if(CAD!==cad) return;
-    let R=null;
-    try{ R=autoRig(cad,{front:OPTS.front}); }catch(e){ st.textContent="The joint finder stopped: "+e.message; return; }
+    const ready=quiet&&PARSED.rig?PARSED.rig:null; PARSED.rig=null;
+    Promise.resolve(ready).then(found=>{
+    if(CAD!==cad) return;
+    let R=found||null;
+    if(!R){ try{ R=autoRig(cad,{front:OPTS.front}); }catch(e){ st.textContent="The joint finder stopped: "+e.message; return; } }
     if(!R||!R.spec){ st.textContent=quiet?"No joints found from the geometry, so they're guessed. Add Onshape mates or a joint spec, or make them in the CAD view."
       :((R&&R.review[0])||"No joints found."); return; }
     MATES.asm=MATES.features=MATES.name=MATES.report=null;
     JOINTS.spec=R.spec; JOINTS.name="found automatically"; JOINTS.step=LAST_STEP?LAST_STEP.name:(cad.name||null);
     applyJoints();
+    });
   },40);
 }
 /* these parts (solid indices) ride this joint ("chassis": the frame) */
@@ -2149,7 +2163,11 @@ function downloadJoints(){
    decide. Either way, what the user picked by hand in the table stays. */
 function mapDevices(){
   if(!CODE||!CAD) return;
-  MAP=autoMap(CODE.devices,CAD.mechs,{cad:CAD});
+  // names, the actuator on each joint's axis, the code's travel, and what's left over (src/bind.js);
+  // a joint spec's own device names are taken as read
+  const explicit=(JOINTS.report&&CAD.mates&&CAD.mates.source==="spec"&&JOINTS.devices)||{};
+  let B=null; try{ B=bindDevices(CODE,CAD,{explicit, isCommanded:n=>isCommanded(CODE,n)}); }catch(e){ B=null; }
+  MAP=B?B.map:autoMap(CODE.devices,CAD.mechs,{cad:CAD});
   applyDeviceMemory();
   const J=JOINTS.report&&CAD.mates&&CAD.mates.source==="spec"?JOINTS.devices:null;
   if(J) for(const d of CODE.devices){
@@ -2201,7 +2219,7 @@ function takeUrdfPart(file){
     else URDF_IN.files[file.name]=r.result;
     clearTimeout(URDF_IN.timer);
     URDF_IN.timer=setTimeout(()=>{
-      if(!URDF_IN.text){ $("#cadStatus").textContent=Object.keys(URDF_IN.files).length+" mesh file(s) waiting for their .urdf"; return; }
+      if(!URDF_IN.text){ $("#cadStatus").textContent=Object.keys(URDF_IN.files).length+" mesh file(s) waiting for their .urdf (drop the robot.urdf with them, or the whole zip)"; return; }
       let p;
       try{ p=urdfToPayload(URDF_IN.text,URDF_IN.files,URDF_IN.name); }
       catch(e){ $("#cadStatus").textContent="couldn't read this URDF — "+e.message; $("#cadDrop").className="drop bad"; return; }
@@ -2214,7 +2232,8 @@ function takeUrdfPart(file){
 }
 function routeFile(file){
   const n=file.name.toLowerCase();
-  if(/\.(urdf|stl)$/.test(n)) takeUrdfPart(file);
+  if(/\.zip$/.test(n)) ImportFlow.takeZip(file);                       // Onshape's URDF export, or a zip of the team's code
+  else if(/\.(urdf|stl|glb|gltf|obj|bin|mtl)$/.test(n)) takeUrdfPart(file);
   else if(/\.(step|stp)$/.test(n)) takeCAD(file);
   else if(/\.ftcsim$/.test(n)) Session.take(file);
   else if(/\.xml$/.test(n)) takeRobotConfig(file);
@@ -2750,11 +2769,13 @@ const Perf={ema:16.7, t:0, pr:Math.min(devicePixelRatio||1,2), downAt:-1e9, quie
     const cap=Math.min(devicePixelRatio||1,2), min=Math.min(cap,0.75);
     if(this.ema>26){
       if(this.pr>min+0.01){ this.pr=Math.max(min,this.pr-0.25); this.set(); this.downAt=now; }
+      else if(View.postOn){ View.postOn=false; }
       else if(!View.lowGfx){ View.lowGfx=true; View.applyQuality(); }
     }else if(this.ema<18.5&&now-this.downAt>20000){
       // room to spare: the full robot back once (a computer that can't keep up goes back to light for good)
       if(View.lowGfx&&!this.recovered){ View.lowGfx=false; this.recovered=true; this.downAt=now; View.applyQuality(); }
       else if(this.pr<cap-0.01){ this.pr=Math.min(cap,this.pr+0.25); this.set(); }
+      else if(!View.postOn&&!this.postBack){ View.postOn=true; this.postBack=true; this.downAt=now; }
     }
   },
   set(){ if(View.ren){ View.ren.setPixelRatio(this.pr); View.resize(); } }
@@ -3174,8 +3195,8 @@ function proBoot(){
 /* ============================================================
    BOOT
    ============================================================ */
-(function boot(){
-  setTheme(store.get("ftcbench.theme","dark")==="light"?"light":"dark");
+function boot(){
+  setTheme(document.documentElement.getAttribute("data-theme")==="dark"?"dark":"light");
   $("#themeBtn").addEventListener("click",()=>setTheme(currentTheme()==="dark"?"light":"dark"));
   // the BIOBUZZ field and shot physics, from the vendored Shot Sim
   Field.init(window.ShotEngine,window.SHOT_DATA);
@@ -3226,11 +3247,11 @@ function proBoot(){
   $("#matchOn").addEventListener("change",e=>{ store.set("ftcbench.match",e.target.checked?"1":"0"); if(Online.inMatch()) return; if(Sim.phase!=="running") resetMatch(); else { Match.on=e.target.checked; if(!Match.on) resetMatch(); } });
   $("#matchSkill").addEventListener("change",e=>{ store.set("ftcbench.matchSkill",e.target.value); if(Online.inMatch()) return; if(Sim.phase!=="running") resetMatch(); else Match.skill=e.target.value; });
   $("#practice").addEventListener("change",e=>{ store.set("ftcbench.practice",e.target.checked?"1":"0"); updateClock(); });
-  NetUI.init(); SetupUI.init(); OnshapeHelp.init();
+  NetUI.init(); SetupUI.init(); OnshapeHelp.init(); ImportFlow.init();
 
   // code
   $("#addOpMode").addEventListener("click",()=>$("#codeFile").click());
-  $("#codeFile").addEventListener("change",e=>{ [].forEach.call(e.target.files,takeCode); e.target.value=""; });
+  $("#codeFile").addEventListener("change",e=>{ [].forEach.call(e.target.files,f=>/\.zip$/i.test(f.name)?ImportFlow.takeZip(f):takeCode(f)); e.target.value=""; });
   $("#reparse").addEventListener("click",()=>{
     const e=entry(CURRENT_ID); if(!e) return;
     e.source=$("#srcbox").value; parseEntry(e);
@@ -3240,7 +3261,7 @@ function proBoot(){
 
   // hardware
   // the robot: a STEP, an Onshape .onshape.json, or a URDF with its meshes
-  wireDrop($("#cadDrop"),$("#cadFile"),f=>/\.(urdf|stl|json)$/i.test(f.name)?routeFile(f):takeCAD(f),true);
+  wireDrop($("#cadDrop"),$("#cadFile"),f=>/\.(step|stp)$/i.test(f.name)?takeCAD(f):routeFile(f),true);
   wireDrop($("#cfgDrop"),$("#cfgFile"),takeRobotConfig);
   wireMates();
   wirePageDrop();
@@ -3339,4 +3360,6 @@ function proBoot(){
       if(new URLSearchParams(location.search).get("robot")!=="sample") loadDefaultRobot();
     }
   }catch(e){}
-})();
+}
+// three.js arrives as an ES module (tools/build.mjs): boot once it has
+if(typeof THREE!=="undefined"&&THREE.WebGLRenderer) boot(); else addEventListener("three-ready",boot,{once:true});

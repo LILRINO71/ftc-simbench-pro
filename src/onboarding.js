@@ -11,15 +11,15 @@
 /* The first-run tour. Each step points at something real on the page; the app
    highlights `target` and switches to `tab` before showing the step. */
 const TOUR = [
-  { id: "drop", tab: "robot", target: "#cadDrop", title: "Drop in your CAD",
-    body: "Export your assembly from Onshape as a <b>STEP</b> file and drop it here. SimBench reads the assembly tree, places every part, and works out mass, centre of mass and the drivetrain on its own — nothing to tag.",
-    tip: "Onshape: right-click the tab → Export → STEP AP242, assembly structure on." },
+  { id: "drop", tab: "robot", target: "#cadDrop", title: "Bring your robot",
+    body: "In Onshape, right-click your assembly tab, <b>Export</b>, format <b>URDF</b>, geometry <b>GLB</b>. Drop the zip here. Every mate arrives as an exact joint, every part in its colour, with its real weight. Nothing is uploaded.",
+    tip: "A STEP works too (joints found from the geometry), and so does a URDF from Fusion, SolidWorks or FreeCAD." },
   { id: "code", tab: "teleop", target: "#opListTele", title: "Add your OpMode",
     body: "Drop a <code>.java</code> file, paste it in the Java tab, or pull it straight from your team's GitHub repo. SimBench interprets the real code at 50 Hz — it doesn't ask you to rewrite it.",
     tip: "Import from GitHub is in the Session menu, top right." },
-  { id: "map", tab: "robot", target: '[data-sec="hwmap"]', title: "Check the hardware map",
-    body: "Every <code>hardwareMap.get(...)</code> name is matched to a part in the CAD automatically. The map is editable, and if your Control Hub configuration .xml is loaded it gets checked against that too.",
-    tip: "A red row means the code and the CAD disagree — that's the one thing worth fixing before you drive." },
+  { id: "map", tab: "robot", target: '[data-sec="setup"]', title: "Review",
+    body: "The bench works out which way is up, where the front is, the drive base, and which of your <code>hardwareMap</code> devices drives which joint. The review card shows those as facts and asks only what it can't know, in your own device names, with a button that moves the part.",
+    tip: "Answers are kept with the robot. Save setup writes one file a teammate can drop in with it." },
   { id: "drive", tab: "teleop", target: "#viewport", title: "Drive it",
     body: "Press <b>INIT</b> then <b>START</b>. Plug in a controller and press a button on it, or use <kbd>I</kbd><kbd>J</kbd><kbd>K</kbd><kbd>L</kbd>. Drag the robot on the field to move it, shift-drag to turn it.",
     tip: "The robot has real mass now: it leans under acceleration, and it can break traction." },

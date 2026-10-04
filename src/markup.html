@@ -1,326 +1,21 @@
 <div class="app" id="app">
 
-  <!-- ===================== Driver Station bar ===================== -->
-  <header class="dsbar">
-    <div class="brand">
-      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
-        <path class="bm-hex" d="M16 2.6 27.6 9.3v13.4L16 29.4 4.4 22.7V9.3Z"/>
-        <path class="bm-arc" d="M9.3 21c2-6.4 8.2-9.8 14-8"/>
-        <circle class="bm-dot" cx="23.4" cy="13" r="2.2"/>
-      </svg>
-      <div class="brand-text"><b>FTC SimBench <i class="pro">Pro</i></b><span>BIOBUZZ · 2026–27</span></div>
-    </div>
-
-    <div class="op-pick">
-      <label for="opSelect">OpMode</label>
-      <div class="op-select-wrap">
-        <select id="opSelect" aria-label="OpMode"></select>
-        <span class="kind" id="opKind">TeleOp</span>
-      </div>
-    </div>
-
-    <div class="ds-controls" role="group" aria-label="Driver Station controls">
-      <button class="ds-btn" id="btnInit">INIT</button>
-      <button class="ds-btn go" id="btnStart"><svg viewBox="0 0 10 10" aria-hidden="true"><path d="M2 1l7 4-7 4z"/></svg>START</button>
-      <button class="ds-btn stop" id="btnStop"><svg viewBox="0 0 10 10" aria-hidden="true"><rect x="1.5" y="1.5" width="7" height="7" rx="1"/></svg>STOP</button>
-    </div>
-
-    <div class="ds-clock-wrap">
-      <div class="ds-clock" id="dsClock" aria-live="off">2:00</div>
-      <div class="ds-clock-bar"><i id="dsBar"></i></div>
-    </div>
-    <div class="match-wrap">
-      <button class="hdr-btn" id="matchBtn" type="button" aria-expanded="false" aria-controls="matchMenu" title="The rest of the match: AI robots, human players, the clock">
-        <i aria-hidden="true"></i><span>Match</span>
-      </button>
-      <div class="menu match-menu" id="matchMenu" hidden>
-        <label class="mm-row"><input type="checkbox" id="matchOn"><span><b>AI robots and human players</b><small>A partner and two opponents the bench drives, and both alliances' human players</small></span></label>
-        <label class="mm-row skill"><span><b>How good the AI teams are</b></span>
-          <select class="match-skill" id="matchSkill" aria-label="AI skill"><option value="rookie">Rookie</option><option value="typical" selected>Typical</option><option value="elite">Elite</option></select></label>
-        <label class="mm-row"><input type="checkbox" id="practice"><span><b>No time limit</b><small>Practice: the clock counts up and never stops the OpMode</small></span></label>
-      </div>
-    </div>
-
-    <div class="online-wrap">
-      <button class="hdr-btn" id="onlineBtn" type="button" aria-expanded="false" aria-controls="onlinePanel" title="One match with other teams, each on their own computer">
-        <i aria-hidden="true"></i><span>Online</span><b class="on-badge" id="onlineBadge" hidden></b>
-      </button>
-    </div>
-
-    <div class="ds-status">
-      <span class="pill" id="phasePill">—</span>
-
-      <div class="status-wrap">
-        <button class="status-chip go" id="statusChip" type="button" aria-expanded="false" aria-controls="statusPanel" title="Everything the bench is unhappy about">
-          <span class="dot" aria-hidden="true"></span><span id="statusLabel">Go</span>
-        </button>
-        <div class="status-panel" id="statusPanel" hidden>
-          <div class="ctrl-head"><b id="statusHead">Status</b><span class="spacer"></span><button class="btn-sm" id="statusClose" type="button">Done</button></div>
-          <div id="statusList"></div>
-        </div>
-      </div>
-
-      <div class="menu-wrap">
-        <button class="hdr-btn" id="sessionBtn" type="button" aria-expanded="false" aria-controls="sessionMenu" title="Save, open, import">
-          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 2.5h8.2L13.5 5.3v8.2h-11z" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M5 2.5v4h6M5 13.5v-4h6v4" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>
-          <span>Session</span>
-        </button>
-        <div class="menu" id="sessionMenu" hidden role="menu">
-          <button type="button" id="saveSession" role="menuitem">Save workspace<kbd>.ftcsim</kbd></button>
-          <button type="button" id="openSession" role="menuitem">Open workspace…</button>
-          <button type="button" id="importGh" role="menuitem">Import OpMode from GitHub…</button>
-          <hr>
-          <button type="button" id="exportMath" role="menuitem">Export the math<kbd>.md</kbd></button>
-        </div>
-      </div>
-      <input type="file" id="sessionFile" accept=".ftcsim,.json" hidden>
-
-      <button class="hdr-btn icon" id="helpBtn" type="button" title="How this works" aria-label="How this works">?</button>
-      <a class="hdr-btn support" id="supportBtn" href="https://buymeacoffee.com/" hidden target="_blank" rel="noopener" title="Support the developers">
-        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13.6S1.8 9.9 1.8 5.9A3.1 3.1 0 0 1 8 4.6a3.1 3.1 0 0 1 6.2 1.3c0 4-6.2 7.7-6.2 7.7z" fill="currentColor"/></svg>
-        <span>Support</span>
-      </a>
-
-      <div class="ctrl-wrap">
-        <button class="ctrl-chip" id="ctrlChip" type="button" aria-expanded="false" aria-controls="ctrlPanel" title="Plug in a controller">
-          <svg viewBox="0 0 24 16" aria-hidden="true"><path d="M6.5 1.5h11c2.6 0 4.4 1.7 5 4.4l.8 4.3c.5 2.7-2.4 4.4-4.3 2.5l-2.3-2.2H7.3L5 12.7c-1.9 1.9-4.8.2-4.3-2.5l.8-4.3c.6-2.7 2.4-4.4 5-4.4z" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M6.5 5v4M4.5 7h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="16.5" cy="5.6" r="1.1" fill="currentColor"/><circle cx="18.8" cy="8" r="1.1" fill="currentColor"/></svg>
-          <span id="ctrlLabel">Controller</span>
-        </button>
-        <div class="ctrl-panel" id="ctrlPanel" hidden>
-          <div class="ctrl-head"><b>Controllers</b><span class="spacer"></span><button class="btn-sm" id="ctrlClose" type="button">Done</button></div>
-          <div id="ctrlList"></div>
-          <div class="slide"><label for="deadzone">Stick deadzone</label>
-            <input type="range" id="deadzone" min="0" max="0.3" step="0.01" value="0.08">
-            <span class="v" id="deadzoneVal">0.08</span></div>
-          <p class="hint" id="ctrlNote">Plug in an Xbox, PlayStation or Logitech controller and press any button on it — browsers only report a controller after a button press.</p>
-        </div>
-      </div>
-      <button class="theme-btn" id="themeBtn" type="button" aria-label="Switch to light theme" title="Switch to light theme"></button>
-    </div>
-  </header>
-
-  <!-- ===================== left: code and robot ===================== -->
-  <aside class="rail rail-left" id="railLeft" aria-label="Code and robot">
-    <nav class="tabs" role="tablist" data-tabs="left">
-      <button role="tab" data-tab="teleop" aria-selected="true">TeleOp</button>
-      <button role="tab" data-tab="java" aria-selected="false">Java</button>
-      <button role="tab" data-tab="robot" aria-selected="false">Robot <span class="count" id="rigCount"></span></button>
-      <button role="tab" data-tab="tune" aria-selected="false">Tune</button>
-      <span class="spacer"></span>
-      <button class="rail-btn" type="button" data-rail="left" title="Hide this panel  [" aria-label="Hide the left panel">
-        <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M7.5 2.5 4 6l3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-    </nav>
-    <button class="rail-strip" type="button" data-rail="left" aria-label="Show the left panel"><span>TeleOp · Java · Robot · Tune</span></button>
-
-    <section class="pane" data-pane="teleop">
-      <div class="sec" data-sec="tele">
-        <div class="sec-head"><h3>TeleOp</h3><span class="count" id="teleCount"></span><span class="spacer"></span>
-          <button class="btn-sm" id="addOpMode" type="button">+ .java</button></div>
-        <div class="oplist" id="opListTele"></div>
-        <input type="file" id="codeFile" accept=".java,.txt" multiple hidden>
-      </div>
-      <div class="sec" data-sec="auto">
-        <div class="sec-head"><h3>Autonomous</h3><span class="count" id="autoCount"></span></div>
-        <div class="oplist" id="opListAuto"></div>
-      </div>
-      <div class="sec" data-sec="helpers">
-        <div class="sec-head"><h3>Helper classes</h3><span class="count" id="helperCount"></span></div>
-        <p class="hint">Files with no <code>@TeleOp</code> or <code>@Autonomous</code>. Every OpMode can use them.</p>
-        <div class="oplist" id="helperList"></div>
-      </div>
-      <div class="sec" data-sec="howto">
-        <div class="sec-head"><h3>Driving</h3></div>
-        <ul class="howto">
-          <li><b>Drag the robot</b> on the field to move it. Shift-drag or right-drag turns it.</li>
-          <li><b>Plug in a controller</b> and press a button — it becomes gamepad1 or gamepad2.</li>
-          <li><b>Keys</b> <kbd>I</kbd><kbd>J</kbd><kbd>K</kbd><kbd>L</kbd> drive, <kbd>U</kbd><kbd>O</kbd> turn, <kbd>A</kbd><kbd>B</kbd><kbd>X</kbd><kbd>Y</kbd>, <kbd>Q</kbd><kbd>E</kbd> bumpers, arrows d-pad, <kbd>F</kbd> fire. Each key goes to the gamepad your code reads it from.</li>
-        </ul>
-      </div>
-    </section>
-
-    <section class="pane pane-java" data-pane="java" hidden>
-      <div class="java-bar"><span class="mono" id="srcName"></span><span class="spacer"></span>
-        <span class="pill" id="covPill">—</span>
-        <button class="btn-sm primary" id="reparse" type="button">Re-analyze</button></div>
-      <div class="editor" id="editor">
-        <div class="ed-gutter" id="edGutter" aria-hidden="true"></div>
-        <div class="ed-main">
-          <pre class="ed-hl" id="edHl" aria-hidden="true"></pre>
-          <textarea class="ed-ta" id="srcbox" spellcheck="false" wrap="off" autocomplete="off" autocapitalize="off" aria-label="Java source"></textarea>
-        </div>
-      </div>
-      <div class="sec" data-sec="coverage" data-collapsed="1">
-        <div class="sec-head"><h3>What the bench runs</h3></div>
-        <div id="coverage"></div>
-      </div>
-    </section>
-
-    <section class="pane" data-pane="robot" hidden>
-      <div class="onshape-note" id="onshapeNote" hidden></div>
-      <div class="sec" data-sec="cad">
-        <div class="sec-head"><h3>Robot CAD</h3><span class="spacer"></span><span class="mono dim" id="vpDims">—</span></div>
-        <div class="drop ok" id="cadDrop" tabindex="0" role="button" aria-label="Load a STEP CAD file">
-          <div class="dt">Drop a robot file here <small>STEP · URDF · .onshape.json</small></div>
-          <div class="ds" id="cadStatus">sample: fulll.step (measured)</div>
-        </div>
-        <input type="file" id="cadFile" accept=".step,.stp,.STEP,.STP,.urdf,.stl,.STL,.json" multiple hidden>
-        <div class="load-row">
-          <button class="load-btn os" type="button" data-os-open>
-            <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8.2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M6.2 10.4l2.6 2.6 5-5.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            <span><b>Get my robot from Onshape</b><small>Exact joints, step by step</small></span></button>
-          <button class="load-btn" type="button" id="cadPick">
-            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 2.5h6.5L15 6v11.5H5z M11.5 2.5V6H15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
-            <span><b>Open a file</b><small>STEP or URDF</small></span></button>
-        </div>
-        <details class="fine"><summary>How the CAD was read</summary>
-          <p class="hint" id="frameNote"></p>
-          <p class="hint" id="exactNote"></p>
-        </details>
-      </div>
-      <div class="sec" data-sec="setup">
-        <div class="sec-head"><h3>Robot setup</h3><span class="pill" id="setupPill">—</span><span class="spacer"></span>
-          <button class="btn-sm" id="setupDownload" type="button" title="This robot's whole setup in one file: give it to teammates to drop in with the STEP">Download setup</button></div>
-        <p class="hint">Saved for this robot. <b>Download setup</b> to share it with your team.</p>
-        <ol class="su-steps" id="setupSteps"></ol>
-      </div>
-      <div class="sec" data-sec="robotcheck">
-        <div class="sec-head"><h3>Robot check</h3><span class="pill" id="rcPill">—</span></div>
-        <p class="hint">Your robot against your code. Only what the bench can't be sure of is asked.</p>
-        <div id="robotCheck"></div>
-      </div>
-      <div class="sec" data-sec="mates">
-        <div class="sec-head"><h3>Mates &amp; joints</h3><span class="pill" id="matePill">none</span><span class="spacer"></span>
-          <button class="btn-sm" id="mateClear" type="button" hidden>Remove</button></div>
-        <p class="hint">A STEP has no joints, so they're guessed. A robot from Onshape brings its mates, so every joint is exact.
-          <button class="btn-sm primary" type="button" data-os-open id="onshapeQuick">How to get it from Onshape</button></p>
-        <details class="mate-manual"><summary>Or by hand, with the assembly's URL</summary>
-        <div class="form2">
-          <span>Assembly URL</span>
-          <input id="mateUrl" type="url" placeholder="https://cad.onshape.com/documents/…/w/…/e/…" spellcheck="false" autocomplete="off">
-        </div>
-        <ol class="mate-steps hint" id="mateSteps">
-          <li>Paste the URL of the Onshape assembly you exported the STEP from.</li>
-          <li>Open the links below in a browser signed in to Onshape. No API keys needed.</li>
-          <li>Save each page (Ctrl+S) and drop the files here.</li>
-        </ol>
-        <div class="mate-links" id="mateLinks" hidden>
-          <a id="mateDefLink" target="_blank" rel="noopener noreferrer">Assembly definition (the mates)</a>
-          <a id="mateFeatLink" target="_blank" rel="noopener noreferrer">Assembly features (mate limits, optional)</a>
-        </div>
-        </details>
-        <div class="drop" id="mateDrop" tabindex="0" role="button" aria-label="Load the Onshape assembly JSON files">
-          <div class="dt">Onshape .json files, or a <a href="robots/into-the-deep/joints.json" target="_blank" rel="noopener">joint spec</a></div>
-          <div class="ds" id="mateStatus">Drop the assembly definition, and the features file too if you want limits.</div>
-        </div>
-        <input type="file" id="mateFile" accept=".json,application/json" multiple hidden>
-        <div class="joint-acts" id="jointActs">
-          <button class="btn-sm" id="jointsFind" type="button" title="Find the joints from the STEP's geometry: servos, motors, slides, and what each one carries">Find joints automatically</button>
-          <button class="btn-sm" id="jointsDownload" type="button">Download joint spec</button>
-          <button class="btn-sm" id="jointsReset" type="button" hidden>Undo my joint edits</button>
-        </div>
-        <p class="hint">Fix a joint in the <b>CAD</b> view: click a part (Ctrl-click for more), then pick what it rides on, or make a new joint from it.</p>
-        <ul class="hint mate-why" id="mateNote"></ul>
-      </div>
-      <div class="sec" data-sec="models">
-        <div class="sec-head"><h3>Drawn parts</h3></div>
-        <div class="form2">
-          <span>Up</span>
-          <div class="seg" id="upSeg" title="Which CAD axis points up — auto reads it from the wheels"><button data-up="">auto</button><button data-up="+z">Z</button><button data-up="+y">Y</button><button data-up="-y">−Y</button><button data-up="+x">X</button><button data-up="-x">−X</button></div>
-          <span>CAD front</span>
-          <div class="seg" id="frontSeg" aria-label="Which way the CAD's front faces"><button data-front="+x">+x</button><button data-front="+y">+y</button><button data-front="-x">−x</button><button data-front="-y">−y</button></div>
-          <span>Drive base</span>
-          <div class="seg" id="baseSeg"><button data-mode="auto">auto</button><button data-mode="show">show</button><button data-mode="hide">hide</button></div>
-          <span>Shooter</span>
-          <div class="seg" id="shooterSeg"><button data-mode="auto">auto</button><button data-mode="show">show</button><button data-mode="hide">hide</button></div>
-          <span>Field</span>
-          <div class="seg" id="obstacleSeg" title="What the robot bumps into: the BIOBUZZ HIVEs and FLOWERs, or only the walls (for an auto written for another season's field)"><button data-obst="all">HIVE &amp; walls</button><button data-obst="walls">walls only</button></div>
-        </div>
-        <p class="hint">When the code drives but the CAD has no wheels, the bench draws a mecanum base under it; when the code shoots and the CAD has no flywheel, it draws one. The honey outline on the floor is what bumps into the field.</p>
-      </div>
-      <div class="sec" data-sec="hwmap">
-        <div class="sec-head"><h3>Hardware map</h3><span class="pill" id="mapPill">—</span><span class="spacer"></span>
-          <div class="seg" id="trustSeg" title="Where servo and motor types come from"><button data-trust="code" class="on">code</button><button data-trust="cad">CAD</button></div></div>
-        <div class="scrollx"><table class="grid" id="mapTable"></table></div>
-        <p class="hint" id="trustNote">Servo and motor types come from your declarations and comments. The CAD is used for geometry only.</p>
-      </div>
-      <div class="sec" data-sec="cfgxml" data-collapsed="1">
-        <div class="sec-head"><h3>Robot configuration</h3><span class="spacer"></span>
-          <button class="btn-sm" id="cfgClear" type="button" hidden>Remove</button></div>
-        <div class="drop" id="cfgDrop" tabindex="0" role="button" aria-label="Load a robot configuration XML file">
-          <div class="dt">Configuration .xml</div>
-          <div class="ds" id="cfgStatus">From the FIRST folder on the Control Hub. Every hardwareMap name gets checked.</div>
-        </div>
-        <input type="file" id="cfgFile" accept=".xml" hidden>
-      </div>
-      <div class="sec" data-sec="rig" data-collapsed="1">
-        <div class="sec-head"><h3>Kinematic rig</h3><span class="pill" id="guessPill">—</span><span class="spacer"></span>
-          <button class="btn-sm" id="addJoint" type="button">+ Joint</button></div>
-        <p class="hint">The rig is the model everything runs on, and it's yours — detection only seeds it. Edits save with this CAD.</p>
-        <div class="scrollx"><table class="grid" id="rigTable"></table></div>
-      </div>
-      <div class="sec" data-sec="chain" data-collapsed="1">
-        <div class="sec-head"><h3>What moves with what</h3><span class="pill" id="rigPill">—</span></div>
-        <div id="rigChain"></div>
-        <div class="slide"><label for="turretSlider">Turret radius</label>
-          <input type="range" id="turretSlider" min="15" max="250" step="5" value="55">
-          <span class="v" id="turretVal">55 %</span></div>
-      </div>
-      <div class="sec" data-sec="assembly" data-collapsed="1">
-        <div class="sec-head"><h3>Assembly</h3><span class="pill" id="partPill">—</span></div>
-        <div class="scroll-list"><table class="grid" id="treeTable"></table></div>
-      </div>
-      <div class="sec" data-sec="portable" data-collapsed="1">
-        <div class="sec-head"><h3>Portable rig</h3><span class="spacer"></span>
-          <button class="btn-sm" id="rigCopy" type="button">Copy</button>
-          <button class="btn-sm" id="rigApply" type="button">Apply</button>
-          <button class="btn-sm" id="rigReset" type="button">Re-detect</button></div>
-        <textarea id="rigJson" class="srcbox small" spellcheck="false" aria-label="Rig JSON"></textarea>
-        <p class="hint">Commit this next to your OpMode — next season starts from last season's rig.</p>
-      </div>
-    </section>
-
-    <section class="pane" data-pane="tune" hidden>
-      <div class="sec" data-sec="physics">
-        <div class="sec-head"><h3>Physics</h3><span class="pill" id="physPill">—</span></div>
-        <div class="form2">
-          <span>Chassis</span>
-          <div class="seg" id="physSeg" title="How the drive base moves"><button data-phys="rigid">rigid body</button><button data-phys="kinematic">kinematic</button></div>
-          <label for="muSlider">Tile grip μ</label>
-          <div class="slide"><input type="range" id="muSlider" min="0.2" max="1.4" step="0.05" value="0.9"><span class="v" id="muVal">0.90</span></div>
-        </div>
-        <div class="mass-read" id="massRead"></div>
-        <p class="hint">Rigid body: the CAD's mass, centre of mass and wheel grip, so it accelerates and slips like the build. Kinematic: instant and perfect.</p>
-      </div>
-      <div class="sec" data-sec="cfgvars">
-        <div class="sec-head"><h3>Config variables</h3><span class="pill" id="cfgVarPill">—</span></div>
-        <p class="hint" id="cfgVarNote"></p>
-        <div id="cfgVars"></div>
-      </div>
-      <div class="sec" data-sec="assume" data-collapsed="1">
-        <div class="sec-head"><h3>Assumptions</h3></div>
-        <div class="slide"><label for="massSlider">Payload at end effector</label>
-          <input type="range" id="massSlider" min="0" max="500" step="10" value="180">
-          <span class="v" id="massVal">180 g</span></div>
-        <div class="slide"><label for="dutySlider">Usable share of stall torque</label>
-          <input type="range" id="dutySlider" min="10" max="60" step="1" value="30">
-          <span class="v" id="dutyVal">30 %</span></div>
-        <p class="hint">These only feed the torque check. Stall torque is a ceiling, not a working load — 25–35 % is a sensible share for a servo that must hold position.</p>
-      </div>
-    </section>
-  </aside>
-
-  <!-- ===================== centre: the field ===================== -->
+  <!-- ===================== the field, full bleed ===================== -->
   <main class="stage" id="stage">
     <div class="viewport" id="viewport">
       <div class="vp-top">
         <div class="vp-title" id="vpTitle">—</div>
-        <div class="seg seg-dark" id="viewSeg">
-          <button data-v="iso" class="on">robot</button><button data-v="side">side</button><button data-v="top">top</button><button data-v="field">driver</button><button data-v="cad" title="Inspect the CAD the way Onshape shows it">CAD</button>
+        <div class="seg seg-glass" id="viewSeg" role="group" aria-label="Camera">
+          <button data-v="iso" class="on">Robot</button><button data-v="side">Side</button><button data-v="top">Top</button><button data-v="field">Driver</button><button data-v="cad" title="Inspect the CAD the way Onshape shows it">CAD</button>
         </div>
         <div class="vp-fill"></div>
       </div>
       <div class="vp-hint" id="vpHint" hidden></div>
-      <aside class="online-panel" id="onlinePanel" hidden aria-label="Online match">
+
+      <!-- the import card: everything about getting a robot in, one place -->
+      <section class="import-card" id="importCard" hidden aria-live="polite"></section>
+
+      <aside class="online-panel panel-glass" id="onlinePanel" hidden aria-label="Online match">
         <div class="onp-head"><b id="onpTitle">Play online</b><span class="onp-sub" id="onpSub"></span><span class="spacer"></span>
           <button class="btn-sm" id="onpClose" type="button" title="Hide this panel; the match goes on">Hide</button></div>
         <p class="onp-msg" id="onpMsg" hidden></p>
@@ -370,32 +65,35 @@
 
         <div class="onp-foot" id="onpFoot" hidden><button class="btn-sm" id="onpLeave" type="button">Leave the match</button><span class="onp-ping" id="onpPing"></span></div>
       </aside>
-      <div class="match-hud" id="matchHud" hidden>
+
+      <div class="match-hud panel-glass" id="matchHud" hidden>
         <div class="mh-row"><span class="mh-al red"><b id="mhRed">0</b><small>RED</small></span><span class="mh-mid" id="mhMid">TELEOP</span><span class="mh-al blue"><b id="mhBlue">0</b><small>BLUE</small></span></div>
         <div class="mh-parts" id="mhParts"></div>
         <ol class="mh-events" id="mhEvents"></ol>
       </div>
       <div class="vp-tip" id="vpTip" hidden>Drag to move · shift-drag to turn</div>
+
       <div class="cad-ui" id="cadUI" hidden>
-        <aside class="cad-tree" aria-label="Instances">
+        <aside class="cad-tree panel-glass" aria-label="Instances">
           <div class="cad-tree-head"><b>Instances</b><span class="cad-count" id="cadCount"></span><span class="spacer"></span><button class="cad-btn" id="cadShowAll" type="button">Show all</button></div>
           <div class="cad-tree-body" id="cadTreeBody"></div>
         </aside>
-        <div class="cad-info" id="cadInfo" hidden></div>
-        <div class="cad-bar" id="cadBar">
+        <div class="cad-info panel-glass" id="cadInfo" hidden></div>
+        <div class="cad-bar seg seg-glass" id="cadBar">
           <button type="button" class="cad-btn" data-cv="iso">Iso</button><button type="button" class="cad-btn" data-cv="front">Front</button><button type="button" class="cad-btn" data-cv="top">Top</button><button type="button" class="cad-btn" data-cv="right">Right</button><button type="button" class="cad-btn" id="cadFit" title="Zoom to fit (F)">Fit</button>
           <label class="cad-check"><input type="checkbox" id="cadEdges" checked> Edges</label>
         </div>
         <div class="cad-hint">Right-drag rotate · middle-drag pan · scroll zoom · click a part</div>
       </div>
+
       <div class="vp-bottom">
-        <div class="pip" id="pip" hidden>
+        <div class="pip panel-glass" id="pip" hidden>
           <button class="pip-head" id="pipHead" type="button" aria-expanded="true"><span>Arm torque</span><span id="pipDeg">—</span></button>
           <div id="mech"></div>
         </div>
         <div class="vp-chips">
-          <button class="vp-tour vp-os" id="vpOnshape" type="button" data-os-open hidden><i aria-hidden="true"></i>Load your own robot from Onshape<span>exact joints</span></button>
-          <button class="vp-tour vp-setup" id="vpSetup" type="button" hidden><i aria-hidden="true"></i>New robot: set it up once<span>4 quick checks</span></button>
+          <button class="vp-tour vp-os" id="vpOnshape" type="button" hidden><i aria-hidden="true"></i>Bring your robot<span>from Onshape, in two steps</span></button>
+          <button class="vp-tour vp-setup" id="vpSetup" type="button" hidden><i aria-hidden="true"></i>Review this robot<span>a few checks, once</span></button>
           <button class="vp-tour" id="vpTour" type="button" hidden><i aria-hidden="true"></i>New here? Take the tour<span>1 min</span></button>
         </div>
         <div class="vp-readout">
@@ -405,7 +103,8 @@
       </div>
     </div>
 
-    <div class="dock" id="dock">
+    <!-- the dock: gamepad, telemetry, actuators -->
+    <div class="dock panel-glass" id="dock">
       <section class="cell cell-pad" aria-label="Gamepad">
         <div class="cell-head">
           <button class="dock-btn" id="dockToggle" type="button" aria-expanded="true" title="Fold the dock away" aria-label="Fold the dock away">
@@ -428,8 +127,322 @@
     </div>
   </main>
 
+  <!-- ===================== the top bar: Driver Station ===================== -->
+  <header class="topbar panel-glass">
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+        <path class="bm-hex" d="M16 2.6 27.6 9.3v13.4L16 29.4 4.4 22.7V9.3Z"/>
+        <path class="bm-arc" d="M9.3 21c2-6.4 8.2-9.8 14-8"/>
+        <circle class="bm-dot" cx="23.4" cy="13" r="2.2"/>
+      </svg>
+      <div class="brand-text"><b>SimBench</b><span>BIOBUZZ 2026–27</span></div>
+    </div>
+
+    <div class="op-pick">
+      <div class="op-select-wrap">
+        <select id="opSelect" aria-label="OpMode"></select>
+        <span class="kind" id="opKind">TeleOp</span>
+      </div>
+    </div>
+
+    <div class="ds-controls" role="group" aria-label="Driver Station controls">
+      <button class="ds-btn" id="btnInit">INIT</button>
+      <button class="ds-btn go" id="btnStart"><svg viewBox="0 0 10 10" aria-hidden="true"><path d="M2 1l7 4-7 4z"/></svg>START</button>
+      <button class="ds-btn stop" id="btnStop"><svg viewBox="0 0 10 10" aria-hidden="true"><rect x="1.5" y="1.5" width="7" height="7" rx="1"/></svg>STOP</button>
+    </div>
+
+    <div class="ds-clock-wrap">
+      <div class="ds-clock" id="dsClock" aria-live="off">2:00</div>
+      <div class="ds-clock-bar"><i id="dsBar"></i></div>
+    </div>
+    <span class="pill phase" id="phasePill">—</span>
+
+    <div class="ds-status">
+      <div class="status-wrap">
+        <button class="status-chip go" id="statusChip" type="button" aria-expanded="false" aria-controls="statusPanel" title="Everything the bench is unhappy about">
+          <span class="dot" aria-hidden="true"></span><span id="statusLabel">Go</span>
+        </button>
+        <div class="status-panel panel-pop" id="statusPanel" hidden>
+          <div class="ctrl-head"><b id="statusHead">Status</b><span class="spacer"></span><button class="btn-sm" id="statusClose" type="button">Done</button></div>
+          <div id="statusList"></div>
+        </div>
+      </div>
+
+      <div class="match-wrap">
+        <button class="hdr-btn" id="matchBtn" type="button" aria-expanded="false" aria-controls="matchMenu" title="The rest of the match: AI robots, human players, the clock">
+          <i aria-hidden="true"></i><span>Match</span>
+        </button>
+        <div class="menu match-menu panel-pop" id="matchMenu" hidden>
+          <label class="mm-row"><input type="checkbox" id="matchOn"><span><b>AI robots and human players</b><small>A partner and two opponents the bench drives, and both alliances' human players</small></span></label>
+          <label class="mm-row skill"><span><b>How good the AI teams are</b></span>
+            <select class="match-skill" id="matchSkill" aria-label="AI skill"><option value="rookie">Rookie</option><option value="typical" selected>Typical</option><option value="elite">Elite</option></select></label>
+          <label class="mm-row"><input type="checkbox" id="practice"><span><b>No time limit</b><small>Practice: the clock counts up and never stops the OpMode</small></span></label>
+        </div>
+      </div>
+
+      <div class="online-wrap">
+        <button class="hdr-btn" id="onlineBtn" type="button" aria-expanded="false" aria-controls="onlinePanel" title="One match with other teams, each on their own computer">
+          <i aria-hidden="true"></i><span>Online</span><b class="on-badge" id="onlineBadge" hidden></b>
+        </button>
+      </div>
+
+      <div class="ctrl-wrap">
+        <button class="ctrl-chip hdr-btn" id="ctrlChip" type="button" aria-expanded="false" aria-controls="ctrlPanel" title="Plug in a controller">
+          <svg viewBox="0 0 24 16" aria-hidden="true"><path d="M6.5 1.5h11c2.6 0 4.4 1.7 5 4.4l.8 4.3c.5 2.7-2.4 4.4-4.3 2.5l-2.3-2.2H7.3L5 12.7c-1.9 1.9-4.8.2-4.3-2.5l.8-4.3c.6-2.7 2.4-4.4 5-4.4z" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M6.5 5v4M4.5 7h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="16.5" cy="5.6" r="1.1" fill="currentColor"/><circle cx="18.8" cy="8" r="1.1" fill="currentColor"/></svg>
+          <span id="ctrlLabel">Controller</span>
+        </button>
+        <div class="ctrl-panel panel-pop" id="ctrlPanel" hidden>
+          <div class="ctrl-head"><b>Controllers</b><span class="spacer"></span><button class="btn-sm" id="ctrlClose" type="button">Done</button></div>
+          <div id="ctrlList"></div>
+          <div class="slide"><label for="deadzone">Stick deadzone</label>
+            <input type="range" id="deadzone" min="0" max="0.3" step="0.01" value="0.08">
+            <span class="v" id="deadzoneVal">0.08</span></div>
+          <p class="hint" id="ctrlNote">Plug in an Xbox, PlayStation or Logitech controller and press any button on it. Browsers only report a controller after a button press.</p>
+        </div>
+      </div>
+
+      <div class="menu-wrap">
+        <button class="hdr-btn icon" id="sessionBtn" type="button" aria-expanded="false" aria-controls="sessionMenu" title="Save, open, import" aria-label="Save, open, import">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="3" r="1.4" fill="currentColor"/><circle cx="8" cy="8" r="1.4" fill="currentColor"/><circle cx="8" cy="13" r="1.4" fill="currentColor"/></svg>
+        </button>
+        <div class="menu panel-pop" id="sessionMenu" hidden role="menu">
+          <button type="button" id="saveSession" role="menuitem">Save workspace<kbd>.ftcsim</kbd></button>
+          <button type="button" id="openSession" role="menuitem">Open workspace…</button>
+          <button type="button" id="importGh" role="menuitem">Import OpMode from GitHub…</button>
+          <hr>
+          <button type="button" id="exportMath" role="menuitem">Export the math<kbd>.md</kbd></button>
+          <hr>
+          <button type="button" id="helpBtn" role="menuitem">Take the tour</button>
+          <a id="supportBtn" href="https://buymeacoffee.com/" hidden target="_blank" rel="noopener" role="menuitem">Support the developers</a>
+        </div>
+      </div>
+      <input type="file" id="sessionFile" accept=".ftcsim,.json" hidden>
+      <button class="hdr-btn icon theme-btn" id="themeBtn" type="button" aria-label="Switch to dark theme" title="Switch to dark theme"></button>
+    </div>
+  </header>
+
+  <!-- ===================== left: the robot and the code ===================== -->
+  <aside class="rail rail-left panel-glass" id="railLeft" aria-label="Robot and code">
+    <nav class="tabs" role="tablist" data-tabs="left">
+      <button role="tab" data-tab="robot" aria-selected="true">Robot <span class="count" id="rigCount"></span></button>
+      <button role="tab" data-tab="teleop" aria-selected="false">Code</button>
+      <button role="tab" data-tab="java" aria-selected="false">Java</button>
+      <button role="tab" data-tab="tune" aria-selected="false">Tune</button>
+      <span class="spacer"></span>
+      <button class="rail-btn" type="button" data-rail="left" title="Hide this panel  [" aria-label="Hide the left panel">
+        <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M7.5 2.5 4 6l3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+    </nav>
+    <button class="rail-strip" type="button" data-rail="left" aria-label="Show the left panel"><span>Robot · Code · Java · Tune</span></button>
+
+    <section class="pane" data-pane="robot">
+      <div class="onshape-note" id="onshapeNote" hidden></div>
+
+      <!-- the robot, as it is -->
+      <div class="sec card" data-sec="cad">
+        <div class="sec-head"><h3>Your robot</h3><span class="spacer"></span><span class="mono dim" id="vpDims">—</span></div>
+        <div class="drop ok" id="cadDrop" tabindex="0" role="button" aria-label="Load a robot: Onshape URDF zip, STEP, or URDF with meshes">
+          <div class="dt">Drop a robot here <small>Onshape URDF zip · STEP · URDF</small></div>
+          <div class="ds" id="cadStatus">sample: fulll.step (measured)</div>
+        </div>
+        <input type="file" id="cadFile" accept=".zip,.step,.stp,.STEP,.STP,.urdf,.stl,.STL,.glb,.gltf,.obj,.json" multiple hidden>
+        <div class="load-row">
+          <button class="load-btn os" type="button" id="importOpen">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v9m0 0 3.5-3.5M10 12 6.5 8.5M4 14.5v1A1.5 1.5 0 0 0 5.5 17h9a1.5 1.5 0 0 0 1.5-1.5v-1" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span><b>Bring your robot</b><small>Onshape export, two steps</small></span></button>
+          <button class="load-btn" type="button" id="cadPick">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 2.5h6.5L15 6v11.5H5z M11.5 2.5V6H15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+            <span><b>Open a file</b><small>zip, STEP or URDF</small></span></button>
+        </div>
+        <details class="fine"><summary>How the CAD was read</summary>
+          <p class="hint" id="frameNote"></p>
+          <p class="hint" id="exactNote"></p>
+        </details>
+      </div>
+
+      <!-- the review: what the bench found, and the little it has to ask -->
+      <div class="sec card" data-sec="setup">
+        <div class="sec-head"><h3>Review</h3><span class="pill" id="setupPill">—</span><span class="spacer"></span>
+          <button class="btn-sm" id="setupDownload" type="button" title="This robot's whole setup in one file: give it to teammates to drop in with the robot">Save setup</button></div>
+        <ol class="su-steps" id="setupSteps"></ol>
+      </div>
+      <div class="sec card" data-sec="robotcheck">
+        <div class="sec-head"><h3>Your robot and your code</h3><span class="pill" id="rcPill">—</span></div>
+        <div id="robotCheck"></div>
+      </div>
+
+      <!-- everything else about the robot, out of the way -->
+      <details class="advanced" id="robotAdvanced">
+        <summary><span>Advanced</span><small>joints, mates, hardware map, configuration, rig</small></summary>
+
+        <div class="sec" data-sec="mates">
+          <div class="sec-head"><h3>Mates &amp; joints</h3><span class="pill" id="matePill">none</span><span class="spacer"></span>
+            <button class="btn-sm" id="mateClear" type="button" hidden>Remove</button></div>
+          <p class="hint">A robot from Onshape's URDF export brings its mates as exact joints. A plain STEP has none, so they're found from the geometry.
+            <button class="btn-sm" type="button" data-os-open id="onshapeQuick">Read the mates from Onshape instead</button></p>
+          <details class="mate-manual"><summary>By hand, with the assembly's URL</summary>
+          <div class="form2">
+            <span>Assembly URL</span>
+            <input id="mateUrl" type="url" placeholder="https://cad.onshape.com/documents/…/w/…/e/…" spellcheck="false" autocomplete="off">
+          </div>
+          <ol class="mate-steps hint" id="mateSteps">
+            <li>Paste the URL of the Onshape assembly you exported the STEP from.</li>
+            <li>Open the links below in a browser signed in to Onshape. No API keys needed.</li>
+            <li>Save each page (Ctrl+S) and drop the files here.</li>
+          </ol>
+          <div class="mate-links" id="mateLinks" hidden>
+            <a id="mateDefLink" target="_blank" rel="noopener noreferrer">Assembly definition (the mates)</a>
+            <a id="mateFeatLink" target="_blank" rel="noopener noreferrer">Assembly features (mate limits, optional)</a>
+          </div>
+          </details>
+          <div class="drop" id="mateDrop" tabindex="0" role="button" aria-label="Load the Onshape assembly JSON files">
+            <div class="dt">Onshape .json files, or a <a href="robots/into-the-deep/joints.json" target="_blank" rel="noopener">joint spec</a></div>
+            <div class="ds" id="mateStatus">Drop the assembly definition, and the features file too if you want limits.</div>
+          </div>
+          <input type="file" id="mateFile" accept=".json,application/json" multiple hidden>
+          <div class="joint-acts" id="jointActs">
+            <button class="btn-sm" id="jointsFind" type="button" title="Find the joints from the STEP's geometry: servos, motors, slides, and what each one carries">Find joints automatically</button>
+            <button class="btn-sm" id="jointsDownload" type="button">Download joint spec</button>
+            <button class="btn-sm" id="jointsReset" type="button" hidden>Undo my joint edits</button>
+          </div>
+          <p class="hint">Fix a joint in the <b>CAD</b> view: click a part (Ctrl-click for more), then pick what it rides on, or make a new joint from it.</p>
+          <ul class="hint mate-why" id="mateNote"></ul>
+        </div>
+
+        <div class="sec" data-sec="models">
+          <div class="sec-head"><h3>Drawn parts</h3></div>
+          <div class="form2">
+            <span>Up</span>
+            <div class="seg" id="upSeg" title="Which CAD axis points up; auto reads it from the wheels"><button data-up="">auto</button><button data-up="+z">Z</button><button data-up="+y">Y</button><button data-up="-y">−Y</button><button data-up="+x">X</button><button data-up="-x">−X</button></div>
+            <span>CAD front</span>
+            <div class="seg" id="frontSeg" aria-label="Which way the CAD's front faces"><button data-front="+x">+x</button><button data-front="+y">+y</button><button data-front="-x">−x</button><button data-front="-y">−y</button></div>
+            <span>Drive base</span>
+            <div class="seg" id="baseSeg"><button data-mode="auto">auto</button><button data-mode="show">show</button><button data-mode="hide">hide</button></div>
+            <span>Shooter</span>
+            <div class="seg" id="shooterSeg"><button data-mode="auto">auto</button><button data-mode="show">show</button><button data-mode="hide">hide</button></div>
+            <span>Field</span>
+            <div class="seg" id="obstacleSeg" title="What the robot bumps into: the BIOBUZZ HIVEs and FLOWERs, or only the walls (for an auto written for another season's field)"><button data-obst="all">HIVE &amp; walls</button><button data-obst="walls">walls only</button></div>
+          </div>
+          <p class="hint">When the code drives but the CAD has no wheels, the bench draws a mecanum base under it; when the code shoots and the CAD has no flywheel, it draws one. The outline on the floor is what bumps into the field.</p>
+        </div>
+
+        <div class="sec" data-sec="hwmap">
+          <div class="sec-head"><h3>Hardware map</h3><span class="pill" id="mapPill">—</span><span class="spacer"></span>
+            <div class="seg" id="trustSeg" title="Where servo and motor types come from"><button data-trust="code" class="on">code</button><button data-trust="cad">CAD</button></div></div>
+          <div class="scrollx"><table class="grid" id="mapTable"></table></div>
+          <p class="hint" id="trustNote">Servo and motor types come from your declarations and comments. The CAD is used for geometry only.</p>
+        </div>
+        <div class="sec" data-sec="cfgxml" data-collapsed="1">
+          <div class="sec-head"><h3>Robot configuration</h3><span class="spacer"></span>
+            <button class="btn-sm" id="cfgClear" type="button" hidden>Remove</button></div>
+          <div class="drop" id="cfgDrop" tabindex="0" role="button" aria-label="Load a robot configuration XML file">
+            <div class="dt">Configuration .xml</div>
+            <div class="ds" id="cfgStatus">From the FIRST folder on the Control Hub. Every hardwareMap name gets checked.</div>
+          </div>
+          <input type="file" id="cfgFile" accept=".xml" hidden>
+        </div>
+        <div class="sec" data-sec="rig" data-collapsed="1">
+          <div class="sec-head"><h3>Kinematic rig</h3><span class="pill" id="guessPill">—</span><span class="spacer"></span>
+            <button class="btn-sm" id="addJoint" type="button">+ Joint</button></div>
+          <p class="hint">The rig is the model everything runs on, and it's yours: detection only seeds it. Edits save with this CAD.</p>
+          <div class="scrollx"><table class="grid" id="rigTable"></table></div>
+        </div>
+        <div class="sec" data-sec="chain" data-collapsed="1">
+          <div class="sec-head"><h3>What moves with what</h3><span class="pill" id="rigPill">—</span></div>
+          <div id="rigChain"></div>
+          <div class="slide"><label for="turretSlider">Turret radius</label>
+            <input type="range" id="turretSlider" min="15" max="250" step="5" value="55">
+            <span class="v" id="turretVal">55 %</span></div>
+        </div>
+        <div class="sec" data-sec="assembly" data-collapsed="1">
+          <div class="sec-head"><h3>Assembly</h3><span class="pill" id="partPill">—</span></div>
+          <div class="scroll-list"><table class="grid" id="treeTable"></table></div>
+        </div>
+        <div class="sec" data-sec="portable" data-collapsed="1">
+          <div class="sec-head"><h3>Portable rig</h3><span class="spacer"></span>
+            <button class="btn-sm" id="rigCopy" type="button">Copy</button>
+            <button class="btn-sm" id="rigApply" type="button">Apply</button>
+            <button class="btn-sm" id="rigReset" type="button">Re-detect</button></div>
+          <textarea id="rigJson" class="srcbox small" spellcheck="false" aria-label="Rig JSON"></textarea>
+          <p class="hint">Commit this next to your OpMode; next season starts from last season's rig.</p>
+        </div>
+      </details>
+    </section>
+
+    <section class="pane" data-pane="teleop" hidden>
+      <div class="sec card" data-sec="tele">
+        <div class="sec-head"><h3>TeleOp</h3><span class="count" id="teleCount"></span><span class="spacer"></span>
+          <button class="btn-sm" id="addOpMode" type="button">+ .java</button></div>
+        <div class="oplist" id="opListTele"></div>
+        <input type="file" id="codeFile" accept=".java,.txt,.zip" multiple hidden>
+      </div>
+      <div class="sec card" data-sec="auto">
+        <div class="sec-head"><h3>Autonomous</h3><span class="count" id="autoCount"></span></div>
+        <div class="oplist" id="opListAuto"></div>
+      </div>
+      <div class="sec card" data-sec="helpers">
+        <div class="sec-head"><h3>Helper classes</h3><span class="count" id="helperCount"></span></div>
+        <p class="hint">Files with no <code>@TeleOp</code> or <code>@Autonomous</code>. Every OpMode can use them.</p>
+        <div class="oplist" id="helperList"></div>
+      </div>
+      <div class="sec card" data-sec="howto">
+        <div class="sec-head"><h3>Driving</h3></div>
+        <ul class="howto">
+          <li><b>Drag the robot</b> on the field to move it. Shift-drag or right-drag turns it.</li>
+          <li><b>Plug in a controller</b> and press a button: it becomes gamepad1 or gamepad2.</li>
+          <li><b>Keys</b> <kbd>I</kbd><kbd>J</kbd><kbd>K</kbd><kbd>L</kbd> drive, <kbd>U</kbd><kbd>O</kbd> turn, <kbd>A</kbd><kbd>B</kbd><kbd>X</kbd><kbd>Y</kbd>, <kbd>Q</kbd><kbd>E</kbd> bumpers, arrows d-pad, <kbd>F</kbd> fire. Each key goes to the gamepad your code reads it from.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="pane pane-java" data-pane="java" hidden>
+      <div class="java-bar"><span class="mono" id="srcName"></span><span class="spacer"></span>
+        <span class="pill" id="covPill">—</span>
+        <button class="btn-sm primary" id="reparse" type="button">Re-analyze</button></div>
+      <div class="editor" id="editor">
+        <div class="ed-gutter" id="edGutter" aria-hidden="true"></div>
+        <div class="ed-main">
+          <pre class="ed-hl" id="edHl" aria-hidden="true"></pre>
+          <textarea class="ed-ta" id="srcbox" spellcheck="false" wrap="off" autocomplete="off" autocapitalize="off" aria-label="Java source"></textarea>
+        </div>
+      </div>
+      <div class="sec" data-sec="coverage" data-collapsed="1">
+        <div class="sec-head"><h3>What the bench runs</h3></div>
+        <div id="coverage"></div>
+      </div>
+    </section>
+
+    <section class="pane" data-pane="tune" hidden>
+      <div class="sec card" data-sec="physics">
+        <div class="sec-head"><h3>Physics</h3><span class="pill" id="physPill">—</span></div>
+        <div class="form2">
+          <span>Chassis</span>
+          <div class="seg" id="physSeg" title="How the drive base moves"><button data-phys="rigid">rigid body</button><button data-phys="kinematic">kinematic</button></div>
+          <label for="muSlider">Tile grip μ</label>
+          <div class="slide"><input type="range" id="muSlider" min="0.2" max="1.4" step="0.05" value="0.9"><span class="v" id="muVal">0.90</span></div>
+        </div>
+        <div class="mass-read" id="massRead"></div>
+        <p class="hint">Rigid body: the CAD's mass, centre of mass and wheel grip, so it accelerates and slips like the build. Kinematic: instant and perfect.</p>
+      </div>
+      <div class="sec card" data-sec="cfgvars">
+        <div class="sec-head"><h3>Config variables</h3><span class="pill" id="cfgVarPill">—</span></div>
+        <p class="hint" id="cfgVarNote"></p>
+        <div id="cfgVars"></div>
+      </div>
+      <div class="sec card" data-sec="assume" data-collapsed="1">
+        <div class="sec-head"><h3>Assumptions</h3></div>
+        <div class="slide"><label for="massSlider">Payload at end effector</label>
+          <input type="range" id="massSlider" min="0" max="500" step="10" value="180">
+          <span class="v" id="massVal">180 g</span></div>
+        <div class="slide"><label for="dutySlider">Usable share of stall torque</label>
+          <input type="range" id="dutySlider" min="10" max="60" step="1" value="30">
+          <span class="v" id="dutyVal">30 %</span></div>
+        <p class="hint">These only feed the torque check. Stall torque is a ceiling, not a working load; 25–35 % is a sensible share for a servo that must hold position.</p>
+      </div>
+    </section>
+  </aside>
+
   <!-- ===================== right: results ===================== -->
-  <aside class="rail rail-right" id="railRight" aria-label="Results">
+  <aside class="rail rail-right panel-glass" id="railRight" aria-label="Results">
     <nav class="tabs" role="tablist" data-tabs="right">
       <button class="rail-btn" type="button" data-rail="right" title="Hide this panel  ]" aria-label="Hide the right panel">
         <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M4.5 2.5 8 6 4.5 9.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
@@ -443,7 +456,7 @@
 
     <section class="pane" data-pane="shot">
       <div class="verdict" id="shotVerdict" aria-live="polite"></div>
-      <div class="sec" data-sec="shooter">
+      <div class="sec card" data-sec="shooter">
         <div class="sec-head"><h3>Your shooter</h3><span class="spacer"></span>
           <button class="btn-sm primary" id="fireBtn" type="button" title="Launch one ball now (F)">Fire <kbd>F</kbd></button></div>
         <div class="shot-live" id="shotLive"></div>
@@ -453,12 +466,12 @@
         </div>
         <p class="hint">A ball launches when the feeder leaves its rest position (a servo) or runs (a motor), at the speed your code gives the flywheel. Each shot wanders like a real one.</p>
       </div>
-      <div class="sec" data-sec="hives">
+      <div class="sec card" data-sec="hives">
         <div class="sec-head"><h3>HIVEs</h3><span class="spacer"></span><button class="btn-sm" id="fieldReset" type="button">Reset field</button></div>
         <div id="hiveRows"></div>
         <div class="shot-log" id="shotLog"></div>
       </div>
-      <div class="sec" data-sec="setup" data-collapsed="1">
+      <div class="sec card" data-sec="setup" data-collapsed="1">
         <div class="sec-head"><h3>Setup</h3><span class="spacer"></span>
           <label class="practice"><input type="checkbox" id="arcToggle" checked> show arc</label></div>
         <div class="form2">
@@ -494,7 +507,7 @@
       </div>
       <div id="mathBody"></div>
       <p class="hint">Every line is the real formula with <b>your</b> robot's numbers substituted, and every number says where
-        it came from — CAD, your code, a vendor spec, or an assumption you can change. Paste it straight into your
+        it came from: CAD, your code, a vendor spec, or an assumption you can change. Paste it straight into your
         Engineering Portfolio.</p>
     </section>
 
@@ -535,13 +548,14 @@
     </div>
   </div>
 
+  <!-- Onshape, read live (the advanced way: a sign-in, or the bookmark) -->
   <div class="overlay" id="osOverlay" hidden>
     <div class="sheet os-sheet" role="dialog" aria-modal="true" aria-labelledby="osTitle">
       <button class="sheet-x" id="osClose" type="button" aria-label="Close">×</button>
 
       <div id="osGuide">
-        <h2 id="osTitle">Get your robot from Onshape</h2>
-        <p class="os-lead">Every part, its colour and weight, and <b>every joint from your mates</b>, straight from your Onshape assembly. Nothing to export, and it works on school computers.</p>
+        <h2 id="osTitle">Read the mates from Onshape</h2>
+        <p class="os-lead">The usual way needs no sign-in: in Onshape, right-click your assembly tab, <b>Export</b>, format <b>URDF</b>, and drop the zip on SimBench. This page is for the rest: reading your assembly live, with mate relations (gear and cascade ratios) that the export leaves out.</p>
         <p class="os-warn" id="osPhone" hidden>This needs a computer: Chrome, Edge, Firefox, Safari or a Chromebook.</p>
 
         <div id="osSignInWay">
@@ -589,10 +603,10 @@
             </li>
           </ol>
         </div>
-        <p class="os-warn" id="osNoSignIn" hidden>Sign in with Onshape isn't switched on for this copy of SimBench. Use the bookmark below on a home computer, or export a STEP from Onshape and use <b>Open a file</b>.</p>
+        <p class="os-warn" id="osNoSignIn" hidden>Sign in with Onshape isn't switched on for this copy of SimBench. Use Onshape's URDF export (Export → URDF, drop the zip here), or the bookmark below on a home computer.</p>
 
         <details class="os-way" id="osBmWay"><summary>Or use the bookmark (home computers only)</summary>
-          <p class="os-warn">School computers block bookmarks that run code. If clicking it does nothing, or a tab says <code>about:blank#blocked</code>, use <b>Sign in with Onshape</b> above.</p>
+          <p class="os-warn">School computers block bookmarks that run code. If clicking it does nothing, or a tab says <code>about:blank#blocked</code>, use the URDF export instead.</p>
           <p class="os-once">Steps 1 and 2 are <b>once per computer</b>. After that, getting your robot is just steps 3 and 4.</p>
           <ol class="os-steps small">
             <li class="os-step">
@@ -600,13 +614,6 @@
               <div class="os-body">
                 <h3>Show your bookmarks bar</h3>
                 <p>Press <kbd id="osKey1">Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>B</kbd>. A thin bar appears just under the address bar. <span class="dim">(Already there? Skip this.)</span></p>
-                <svg class="os-pic" viewBox="0 0 360 84" aria-hidden="true">
-                  <rect x="1" y="1" width="358" height="82" rx="8" class="p-win"/>
-                  <rect x="10" y="9" width="92" height="16" rx="5" class="p-tab"/><text x="20" y="21" class="p-t">SimBench</text>
-                  <rect x="10" y="31" width="340" height="18" rx="9" class="p-addr"/><text x="22" y="44" class="p-t dim">app.ftc-simbench.com</text>
-                  <rect x="6" y="55" width="348" height="22" rx="4" class="p-bar"/>
-                  <text x="14" y="70" class="p-t acc">← your bookmarks bar shows up here</text>
-                </svg>
               </div>
             </li>
             <li class="os-step">
@@ -631,13 +638,6 @@
               <div class="os-body">
                 <h3>Open your robot's <u>assembly</u> in Onshape</h3>
                 <p>Sign in to Onshape, open your robot's document, and click the <b>Assembly</b> tab along the bottom. Not a Part Studio: the joints live in the assembly.</p>
-                <svg class="os-pic" viewBox="0 0 360 74" aria-hidden="true">
-                  <rect x="1" y="1" width="358" height="72" rx="8" class="p-win"/>
-                  <rect x="10" y="10" width="340" height="30" rx="4" class="p-canvas"/><text x="150" y="30" class="p-t dim">your robot</text>
-                  <rect x="10" y="48" width="86" height="18" rx="3" class="p-tab"/><text x="18" y="61" class="p-t dim">Part Studio 1</text>
-                  <rect x="102" y="48" width="86" height="18" rx="3" class="p-tab hi"/><text x="112" y="61" class="p-t">◈ Assembly 1</text>
-                  <path d="M226 57 h-30 M202 51 l-6 6 6 6" class="p-arrow"/><text x="232" y="61" class="p-t acc">this one</text>
-                </svg>
                 <a class="btn-sm" href="https://cad.onshape.com/documents" target="_blank" rel="noopener">Open Onshape in a new tab ↗</a>
               </div>
             </li>
@@ -646,13 +646,6 @@
               <div class="os-body">
                 <h3>Click <b>Send to SimBench</b> on your bookmarks bar</h3>
                 <p>A SimBench tab opens and reads your robot. <b>Keep the Onshape tab open</b> until your robot appears. A big robot takes about a minute.</p>
-                <svg class="os-pic" viewBox="0 0 360 52" aria-hidden="true">
-                  <rect x="1" y="1" width="358" height="50" rx="8" class="p-win"/>
-                  <rect x="6" y="10" width="348" height="22" rx="4" class="p-bar"/>
-                  <rect x="12" y="13" width="112" height="16" rx="4" class="p-bm"/><text x="20" y="25" class="p-t ink">★ Send to SimBench</text>
-                  <path d="M84 24 l0 16 4 -4 3 7 3 -1 -3 -7 6 0 z" class="p-cursor"/>
-                  <text x="140" y="25" class="p-t dim">← click it while your assembly is open</text>
-                </svg>
               </div>
             </li>
           </ol>
@@ -669,7 +662,7 @@
             <dt>It says I'm not allowed (401 or 403)</dt>
             <dd>The document has to be yours or shared with you (view access is enough). Click <b>sign out</b>, then sign in again with the Onshape account that owns the robot.</dd>
             <dt>The bookmark does nothing, or I see about:blank#blocked</dt>
-            <dd>Your school blocks bookmarks that run code, and dropping the button on the Onshape page never works. Use <b>Sign in with Onshape</b> instead.</dd>
+            <dd>Your school blocks bookmarks that run code. Use Onshape's URDF export instead: it needs nothing but the zip.</dd>
             <dt>It's taking a long time</dt>
             <dd>Every part studio is read once; a robot with 100 of them takes a minute or two.</dd>
           </dl>
@@ -701,7 +694,7 @@
       <button class="sheet-x" id="ghClose" type="button" aria-label="Close">×</button>
       <h2 id="ghTitle">Import an OpMode from GitHub</h2>
       <p class="hint">Paste your team's repository, a folder inside it, or one <code>.java</code> file. Public repositories
-        only — nothing is sent anywhere except GitHub.</p>
+        only; nothing is sent anywhere except GitHub.</p>
       <div class="gh-row">
         <input type="text" id="ghUrl" spellcheck="false" autocomplete="off" placeholder="owner/repo  ·  github.com/owner/repo/tree/main/TeamCode">
         <button class="btn-sm primary" id="ghGo" type="button">Find OpModes</button>
@@ -711,5 +704,5 @@
     </div>
   </div>
 
-  <div class="drop-veil" id="dropVeil" hidden><div><b>Drop it anywhere</b><span>STEP assembly · .java OpMode · .ftcsim workspace · configuration .xml</span></div></div>
+  <div class="drop-veil" id="dropVeil" hidden><div><b>Drop it anywhere</b><span>Onshape URDF zip · STEP · .java OpModes · .ftcsim workspace · configuration .xml</span></div></div>
 </div>
