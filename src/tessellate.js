@@ -200,7 +200,7 @@ function tessAssign(cad,res,turretScale){
    steeper than 30 degrees on welded vertices. Shared meshes (one shape placed
    many times) are worked out once. */
 const EDGE_CACHE=new WeakMap();
-function meshEdgeSegs(m){
+function meshEdgeSegs(m,creaseDeg){
   const P=m.attributes&&m.attributes.position&&m.attributes.position.array, I=m.index&&m.index.array;
   if(!P||!P.length||!I||!I.length) return new Float32Array(0);
   const hit=EDGE_CACHE.get(P); if(hit) return hit;
@@ -226,10 +226,12 @@ function meshEdgeSegs(m){
     for(let t=0;t<I.length/3;t++) for(let e=0;e<3;e++){
       const a=id[I[3*t+e]], b=id[I[3*t+(e+1)%3]]; if(a===b) continue;
       const k=a<b?a+"_"+b:b+"_"+a; const r=edges.get(k); if(r) r.t.push(t); else edges.set(k,{a,b,t:[t]}); }
-    const cos30=Math.cos(Math.PI/6);
+    // a crease: the two faces meet at more than this (30 deg on a STEP's clean mesh; a thinned
+    // export mesh is faceted everywhere, so only its real corners count)
+    const cosC=Math.cos((creaseDeg||30)*Math.PI/180);
     for(const e of edges.values()){
       let keep=e.t.length!==2;
-      if(!keep){ const n1=nrm(e.t[0]), n2=nrm(e.t[1]); keep=n1[0]*n2[0]+n1[1]*n2[1]+n1[2]*n2[2]<cos30; }
+      if(!keep){ const n1=nrm(e.t[0]), n2=nrm(e.t[1]); keep=n1[0]*n2[0]+n1[1]*n2[1]+n1[2]*n2[2]<cosC; }
       if(keep) put(e.a,e.b);
     }
   }

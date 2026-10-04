@@ -290,7 +290,9 @@ const View={
       if(last&&last.col===col&&last.end===f.first) last.end=f.last+1; else runs.push({col, start:f.first, end:f.last+1}); }
     runs.forEach((r,i)=>g.addGroup(r.start*3,(r.end-r.start)*3,i));
     g.computeBoundingSphere(); g.userData.shared=true;
-    const segs=meshEdgeSegs(m); let eg=null;
+    // an export's thinned mesh (m.shape): edges only at real corners, and none at all on a dense one
+    // (every facet of a 20,000-triangle roller read as an edge: the robot looked wire-framed)
+    const segs=m.shape?(m.index.array.length>3*6000?new Float32Array(0):meshEdgeSegs(m,62)):meshEdgeSegs(m); let eg=null;
     if(segs.length){ eg=new THREE.BufferGeometry(); eg.setAttribute("position",new THREE.BufferAttribute(segs,3)); eg.userData.shared=true; }
     e={g, runs, eg}; this.shapeCache.set(k,e); return e;
   },

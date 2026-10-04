@@ -103,7 +103,7 @@
       </div>
     </div>
 
-    <!-- the dock: gamepad, telemetry, actuators -->
+    <!-- the dock: gamepad and telemetry -->
     <div class="dock panel-glass" id="dock">
       <section class="cell cell-pad" aria-label="Gamepad">
         <div class="cell-head">
@@ -120,10 +120,6 @@
         <div class="cell-head"><h3>Telemetry</h3><span class="spacer"></span><span class="pill" id="loopPill">—</span></div>
         <div class="cell-body"><div class="ds-panel" id="dsPanel"></div></div>
       </section>
-      <section class="cell cell-acts" aria-label="Actuators">
-        <div class="cell-head"><h3>Actuators</h3><span class="spacer"></span><span class="pill" id="tickPill">—</span></div>
-        <div class="cell-body"><div class="gauges" id="gauges"></div></div>
-      </section>
     </div>
   </main>
 
@@ -138,24 +134,27 @@
       <div class="brand-text"><b>SimBench</b><span>BIOBUZZ 2026–27</span></div>
     </div>
 
-    <div class="op-pick">
-      <div class="op-select-wrap">
-        <select id="opSelect" aria-label="OpMode"></select>
-        <span class="kind" id="opKind">TeleOp</span>
+    <!-- the Driver Station proper, centred: the OpMode, INIT / START / STOP, the clock -->
+    <div class="ds-center">
+      <div class="op-pick">
+        <div class="op-select-wrap">
+          <select id="opSelect" aria-label="OpMode"></select>
+          <span class="kind" id="opKind">TeleOp</span>
+        </div>
       </div>
-    </div>
 
-    <div class="ds-controls" role="group" aria-label="Driver Station controls">
-      <button class="ds-btn" id="btnInit">INIT</button>
-      <button class="ds-btn go" id="btnStart"><svg viewBox="0 0 10 10" aria-hidden="true"><path d="M2 1l7 4-7 4z"/></svg>START</button>
-      <button class="ds-btn stop" id="btnStop"><svg viewBox="0 0 10 10" aria-hidden="true"><rect x="1.5" y="1.5" width="7" height="7" rx="1"/></svg>STOP</button>
-    </div>
+      <div class="ds-controls" role="group" aria-label="Driver Station controls">
+        <button class="ds-btn" id="btnInit">INIT</button>
+        <button class="ds-btn go" id="btnStart"><svg viewBox="0 0 10 10" aria-hidden="true"><path d="M2 1l7 4-7 4z"/></svg>START</button>
+        <button class="ds-btn stop" id="btnStop"><svg viewBox="0 0 10 10" aria-hidden="true"><rect x="1.5" y="1.5" width="7" height="7" rx="1"/></svg>STOP</button>
+      </div>
 
-    <div class="ds-clock-wrap">
-      <div class="ds-clock" id="dsClock" aria-live="off">2:00</div>
-      <div class="ds-clock-bar"><i id="dsBar"></i></div>
+      <div class="ds-clock-wrap">
+        <div class="ds-clock" id="dsClock" aria-live="off">2:00</div>
+        <div class="ds-clock-bar"><i id="dsBar"></i></div>
+      </div>
+      <span class="pill phase" id="phasePill">—</span>
     </div>
-    <span class="pill phase" id="phasePill">—</span>
 
     <div class="ds-status">
       <div class="status-wrap">

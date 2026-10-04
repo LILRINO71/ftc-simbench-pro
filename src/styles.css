@@ -125,14 +125,16 @@ a:hover{text-decoration:underline;}
 
 /* the top bar */
 .topbar{position:absolute; top:var(--gap); left:var(--gap); right:var(--gap); height:var(--bar); border-radius:16px; z-index:20;
-  display:flex; align-items:center; gap:10px; padding:0 10px 0 14px; min-width:0;}
-.brand{display:flex; align-items:center; gap:9px; flex:none;}
+  display:grid; grid-template-columns:minmax(0,1fr) auto minmax(0,1fr); align-items:center; gap:10px; padding:0 10px 0 14px; min-width:0;}
+/* the Driver Station sits in the middle of the bar, whatever is left and right of it */
+.ds-center{display:flex; align-items:center; gap:10px; justify-self:center; min-width:0;}
+.brand{display:flex; align-items:center; gap:9px; flex:none; justify-self:start;}
 .brand-mark{width:26px; height:26px;}
 .bm-hex{fill:#F2B230} .bm-arc{fill:none; stroke:#231A0E; stroke-width:2.4; stroke-linecap:round} .bm-dot{fill:#231A0E}
 .brand-text{display:flex; flex-direction:column; line-height:1.05;}
 .brand-text b{font-size:15px; font-weight:600; letter-spacing:-.01em;}
 .brand-text span{font-size:10.5px; color:var(--label-3); margin-top:2px;}
-.op-pick{display:flex; min-width:0; flex:0 1 280px; margin-left:6px;}
+.op-pick{display:flex; min-width:0; flex:0 1 260px; width:260px;}
 .op-select-wrap{display:flex; align-items:center; gap:7px; min-width:0; flex:1;}
 .op-select-wrap select{flex:1; min-width:0; font-size:13.5px; font-weight:500; color:var(--label); background:var(--fill-3); border:0; border-radius:9px; padding:7px 10px; appearance:auto;}
 .kind{font-size:10.5px; font-weight:600; padding:2px 7px; border-radius:6px; flex:none; background:var(--fill-3); color:var(--label-2);}
@@ -156,7 +158,7 @@ a:hover{text-decoration:underline;}
 .ds-clock-bar i{display:block; height:100%; width:0; background:var(--accent); border-radius:2px;}
 .pill.phase{border:0; background:transparent; color:var(--label-3); font-size:11.5px; flex:none; max-width:170px; overflow:hidden; text-overflow:ellipsis;}
 .pill.phase.live{color:var(--pass);}
-.ds-status{display:flex; align-items:center; gap:4px; margin-left:auto; flex:none;}
+.ds-status{display:flex; align-items:center; gap:4px; justify-self:end; flex:none;}
 .practice{display:flex; align-items:center; gap:5px; font-size:11.5px; color:var(--label-3); cursor:pointer; white-space:nowrap;}
 .practice input{accent-color:var(--accent); margin:0;}
 
@@ -476,7 +478,7 @@ kbd{display:inline-block; min-width:15px; padding:0 4px; border:1px solid var(--
 
 /* ================= the dock ================= */
 .dock{position:absolute; left:calc(var(--left) + 2*var(--gap)); right:calc(var(--right) + 2*var(--gap)); bottom:var(--gap); height:var(--dock); border-radius:18px; z-index:12;
-  display:grid; grid-template-columns:minmax(300px,1.2fr) minmax(200px,1fr) minmax(220px,1fr); overflow:hidden;
+  display:grid; grid-template-columns:minmax(300px,1.2fr) minmax(220px,1fr); overflow:hidden;
   transition:height var(--t-smooth) var(--spring-smooth), left var(--t-smooth) var(--spring-smooth), right var(--t-smooth) var(--spring-smooth);}
 .dock.closed{height:44px;}
 .dock.closed .cell-body{display:none;}
@@ -969,7 +971,7 @@ button.rmbtn{color:var(--label-3);} button.rmbtn:hover{color:var(--fail);}
   .app{--lw:min(86vw,340px); --rw:min(86vw,340px); --dock:200px;}
   .rail{z-index:30;}
   .dock{left:var(--gap); right:var(--gap); grid-template-columns:1fr 1fr;}
-  .cell-acts{display:none;}
+
   .vp-top,.vp-bottom,.import-card,.vp-hint{left:var(--gap); right:var(--gap);}
   .ds-clock-wrap{display:none;}
   .ds-btn{min-width:0; padding:0 10px;}
@@ -982,3 +984,8 @@ button.rmbtn{color:var(--label-3);} button.rmbtn:hover{color:var(--fail);}
   .ic-steps{grid-template-columns:1fr;}
 }
 @media (prefers-reduced-motion:reduce){ *,*::before,*::after{animation:none !important; transition:none !important;} }
+
+/* a quiet line under a card's drop zone, with one text button in it */
+.ic-note{margin:14px 0 0; font-size:12.5px; line-height:1.45; color:var(--label-3);}
+.ic-textbtn{background:none; border:0; padding:0; font:inherit; color:var(--accent); cursor:pointer; text-decoration:none;}
+.ic-textbtn:hover{text-decoration:underline;}

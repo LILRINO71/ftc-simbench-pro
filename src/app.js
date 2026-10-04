@@ -457,10 +457,11 @@ function arcPath(t0,t1){
   return `M ${x0.toFixed(2)} ${y0.toFixed(2)} A ${ARC_R} ${ARC_R} 0 ${(a1-a0)>Math.PI?1:0} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`;
 }
 function buildGauges(){
-  if(!CODE){ $("#gauges").innerHTML=""; return; }
+  const box=$("#gauges"); if(!box) return;                 // the actuator gauges left the dock; the graph has them
+  if(!CODE){ box.innerHTML=""; return; }
   const acts=CODE.devices.filter(d=>Sim.dev[d.name]&&/Servo|DcMotor/i.test(d.type||""));
-  if(!acts.length){ $("#gauges").innerHTML=`<p class="hint" style="grid-column:1/-1">No servos or motors in this OpMode.</p>`; return; }
-  $("#gauges").innerHTML=acts.map(d=>{
+  if(!acts.length){ box.innerHTML=`<p class="hint" style="grid-column:1/-1">No servos or motors in this OpMode.</p>`; return; }
+  box.innerHTML=acts.map(d=>{
     const s=Sim.dev[d.name], isMotor=s.kind==="motor", r=travelRange(CODE,d.name);
     const lo=r?r.lo:0, hi=r?r.hi:1;
     return `<div class="gauge" data-dev="${esc(d.name)}" data-motor="${isMotor?1:0}">
@@ -1352,7 +1353,8 @@ function loadCAD(cad,label,cls){
   CAD=cad;
   $("#cadStatus").textContent=label; $("#cadDrop").className="drop "+(cls||"ok");
   const parts=cad.solids&&cad.solids.length?cad.solids.length+" parts":(cad.points?cad.points.length.toLocaleString():"0")+" pts";
-  $("#vpTitle").textContent=(cad.name||label)+" · "+parts+" · "+cad.mechs.length+" mechanism"+(cad.mechs.length===1?"":"s")+(Field.ok?" · BIOBUZZ field":"");
+  const nm=cad.mechs.filter(m=>!m.internal&&m.kind!=="fixed").length;
+  $("#vpTitle").textContent=(cad.name||label)+" · "+parts+" · "+nm+" mechanism"+(nm===1?"":"s")+(Field.ok?" · BIOBUZZ field":"");
   const b=cad.bbox, mm=v=>(v*1000).toFixed(0);
   $("#vpDims").textContent=`${mm(b.max[0]-b.min[0])} × ${mm(b.max[1]-b.min[1])} × ${mm(b.max[2]-b.min[2])} mm`;
   // the front defaults to the way the wheels roll; a saved rig can still say otherwise
@@ -2812,7 +2814,7 @@ function frame(now){
     shotTick(now);
     const anyDown=Object.keys(Sim.pad[activePad]).some(k=>Sim.pad[activePad][k]);
     const tp=$("#tickPill");
-    tp.textContent=Sim.phase==="running"?(anyDown?"commanding":"holding"):Sim.phase==="init"?"init positions":"idle";
+    if(tp) tp.textContent=Sim.phase==="running"?(anyDown?"commanding":"holding"):Sim.phase==="init"?"init positions":"idle";
     const lp=$("#loopPill");
     lp.textContent=Sim.phase==="running"?Sim.t.toFixed(1)+" s · 50 Hz":Sim.phase; lp.className="pill"+(Sim.phase==="running"?" live":"");
     $$(".bindrow").forEach(r=>r.classList.toggle("active",!!Sim.pad[activePad][r.dataset.btn]));

@@ -29,12 +29,14 @@ const EngineWorker={
 const say=(id,t,d,n)=>postMessage({id, progress:String(t||""), done:d, total:n});
 // typed arrays travel without a copy; plain number arrays are copied, so the big ones are converted
 function pack(cad){
-  const tr=[];
+  const tr=new Set();
   for(const s of cad.solids||[]){
     if(s.tri&&s.tri.pos&&!(s.tri.pos instanceof Float32Array)){ s.tri.pos=Float32Array.from(s.tri.pos); s.tri.nor=Float32Array.from(s.tri.nor||[]); }
-    if(s.tri&&s.tri.pos instanceof Float32Array){ tr.push(s.tri.pos.buffer); if(s.tri.nor&&s.tri.nor.buffer!==s.tri.pos.buffer) tr.push(s.tri.nor.buffer); }
+    if(s.tri&&s.tri.pos instanceof Float32Array){ tr.add(s.tri.pos.buffer); if(s.tri.nor) tr.add(s.tri.nor.buffer); }
   }
-  return tr;
+  // a URDF robot's shapes, shared by every placed copy
+  (cad.shapes||[]).forEach(S=>{ if(S.pos&&S.pos.buffer) tr.add(S.pos.buffer); if(S.idx&&S.idx.buffer) tr.add(S.idx.buffer); });
+  return [...tr];
 }
 onmessage=async e=>{
   const d=e.data;
@@ -51,13 +53,10 @@ onmessage=async e=>{
       postMessage({id:d.id, late:"units", value:units});
     }else if(d.op==="urdfzip"){
       say(d.id,"unpacking …");
-      const r=await urdfFromZip(d.bytes,d.name);
-      if(!r.payload){ postMessage({id:d.id, ok:true, entries:r.entries.map(x=>({name:x.name, data:x.data}))},r.entries.map(x=>x.data.buffer).filter((b,i,a)=>a.indexOf(b)===i)); return; }
-      say(d.id,"building the robot …");
-      const cad=cadFromOnshape(r.payload,d.opts||{}); cad.source="urdf";
-      if(r.payload.notes&&r.payload.notes.length) cad.onshape.why=r.payload.notes.concat(cad.onshape.why||[]);
-      urdfApplyHints(cad,r.payload.hints);
-      postMessage({id:d.id, ok:true, cad, notes:r.payload.notes||[], name:r.payload.name},pack(cad));
+      const r=await urdfRobotFromZip(d.bytes,d.name,Object.assign({say:msg=>say(d.id,msg)},d.opts||{}));
+      if(!r.cad){ postMessage({id:d.id, ok:true, entries:r.entries.map(x=>({name:x.name, data:x.data}))},r.entries.map(x=>x.data&&x.data.buffer).filter((b,i,a)=>b&&a.indexOf(b)===i)); return; }
+      const cad=r.cad; cad.source="urdf";
+      postMessage({id:d.id, ok:true, cad, notes:cad.onshape.why||[], name:cad.name},pack(cad));
     }else if(d.op==="onshape"){
       say(d.id,"building the robot …");
       const cad=cadFromOnshape(d.payload,d.opts||{});
@@ -84,7 +83,11 @@ onmessage=async e=>{
       w.onerror=e=>{ e.preventDefault&&e.preventDefault();
         // it never started (the engine file didn't load): everything pending runs on the page instead
         const err=new Error("worker: "+(e.message||"stopped"));
-        for(const id in this.pending){ const p=this.pending[id]; delete this.pending[id]; p.reject(Object.assign(err,{fallback:true}));
+        for(const id in this.pending){ const p=this.pending[id]; delete this.pending[id];
+          // a job whose bytes were handed to the worker can't run again on the page: the worker
+          // died on it (a browser out of memory on a huge export), so say that instead
+          p.reject(p.handed?new Error("the browser ran out of memory reading it. Export again at Medium resolution (Onshape: Export → URDF → Resolution), which is plenty for the bench")
+                          :Object.assign(err,{fallback:true}));
           if(p.late) for(const k in p.late) p.late[k].resolve(null); }
         try{ w.terminate(); }catch(x){} this.worker=null; this.dead=true; };
       this.worker=w;
@@ -95,7 +98,7 @@ onmessage=async e=>{
     const w=this.get();
     if(!w) return Promise.reject(Object.assign(new Error("no worker"),{fallback:true}));
     const id=++this.seq;
-    return new Promise((resolve,reject)=>{ this.pending[id]={resolve,reject,onProgress}; w.postMessage(Object.assign({id},msg),transfer||[]); });
+    return new Promise((resolve,reject)=>{ this.pending[id]={resolve,reject,onProgress,handed:!!(transfer&&transfer.length)}; w.postMessage(Object.assign({id},msg),transfer||[]); });
   },
   /* the same work on the page, when there is no worker */
   async local(msg,onProgress){
@@ -109,12 +112,10 @@ onmessage=async e=>{
       return {ok:true, cad, rig, units};
     }
     if(msg.op==="urdfzip"){
-      const r=await urdfFromZip(msg.bytes,msg.name);
-      if(!r.payload) return {ok:true, entries:r.entries};
-      const cad=cadFromOnshape(r.payload,msg.opts||{}); cad.source="urdf";
-      if(r.payload.notes&&r.payload.notes.length) cad.onshape.why=r.payload.notes.concat(cad.onshape.why||[]);
-      urdfApplyHints(cad,r.payload.hints);
-      return {ok:true, cad, notes:r.payload.notes||[], name:r.payload.name};
+      const r=await urdfRobotFromZip(msg.bytes,msg.name,Object.assign({say},msg.opts||{}));
+      if(!r.cad) return {ok:true, entries:r.entries};
+      const cad=r.cad; cad.source="urdf";
+      return {ok:true, cad, notes:cad.onshape.why||[], name:cad.name};
     }
     if(msg.op==="onshape"){
       const cad=cadFromOnshape(msg.payload,msg.opts||{});
@@ -128,6 +129,7 @@ onmessage=async e=>{
     return this.run(msg,transfer,onProgress).catch(e=>{ if(e&&e.fallback) return this.local(msg,onProgress); throw e; });
   },
   parseStep(text,name,opts){ return this.job({op:"step", text, name, opts:opts.frame||{}, rig:opts.rig!==false, front:opts.front||"+x", units:opts.units!==false},[],opts.onProgress); },
-  urdfZip(bytes,name,opts){ const u8=bytes instanceof Uint8Array?bytes:new Uint8Array(bytes); return this.job({op:"urdfzip", bytes:u8, name, opts:opts.frame||{}},[],opts.onProgress); },
+  // the zip's bytes are handed over, not copied: a 500 MB export would otherwise sit in memory twice
+  urdfZip(bytes,name,opts){ const u8=bytes instanceof Uint8Array?bytes:new Uint8Array(bytes); return this.job({op:"urdfzip", bytes:u8, name, opts:opts.frame||{}},[u8.buffer],opts.onProgress); },
   onshape(payload,opts){ return this.job({op:"onshape", payload, from:opts.from||null, opts:opts.frame||{}},[],opts.onProgress); },
 };

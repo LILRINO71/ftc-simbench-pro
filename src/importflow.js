@@ -39,6 +39,9 @@ const ImportFlow={
     const own=(()=>{ try{ return ownRobot()||!!(CAD&&(CAD.source==="onshape"||CAD.source==="urdf")); }catch(e){ return false; } })();
     if(!own) return store.get("ftcbench.import.seen","0")==="1"&&!this.forced?"done":"bring";
     if(!CODE||!(CODE.devices||[]).length) return "code";
+    // the team's own robot with a sample OpMode still selected: binding the sample's devices to
+    // their joints would only raise questions about a robot the sample was never written for
+    if(this.sampleOk!==CAD&&typeof entry==="function"&&typeof CURRENT_ID!=="undefined"){ const e=entry(CURRENT_ID); if(e&&e.builtin) return "code"; }
     if(this.dismissed===CAD) return "done";
     const A=SetupUI.auto(), allSetup=SETUP_STEPS.every(k=>SetupUI.isDone(k,A));
     const rc=RC, bind=this.bind();
@@ -80,7 +83,7 @@ const ImportFlow={
     return `<div class="ic-head"><div><h2>Bring your robot</h2><p>Two steps in Onshape, and it arrives with every joint from your mates, every part in its colour, and its real weight.</p></div>
       <button class="ic-x" type="button" data-ic="close" aria-label="Not now">×</button></div>
       <div class="ic-steps">
-        <div class="ic-step"><span class="n">1</span><div><b>Export it from Onshape</b><p>Right-click your <b>Assembly</b> tab at the bottom of Onshape → <b>Export</b>. Format <code>URDF</code>, geometry <code>GLB</code>, resolution <code>Fine</code>, compression off. A zip downloads.</p>
+        <div class="ic-step"><span class="n">1</span><div><b>Export it from Onshape</b><p>Right-click your <b>Assembly</b> tab at the bottom of Onshape → <b>Export</b>. Format <code>URDF</code>, geometry <code>GLB</code>, resolution <code>Medium</code> (Fine is ten times the file for no gain here), compression off. A zip downloads.</p>
           <svg class="ic-pic" viewBox="0 0 300 70" aria-hidden="true"><rect x="1" y="1" width="298" height="68" rx="8" fill="var(--card)" stroke="var(--sep-2)"/><rect x="10" y="8" width="280" height="30" rx="4" fill="var(--card-2)"/><text x="150" y="27" text-anchor="middle" font-size="10" fill="var(--label-3)">your robot</text>
           <rect x="10" y="46" width="70" height="16" rx="3" fill="var(--card-2)"/><text x="18" y="58" font-size="9" fill="var(--label-3)">Part Studio 1</text><rect x="86" y="46" width="70" height="16" rx="3" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.5"/><text x="94" y="58" font-size="9" font-weight="600" fill="var(--accent-tx)">◈ Assembly 1</text>
           <path d="M190 54 h-26 M170 49 l-6 5 6 5" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><text x="196" y="58" font-size="9.5" font-weight="600" fill="var(--accent-tx)">right-click → Export</text></svg></div></div>
@@ -98,11 +101,14 @@ const ImportFlow={
       <p class="ic-sub">Big robots take a little while. The page stays usable.</p>`;
   },
   htmlCode(){
-    const n=CAD?CAD.solids.length:0, j=CAD?CAD.mechs.filter(m=>m.fromMate&&!m.internal).length:0, kg=CAD&&CAD.onshape&&CAD.onshape.kg;
-    return `<div class="ic-head"><div><h2>Now your code</h2><p><b>${esc(CAD?CAD.name:"Your robot")}</b> is in: ${n} parts${j?", "+j+" joint"+(j===1?"":"s")+" from your mates":""}${kg?", "+kg.toFixed(1)+" kg":""}. Add the OpModes you run on the Control Hub, and every helper class they use.</p></div>
+    const n=CAD?CAD.solids.length:0, j=CAD?CAD.mechs.filter(m=>m.fromMate&&!m.internal).length:0;
+    const mass=(Sim.rig&&Sim.rig.props)||Physics.props, kg=mass&&!mass.assumed?mass.kg:(CAD&&CAD.onshape&&CAD.onshape.kg);
+    const sample=CODE&&(CODE.devices||[]).length&&typeof entry==="function"&&entry(CURRENT_ID)&&entry(CURRENT_ID).builtin;
+    return `<div class="ic-head"><div><h2>Now your code</h2><p><b>${esc(CAD?CAD.name:"Your robot")}</b> is in: ${n} parts${j?", "+j+" joint"+(j===1?"":"s")+" from your mates":""}${kg?", about "+kg.toFixed(1)+" kg":""}. Add the OpModes you run on the Control Hub, and every helper class they use.</p></div>
       <button class="ic-x" type="button" data-ic="close" aria-label="Not now">×</button></div>
       <div class="ic-drop" data-ic="pick-code" role="button" tabindex="0"><b>Drop your .java files, or click to choose them</b><span>TeleOps, autos and helper classes together, or a zip of the TeamCode folder</span></div>
-      <form class="ic-code" id="icGh"><input id="icGhUrl" type="text" placeholder="or paste your team's GitHub repo" spellcheck="false" autocomplete="off"><button class="btn-sm primary" type="submit">Find OpModes</button></form>`;
+      <form class="ic-code" id="icGh"><input id="icGhUrl" type="text" placeholder="or paste your team's GitHub repo" spellcheck="false" autocomplete="off"><button class="btn-sm primary" type="submit">Find OpModes</button></form>
+      ${sample?`<p class="ic-note">The OpMode selected now is a sample written for another robot. <button class="ic-textbtn" type="button" data-ic="sample-ok">Drive this robot with it anyway</button></p>`:""}`;
   },
   htmlReview(){
     const A=SetupUI.auto(), B=this.bind(), rc=RC, F=CAD.frame||{};
@@ -161,6 +167,7 @@ const ImportFlow={
     else if(k==="accept"){ for(const s of SETUP_STEPS) SETUP.done[s]=true; saveRig(); SetupUI.render(); this.close(); }
     else if(k==="pick") $("#cadFile").click();
     else if(k==="pick-code") $("#codeFile").click();
+    else if(k==="sample-ok"){ this.sampleOk=CAD; this.render(true); }
     else if(k==="cad"){ CadView.enter(); $$("#viewSeg button").forEach(x=>x.classList.toggle("on",x.dataset.v==="cad")); }
     else if(k==="save") SetupUI.download();
     else if(k==="onshape-live") OnshapeHelp.open();
@@ -204,8 +211,17 @@ const ImportFlow={
     LAST_STEP={name:cad.name, text:"", urdfZip:true, label:cad.name+" · from "+(/onshape|urdf/i.test(file.name)?"Onshape":"URDF")};
     JOINTS.spec=JOINTS.report=JOINTS.devices=null; JOINTS.name=JOINTS.step=null;
     MATES.asm=MATES.features=MATES.name=MATES.report=MATES.url=null; MATES.fromLink=false;
-    const n=cad.mechs.filter(m=>m.fromMate).length;
-    loadCAD(cad, cad.name+" · from URDF · "+cad.solids.length+" parts · "+n+" joint"+(n===1?"":"s"), "ok");
+    // which of the export's joints are mechanisms (the rest are bearings, shafts, rollers): before anything is said about them
+    classifyJoints(cad);
+    const n=cad.mechs.filter(m=>m.fromMate&&!m.internal).length, hid=cad.mechs.filter(m=>m.fromMate&&m.internal).length;
+    loadCAD(cad, cad.name+" · from URDF · "+cad.solids.length+" parts · "+n+" joint"+(n===1?"":"s")+(hid?" ("+hid+" bearings and shafts left fixed)":""), "ok");
+    // the export's own surfaces, thinned in the worker: exact geometry with nothing more to load
+    const ex=typeof urdfExact==="function"?urdfExact(cad):null;
+    if(ex&&ex.meshes.length){
+      EXACT={state:"ok", msg:null}; View.setExact(cad,ex);
+      const note=$("#exactNote"); if(note){ note.textContent="Exact geometry: "+ex.meshes.length+" parts from "+ex.shapes+" shapes in the export, "+(cad.urdf?(cad.urdf.triangles/1e6).toFixed(1)+" M triangles":"")+"."; note.className="hint"; }
+      if(CadView.on) CadView.renderTree();
+    }
     recomputeChain(cad.mechs);
     classifyJoints(cad);
     const mine=savedJoints(cad.name); if(mine){ JOINTS.spec=mine; JOINTS.step=cad.name; JOINTS.name="your joints"; applyJoints(); }
