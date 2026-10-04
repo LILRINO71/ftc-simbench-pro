@@ -43,6 +43,7 @@ was designed in, not the build order.
 | `simbot.js` | Robot packages (`.simbot`): a deterministic zip and a capped reader, a glTF binary writer and reader, the package from any robot and back, and `validateRobot` (what to check). Joint spec version 2's constraints live here and in jointspec.js. See [../docs/robot-package.md](../docs/robot-package.md). |
 | `urdf.js` | URDF into the same payload an Onshape import gives, including Onshape's own export (root, dummy links for loop closures, cylindrical and planar mates, continuous joints, `<mimic>`, underscored names, near-zero masses), with mesh readers for STL, OBJ, glTF, GLB and COLLADA, and a glTF-only reader for shapes without joints. |
 | `mjcf.js` | MuJoCo MJCF models into the same payload an Onshape import gives: bodies, joints with limits, joint equalities as couplings, connects as loop closures. |
+| `autobind.js` | Zero questions after a CAD upload: binds each motor and servo in the code to a joint from what the CAD shows (an actuator on the axis, a pulley or gear, what the joint carries) and how the code uses the device (setVelocity, an encoder held, plain power, servo positions), pairs included, every pick with its reason. |
 | `zipin.js` | A robot in a zip: Onshape's URDF or glTF export, a ROS package, a zipped STEP or robot package. `robotFromZip` reads it with the package's capped zip reader and says what it holds. |
 
 ## Code → behaviour

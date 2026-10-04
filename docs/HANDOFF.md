@@ -131,6 +131,12 @@ The research behind the fixes is in
     hand (an "O"/mixed pattern), which made strafing spin the robot. Four
     mecanum wheels are modelled X whatever the rollers read, with a note
     naming the odd wheel.
+  - **Zero questions.** `src/autobind.js` binds every device the name
+    mapper leaves to a joint from the CAD's own evidence and the code's
+    usage (docs/joints.md "Zero questions: the binder"); the robot check
+    shows each pick with its reason as a note. The owner's export went
+    from 7 questions to 0. A mate named after a device is never passive
+    and binds first.
   Also from the owner's list: the Actuators dock cell is gone (the gauges
   were noise), a robot read from its CAD gets no stand-in shooter drawn in,
   Onshape's default greys are no colour (the part is drawn by what it is,

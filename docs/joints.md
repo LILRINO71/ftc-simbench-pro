@@ -87,6 +87,36 @@ What a real export taught (a 1,900-link, 9.4-million-triangle robot, 2026-10-03)
 - **Four mecanum wheels are modelled X** whatever their rollers read (a real base is built X; an
   "O" or a mix can't drive), with a note naming the wheel that read the other hand.
 
+### Zero questions: the binder (`src/autobind.js`)
+
+A robot read from its CAD has exact joints but default mate names, so nothing says which joint
+`spinner` turns. The team shouldn't have to answer that per device; the CAD and the code together
+usually do, and the binder reads only what any export has:
+
+- **From the CAD**, per candidate joint (not passive, not a motor's own gearbox internals, not an
+  odometry pod, not a drive wheel's hub or anything within 12 cm of a drive wheel): what it carries
+  (parts, mass, span, height), whether a motor or servo part sits on its axis right by the pivot
+  (direct drive), whether a pulley, gear or sprocket is on it (belt or gear drive), and whether its
+  own parts include a servo spline or horn (a servo's output). A chain of joints that carry the same
+  parts (spline → hub → arm) is one mechanism, taken at the top.
+- **From the code**, per device: `setVelocity` is a flywheel; reading the encoder or holding a target
+  is an indexer, turret or arm; plain `setPower` is a roller; a servo sent between two positions is a
+  flipper or claw; one sent round 0.5 is a continuous spin. Two devices commanded alike or named alike
+  (`outtake`/`outtake2`, `uppies`/`uppies2`) are a pair, and a pair goes on a pair of matching joints
+  (parallel axes, similar height and mass).
+- **Scoring**: kind must agree (a servo on the axis for a servo device; a motor on the axis, scaled by
+  how much the joint carries, for a motor device; the other kind counts against); a flywheel wants a
+  wheel, little mass and height; a held mechanism wants mass and parts; a roller wants a wheel-like part
+  off the floor. Picks need a clear margin; what's left takes the one joint that still fits it alone.
+- **Every pick carries its reason** and the Checks tab shows it as a note ("spinner drives this: the
+  heaviest joint, with a pulley, held to encoder targets in your code"), never as a question. The
+  hardware table changes a wrong pick. Joints nothing drives are one summary line.
+
+Measured on a 1,900-link export: 7 of 7 devices bound with no question (two flywheels on their motors'
+axles, the indexer drum by mass and pulley, the gripping wheel, two mirrored servo flippers on splines,
+the hood servo). The named-mate route still beats it: a mate named after its device binds first and is
+never passive.
+
 **Sign in with Onshape** (`src/onshapelink.js`, `functions/onshape/`): in the **Get my robot from
 Onshape** pop-up, sign in through Onshape's own page once, then paste the assembly's address. It
 reads the same API calls as the bookmark below, through a small Cloudflare Pages Function, and works
