@@ -12,7 +12,7 @@ const store={
 
 let CODE=null, CAD=null, MAP={}, FINDINGS=[], activePad=2;
 let JOLT=null;                     // Jolt Physics once loaded (Physics.loadJolt), for solved mechanisms
-const OPTS={payloadKg:0.180, duty:0.30, trust:"code", robotConfig:null, front:"+x", baseModel:"auto", shooterModel:"auto", shift:null};
+const OPTS={payloadKg:0.180, duty:0.30, trust:"code", robotConfig:null, front:"+x", baseModel:"auto", shooterModel:"auto", shift:null, driveFrom:"code"};
 let IGNORED={};
 try{ IGNORED=JSON.parse(store.get("ftcbench.ignored","{}"))||{}; }catch(e){ IGNORED={}; }
 function saveIgnored(){ store.set("ftcbench.ignored",JSON.stringify(IGNORED)); }
@@ -129,12 +129,9 @@ function reparseAll(){
 const isOpModeSource=t=>/@(TeleOp|Autonomous)\b/.test(stripComments(t))||/\bextends\s+(LinearOpMode|OpMode)\b/.test(t);
 function initLibrary(){
   loadHelpers();
-  LIBRARY=[
-    {id:"sample-claw", file:"WORKSHOPCODE.java", source:SAMPLE_JAVA, builtin:true},
-    {id:"sample-mecanum", file:"MecanumTeleOp.java", source:DRIVE_JAVA, builtin:true},
-    {id:"sample-auto", file:"TimedDriveAuto.java", source:AUTO_JAVA, builtin:true},
-    {id:"sample-shooter", file:"ShooterTeleOp.java", source:SHOOTER_JAVA, builtin:true}
-  ];
+  // nothing built in: the default robot brings its own TeleOp (loadDefaultRobot), and
+  // everything else is what the team uploads
+  LIBRARY=[];
   try{
     const saved=JSON.parse(store.get("ftcbench.library","[]"))||[];
     for(const s of saved) if(s&&s.id&&s.source) LIBRARY.push({id:s.id, file:s.file||"OpMode.java", source:s.source, builtin:false});
@@ -458,10 +455,11 @@ function arcPath(t0,t1){
   return `M ${x0.toFixed(2)} ${y0.toFixed(2)} A ${ARC_R} ${ARC_R} 0 ${(a1-a0)>Math.PI?1:0} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`;
 }
 function buildGauges(){
-  if(!CODE){ $("#gauges").innerHTML=""; return; }
+  const gaugeBox=$("#gauges"); if(!gaugeBox) return;
+  if(!CODE){ gaugeBox.innerHTML=""; return; }
   const acts=CODE.devices.filter(d=>Sim.dev[d.name]&&/Servo|DcMotor/i.test(d.type||""));
-  if(!acts.length){ $("#gauges").innerHTML=`<p class="hint" style="grid-column:1/-1">No servos or motors in this OpMode.</p>`; return; }
-  $("#gauges").innerHTML=acts.map(d=>{
+  if(!acts.length){ gaugeBox.innerHTML=`<p class="hint" style="grid-column:1/-1">No servos or motors in this OpMode.</p>`; return; }
+  gaugeBox.innerHTML=acts.map(d=>{
     const s=Sim.dev[d.name], isMotor=s.kind==="motor", r=travelRange(CODE,d.name);
     const lo=r?r.lo:0, hi=r?r.hi:1;
     return `<div class="gauge" data-dev="${esc(d.name)}" data-motor="${isMotor?1:0}">
@@ -636,7 +634,7 @@ function exportRig(){
     format:"ftc-sim-bench.rig", version:1,
     cad:(CAD&&CAD.name)||null, opmode:(CODE&&CODE.opmode)||null,
     trust:OPTS.trust, payloadKg:OPTS.payloadKg, duty:OPTS.duty, turretScale:View.turretScale,
-    front:OPTS.front, baseModel:OPTS.baseModel, shooterModel:OPTS.shooterModel, shot:Shots.cfg||null,
+    front:OPTS.front, baseModel:OPTS.baseModel, shooterModel:OPTS.shooterModel, driveFrom:OPTS.driveFrom, shot:Shots.cfg||null,
     joints:(CAD?CAD.mechs:[]).map(m=>({
       id:m.id, label:m.label||m.id, kind:m.kind, parent:m.parent, dir:m.dir||1,
       pivotMm:m.pivot?m.pivot.map(v=>+(v*1000).toFixed(1)):null,
@@ -1630,7 +1628,7 @@ function parseAndLoad(done){
    ============================================================ */
 const DEFAULT_ROBOT={dir:"robots/into-the-deep/", step:"Into The Deep.step", file:"robot.step.gz", joints:"joints.json",
   team:"7832", label:"GearGurus 7832 · Into The Deep",
-  opmodes:[{id:"itd-sample-tele", file:"sample_teleop.java"}, {id:"itd-bal", file:"BAL.java"}, {id:"itd-holy-grail", file:"TheHolyGrail.java", field:"other"}],
+  opmodes:[{id:"itd-bal", file:"BAL.java"}],
   helpers:["MecanumDrive.java", "Arm.java", "Arm_PID_Class.java", "Slides_PID_Class.java"]};
 async function fetchStepText(url){
   const r=await fetch(url); if(!r.ok) throw new Error(r.status+" for "+url);
@@ -1663,7 +1661,7 @@ async function loadDefaultRobot(){
       selectOpMode(mine&&(!mine.builtin||mine.team)?saved:R.opmodes[0].id);
     });
   }catch(e){
-    if(!LAST_STEP) st.textContent="couldn't load the default robot ("+e.message+") — this is the built-in sample";
+    if(!LAST_STEP){ st.textContent="couldn't load the default robot ("+e.message+") — this is the built-in sample"; if(View.chassisG) View.chassisG.visible=true; }
   }
 }
 /* The real surfaces, the way Onshape draws them. OpenCascade loads from the
@@ -2056,7 +2054,7 @@ function renderRobotCheckNow(){
   const put=h=>boxes.forEach(b=>{ b.innerHTML=(b.id==="rcChecks"?rcHead():"")+h; });
   const rcHead=()=>`<div class="rc-title"><b>Robot check</b><span class="pill ${RC?(RC.ready?(RC.warn?"warnp":"ok"):"bad"):""}">${RC?(RC.ready?(RC.warn?RC.warn+" to confirm":"ready"):RC.need+" to answer"):"—"}</span></div>`;
   if(!CAD||!CODE){ RC=null; put(`<p class="hint">Load a robot and an OpMode to check them together.</p>`); if(pill){ pill.textContent="—"; pill.className="pill"; } return; }
-  try{ RC=checkRobot(CAD,CODE,MAP,{isCommanded:n=>isCommanded(CODE,n), front:OPTS.front}); }
+  try{ RC=checkRobot(CAD,CODE,MAP,{isCommanded:n=>isCommanded(CODE,n), front:OPTS.front, mountDisagree:(Sim.rig&&Sim.rig.drive&&Sim.rig.drive.disagree)||[]}); }
   catch(e){ RC=null; put(`<p class="hint">The robot check stopped: ${esc(e.message)}</p>`); return; }
   pill.textContent=RC.ready?(RC.warn?RC.warn+" to confirm":"ready"):RC.need+" to answer";
   pill.className="pill "+(RC.ready?(RC.warn?"warnp":"ok"):"bad");
@@ -2886,7 +2884,7 @@ function frame(now){
     shotTick(now);
     const anyDown=Object.keys(Sim.pad[activePad]).some(k=>Sim.pad[activePad][k]);
     const tp=$("#tickPill");
-    tp.textContent=Sim.phase==="running"?(anyDown?"commanding":"holding"):Sim.phase==="init"?"init positions":"idle";
+    if(tp) tp.textContent=Sim.phase==="running"?(anyDown?"commanding":"holding"):Sim.phase==="init"?"init positions":"idle";
     const lp=$("#loopPill");
     lp.textContent=Sim.phase==="running"?Sim.t.toFixed(1)+" s · 50 Hz"+LoopTime.text():Sim.phase; lp.className="pill"+(Sim.phase==="running"?(LoopTime.slow()?" warnp":" live"):"");
     lp.title=LoopTime.slow()?"Each 20 ms tick takes "+Math.round(LoopTime.ms)+" ms on this computer, so the robot runs slower than real time. Lighter graphics (fewer shadows) or closing other tabs helps.":"";
@@ -3206,7 +3204,7 @@ const Session={
       // the file name if the workspace kept one, else what the OpMode calls itself
       if(s.java) addOpModeFromText(s.opName||((s.code&&s.code.opmode)||"Workspace").replace(/[^\w.-]+/g,"")+".java",s.java);
       // mu and physics are null in a workspace that didn't say: the bench keeps its own
-      if(s.opts){ for(const k of ["payloadKg","duty","trust","front","baseModel","shooterModel","mu","physics"]) if(s.opts[k]!=null) OPTS[k]=s.opts[k]; syncOptionControls(); }
+      if(s.opts){ for(const k of ["payloadKg","duty","trust","front","baseModel","shooterModel","mu","physics","driveFrom"]) if(s.opts[k]!=null) OPTS[k]=s.opts[k]; syncOptionControls(); }
       if(s.map&&Object.keys(s.map).length) MAP=s.map;
       // the shooter as it was set up
       if(s.shots){
@@ -3474,9 +3472,14 @@ function proBoot(){
   sample.solids=sampleSolids();
   classifyMechs(sample.mechs);
   loadCAD(sample,"sample: fulll.step (measured)","ok");
+  // the sample is the fallback, not the first thing a team sees: it stays hidden while
+  // the default robot loads, and shows only if that can't (offline on a first visit)
+  const wantSample=new URLSearchParams(location.search).get("robot")==="sample";
+  if(!wantSample&&View.chassisG){ View.chassisG.visible=false; $("#cadStatus").textContent="loading "+DEFAULT_ROBOT.label+" …"; }
 
   const saved=store.get("ftcbench.current",null);
-  selectOpMode(entry(saved)?saved:"sample-claw");
+  const first=entry(saved)?saved:(LIBRARY[0]&&LIBRARY[0].id);
+  if(first) selectOpMode(first);
   renderCompareSelects();
 
   // Driver Station
@@ -3556,6 +3559,7 @@ function proBoot(){
   $("#dutySlider").addEventListener("input",e=>{ OPTS.duty=+e.target.value/100; $("#dutyVal").textContent=e.target.value+" %"; analyzeAll(); saveRig(); });
 
   // stage & dock
+  const cadBack=$("#cadBack"); if(cadBack) cadBack.addEventListener("click",()=>{ CadView.exit(); View.setView&&View.setView("iso"); $$("#viewSeg button").forEach(x=>x.classList.toggle("on",x.dataset.v==="iso")); });
   $("#viewSeg").addEventListener("click",e=>{ const b=e.target.closest("button"); if(!b) return;
     $$("#viewSeg button").forEach(x=>x.classList.toggle("on",x===b));
     if(b.dataset.v==="cad") CadView.enter(); else { CadView.exit(); View.setView(b.dataset.v); } });

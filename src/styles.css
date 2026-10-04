@@ -350,7 +350,7 @@ button.rmbtn:hover{border-color:var(--fail); color:var(--fail);}
 .pip svg{display:block; width:100%; height:auto;}
 
 /* ================= dock ================= */
-.dock{display:grid; grid-template-columns:minmax(300px,1.2fr) minmax(200px,1fr) minmax(220px,1fr); height:300px; border-top:1px solid var(--line); background:var(--panel);}
+.dock{display:grid; grid-template-columns:minmax(300px,1.2fr) minmax(220px,1fr); height:300px; border-top:1px solid var(--line); background:var(--panel);}
 .dock.closed{height:39px;}
 .dock.closed .cell-body{display:none;}
 .dock.closed .cell-head{border-bottom-color:transparent;}
@@ -713,6 +713,8 @@ kbd{display:inline-block; min-width:15px; padding:0 3px; border:1px solid var(--
   background:rgba(255,255,255,.95); border:1px solid #cfd6de; border-radius:6px; box-shadow:0 1px 3px rgba(20,30,40,.12);}
 .cad-btn{border:0; background:none; color:#1f2933; font:600 12px var(--body); padding:5px 10px; border-radius:4px; cursor:pointer;}
 .cad-btn:hover{background:#e6eef7; color:#1253a8;}
+.cad-btn.cad-back{background:#1253a8; color:#fff; margin-right:6px;}
+.cad-btn.cad-back:hover{background:#0e4489; color:#fff;}
 .cad-check{display:flex; align-items:center; gap:5px; font-size:12px; padding:0 8px 0 6px; border-left:1px solid #e3e8ed; margin-left:3px; cursor:pointer;}
 .cad-hint{position:absolute; left:50%; transform:translateX(-50%); bottom:52px; white-space:nowrap; font-size:11px; color:#616e7c; background:rgba(255,255,255,.7); padding:3px 7px; border-radius:4px;}
 @media (max-width:900px){ .cad-tree{width:180px;} .cad-info{right:10px; top:auto; bottom:58px;} }

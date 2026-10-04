@@ -391,6 +391,7 @@
         </aside>
         <div class="cad-info" id="cadInfo" hidden></div>
         <div class="cad-bar" id="cadBar">
+          <button type="button" class="cad-btn cad-back" id="cadBack" title="Leave the CAD view and go back to the field">← Back to the field</button>
           <button type="button" class="cad-btn" data-cv="iso">Iso</button><button type="button" class="cad-btn" data-cv="front">Front</button><button type="button" class="cad-btn" data-cv="top">Top</button><button type="button" class="cad-btn" data-cv="right">Right</button><button type="button" class="cad-btn" id="cadFit" title="Zoom to fit (F)">Fit</button>
           <label class="cad-check"><input type="checkbox" id="cadEdges" checked> Edges</label>
         </div>
@@ -428,10 +429,6 @@
       <section class="cell cell-tele" aria-label="Driver Station telemetry">
         <div class="cell-head"><h3>Telemetry</h3><span class="spacer"></span><span class="pill" id="loopPill">—</span></div>
         <div class="cell-body"><div class="ds-panel" id="dsPanel"></div></div>
-      </section>
-      <section class="cell cell-acts" aria-label="Actuators">
-        <div class="cell-head"><h3>Actuators</h3><span class="spacer"></span><span class="pill" id="tickPill">—</span></div>
-        <div class="cell-body"><div class="gauges" id="gauges"></div></div>
       </section>
     </div>
   </main>
