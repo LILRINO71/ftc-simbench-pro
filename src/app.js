@@ -1047,9 +1047,13 @@ function fmtTick(v,step){
 const SUN='<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3.2" fill="currentColor"/><g stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M8 1v1.6M8 13.4V15M1 8h1.6M13.4 8H15M3 3l1.1 1.1M11.9 11.9L13 13M3 13l1.1-1.1M11.9 4.1L13 3"/></g></svg>';
 const MOON='<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13.6 10.2A6 6 0 0 1 5.8 2.4a6 6 0 1 0 7.8 7.8z" fill="currentColor"/></svg>';
 const currentTheme=()=>document.documentElement.getAttribute("data-theme")==="light"?"light":"dark";
-function setTheme(t){
+/* `follow`: the system's theme, not a choice, so it isn't saved and the next
+   visit follows the system again. The field's venue (View.applyTheme) and the
+   graph canvases take their colours from the page's tokens, so they go too. */
+function setTheme(t,follow){
   document.documentElement.setAttribute("data-theme",t);
-  store.set("ftcbench.theme",t);
+  if(!follow) store.set("ftcbench.theme",t);
+  if(typeof View!=="undefined"&&View.ren&&View.applyTheme) View.applyTheme();
   const b=$("#themeBtn"); if(!b) return;
   const next=t==="dark"?"light":"dark";
   b.innerHTML=t==="dark"?SUN:MOON;
@@ -3440,7 +3444,9 @@ function proBoot(){
    BOOT
    ============================================================ */
 (function boot(){
-  setTheme(store.get("ftcbench.theme","dark")==="light"?"light":"dark");
+  // the head script already set data-theme: a saved choice, else the system's
+  const savedTheme=store.get("ftcbench.theme",null), chosen=savedTheme==="light"||savedTheme==="dark";
+  setTheme(chosen?savedTheme:currentTheme(), !chosen);
   $("#themeBtn").addEventListener("click",()=>setTheme(currentTheme()==="dark"?"light":"dark"));
   // the BIOBUZZ field and shot physics, from the vendored Shot Sim
   Field.init(window.ShotEngine,window.SHOT_DATA);
