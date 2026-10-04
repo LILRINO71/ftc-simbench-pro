@@ -47,6 +47,35 @@ running them, not by reading Onshape's docs; each fix has a test.
 - **Edges**: a thinned mesh is faceted everywhere, so its edges (30° crease) drew the robot as
   wire. Export meshes take a 62° crease and none at all over 6,000 triangles.
 
+### The second pass, same day: the mechanisms were there all along
+
+The owner reported the robot "doesn't move the right mates". It didn't: `applyOnshapeMates`
+took every root-level part that wasn't the moving end of a mate as frame. In a URDF model every
+link is root-level, so an arm's plates (fastened to the hub on its motor's shaft) were welded to
+the chassis and the shaft's revolute became "a mate between parts also fastened together", ignored
+— 99 of them. The frame is now the fixed parts plus the parts no mate touches (and, with nothing
+fixed, the biggest root-level body); planar/parallel connector chains and loop closures are left
+free instead of "fixed" (they are no fastening); a mate with a real degree of freedom is walked
+before a planar one so loops land on the planar. REVIVER went from 11 one-part "mechanisms" to 19
+real ones: the turret (96 parts, 123 carried, yaw), its hood servo and feeder wheel, the spindexer
+(three coaxial copies folded to one), the intake arm (234 mm), the shooter shaft, the servos.
+`classifyJoints` also folds coaxial siblings and sets odometry pods aside. Thinned meshes now keep
+up to 60,000 triangles each (1.7 M for the robot) and get crease-angle normals, so flat faces stay
+flat and fillets stay smooth. Tested: `tests/import-zip.test.mjs` (a plate fastened to the arm
+moves with the arm), `tests/mates.test.mjs` still exact on the corpus; headless Chrome shows the
+turret turning with its parts (`View.preview`).
+
+**Research (deep-research, 22 claims verified 3-0 against Onshape's docs and OpenAPI spec,
+2026-10-04):** the owner asked whether "STEP for looks + a JSON for mates" would be better. The
+mates JSON exists (`getAssemblyDefinition` with `includeMateFeatures`), can be called with
+per-user API keys and no OAuth, and glTF can be exported by API; but it carries the same mates
+Onshape's URDF export already writes, the occurrence transforms are absolute (not parent-relative),
+API keys are per user ("local testing only" per Onshape) and the browser still needs the relay for
+CORS. STEP would need OpenCascade in the browser for looks, which is the slow path this import
+replaced. So the URDF zip stays the route; the looks problem was ours (thinning and normals), not
+the format's. onshape-to-robot's `dof_` naming convention does not apply to Onshape's native
+export.
+
 ### Measured here
 
 - Node: the zip builds in 22–30 s (536 unique shapes, 19.5 M → 0.92 M triangles, 1,939 parts);
