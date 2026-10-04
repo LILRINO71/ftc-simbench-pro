@@ -1,6 +1,6 @@
 # tests/
 
-755 tests on Node's built-in runner (`node:test`). There's no browser, no mocks and no transpile
+756 tests on Node's built-in runner (`node:test`). There's no browser, no mocks and no transpile
 step: the tests run the same engine code that ships.
 
 ```bash

@@ -253,6 +253,37 @@ function tessEdges(cad,res,asg,hidden){
 /* A STEP robot's exact meshes for a robot package (src/simbot.js meshFor):
    for part i, every OpenCascade mesh that belongs to it, keyed by the shape it
    is a copy of, with where that copy sits in the robot frame. */
+/* A robot whose parts arrived as a shape placed many times (Onshape's own export, a URDF,
+   the bookmark) as the per-shape result the exact path draws: one mesh per shape, placed
+   per copy, with smoothed normals, so eighty rollers are one geometry drawn eighty times,
+   the CAD view picks any part, and the edges and light copy come for free. */
+function tessFromSolids(cad){
+  const solids=(cad&&cad.solids)||[], meshes=[], solidOf=[], byKey=new Map(), kids=[];
+  const toLin=v=>v<=0.04045?v/12.92:Math.pow((v+0.055)/1.055,2.4);
+  solids.forEach((s,i)=>{
+    const I=s.inst; if(!I||!I.local||I.local.length<9||!I.raw) return;
+    let shape=byKey.get(I.key);
+    if(!shape){
+      const pos=I.local instanceof Float32Array?I.local:Float32Array.from(I.local), n=pos.length/3;
+      const idx=n<=65535?new Uint16Array(n):new Uint32Array(n); for(let k=0;k<n;k++) idx[k]=k;
+      const nor=new Float32Array(pos.length);
+      for(let k=0;k<pos.length;k+=9){
+        const u=[pos[k+3]-pos[k],pos[k+4]-pos[k+1],pos[k+5]-pos[k+2]], v=[pos[k+6]-pos[k],pos[k+7]-pos[k+1],pos[k+8]-pos[k+2]];
+        let nx=u[1]*v[2]-u[2]*v[1], ny=u[2]*v[0]-u[0]*v[2], nz=u[0]*v[1]-u[1]*v[0]; const L=Math.hypot(nx,ny,nz)||1; nx/=L; ny/=L; nz/=L;
+        for(let q=0;q<9;q+=3){ nor[k+q]=nx; nor[k+q+1]=ny; nor[k+q+2]=nz; }
+      }
+      if(typeof osSmoothNormals==="function") osSmoothNormals(pos,nor,35);
+      shape={pos,idx,nor}; byKey.set(I.key,shape);
+    }
+    // placeM reads r[k] as the k-th axis of the placement: the columns of the raw occurrence matrix
+    const B=I.raw, T={r:[[B[0],B[4],B[8]],[B[1],B[5],B[9]],[B[2],B[6],B[10]]], t:[B[3],B[7],B[11]]};
+    meshes.push({name:s.name||"part", attributes:{position:{array:shape.pos}, normal:{array:shape.nor}}, index:{array:shape.idx},
+      color:Array.isArray(s.color)&&s.color.length>=3?s.color.slice(0,3).map(toLin):null, T});
+    solidOf.push(i); kids.push({name:s.name||"part", meshes:[meshes.length-1]});
+  });
+  if(!meshes.length) return null;
+  return {success:true, perShape:true, meshes, solidOf, shapes:byKey.size, root:{name:(cad&&cad.name)||"robot", meshes:[], children:kids}};
+}
 function tessPackageMeshes(cad,res){
   if(!res||!Array.isArray(res.meshes)||!res.meshes.length) return null;
   const mt=tessMatch(cad,res), M=frameM(cad), byPart=new Map(), keys=new Map();

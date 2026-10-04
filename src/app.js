@@ -1421,6 +1421,12 @@ function loadOnshapeRobot(p,reparse){
   MATES.asm=p.asm; MATES.features=p.features; MATES.name=p.name; MATES.url=p.url||null; MATES.fromLink=true; MATES.report=cad.onshape.report;
   SetupUI.beforeParse&&SetupUI.beforeParse(p.name);
   loadCAD(cad, p.name+" · from "+from+" · "+cad.solids.length+" parts · "+cad.mechs.filter(m=>m.fromMate).length+" joints", "ok");
+  // every part as an instance of its shape, the way a STEP's exact surfaces are drawn
+  if(cad.instanced&&typeof tessFromSolids==="function"){
+    const res=tessFromSolids(cad);
+    if(res){ EXACT={state:"ok", msg:null}; View.setExact(cad,res);
+      const note=$("#exactNote"); if(note){ note.textContent="Shapes from your "+from+": "+res.shapes+" shapes, placed "+res.meshes.length+" times."; note.className="hint"; } }
+  }
   recomputeChain(cad.mechs);
   if(JOINTS.spec) applyJoints();
   const rep=cad.onshape.report, n=cad.mechs.filter(m=>m.fromMate).length;
@@ -3576,6 +3582,7 @@ function proBoot(){
   $("#dutySlider").addEventListener("input",e=>{ OPTS.duty=+e.target.value/100; $("#dutyVal").textContent=e.target.value+" %"; analyzeAll(); saveRig(); });
 
   // stage & dock
+  const stamp=$("#buildStamp"); if(stamp&&typeof SIMBENCH_BUILD!=="undefined"&&SIMBENCH_BUILD.build) stamp.textContent="build "+String(SIMBENCH_BUILD.build).slice(0,8);
   const cadBack=$("#cadBack"); if(cadBack) cadBack.addEventListener("click",()=>{ CadView.exit(); View.setView&&View.setView("iso"); $$("#viewSeg button").forEach(x=>x.classList.toggle("on",x.dataset.v==="iso")); });
   $("#viewSeg").addEventListener("click",e=>{ const b=e.target.closest("button"); if(!b) return;
     $$("#viewSeg button").forEach(x=>x.classList.toggle("on",x===b));

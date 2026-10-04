@@ -131,6 +131,11 @@ The research behind the fixes is in
     hand (an "O"/mixed pattern), which made strafing spin the robot. Four
     mecanum wheels are modelled X whatever the rollers read, with a note
     naming the odd wheel.
+  - **Drawn like a STEP.** The imported robot goes down the exact per-shape
+    path (tessFromSolids → View.setExact → applyInstanced): one geometry per
+    shape, instanced per copy, lazy placed triangles (osLazyTri), budgets per
+    unique shape. 196 MB of heap for the owner's export, the CAD view picks
+    every part.
   - **Zero questions.** `src/autobind.js` binds every device the name
     mapper leaves to a joint from the CAD's own evidence and the code's
     usage (docs/joints.md "Zero questions: the binder"); the robot check

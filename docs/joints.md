@@ -56,6 +56,12 @@ by many parts is computed and stored once, the geometry lives in typed arrays, a
 smoothed within a 35° crease so cylinders shade round. The note under the robot says how much was
 cut. Joints, placements and masses are untouched by this.
 
+The imported robot is drawn the way a STEP's exact surfaces are: each shape once, as an instanced
+mesh placed per copy (`tessFromSolids` in `src/tessellate.js`), with the bench's materials, real edges,
+the light copy and part picking in the CAD view. A part's placed triangles are made only when
+something asks for them (`osLazyTri`), so copies cost nothing, and the triangle budget is per unique
+shape (two and a half million on a desktop), no shape over 30% of it.
+
 What a real export taught (a 1,900-link, 9.4-million-triangle robot, 2026-10-03):
 
 - **Every revolute mate without limits is a `continuous` joint**, and a team mates every bearing,

@@ -678,6 +678,7 @@ const View={
     const mkSolids=list=>{
       const byKind={};
       for(const s of list){
+        if(cad.instanced&&s.inst&&s.inst.local) continue;          // drawn as instances of its shape (applyInstanced)
         if(!s.tri) s.tri=solidTriangles(s.pts)||{pos:[],nor:[]};
         const mk=s.color&&s.keepTri?"rgb:"+s.color.map(v=>Math.round(v*255)).join(","):(s.kind||"metal");
         (byKind[mk]=byKind[mk]||[]).push(s.tri);

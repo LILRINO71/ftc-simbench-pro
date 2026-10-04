@@ -98,6 +98,30 @@ function osSmoothNormals(pos,nor,creaseDeg){
   }
   nor.set(out);
 }
+/* A solid's placed triangles, made when first asked for and dropped when its placement
+   changes: the shape (inst.local) through the placement (inst.M), flat normals smoothed within
+   the crease. The view draws these parts as instances of the shape (src/tessellate.js
+   tessFromSolids), so for most parts nothing ever asks. */
+function osLazyTri(s){
+  let cache=null;
+  Object.defineProperty(s,"tri",{configurable:true, enumerable:false,
+    get(){
+      if(cache) return cache;
+      const L=s.inst&&s.inst.local, M=s.inst&&s.inst.M; if(!L||!M) return null;
+      const n=L.length, pos=new Float32Array(n), nor=new Float32Array(n);
+      for(let k=0;k<n;k+=3){ const x=L[k], y=L[k+1], z=L[k+2];
+        pos[k]=M[0]*x+M[1]*y+M[2]*z+M[3]; pos[k+1]=M[4]*x+M[5]*y+M[6]*z+M[7]; pos[k+2]=M[8]*x+M[9]*y+M[10]*z+M[11]; }
+      for(let k=0;k<n;k+=9){
+        const u=[pos[k+3]-pos[k],pos[k+4]-pos[k+1],pos[k+5]-pos[k+2]], v=[pos[k+6]-pos[k],pos[k+7]-pos[k+1],pos[k+8]-pos[k+2]];
+        let nx=u[1]*v[2]-u[2]*v[1], ny=u[2]*v[0]-u[0]*v[2], nz=u[0]*v[1]-u[1]*v[0]; const Ln=Math.hypot(nx,ny,nz)||1; nx/=Ln; ny/=Ln; nz/=Ln;
+        for(let q=0;q<9;q+=3){ nor[k+q]=nx; nor[k+q+1]=ny; nor[k+q+2]=nz; }
+      }
+      osSmoothNormals(pos,nor,35);
+      cache={pos,nor}; return cache;
+    },
+    set(v){ cache=v||null; }});
+  s.keepTri=true;
+}
 function cadFromOnshape(p,opts){
   opts=opts||{};
   const A=p.asm;
@@ -124,23 +148,18 @@ function cadFromOnshape(p,opts){
     const key=onshapeGeomKey(inst), G=geom[key], body=G&&G.parts[inst.partId];
     if(!body||!body.tri||body.tri.length<9){ if(!inst.shapeless) missing.add(inst.name||inst.partId); continue; }
     const T=o.transform, R=[[T[0],T[1],T[2]],[T[4],T[5],T[6]],[T[8],T[9],T[10]]], t=[T[3],T[7],T[11]];
-    // typed arrays: half the memory of plain ones, and what the view uploads as they are
-    const tri=body.tri, nv=tri.length, pos=new Float32Array(nv), nor=new Float32Array(nv);
+    // only the bounds and a sample of the vertices are taken here: a copy's placed
+    // triangles are made when something asks for them (osLazyTri), from the shape once
+    // and its placement, so eighty copies of one roller cost one roller's memory
+    const tri=body.tri, nv=tri.length;
     const smn=[Infinity,Infinity,Infinity], smx=[-Infinity,-Infinity,-Infinity], pts=[];
     // a sample of the vertices for the hull and the frame: at most ~1500 per part (thinPoints keeps 120)
     const step=Math.max(3,Math.ceil(nv/3/1500))*3;
     for(let k=0;k<nv;k+=3){
       const x=tri[k], y=tri[k+1], z=tri[k+2];
       const wx=R[0][0]*x+R[0][1]*y+R[0][2]*z+t[0], wy=R[1][0]*x+R[1][1]*y+R[1][2]*z+t[1], wz=R[2][0]*x+R[2][1]*y+R[2][2]*z+t[2];
-      pos[k]=wx; pos[k+1]=wy; pos[k+2]=wz;
       if(wx<smn[0]) smn[0]=wx; if(wx>smx[0]) smx[0]=wx; if(wy<smn[1]) smn[1]=wy; if(wy>smx[1]) smx[1]=wy; if(wz<smn[2]) smn[2]=wz; if(wz>smx[2]) smx[2]=wz;
       if(k%step===0||nv<300) pts.push([wx,wy,wz]);
-    }
-    // flat normals, one per facet
-    for(let k=0;k<pos.length;k+=9){
-      const u=[pos[k+3]-pos[k],pos[k+4]-pos[k+1],pos[k+5]-pos[k+2]], v=[pos[k+6]-pos[k],pos[k+7]-pos[k+1],pos[k+8]-pos[k+2]];
-      let n=[u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0]]; const L=Math.hypot(n[0],n[1],n[2])||1; n=[n[0]/L,n[1]/L,n[2]/L];
-      for(let q=0;q<9;q+=3){ nor[k+q]=n[0]; nor[k+q+1]=n[1]; nor[k+q+2]=n[2]; }
     }
     for(let q=0;q<3;q++){ mn[q]=Math.min(mn[q],smn[q]); mx[q]=Math.max(mx[q],smx[q]); }
     const size=Math.hypot(smx[0]-smn[0],smx[1]-smn[1],smx[2]-smn[2]);
@@ -150,10 +169,12 @@ function cadFromOnshape(p,opts){
     // occT in the parser's convention (src/step.js, osT in src/mates.js): r[k] is
     // the part's own k axis in the world, a column of Onshape's row-major R
     const sd={name:nm, part:pn?pn[1]:null, kind:solidKind(nm,pn?pn[1]:null), size, pts:thinPoints(pts.length>=4?pts:pts.concat(pts),120),
-      rawTri:{pos,nor}, color:osColor(body.color), occT:{r:[0,1,2].map(k=>[R[0][k],R[1][k],R[2][k]]), t:t.slice()}, osPath:o.path.join("/"),
+      color:osColor(body.color), occT:{r:[0,1,2].map(k=>[R[0][k],R[1][k],R[2][k]]), t:t.slice()}, osPath:o.path.join("/"),
       // the shape once, in its Part Studio's frame, and where this copy sits: a
       // robot package (src/simbot.js) stores eight identical channels as one mesh
-      inst:{key:key+"#"+inst.partId, local:tri, M:[T[0],T[1],T[2],T[3], T[4],T[5],T[6],T[7], T[8],T[9],T[10],T[11], 0,0,0,1]}};
+      inst:{key:key+"#"+inst.partId, local:tri, M:[T[0],T[1],T[2],T[3], T[4],T[5],T[6],T[7], T[8],T[9],T[10],T[11], 0,0,0,1],
+            raw:[T[0],T[1],T[2],T[3], T[4],T[5],T[6],T[7], T[8],T[9],T[10],T[11], 0,0,0,1]}};
+    osLazyTri(sd);
     if(mass){ sd.kg=mass.kg; if(mass.est){ sd.kgEst=true; kgEstSum+=mass.kg; kgEstParts++; } else { kgSum+=mass.kg; kgParts++; } }
     for(const q of sd.pts) P.push(q);
     solids.push(sd);
@@ -168,20 +189,18 @@ function cadFromOnshape(p,opts){
     const bb=applyFrame(F,{points:P, solids, placements:[], bbox:{min:mn.slice(),max:mx.slice()}});
     for(let k=0;k<3;k++){ mn[k]=bb.min[k]; mx[k]=bb.max[k]; }
     frame=frameRecord(F);
-    for(const s of solids){ const r=s.rawTri, pos=r.pos, nor=r.nor;
-      // the copy's placement in the robot frame: the frame after the occurrence
+    for(const s of solids){
+      // the copy's placement in the robot frame: the frame after the occurrence (its
+      // placed triangles, if anything asked for them already, are made again from this)
       const A=frame.M, B=s.inst.M, C=new Array(16);
       for(let i=0;i<4;i++) for(let j=0;j<4;j++){ let v=0; for(let k=0;k<4;k++) v+=A[4*i+k]*B[4*k+j]; C[4*i+j]=v; }
-      s.inst.M=C;
-      // in place: the frame is rigid, so no second copy of the robot is needed
-      for(let k=0;k<pos.length;k+=3){ const a=F.toRobot([pos[k],pos[k+1],pos[k+2]]), b=F.dirToRobot([nor[k],nor[k+1],nor[k+2]]);
-        pos[k]=a[0]; pos[k+1]=a[1]; pos[k+2]=a[2]; nor[k]=b[0]; nor[k+1]=b[1]; nor[k+2]=b[2]; }
-      s.tri={pos,nor}; s.keepTri=true; delete s.rawTri; osSmoothNormals(pos,nor,35); }
-  } else for(const s of solids){ s.tri=s.rawTri; s.keepTri=true; delete s.rawTri; osSmoothNormals(s.tri.pos,s.tri.nor,35); }
+      s.inst.M=C; s.tri=null; }
+  }
   const counts=new Map();
   for(const s of solids){ const e=counts.get(s.name)||{name:s.name,part:s.part,n:0,kind:"struct"}; e.n++; counts.set(s.name,e); }
   const parts=[...counts.values()].map(e=>{ const hw=typeof hwFromPart==="function"?hwFromPart(e.part,e.name):null; return Object.assign(e,{kind:hw?hw.kind:"struct"}); });
-  const cad={name:p.name||"Onshape robot", units:"METRE", points:P, pointCount:P.length, solids, bbox:{min:mn,max:mx}, parts, mechs:[], placements:[], frame, occs:[],
+  // the view draws these parts as instances of each shape (tessFromSolids), not as copied triangles
+  const cad={name:p.name||"Onshape robot", units:"METRE", points:P, pointCount:P.length, solids, bbox:{min:mn,max:mx}, parts, mechs:[], placements:[], frame, occs:[], instanced:true,
     source:"onshape", onshape:{url:p.url||null, parts:nOcc, withShape:solids.length, kg:kgParts?kgSum:null, kgParts, kgEst:kgEstParts?kgEstSum:null, kgEstParts}};
   if(kgParts) why.push("Mass from Onshape's materials: "+kgSum.toFixed(2)+" kg over "+kgParts+" of "+solids.length+" parts"+(kgEstParts?"; "+kgEstSum.toFixed(2)+" kg more weighed from the shapes of "+kgEstParts+" parts with no material.":"."));
   else if(kgEstParts) why.push("No part has a material in Onshape: "+kgEstSum.toFixed(2)+" kg weighed from the shapes of "+kgEstParts+" parts.");

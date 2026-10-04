@@ -265,7 +265,7 @@ function urdfDecimate(T,budget){
   const span=Math.max(mx[0]-mn[0],mx[1]-mn[1],mx[2]-mn[2])||1;
   // start fine (a 2.5 mm grid on a 400 mm channel) and coarsen only as far as the budget needs
   let cells=160, best=null;
-  for(let pass=0;pass<10;pass++){
+  for(let pass=0;pass<18;pass++){
     const C=cells+1, cell=span/cells, rep=new Map(), sum=[], idx=new Int32Array(T.length/3);
     for(let v=0;v<idx.length;v++){
       const x=T[3*v], y=T[3*v+1], z=T[3*v+2];
@@ -279,7 +279,7 @@ function urdfDecimate(T,budget){
       for(const r of [a,b,c]){ const s=sum[r]; out[o++]=s[0]/s[3]; out[o++]=s[1]/s[3]; out[o++]=s[2]/s[3]; } }
     best=out;
     if(kept<=budget||cells<=4) break;
-    cells=Math.max(4,Math.floor(cells*0.72));
+    cells=Math.max(4,Math.floor(cells*0.85));
   }
   return best;
 }
@@ -387,8 +387,9 @@ function urdfToPayload(text,files,name,opts){
   // out by size: every mesh's count is read from its header first, and each gets the
   // share its placements are of the whole, never under 600. A tyre of 700,000 keeps
   // tens of thousands; a screw of 8 keeps 8.
-  // two million on a desktop (the app passes a smaller device's own allowance, src/tier.js)
-  const total=opts.triangles>0?opts.triangles:2e6;
+  // two and a half million unique triangles on a desktop (the app passes a smaller device's own
+  // allowance, src/tier.js); copies cost nothing more, since the view draws them as instances
+  const total=opts.triangles>0?opts.triangles:2.5e6;
   const placed=new Map(), countOf=new Map();
   for(const l of links) for(const v of urdfKids(l,"visual")){
     const g=urdfKid(v,"geometry"), sh=g&&g.kids[0]; if(!sh||sh.tag!=="mesh") continue;
@@ -396,16 +397,17 @@ function urdfToPayload(text,files,name,opts){
     if(!countOf.has(key)){ const f=key[0]==="#"?fileByBase[key.slice(1)]:fileByPath[key]; let n=null; try{ n=urdfMeshCount(base(sh.attrs.filename),f); }catch(e){} countOf.set(key,n); }
     placed.set(key,(placed.get(key)||0)+1);
   }
-  let sum=0; for(const [k,n] of countOf) sum+=(n||0)*(placed.get(k)||1);
-  const family=new Map();                                  // mesh -> triangles for all its copies together
+  // each mesh once, however many copies: the view instances them (src/tessellate.js tessFromSolids)
+  let sum=0; for(const [k,n] of countOf) sum+=(n||0);
+  const family=new Map();                                  // mesh -> the triangles it keeps
   if(sum>total){
     let pool=[...countOf.keys()].filter(k=>countOf.get(k)!=null), left=total;
-    for(let pass=0;pass<8&&pool.length;pass++){
-      const W=pool.reduce((s,k)=>s+countOf.get(k)*(placed.get(k)||1),0)||1;
+    while(pool.length){
+      const W=pool.reduce((s,k)=>s+countOf.get(k),0)||1;
       const capped=[];
-      for(const k of pool){ const n=countOf.get(k), c=placed.get(k)||1, want=left*n*c/W, cap=Math.min(n*c, total*0.3, c*total/8);
+      for(const k of pool){ const n=countOf.get(k), want=left*n/W, cap=Math.min(n, total*0.3);
         if(want>=cap){ family.set(k,cap); capped.push(k); } }
-      if(!capped.length){ for(const k of pool) family.set(k,left*countOf.get(k)*(placed.get(k)||1)/W); break; }
+      if(!capped.length){ for(const k of pool) family.set(k,left*countOf.get(k)/W); break; }
       for(const k of capped) left-=family.get(k);
       pool=pool.filter(k=>!capped.includes(k));
     }
@@ -414,7 +416,7 @@ function urdfToPayload(text,files,name,opts){
   const budgetOf=key=>{ if(opts.triBudget>0) return opts.triBudget; const n=countOf.get(key);
     if(n==null) return urdfTriBudget(meshLinks,total);                 // a mesh whose count takes a full read (DAE): the even share
     if(sum<=total) return Infinity;
-    return Math.max(600,Math.floor((family.get(key)||0)/(placed.get(key)||1))); };
+    return Math.max(600,Math.floor(family.get(key)||0)); };
   // each mesh file read once, however many links share it, and cut down to its budget
   const meshCache=new Map(); let triIn=0, triOut=0, cut=0;
   const loadMesh=fname=>{
@@ -529,7 +531,7 @@ function urdfToPayload(text,files,name,opts){
     if(W.has(nm)) occurrences.push({path:[id],transform:urdfT16(W.get(nm)),fixed:nm===root.attrs.name,hidden:false});
   });
   if(tinyMass) notes.push(tinyMass+" part"+(tinyMass===1?" has":"s have")+" no material in Onshape ("+tinyNames.join(", ")+(tinyMass>5?" …":"")+"), so "+(tinyMass===1?"it's":"they're")+" weighed from "+(tinyMass===1?"its":"their")+" shape"+(tinyMass===1?"":"s")+": about "+kgEst.toFixed(1)+" kg as aluminium, or steel, plastic, rubber or a motor where the name says so. Give them materials for exact masses.");
-  if(cut) notes.push(cut+" mesh"+(cut===1?" was":"es were")+" simplified for the browser ("+(triIn/1e6).toFixed(1)+"M triangles in the files, "+(triOut/1e6).toFixed(2)+"M kept, each drawn once per copy): the shapes draw a little coarser; the joints, placements and masses are exact.");
+  if(cut) notes.push(cut+" mesh"+(cut===1?" was":"es were")+" simplified for the browser ("+(triIn/1e6).toFixed(1)+"M triangles in the files, "+(triOut/1e6).toFixed(2)+"M kept; copies share their shape): the shapes draw a little coarser; the joints, placements and masses are exact.");
 
   // joints as mates: the joint frame, z along its axis, in each end's own frame
   const features=[], limitsOut=[], mimic=[];
