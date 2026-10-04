@@ -36,6 +36,7 @@ const BIND_RULES={
   internalExtent:0.045,          // m: a body this small turning on its own is a shaft or a bearing race
   internalNamedExtent:0.14,      // m: a body of only hardware words up to this size is internal too
   hardwareWords:/\b(bearing|shaft|axle|race|spacer|standoff|washer|collar|bushing|hub|clamp|coupler|encoder|magnet|clip|retainer|nut|bolt|screw|insert|pin|dowel|rod end|heim)\b|\bmotor\b|servo horn|horn\b/i,
+  odometryWords:/odometry|odo|dead ?wheel|encoder (cvr|cover|board|mount)|encoder.*pod|pod.*encoder/i,
   travelTolerance:0.25,          // a slide's travel vs what the code asks of a motor, as a fraction
   nameScoreSure:80,              // a name match this strong is bound outright
 };
@@ -118,8 +119,28 @@ const {classifyJoints, bindDevices}=(function(){
       const drop=lim(m)&&!lim(p)?p:m;
       drop.internal=true; drop.internalWhy="coaxial"; reasons.coaxial++; internal++;
     }
+    // two joints off the same parent on one axis line (a spindexer plate mated twice, two servos
+    // turning one turret, a hub and the shaft through it) are one motion too: the one with limits,
+    // then with an actuator, then carrying more, stays; the code's second device pairs onto it
+    const live=mechs.filter(m=>!m.internal&&!m.keep&&!m.manual&&!spec&&!m.couple&&kindOf(m)!=="linear"&&m.axis&&m.pivot);
+    const score=m=>(lim(m)?4:0)+(m.hasActuator?2:0)+Math.min(1,subtree(m,0).length/1000);
+    for(let i=0;i<live.length;i++) for(let j=i+1;j<live.length;j++){
+      const a=live[i], c=live[j]; if(a.internal||c.internal||a.parent!==c.parent) continue;
+      if(Math.abs(dot(a.axis,c.axis))<Math.cos(3*DEG)) continue;
+      const d=sub(c.pivot,a.pivot), t=dot(d,a.axis);
+      if(Math.hypot(d[0]-a.axis[0]*t,d[1]-a.axis[1]*t,d[2]-a.axis[2]*t)>0.012) continue;
+      const drop=score(c)>score(a)?a:c;
+      drop.internal=true; drop.internalWhy="coaxial"; drop.coaxialWith=(drop===a?c:a).id; reasons.coaxial++; internal++;
+    }
+    // an odometry pod: a dead wheel with its encoder, swinging and spinning on its own joints
+    for(const m of mechs){
+      if(m.internal||m.keep||m.manual||spec||m.couple) continue;
+      const idx=subtree(m,0), box=boxOf(cad,idx); if(!box||box.extent>BIND_RULES.internalNamedExtent) continue;
+      if(idx.some(i=>BIND_RULES.odometryWords.test(String(cad.solids[i].name||"")))){ m.internal=true; m.internalWhy="odometry"; reasons.odometry=(reasons.odometry||0)+1; internal++; }
+    }
     if(reasons.small) why.push(reasons.small+" small turn"+(reasons.small===1?"":"s")+" (shafts, bearing races, rollers) left fixed.");
     if(reasons.hardware) why.push(reasons.hardware+" joint"+(reasons.hardware===1?"":"s")+" carrying only hardware (hubs, spacers, motor shafts) left fixed.");
+    if(reasons.odometry) why.push(reasons.odometry+" odometry pod joint"+(reasons.odometry===1?"":"s")+" (a dead wheel and its encoder) left to themselves.");
     if(reasons.axle) why.push(reasons.axle+" turn"+(reasons.axle===1?"":"s")+" on the drive wheels' axles (shafts, hubs, bearings) left to the drive.");
     if(reasons.coaxial) why.push(reasons.coaxial+" turn"+(reasons.coaxial===1?"":"s")+" on the same axis as the turn "+(reasons.coaxial===1?"it hangs":"they hang")+" from (a gear on a gear, a shaft in its bearing) folded into "+(reasons.coaxial===1?"it":"them")+".");
     return {internal, mechanisms:mechs.length-internal, why};
