@@ -1,4 +1,72 @@
-# Handoff: real joints and real Java
+# Handoff
+
+Two handoffs live here, the newer one first.
+
+## 2026-10-03: the import redone, the page redone
+
+Branch `claude/cad-import-apple-ui`. The problem set by the owner: getting a robot's CAD in took
+too many steps, wasn't clear, and wasn't accurate; the page lagged and looked dated.
+
+### What changed
+
+- **Onshape's URDF export is the way in** (Onshape release 1.212, March 2026; GLB meshes since
+  September 2026). Right-click the assembly tab → Export → URDF → drop the zip. `src/meshfiles.js`
+  (zip, GLB/glTF, OBJ, STL readers; pure, tested in Node) and `src/urdf.js` (`urdfFromZip`,
+  tolerant mesh paths, coupling hints) make the robot with no sign-in, no server and no quota.
+- **`src/bind.js`**: `classifyJoints` marks the library's bearing and motor-shaft mates internal
+  (never a question; the robot check and the name mapper skip them); `bindDevices` ties devices to
+  joints by name, by the actuator kind on the axis, by `RUN_TO_POSITION` travel, by pairing and by
+  elimination, applies the URDF's coupling hints when the code confirms the leader, and returns the
+  open questions with candidates. On 7832's robot with the spec withheld: 11 of 11 bound, nothing
+  asked (`tests/import-zip.test.mjs`).
+- **`src/engineworker.js`**: the build ships the engine alone as `dist/engine-<hash>.js`; a Blob
+  worker imports it and parses STEPs, finds joints, cuts the shape units and builds URDF robots off
+  the page's thread (the robot is posted first; the joints and the units follow as promises). The
+  eight-second freeze on loading a robot is gone. It falls back to the page on file://.
+- **`src/importflow.js`**: one card over the field: bring → busy → code → review → done. The review
+  shows facts (up, front, drive base, joints, devices bound, weight) and only the real questions,
+  each answerable with one click and a "show" that wiggles the joint.
+- **The page**: `src/markup.html` and `src/styles.css` rewritten with the apple-design skill:
+  light by default (dark follows the system or the switch), glass chrome (top bar, side panels,
+  dock) over a full-bleed field, quiet solid cards, one accent (system blue), spring motion on
+  transforms only, reduced-motion and reduced-transparency honoured. Every element id the scripts
+  use was kept; the Robot tab is "Your robot / Review / Your robot and your code", with everything
+  else under **Advanced**.
+- **Graphics**: three.js r128 → r186 as ES modules (an import map, `window.THREE` plus the add-ons,
+  the app boots on `three-ready`). GTAO ambient occlusion, SMAA and an OutputPass through an
+  EffectComposer (`View.draw`, one composer per camera); RoomEnvironment PMREM as the scene
+  environment; physically scaled light intensities; colour management on (no more `linearize`;
+  canvases marked sRGB, vertex colours converted where they are built). The frame-rate watchdog
+  turns the passes off first, then pixels, then the light copy.
+- **The Onshape relay** caches Part Studio shapes and masses at the edge by version or
+  microversion (`CACHEABLE`), so the private app's 2,500 calls a year go much further.
+- **`tools/fusion/ExportToSimBench`**: a Fusion script that writes robot.urdf, OBJ meshes and a
+  zip, with joints and limits from the design's joints and motion links as mimics. Not run in
+  Fusion itself (no Fusion here); the API names are from Autodesk's current reference pages.
+
+### Measured here
+
+- Parse 5.2 s, joint finder 3.1 s, shape units 3.1 s for the 773-part robot, all in the worker now.
+- 610 tests, all green (`npm test`). `tests/net.test.mjs` is timing-sensitive: it failed once while
+  Chrome was rendering alongside, and passes alone.
+- Headless Chrome (swiftshader) loads the page with no exceptions, in both themes.
+
+### Not done, in order
+
+1. **Try a real Onshape URDF export.** The reader was built from Onshape's documented behaviour and
+   a synthetic export (`tests/import-zip.test.mjs`), not a real zip: no Onshape account was at hand.
+   Export GearGurus 7832's assembly (URDF, GLB, Fine, compression off), drop it, and check: mesh
+   paths resolve, colours arrive, the lift's stages couple, the claw fingers mirror, the shaft and
+   bearing turns are set aside, the eleven devices bind. Composite parts come as one mesh (a known
+   Onshape issue) and closed linkages come with a `loop_closure_link`.
+2. **Run the Fusion script in Fusion** once and fix whatever the API disagrees with (occurrence
+   transforms against body coordinates in `meshManager`, joint geometry on as-built joints).
+3. **"Set it by numbers"** for a CAD with no wheels still lives in the Robot tab's Review section;
+   the card points at it. Bringing that form into the card would finish the one-place promise.
+4. The earlier handoff's list still stands: Sign in with Onshape secrets, online on two real
+   computers, the teams whose TeleOps don't drive.
+
+## Earlier: real joints and real Java
 
 Where the "it never works on our robot" work stands, for whoever picks it up
 next. Branch `claude/ftc-simbench-ui-bugs-63kx2s`, pull request

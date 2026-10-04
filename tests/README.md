@@ -1,6 +1,6 @@
 # tests/
 
-457 tests on Node's built-in runner (`node:test`). There's no browser, no mocks and no transpile
+610 tests on Node's built-in runner (`node:test`). There's no browser, no mocks and no transpile
 step: the tests run the same engine code that ships.
 
 ```bash
@@ -28,6 +28,7 @@ pure, to test how joints are drawn.
 
 | File | Covers |
 |---|---|
+| `import-zip.test.mjs` | The URDF zip route: the zip reader, GLB and OBJ meshes, Onshape's export as a robot, the cascade and gear hints, internal joints never asked about, and every device bound without a form (the synthetic robot and the real 773-part one with its spec withheld). |
 | `anyrobot.test.mjs` | **"Will any robot work?"** 14 generated robots (every drivetrain, Y-up, inch units, offset origins, unnamed parts, 4-deep nesting, 1,500 parts) go through the whole engine. Each spins in place, and the true drivetrain centre must stay within 5 mm. |
 | `into-the-deep.test.mjs` | **The real robot**, end to end: the team's STEP, joint spec, TeleOp and Road Runner auto. The right parts ride each joint. Gamepad buttons move the lift, arm, linkage and claws the right amounts. The fixed linkage stays above the floor. The auto passes all 9 waypoints within 2 in, in order. |
 | `autorig.test.mjs` | **The automatic joint finder**, from geometry alone. On the real robot it finds all 9 driven joints on their true axis lines, both claw gears as followers, and both slides; no frame part moves; over 90% of the moving parts are found. On the 14 generated robots with no mechanisms it finds nothing. |

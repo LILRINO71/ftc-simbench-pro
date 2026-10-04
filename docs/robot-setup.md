@@ -1,50 +1,78 @@
-# Robot setup: once per robot
+# Getting a robot in, and knowing it is right
 
-The bench reads a robot's floor, front, drive base and joints from its STEP file by itself, and it
-gets most robots right. No automatic reader gets every team's CAD right, though: a wheel left out of
-the assembly, a robot exported lying on its side, a drive base drawn as plain blocks. So every robot
-gets a short setup the first time it loads. The team checks four things, fixes anything that's wrong
-by clicking (or by typing a few numbers), and the bench never asks again.
+A team should be able to bring its robot in without reading anything, and the bench should
+promise it is right, or say exactly what it can't be sure of. One card over the field does both.
+It always says the one thing to do next, and it goes away when there is nothing left.
 
-## The four checks
+## 1. Bring the robot: two steps in Onshape
 
-Open **Robot → Robot setup**. A new robot shows **New robot: set it up once** in the corner of the
-field view as a reminder.
+In Onshape, right-click the robot's **Assembly** tab at the bottom, **Export**, format **URDF**,
+geometry **GLB**, resolution **Fine**, compression off. A zip downloads. Drop it on SimBench.
 
-| Check | What the bench found | Fix it by |
-|---|---|---|
-| **Floor and up** | which CAD axis is up, from the drive wheels | picking the axis (auto, Z, Y, −Y, X, −X) |
-| **Front** | the way the wheels roll | picking the front (+x, +y, −x, −y); **Top view** shows it facing up the screen |
-| **Drive base** | the type, the wheels, their size, the track and wheelbase, the mecanum roller pattern, and anything it had to assume | **Set it by numbers**: type, wheel diameter, track, wheelbase, rollers X or O, and moving the drive base's centre forward or left |
-| **Joints and your code** | the robot check's questions | answering them in **Robot check**, or fixing joints in the **CAD** view |
+What arrives, with nothing to answer:
 
-Each check is marked done when you press **Looks right** or change something. **Set it by numbers**
-works for any robot, even one whose CAD has no wheels at all. Your chassis' numbers are on its kit's
-product page, or measure wheel centre to wheel centre.
+| From the export | In the bench |
+|---|---|
+| every mate (revolute, slider, cylindrical, fastened) | an exact joint, with its axis, pivot and travel limits |
+| every part's mesh and appearance | the part, in its colour |
+| the mass properties | each part's mass; the robot's weight, centre of mass and inertia |
 
-## Saved, and shared
+Nothing is uploaded and nobody signs in: the zip is read on the computer, in a Web Worker, so
+the page keeps drawing. It works on school Chromebooks. A URDF from Fusion, SolidWorks or FreeCAD
+drops in the same way ([tools/fusion](../tools/fusion/README.md) writes one from Fusion), and so
+does a plain STEP, with its joints found from the geometry instead.
 
-- **This browser** keeps the setup for the STEP's file name, so it comes back every time that robot
-  loads, including after you export the CAD again under the same name.
-- **Download setup** saves one small file, `<robot>.simbench.json`. A teammate drops it in with the
-  STEP, in either order, and gets the same robot: up, front, drive base, joints, device mapping and
-  shooter. A setup file dropped before its STEP waits for it.
+Onshape's export carries two things wrong, and the bench corrects both:
 
-## What the bench reads by itself first
+- **Every library bearing and motor comes with a mate.** A real robot came out with 113 joints,
+  most of them a shaft or a race turning on its own. `src/bind.js` marks those **internal** from
+  what they carry (a body under 45 mm, or only hardware words: bearing, shaft, spacer, hub) and
+  never asks about them. The review says how many it set aside.
+- **Mate relations are dropped.** A cascade lift comes as three independent slides, a two-gear
+  claw as two independent turns. `src/urdf.js` infers the obvious couplings as *hints* (stages
+  along one axis extend together; two revolutes on one parent with parallel axes 5–80 mm apart
+  mirror each other) and applies them only when the code drives the leader and nothing drives the
+  follower. The review says which followed what.
 
-The setup is the guarantee. These make it rarely needed:
+## 2. Add the code
 
-- **Wheels made of many parts.** A goBILDA or REV mecanum wheel is two side plates and a ring of
-  rollers, often named nothing like a wheel. The CAD's own wheel sub-assembly is read as one wheel.
-  A flattened file's wheel parts are grouped by where they sit.
-- **Mecanum or omni from the rollers.** Rollers at about 45 degrees to the axle are mecanum, square
-  on are omni, whatever the parts are called. The roller touching the floor gives each mecanum
-  wheel's hand. Only the standard X pattern is taken as standard; an "O" base, or wheels on the
-  wrong corners, is modelled as drawn and flagged.
-- **One wheel drawn.** The other three are placed as its mirror images through the middle of the
-  four drive motors, when the CAD has them. That's not the middle of the whole robot, which an
-  intake out one side would move. The robot check says it did this.
-- **Up and the front** come from the same wheels, so the frame and the drivetrain always agree.
+Drop the `.java` OpModes and helper classes (or a zip of the TeamCode folder), or paste the
+team's GitHub repository. The code runs as written on the Java VM.
 
-Anything the bench had to assume shows up in the drive base check and in the robot check, so the
-team knows what to look at.
+## 3. The review
+
+With both in, the card shows what the bench worked out as facts, and the little it couldn't:
+
+| Fact | Where it came from |
+|---|---|
+| up and front | the drive wheels: up from the ones that stand on the floor, front from the way they roll |
+| drive base | the wheels' kind, size, track and wheelbase; or "set it by numbers" when the CAD has no wheels |
+| joints | exact from the export, or found from the geometry |
+| devices tied to joints | `bindDevices`: the device's name against the mate, part and subassembly names and FTC synonyms; the kind of actuator sitting on the joint's axis (a servo never lands on a motor's joint); `RUN_TO_POSITION` targets that reach exactly one slide's length; the second motor of a pair; and, last, the only device of its kind left for the only joint that takes it |
+| weight | the export's masses, or the CAD's materials |
+
+What's left is a question in the team's own names: *"Which part does `wrist` move?"* with the
+candidate joints as buttons (each **show**s the joint moving in the CAD view) and **this one** to
+answer, or **Click it in the CAD view** to make a joint from the part, or **It moves nothing
+drawn** to keep the device as a live gauge. The robot check's own questions (a joint that moves no
+parts, a servo sent where the joint can't go, a mecanum wheel drawn the wrong hand) appear in the
+same list. **Looks right** closes the card; **Save setup** writes one file a teammate can drop in
+with the robot to get the same setup.
+
+Every answer is kept with the robot: in this browser for its file name, and in the setup file.
+It is asked once.
+
+## When nothing is asked
+
+On GearGurus 7832's 773-part robot with the team's TeleOp and no hand-written joint spec, all
+eleven devices bind (nine by name, one as the second motor of a pair, one by elimination) and
+the card says **Ready to drive**. `tests/import-zip.test.mjs` holds that, and the synthetic
+Onshape export it also checks: a two-stage lift, a two-gear claw and a motor shaft, every device
+bound, the shaft set aside, the stages and fingers coupled.
+
+## Under Advanced
+
+The Robot tab keeps everything else out of the way under **Advanced**: the Onshape mates read
+live (with gear and rack relations the export leaves out), the joint spec and the joint finder,
+the drawn-parts settings (up, front, a drawn drive base or shooter), the hardware map table, the
+Control Hub configuration XML, the kinematic rig and the portable rig document.

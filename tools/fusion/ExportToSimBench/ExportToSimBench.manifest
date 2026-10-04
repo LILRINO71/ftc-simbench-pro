@@ -1,0 +1,10 @@
+{
+  "autodeskProduct": "Fusion",
+  "type": "script",
+  "author": "FTC SimBench",
+  "description": {
+    "": "Writes the open design as robot.urdf with one mesh per body, zipped, to drop on SimBench."
+  },
+  "supportedOS": "windows|mac",
+  "editEnabled": true
+}

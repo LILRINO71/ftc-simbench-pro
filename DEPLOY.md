@@ -14,13 +14,14 @@ That writes `dist/`:
 
 | file | what it is |
 |---|---|
-| `index.html` | the app, one self-contained file |
+| `index.html` | the app, one file; three.js r186 and its add-ons load from jsDelivr as ES modules |
+| `engine-<hash>.js` | the engine alone, run in a Web Worker to read CAD off the page's thread; immutable, cached for a year |
 | `fragment.html` | the same app without `<html>`/`<head>`, for embedding |
 | `CNAME` | `app.ftc-simbench.com` — read by GitHub Pages; Cloudflare ignores it harmlessly |
 | `_headers` | cache and security headers, read by Cloudflare Pages and Netlify |
 | `.nojekyll` | stops Jekyll eating files that start with `_` |
 
-Two external requests remain at runtime: Google Fonts and the three.js CDN. To be fully
+Three external requests remain at runtime: Google Fonts, the three.js CDN (jsDelivr) and OpenCascade (jsDelivr, the first time a STEP is dropped). To be fully
 self-hosted, download `three.min.js` into `vendor/` and inline the fonts — see "Going
 dependency-free" below.
 
@@ -65,7 +66,15 @@ the free plan, publishing this repo to Pages would mean making it public, which 
 Use Cloudflare or Netlify instead, or publish only the built `dist/` to a separate public repo and
 accept that the bundle is readable (it is anyway — see below).
 
-## Sign in with Onshape (do this once)
+## Sign in with Onshape (optional)
+
+The main way in needs none of this: a team exports URDF from Onshape and drops the zip. Sign in
+with Onshape is the advanced way, for the mate relations (gear and rack ratios) the export leaves
+out. The function keeps each Part Studio's shapes and masses in the edge cache by version or
+microversion (`CACHEABLE` in `functions/onshape/[[path]].js`), so a goBILDA part read once is served
+to the next team from the cache, which spares the app's API quota.
+
+### Setting it up
 
 School computers block the "Send to SimBench" bookmark: their admins list `javascript:` URLs as
 blocked, so clicking it does nothing and dragging it shows `about:blank#blocked`. **Sign in with

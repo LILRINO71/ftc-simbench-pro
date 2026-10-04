@@ -32,6 +32,8 @@ const API = "https://cad.onshape.com/api/";
 const COOKIE = "sb_os", STATE = "sb_os_state";
 // what the robot reader calls (src/onshapelink.js onshapeRead), and nothing else
 const ALLOWED = /^(?:v\d+\/)?(?:assemblies\/d\/[0-9a-f]{24}\/[wvm]\/[0-9a-f]{24}\/e\/[0-9a-f]{24}(?:\/features)?|partstudios\/d\/[0-9a-f]{24}\/[wvm]\/[0-9a-f]{24}\/e\/[0-9a-f]{24}\/(?:tessellatedfaces|massproperties)|documents\/[0-9a-f]{24})$/i;
+// what may be kept at the edge: a Part Studio's shapes or masses at a version (v) or microversion (m); a workspace (w) moves
+const CACHEABLE = /^(?:v\d+\/)?partstudios\/d\/[0-9a-f]{24}\/[vm]\/[0-9a-f]{24}\/e\/[0-9a-f]{24}\/(?:tessellatedfaces|massproperties)$/i;
 
 const enc = new TextEncoder(), dec = new TextDecoder();
 const b64u = (u8) => btoa(String.fromCharCode(...u8)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -138,12 +140,27 @@ export async function handle(request, env, fetchImpl = fetch) {
     let fresh = false;
     const refresh = async () => { if (!t.r) return false; const n = await token(env, fetchImpl, { grant_type: "refresh_token", refresh_token: t.r }); if (!n) return false; t = n; fresh = true; return true; };
     if (t.e < Date.now() + 60000 && !(await refresh())) return signedOut();
+    // Part Studio shapes and masses pinned to a version or a microversion never change,
+    // so they are kept at the edge and served to the next team that reads the same
+    // goBILDA or REV part: fewer calls against the quota, and a faster second import.
+    // The assembly definition (a workspace, which moves) is never cached.
+    const cacheable = CACHEABLE.test(path);
+    const key = cacheable ? new Request("https://simbench-onshape-cache/" + path + url.search) : null;
+    const store = cacheable && typeof caches !== "undefined" ? caches.default : null;
+    if (store) { const hit = await store.match(key).catch(() => null); if (hit) { const h = new Headers(hit.headers); h.set("X-SimBench-Cache", "hit"); return new Response(hit.body, { status: hit.status, headers: h }); } }
     const call = () => fetchImpl(API + path + url.search, { headers: { Authorization: "Bearer " + t.a, Accept: "application/json" } });
     let r = await call();
     if (r.status === 401 && !fresh) { if (!(await refresh())) return signedOut(); r = await call(); }
     const headers = new Headers({ "Content-Type": r.headers.get("Content-Type") || "application/json", "Cache-Control": "no-store" });
     const ra = r.headers.get("Retry-After"); if (ra) headers.set("Retry-After", ra);
     if (fresh) headers.append("Set-Cookie", setCookie(COOKIE, await seal(env, t), 60 * 60 * 24 * 30));
+    if (store && r.ok) {
+      const body = await r.arrayBuffer();
+      const keep = new Response(body, { status: 200, headers: { "Content-Type": headers.get("Content-Type"), "Cache-Control": "public, max-age=" + (/\/v\//.test(path) ? 60 * 60 * 24 * 30 : 60 * 60 * 24 * 7) } });
+      try { await store.put(key, keep); } catch (e) { /* too big for the edge cache: served, not kept */ }
+      headers.set("X-SimBench-Cache", "miss");
+      return new Response(body, { status: 200, headers });
+    }
     return new Response(r.body, { status: r.status, headers });
   }
   return json({ error: "not-found" }, 404);

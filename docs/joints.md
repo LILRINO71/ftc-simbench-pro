@@ -13,7 +13,18 @@ mechanism:
 There are four ways to get those. They all end up as the same mechanisms, so the sim, the
 Checks tab and the 3D view treat them alike.
 
-## 1. Onshape mates: exact
+## 0. Onshape's URDF export: exact, and the usual way
+
+Since March 2026 Onshape exports an assembly as URDF (right-click the assembly tab → **Export** →
+format **URDF**, geometry **GLB**): the mates become joints with their limits, the mass
+properties become inertials, and every part comes as a mesh. Drop the zip on SimBench and
+`src/meshfiles.js` unzips and reads it on the page, `src/urdf.js` makes the robot, and
+`src/bind.js` sets aside the library's bearing and shaft turns and ties the code's devices to the
+real joints. No sign-in, no server, no API quota. The export drops mate *relations*, so a cascade's
+stages and a gear pair's followers are inferred as hints and coupled once the code says which is
+driven. See [robot-setup.md](robot-setup.md).
+
+## 1. Onshape mates, read live: exact, with relations
 
 If the robot is in Onshape, its assembly already has every mate. `src/mates.js` reads the
 assembly definition (`GET /api/assemblies/d/…/w/…/e/…?includeMateFeatures=true`). It groups parts

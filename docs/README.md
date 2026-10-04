@@ -4,7 +4,7 @@
 |---|---|
 | [HANDOFF.md](HANDOFF.md) | Start here: where the real-joints and real-Java work stands, the benchmark numbers, what's next, and two bugs worth knowing about. |
 | [joints.md](joints.md) | How a STEP file becomes a moving robot: Onshape mates, joint specs (with the format reference), the click-to-fix editor, and the automatic finder. |
-| [robot-setup.md](robot-setup.md) | Setting up a robot once: the four checks, setting the drive base by numbers, saving and sharing the setup file, and what the bench reads by itself first. |
+| [robot-setup.md](robot-setup.md) | Getting a robot in: Onshape's URDF export in two steps, the code, and the review card that shows what the bench found and asks only what it can't know. |
 | [online.md](online.md) | Online matches: finding or hosting one, the room, chat and marks, how the host keeps one match for everyone, the network and what it can't do yet. |
 | [match.md](match.md) | The AI robots and human players: what they do, the rules they keep, the skill levels. |
 | [robot-check.md](robot-check.md) | How every robot ends up right: exact Onshape mates, the robot check against the team's code, and the questions it asks. The real-team CAD test set. |
