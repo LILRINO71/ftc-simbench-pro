@@ -616,10 +616,6 @@ JVM.prototype.note=function(what){
 };
 
 /* ---- type resolution ---- */
-const JV_LANG={String:1,Object:1,Math:1,Integer:1,Double:1,Float:1,Long:1,Boolean:1,Character:1,Short:1,Byte:1,Number:1,System:1,Thread:1,Runnable:1,
-  Exception:1,RuntimeException:1,Throwable:1,Error:1,InterruptedException:1,IllegalArgumentException:1,IllegalStateException:1,NullPointerException:1,
-  ArithmeticException:1,IndexOutOfBoundsException:1,ArrayIndexOutOfBoundsException:1,UnsupportedOperationException:1,StringBuilder:1,Iterable:1,Comparable:1,
-  Enum:1,Record:1,Override:1,Deprecated:1,SuppressWarnings:1,FunctionalInterface:1,Void:1,CharSequence:1,AutoCloseable:1,Cloneable:1,Class:1,ClassCastException:1,NumberFormatException:1,StrictMath:1};
 JVM.prototype.findType=function(name,ctx){
   if(!name) return null;
   const key=name;

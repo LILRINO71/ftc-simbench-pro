@@ -257,4 +257,3 @@ function meshRead(name,data,files){
   if(ext==="dae") throw new Error("Collada (.dae) meshes aren't read; export the meshes as GLB or STL");
   throw new Error("unknown mesh format ."+ext);
 }
-const MESH_EXT=/\.(stl|glb|gltf|obj|bin|mtl)$/i;

@@ -1,9 +1,6 @@
 /* ============================================================
    5.  MAPPING
    ============================================================ */
-const SYNONYM={ lift:["arm","lift","shoulder","elbow","slide","extend","pivot"],
-                grip:["claw","grip","gripper","hand","intake","clamp","wrist"],
-                yaw: ["rotate","base","turret","yaw","swivel","spin"] };
 /* Devices that never drive a CAD mechanism: sensors and the IMU move nothing,
    and a drive motor turns a wheel (the drivetrain pairs those with wheels by
    corner). */
