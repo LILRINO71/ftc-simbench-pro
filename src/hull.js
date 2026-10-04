@@ -108,7 +108,8 @@ function thinPoints(pts,max){
 function solidKind(name,pn){
   const s=String(name||"").toLowerCase(), p=String(pn||"");
   if(/screw|bolt|\bnut\b|washer|rivet|shcs|bhcs|fhcs|set ?screw|locknut/.test(s)) return "fastener";
-  if(/^520[234]-/.test(p)||/yellow ?jacket|gearmotor|\bmotor\b/.test(s)) return "motor";
+  if(/mount|shield|bracket|plate|controller|cover|cap\b/.test(s)&&!/^520[234]-/.test(p)){ /* a motor's mount, shield or bracket is structure */ }
+  else if(/^520[234]-/.test(p)||/yellow ?jacket|gearmotor|\bmotor\b/.test(s)) return "motor";
   if(/^2000-0025/.test(p)||/\bservo\b/.test(s)) return "servo";
   if(/mecanum|omni|wheel|tire|tyre|traction|gecko|roller/.test(s)) return "wheel";
   if(/hub|battery|switch|camera|limelight|sensor|webcam|\bled\b|pcb/.test(s)) return "electronics";

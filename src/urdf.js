@@ -410,7 +410,10 @@ function urdfToPayload(text,files,name,opts){
       pool=pool.filter(k=>!capped.includes(k));
     }
   }
-  const budgetOf=key=>{ if(opts.triBudget>0) return opts.triBudget; const n=countOf.get(key); if(sum<=total||n==null) return Infinity;
+  const meshLinks=Math.max(1,links.filter(l=>urdfKids(l,"visual").some(v=>{ const g=urdfKid(v,"geometry"); return g&&g.kids[0]&&g.kids[0].tag==="mesh"; })).length);
+  const budgetOf=key=>{ if(opts.triBudget>0) return opts.triBudget; const n=countOf.get(key);
+    if(n==null) return urdfTriBudget(meshLinks,total);                 // a mesh whose count takes a full read (DAE): the even share
+    if(sum<=total) return Infinity;
     return Math.max(600,Math.floor((family.get(key)||0)/(placed.get(key)||1))); };
   // each mesh file read once, however many links share it, and cut down to its budget
   const meshCache=new Map(); let triIn=0, triOut=0, cut=0;
@@ -506,8 +509,12 @@ function urdfToPayload(text,files,name,opts){
     let kg=kgOf(l), est=false;
     // Onshape gives a part with no material a density of 1 kg/m³, so its "mass" is its
     // volume: that part is weighed from its shape instead, as what its name says it is
-    if(tri.length&&(!Number.isFinite(kg)||kg<=0||(volOf!=null&&kg/volOf<50))){
-      if(volOf>1e-9&&(Number.isFinite(kg)&&kg>0||onshape)){ if(Number.isFinite(kg)&&kg>0){ tinyMass++; if(tinyNames.length<5) tinyNames.push(display); } kg=volOf*urdfDensity(display,pn); est=true; kgEst+=kg; }
+    // a closed mesh's volume can't exceed its own box; an open sheet or a broken mesh reads as nothing
+    if(volOf!=null&&tri.length){ const bb=[[Infinity,-Infinity],[Infinity,-Infinity],[Infinity,-Infinity]]; for(let k=0;k<tri.length;k+=3) for(let q=0;q<3;q++){ const v=tri[k+q]; if(v<bb[q][0]) bb[q][0]=v; if(v>bb[q][1]) bb[q][1]=v; }
+      const box=(bb[0][1]-bb[0][0])*(bb[1][1]-bb[1][0])*(bb[2][1]-bb[2][0]); if(!(volOf<=box*1.001)) volOf=0; }
+    const noMaterial=onshape&&Number.isFinite(kg)&&kg>0&&volOf!=null&&(volOf>0?kg/volOf<2:kg<0.1);     // Onshape's 1 kg/m³ placeholder (a sheet: no volume, a tiny mass)
+    if(tri.length&&(!Number.isFinite(kg)||kg<=0||noMaterial)){
+      if(volOf>1e-9&&(noMaterial||(onshape&&!(kg>0)))){ if(noMaterial){ tinyMass++; if(tinyNames.length<5) tinyNames.push(display); } kg=volOf*urdfDensity(display,pn); est=true; kgEst+=kg; }
       else if(onshape){ kg=0.001; est=true; }                 // a decal, a sticker: a gram
       else kg=NaN;
     }
@@ -522,7 +529,7 @@ function urdfToPayload(text,files,name,opts){
     if(W.has(nm)) occurrences.push({path:[id],transform:urdfT16(W.get(nm)),fixed:nm===root.attrs.name,hidden:false});
   });
   if(tinyMass) notes.push(tinyMass+" part"+(tinyMass===1?" has":"s have")+" no material in Onshape ("+tinyNames.join(", ")+(tinyMass>5?" …":"")+"), so "+(tinyMass===1?"it's":"they're")+" weighed from "+(tinyMass===1?"its":"their")+" shape"+(tinyMass===1?"":"s")+": about "+kgEst.toFixed(1)+" kg as aluminium, or steel, plastic, rubber or a motor where the name says so. Give them materials for exact masses.");
-  if(cut) notes.push(cut+" mesh"+(cut===1?" was":"es were")+" simplified for the browser ("+(triIn/1e6).toFixed(1)+"M triangles down to "+(triOut/1e6).toFixed(2)+"M): the shapes draw a little coarser; the joints, placements and masses are exact.");
+  if(cut) notes.push(cut+" mesh"+(cut===1?" was":"es were")+" simplified for the browser ("+(triIn/1e6).toFixed(1)+"M triangles in the files, "+(triOut/1e6).toFixed(2)+"M kept, each drawn once per copy): the shapes draw a little coarser; the joints, placements and masses are exact.");
 
   // joints as mates: the joint frame, z along its axis, in each end's own frame
   const features=[], limitsOut=[], mimic=[];
