@@ -14,7 +14,6 @@
    ============================================================ */
 const JV_HW="com.qualcomm.robotcore.hardware.";
 const JV_NAV="org.firstinspires.ftc.robotcore.external.navigation.";
-function jvGen(r){ return r&&typeof r.next==="function"&&typeof r[Symbol.iterator]==="function"; }
 function jvArg(v){ return v&&v[JV_OPAQUE_TAG]?0:jvNum(v); }
 const jvClamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 /* an enum constant's name, whatever enum it is (a string works too) */

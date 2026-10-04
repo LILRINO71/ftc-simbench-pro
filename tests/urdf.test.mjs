@@ -1,6 +1,6 @@
 // URDF (src/urdf.js): what Fusion, SolidWorks and FreeCAD exporters write. The
-// links become parts, the joints mates, and the same builder as an Onshape
-// import makes the robot: joints with their axes, limits and what they carry.
+// links become parts, the joints mates, and the robot comes out the way an
+// Onshape import does: joints with their axes, limits and what they carry.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { loadEngine } from './load.mjs';
@@ -42,18 +42,18 @@ const URDF = `<?xml version="1.0"?>
   </joint>
 </robot>`;
 
-test('urdf: links are parts with shapes, colours and masses, in the robot frame', () => {
-  const cad = E.cadFromUrdf(URDF, {});
+test('urdf: links are parts with shapes, colours and masses, in the robot frame', async () => {
+  const cad = await E.urdfRobot(URDF, {}, 'urdfbot');
   assert.equal(cad.source, 'urdf');
   assert.equal(cad.solids.length, 5);
-  const base = cad.solids.find((s) => s.name === 'base_link');
-  assert.deepEqual(base.color, [1, 0.5, 0]);
+  const base = cad.solids.find((s) => /^base/.test(s.name));
+  assert.deepEqual(base.color.map((v) => +v.toFixed(6)), [1, 0.5, 0]);
   assert.ok(Math.abs(cad.onshape.kg - 9.5) < 1e-9);
   assert.ok(Math.abs(cad.bbox.min[2]) < 0.002, 'stands on the floor');
 });
 
-test('urdf: the joints come through: kind, axis, limits, what each carries, a mimic as a coupling', () => {
-  const cad = E.cadFromUrdf(URDF, {});
+test('urdf: the joints come through: kind, axis, limits, what each carries, a mimic as a coupling', async () => {
+  const cad = await E.urdfRobot(URDF, {}, 'urdfbot');
   const j = Object.fromEntries(cad.mechs.filter((m) => m.fromMate).map((m) => [m.id, m]));
   assert.ok(j.lift && j.arm && j.claw, Object.keys(j).join(','));
   assert.equal(j.lift.kind, 'linear');
@@ -69,7 +69,7 @@ test('urdf: the joints come through: kind, axis, limits, what each carries, a mi
   assert.ok(!j.fl_wheel);
 });
 
-test('urdf: STL meshes dropped with it, binary and ASCII; a missing one is named', () => {
+test('urdf: STL meshes dropped with it, binary and ASCII; a missing one is named', async () => {
   const tri = [[0, 0, 0], [0.1, 0, 0], [0, 0.1, 0]];
   const bin = new Uint8Array(84 + 50); const dv = new DataView(bin.buffer); dv.setUint32(80, 1, true);
   tri.flat().forEach((v, k) => dv.setFloat32(84 + 12 + k * 4, v, true));
@@ -78,11 +78,11 @@ test('urdf: STL meshes dropped with it, binary and ASCII; a missing one is named
   assert.deepEqual(E.urdfStl(ascii), tri.flat());
   const u = URDF.replace('<box size="0.04 0.06 0.02"/>', '<mesh filename="package://bot/meshes/Claw.STL" scale="0.001 0.001 0.001"/>')
     .replace('<box size="0.40 0.36 0.05"/>', '<mesh filename="package://bot/meshes/base.stl"/>');
-  const cad = E.cadFromUrdf(u, { 'Claw.STL': bin.buffer });
+  const cad = await E.urdfRobot(u, { 'Claw.STL': bin.buffer }, 'urdfbot');
   assert.ok(cad.solids.some((s) => s.name === 'claw'), 'the claw mesh (scaled) is used');
   assert.ok(cad.onshape.why.some((w) => /base\.stl/.test(w)), 'the missing base mesh is named');
 });
 
-test('urdf: a xacro file is refused with what to do', () => {
-  assert.throws(() => E.cadFromUrdf('<robot xmlns:xacro="x"><xacro:macro name="m"/></robot>', {}), /xacro/);
+test('urdf: a xacro file is refused with what to do', async () => {
+  await assert.rejects(E.urdfRobot('<robot xmlns:xacro="x"><xacro:macro name="m"/></robot>', {}, 'x'), /xacro/);
 });

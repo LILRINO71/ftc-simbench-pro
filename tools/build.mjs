@@ -1,7 +1,6 @@
 // Builds FTC SimBench Pro from src/ into dist/:
 //   dist/index.html      the deployable app (this is what goes on app.ftc-simbench.com)
 //   dist/fragment.html   the same app as an embeddable fragment
-//   dist/CNAME           the custom domain, for GitHub Pages / static hosts that read it
 //
 //   node tools/build.mjs           readable build, for developing
 //   node tools/build.mjs --min     ship build: comments and layout stripped
@@ -17,7 +16,6 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const rd = (...p) => fs.readFileSync(path.join(ROOT, ...p), 'utf8');
 const pkg = JSON.parse(rd('package.json'));
 
-export const DOMAIN = 'app.ftc-simbench.com';
 // where the app really lives: link previews (Discord, iMessage, Slack) point here
 export const SITE = 'https://ftc-simbench-pro.pages.dev';
 
@@ -129,7 +127,6 @@ const page = `<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\
   `<link rel="icon" href="${favicon}">\n` +
   `</head>\n<body>\n${fragment}\n</body>\n</html>\n`;
 fs.writeFileSync(path.join(DIST, 'index.html'), page, 'utf8');
-fs.writeFileSync(path.join(DIST, 'CNAME'), DOMAIN + '\n', 'utf8');
 // the picture a shared link shows (og:image)
 fs.copyFileSync(path.join(ROOT, 'docs', 'into-the-deep.png'), path.join(DIST, 'og.png'));
 fs.writeFileSync(path.join(DIST, '.nojekyll'), '', 'utf8');
@@ -166,4 +163,3 @@ console.log(`FTC SimBench Pro ${pkg.version} build ${build}${MIN ? (STRINGS ? ' 
 console.log(`  dist/index.html    ${kb(page)}   (js ${kb(js)}, css ${kb(css)})`);
 console.log(`  dist/${ENGINE_FILE}  ${kb(engineJs)}   (the engine, for the worker)`);
 console.log(`  dist/fragment.html ${kb(fragment)}`);
-console.log(`  dist/CNAME         ${DOMAIN}`);

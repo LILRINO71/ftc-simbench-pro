@@ -81,10 +81,10 @@ test('obj: faces fan to triangles and the MTL Kd gives the colour', () => {
 });
 
 test('urdf zip: the whole robot from the export, meshes found by any path the file writes', async () => {
-  const r = await E.urdfFromZip(ZIP(), 'robot.zip');
-  assert.ok(r.payload, 'a robot');
-  assert.equal(r.payload.notes.length, 0, 'every mesh found: ' + r.payload.notes.join('; '));
-  const cad = E.cadFromOnshape(r.payload); E.urdfApplyHints(cad, r.payload.hints);
+  const r = await E.urdfRobotFromZip(ZIP(), 'robot.zip');
+  assert.ok(r.cad, 'a robot');
+  assert.equal(r.cad.urdf.missing.length, 0, 'every mesh found: ' + r.cad.urdf.missing.join('; '));
+  const cad = r.cad;
   assert.equal(cad.solids.length, 6);
   assert.equal(cad.mechs.filter((m) => m.fromMate).length, 5, 'every joint became a mechanism');
   const frame = cad.solids.find((s) => /Frame/.test(s.name));
@@ -93,38 +93,35 @@ test('urdf zip: the whole robot from the export, meshes found by any path the fi
 });
 
 test('urdf zip: what the export cannot say is offered as hints: a cascade and a mirrored pair', async () => {
-  const r = await E.urdfFromZip(ZIP(), 'robot.zip');
-  const h = r.payload.hints;
-  assert.ok(h.some((x) => x.via === 'cascade' && x.ratio === 1), 'stage 2 follows stage 1');
-  assert.ok(h.some((x) => x.via === 'gear' && x.ratio === -1), 'the right finger mirrors the left');
-  const cad = E.cadFromOnshape(r.payload); E.urdfApplyHints(cad, r.payload.hints);
+  const cad = (await E.urdfRobotFromZip(ZIP(), 'robot.zip')).cad;
+  const hinted = cad.mechs.filter((x) => x.coupleHint);
+  assert.ok(hinted.some((x) => x.coupleHint.via === 'cascade' && x.coupleHint.ratio === 1), 'stage 2 follows stage 1');
+  assert.ok(hinted.some((x) => x.coupleHint.via === 'gear' && x.coupleHint.ratio === -1), 'the right finger mirrors the left');
   const s2 = cad.mechs.find((m) => m.id === 'lift_2');
   assert.ok(s2.coupleHint && s2.coupleHint.to === 'lift_1', 'a hint, not yet a coupling: the code decides');
   assert.ok(!s2.couple);
 });
 
 test('urdf zip: no .urdf inside means the entries come back (a zip of the team\'s code)', async () => {
-  const r = await E.urdfFromZip(zip([{ name: 'TeamCode/Tele.java', data: JAVA, deflate: true }]), 'code.zip');
-  assert.equal(r.payload, null); assert.equal(r.entries.length, 1);
+  const r = await E.urdfRobotFromZip(zip([{ name: 'TeamCode/Tele.java', data: JAVA, deflate: true }]), 'code.zip');
+  assert.equal(r.cad, null); assert.equal(r.entries.length, 1); assert.ok(r.entries[0].data.length > 0, 'read, ready for the code library');
 });
 
 test('classify: a motor shaft turning on its own is internal, the lift and the claw are mechanisms', async () => {
-  const r = await E.urdfFromZip(ZIP(), 'robot.zip');
-  const cad = E.cadFromOnshape(r.payload); E.urdfApplyHints(cad, r.payload.hints);
+  const cad = (await E.urdfRobotFromZip(ZIP(), 'robot.zip')).cad;
   const C = E.classifyJoints(cad);
   assert.equal(C.internal, 1);
-  assert.ok(cad.mechs.find((m) => /Revolute 7|Motor_shaft/.test(m.id)).internal, 'the 12 mm shaft');
+  assert.ok(cad.mechs.find((m) => /Revolute 7|Motor[ _]shaft/.test(m.id)).internal, 'the 12 mm shaft');
   for (const id of ['lift_1', 'lift_2', 'claw_L', 'claw_R']) assert.ok(!cad.mechs.find((m) => m.id === id).internal, id);
   // and it never comes up in the robot check
   const code = E.parseJava(JAVA);
   const map = E.autoMap(code.devices, cad.mechs, { cad });
   const rc = E.checkRobot(cad, code, map, { isCommanded: () => true, front: '+x', swing: false });
-  assert.ok(!rc.items.some((i) => /Revolute 7|Motor_shaft/.test(i.text)), 'no question about the shaft');
+  assert.ok(!rc.items.some((i) => /Revolute 7|Motor[ _]shaft/.test(i.text)), 'no question about the shaft');
 });
 
 test('bind: every device finds its joint without a form, and the hints become couplings', async () => {
-  const r = await E.urdfFromZip(ZIP(), 'robot.zip');
-  const cad = E.cadFromOnshape(r.payload); E.urdfApplyHints(cad, r.payload.hints);
+  const cad = (await E.urdfRobotFromZip(ZIP(), 'robot.zip')).cad;
   const code = E.parseJava(JAVA);
   const B = E.bindDevices(code, cad, { isCommanded: () => true });
   assert.equal(B.open.length, 0, 'nothing to ask: ' + JSON.stringify(B.open));
@@ -138,8 +135,7 @@ test('bind: every device finds its joint without a form, and the hints become co
 });
 
 test('bind: a device with no name in common still lands when it is the only one of its kind that fits', async () => {
-  const r = await E.urdfFromZip(ZIP(), 'robot.zip');
-  const cad = E.cadFromOnshape(r.payload); E.urdfApplyHints(cad, r.payload.hints);
+  const cad = (await E.urdfRobotFromZip(ZIP(), 'robot.zip')).cad;
   const code = E.parseJava(JAVA.replace(/"liftMotor"/, '"uppies"').replace(/lift=/, 'uppies=').replace(/lift\.setPower/, 'uppies.setPower').replace(/"claw"/, '"grabby"').replace(/claw=/, 'grabby=').replace(/claw\.setPosition/g, 'grabby.setPosition'));
   const B = E.bindDevices(code, cad, { isCommanded: () => true });
   assert.equal(B.map.uppies, 'lift_1', 'the only motor left and the only slide: ' + JSON.stringify(B.bound));

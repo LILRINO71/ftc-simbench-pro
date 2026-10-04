@@ -34,7 +34,6 @@ const MATCH_SKILL={
   typical:{label:"Typical", vmax:1.2, acc:2.6, turn:3.2, precision:"typical", pick:0.95,miss:0.22, feed:0.6, settle:0.85,think:0.6},
   elite:  {label:"Elite",   vmax:1.6, acc:3.6, turn:4.2, precision:"dialed",  pick:0.5, miss:0.08, feed:0.4, settle:0.45,think:0.25}};
 const MATCH_PTS={leave:3, parkAuto:5, park:5, tip:20, cell:2, flower:2, bottom:5, garden:1};
-const HIVE_KEEP={x:(24+11)*IN, y:(19.5+11)*IN};   // the HIVE frame, half a robot and a margin: drive around it
 const FLOWER_CAP=6;                                // ~4 POLLEN + 2 NECTAR fit between the rings
 const wrapA=a=>{ while(a>Math.PI) a-=2*Math.PI; while(a<-Math.PI) a+=2*Math.PI; return a; };
 
@@ -663,12 +662,6 @@ function segDist(x,y,a,b){
   return Math.hypot(x-a[0]-ux*t, y-a[1]-uy*t);
 }
 /* Does segment a-b pass through the inside of the box |x|<B.x, |y|<B.y? */
-function segCrossesBox(a,b,B){
-  let t0=0, t1=1; const dx=b.x-a.x, dy=b.y-a.y;
-  const clip=(p,q)=>{ if(Math.abs(p)<1e-12) return q>0; const r=q/p; if(p<0){ if(r>t1) return false; if(r>t0) t0=r; } else { if(r<t0) return false; if(r<t1) t1=r; } return true; };
-  if(!clip(-dx,a.x+B.x)||!clip(dx,B.x-a.x)||!clip(-dy,a.y+B.y)||!clip(dy,B.y-a.y)) return false;
-  return t1-t0>1e-6;
-}
 /* The box a robot takes up on the field: its footprint (fp: hx, hy, and ox, oy off the
    drivetrain centre along its heading) around the chassis pose ch. */
 function footBox(ch,fp){
