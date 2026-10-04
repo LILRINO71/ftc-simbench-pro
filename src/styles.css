@@ -425,6 +425,31 @@ kbd{display:inline-block; min-width:15px; padding:0 4px; border:1px solid var(--
 .ic-link input{flex:1; min-width:0; font:12.5px var(--mono); padding:8px 10px; border-radius:10px; border:1px solid var(--sep-2); background:var(--card-2); color:var(--label);}
 .ic-why{font-size:12px; color:var(--label-3); margin:10px 0 0; line-height:1.5;}
 .ic-why.bad{color:var(--fail);}
+/* the joint sheet (src/importflow.js htmlSheet): one row per joint, what moves it under its name */
+.import-card.wide{width:min(760px, 100%);}
+.js-rows{display:flex; flex-direction:column; gap:6px; margin-top:14px;}
+.js-row{display:grid; grid-template-columns:minmax(0,1fr) auto; gap:6px 10px; align-items:center; padding:9px 10px 9px 12px; border-radius:12px; background:var(--card-2); transition:box-shadow .15s;}
+.js-row.on{box-shadow:inset 0 0 0 1.5px var(--accent);}
+.js-name{min-width:0;}
+.js-name b{display:block; font-size:13px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.js-name span{display:block; font-size:11.5px; color:var(--label-3); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.js-ctl{grid-column:1 / -1; display:flex; flex-wrap:wrap; gap:6px 8px; align-items:center; font-size:12px; color:var(--label-3);}
+.js-ctl select,.js-ctl input:not([type=checkbox]){font:inherit; font-size:12.5px; color:var(--label); padding:5px 8px; border-radius:8px; border:1px solid var(--sep-2); background:var(--card); min-height:28px;}
+.js-ctl select:focus,.js-ctl input:focus{outline:2px solid var(--accent); outline-offset:1px;}
+.js-ctl .js-dev{flex:1 1 140px; min-width:0; font-family:var(--mono);}
+.js-ctl .js-lim input,.js-ctl .js-ratio input{width:68px;}
+.js-rev{display:inline-flex; align-items:center; gap:4px; cursor:pointer;}
+.js-row:not([data-drive=follow]) .js-ratio{display:none;}
+.js-row[data-drive=""] .js-dev,.js-row[data-drive=free] .js-dev,.js-row[data-drive=fixed] .js-dev,
+.js-row[data-drive=""] .js-lim,.js-row[data-drive=fixed] .js-lim,
+.js-row[data-drive=""] .js-rev,.js-row[data-drive=free] .js-rev,.js-row[data-drive=fixed] .js-rev{display:none;}
+.js-names{margin-top:14px; padding:12px; border-radius:12px; background:var(--card-2); font-size:12.5px;}
+.js-names p{margin:0 0 8px; color:var(--label-2); line-height:1.45;}
+.js-names ul{list-style:none; margin:0 0 8px; padding:0; display:flex; flex-direction:column; gap:4px;}
+.js-names li.done{color:var(--label-3);}
+.js-names code{font-family:var(--mono); font-size:12px; background:var(--fill-3); border-radius:4px; padding:0 4px;}
+.js-names small{color:var(--label-3);}
+@media (max-width:640px){ .js-ctl .js-dev{flex-basis:100%;} }
 
 /* ================= viewport overlays ================= */
 .vp-top{position:absolute; top:calc(var(--bar) + 2*var(--gap)); left:calc(var(--left) + 2*var(--gap)); right:calc(var(--right) + 2*var(--gap)); display:flex; align-items:flex-start; gap:12px; pointer-events:none; z-index:5;}

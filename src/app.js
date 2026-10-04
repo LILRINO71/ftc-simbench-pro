@@ -1778,6 +1778,7 @@ function takeMates(file){
       holdOnshape(p); return;
     }
     if(j&&j.format===SETUP_FORMAT){ SetupUI.take(j,file.name); return; }
+    if(j&&j.format===JOINT_SHEET_FORMAT){ ImportFlow.takeSheet(j,file.name); return; }
     if(j&&j.format===JOINT_SPEC_FORMAT){
       MATES.asm=MATES.features=MATES.name=MATES.report=null;
       JOINTS.spec=j; JOINTS.name=file.name; JOINTS.step=LAST_STEP?LAST_STEP.name:null;
@@ -2054,6 +2055,7 @@ function renderRobotCheckNow(){
     }else if(it.ask==="drop-joint") acts=btn("show",it.joint,"show")+btn("drop",it.joint,"remove it","primary");
     else if(it.ask==="look"&&it.joint) acts=btn("show",it.joint,"show");
     else if(it.ask==="mates") acts=btn("mates","","Use my Onshape mates");
+    else if(it.ask==="declare") acts=btn("declare","","Declare the joints");
     return `<div class="rc-item ${it.sev}"><div class="rc-head"><span class="rc-sev">${SEV[it.sev]}</span><span class="rc-text">${esc(it.text)}</span></div>${acts?`<div class="rc-acts">${acts}</div>`:""}</div>`;
   };
   // nothing to ask: say so, and say when there would be (joints the bench had to guess)
@@ -2088,6 +2090,13 @@ function showJoint(id){
 }
 function robotCheckAct(act,a){
   if(act==="show") return showJoint(a);
+  // declared joints (src/jointsheet.js) change on the joint sheet, never by turning into a joint spec
+  if(act==="declare") return ImportFlow.openSheet();
+  if(CAD&&isExact(CAD)){
+    if(act==="pair"){ const [dev,joint]=a.split("|"); return ImportFlow.sheetPair(dev,joint); }
+    if(act==="drop") return ImportFlow.sheetDrop(a);
+    if(act==="click") return ImportFlow.openSheet();
+  }
   if(act==="pair"){ const [dev,joint]=a.split("|"); changeJoint(joint,{device:dev}); return; }
   if(act==="drop"){ removeJoint(a); return; }
   if(act==="click"){ CadView.pendingDevice=a; if(!CadView.on) CadView.enter();
