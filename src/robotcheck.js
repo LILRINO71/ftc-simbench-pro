@@ -76,7 +76,14 @@ const {checkRobot, setupAuto}=(function(){
 
     // where the joints came from
     const src=cad&&cad.mates&&cad.mates.source;
-    if(src==="onshape") put({key:"source", sev:"ok", text:cad.source==="urdf"?"Joints come from your URDF's joints, so axes, pivots and parts are exact.":"Joints come from your Onshape mates, so axes, pivots and parts are exact."});
+    // which of the mates are mechanisms: declared by the team (src/jointsheet.js), or worked out from what they carry
+    const mateJoints=src==="onshape"?((cad.mechs||[]).filter(m=>m.fromMate&&!m.drive&&m.kind!=="fixed")):[];
+    if(typeof isExact==="function"&&isExact(cad)){
+      const S=cad.sheet, where=S.from==="sheet"?"your joint sheet":S.from==="tags"?"your mates' names":"your mates' names and joint sheet";
+      put({key:"source", sev:"ok", text:"Joints are declared in "+where+": "+S.declared+" mechanism"+(S.declared===1?"":"s")+", the other "+S.held+" joint"+(S.held===1?"":"s")+" held as drawn. Nothing is guessed."});
+    }
+    else if(src==="onshape"&&mateJoints.some(m=>m.internal)) put({key:"source", sev:"note", ask:"declare", text:"Axes, pivots and parts come exactly from your "+(cad.source==="urdf"?"export":"mates")+", but which "+mateJoints.filter(m=>!m.internal).length+" of its "+mateJoints.length+" joints are mechanisms was worked out from what they carry. Declare them (name the mates in Onshape, or fill in the joint sheet) and nothing is guessed."});
+    else if(src==="onshape") put({key:"source", sev:"ok", text:cad.source==="urdf"?"Joints come from your URDF's joints, so axes, pivots and parts are exact.":"Joints come from your Onshape mates, so axes, pivots and parts are exact."});
     else if(src==="spec"&&!(cad.mates.auto)) put({key:"source", sev:"ok", text:"Joints come from a joint spec"+(cad.mates.name?" ("+cad.mates.name+")":"")+"."});
     else put({key:"source", sev:"note", ask:"mates", text:(src==="spec"?"Joints were found from the geometry":"Joints are guessed from the assembly")+
       ". The Onshape bookmark or a URDF would make them exact."});
