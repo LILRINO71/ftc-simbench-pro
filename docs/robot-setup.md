@@ -7,7 +7,7 @@ It always says the one thing to do next, and it goes away when there is nothing 
 ## 1. Bring the robot: two steps in Onshape
 
 In Onshape, right-click the robot's **Assembly** tab at the bottom, **Export**, format **URDF**,
-geometry **GLB**, resolution **Fine**, compression off. A zip downloads. Drop it on SimBench.
+geometry **GLB**, resolution **Medium**, compression off. A zip downloads. Drop it on SimBench. (Fine works too, but a Fine export of a full robot is 200–500 MB and takes a minute to read; Medium is 20–50 MB and the bench thins every shape anyway.)
 
 What arrives, with nothing to answer:
 
@@ -22,7 +22,7 @@ the page keeps drawing. It works on school Chromebooks. A URDF from Fusion, Soli
 drops in the same way ([tools/fusion](../tools/fusion/README.md) writes one from Fusion), and so
 does a plain STEP, with its joints found from the geometry instead.
 
-Onshape's export carries two things wrong, and the bench corrects both:
+Onshape's export carries a few things the bench has to correct (all seen on a real robot's export):
 
 - **Every library bearing and motor comes with a mate.** A real robot came out with 113 joints,
   most of them a shaft or a race turning on its own. `src/bind.js` marks those **internal** from
@@ -33,6 +33,18 @@ Onshape's export carries two things wrong, and the bench corrects both:
   along one axis extend together; two revolutes on one parent with parallel axes 5–80 mm apart
   mirror each other) and applies them only when the code drives the leader and nothing drives the
   follower. The review says which followed what.
+- **Every part of a rigid body is one link.** The chassis arrives as one link with fifty parts in
+  it. Each part is read as its own solid (named after its mesh), so weights, colours and the drive
+  finder see parts, not a block.
+- **Parts never mated to anything hang off the root** where they were inserted. One sitting clear
+  of the robot (700 mm in front, or under the floor) is left off, and the import notes name it.
+- **Parts with no material weigh their volume.** The exporter writes them at a density of 1, so
+  the number is the part's volume in m³; the bench weighs that volume at the material its kind
+  implies (aluminium for a vendor part, printed or polycarbonate for a part the team drew, steel
+  for a fastener). A part with a material set keeps its real mass. Game elements drawn in the
+  robot weigh nothing. Set materials in Onshape for exact weights.
+- **Planar and parallel mates** arrive as chains of slides and a turn: a part free about a plane
+  is no mechanism, so it is held where it was drawn.
 
 ## 2. Add the code
 
@@ -49,7 +61,7 @@ With both in, the card shows what the bench worked out as facts, and the little 
 | drive base | the wheels' kind, size, track and wheelbase; or "set it by numbers" when the CAD has no wheels |
 | joints | exact from the export, or found from the geometry |
 | devices tied to joints | `bindDevices`: the device's name against the mate, part and subassembly names and FTC synonyms; the kind of actuator sitting on the joint's axis (a servo never lands on a motor's joint); `RUN_TO_POSITION` targets that reach exactly one slide's length; the second motor of a pair; and, last, the only device of its kind left for the only joint that takes it |
-| weight | the export's masses, or the CAD's materials |
+| weight | the export's masses for parts with a material, their volume at the implied material's density otherwise |
 
 What's left is a question in the team's own names: *"Which part does `wrist` move?"* with the
 candidate joints as buttons (each **show**s the joint moving in the CAD view) and **this one** to
