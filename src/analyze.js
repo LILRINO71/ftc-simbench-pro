@@ -239,8 +239,9 @@ headroom  ${ratio.toFixed(2)}×${ratio<1?"  ◄ SHORT":""}`;
   // ---- CAD mechanisms nothing drives
   const mapped={}; for(const k in map) if(map[k]) mapped[map[k]]=1;
   for(const mech of cad.mechs) if(!mapped[mech.id]){
-    // drive hardware turns wheels; a cascade stage or gear is driven through its leader
-    if(mech.drive||mech.couple) continue;
+    // drive hardware turns wheels; a cascade stage or gear is driven through its leader; a
+    // bearing race or shaft with its own joint (a URDF export) is nothing a device would drive
+    if(mech.drive||mech.couple||mech.internal) continue;
     const cadSpec=mech.part?hwFromPart(mech.part,mech.partName):null;
     const actuator=cadSpec&&/^(motor|servo|crservo)$/.test(cadSpec.kind);
     if(mech.fromMate&&mech.kind!=="fixed")

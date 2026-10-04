@@ -56,28 +56,72 @@ const {classifyJoints, bindDevices}=(function(){
     return Number.isFinite(mn[0])?{min:mn,max:mx,extent:Math.max(mx[0]-mn[0],mx[1]-mn[1],mx[2]-mn[2])}:null;
   }
 
+  /* the drive wheels' axles, once per CAD: {c, axis, r} in the CAD's own frame */
+  const AXLES=new WeakMap();
+  function wheelAxles(cad){
+    if(!cad||typeof cad!=="object") return [];
+    if(AXLES.has(cad)) return AXLES.get(cad);
+    let out=[];
+    try{ if(typeof driveFromCAD==="function"){ const D=driveFromCAD(cad,{}); if(D&&D.wheels&&D.wheels.length>=2) out=D.wheels.filter(w=>w.c&&w.axis).map(w=>({c:w.c, axis:w.axis, r:w.r||0.05})); } }catch(e){ out=[]; }
+    AXLES.set(cad,out); return out;
+  }
+
   /* ---- 1. which joints are mechanisms ----
      Idempotent; a joint spec or a hand edit (m.keep) is never demoted. Returns
      {internal, mechanisms, why:[…]}. */
   function classifyJoints(cad){
     const mechs=((cad&&cad.mechs)||[]).filter(m=>!m.drive&&m.kind!=="fixed");
-    const kids=id=>mechs.filter(k=>k.parent===id);
+    const byId=new Map(mechs.map(m=>[m.id,m])), kids=new Map();
+    for(const m of mechs){ if(!kids.has(m.parent)) kids.set(m.parent,[]); kids.get(m.parent).push(m); }
+    // everything a joint carries: its own body and every joint hanging from it. A URDF
+    // export gives a bearing's inner race its own joint, and the shaft in it another; judged
+    // on its own body each is a 20 mm part, judged on what it carries an arm's pivot is an arm.
+    const carried=new Map();
+    const subtree=(m,depth)=>{ if(carried.has(m.id)) return carried.get(m.id); const idx=members(cad,m);
+      if(depth<40) for(const k of kids.get(m.id)||[]) idx.push(...subtree(k,depth+1)); carried.set(m.id,idx); return idx; };
+    const spec=!!(cad.mates&&cad.mates.source==="spec");
     let internal=0, why=[];
-    const reasons={small:0, hardware:0};
+    const reasons={small:0, hardware:0, coaxial:0};
     for(const m of mechs){
-      if(m.keep||m.manual||(cad.mates&&cad.mates.source==="spec")){ m.internal=false; continue; }
-      if(m.couple||kids(m.id).length){ m.internal=false; continue; }      // it carries another joint, or follows one: a mechanism
-      const idx=members(cad,m), box=boxOf(cad,idx);
+      if(m.keep||m.manual||spec){ m.internal=false; continue; }
+      if(m.couple){ m.internal=false; continue; }                           // it follows another joint: a mechanism
+      const idx=subtree(m,0), box=boxOf(cad,idx);
       if(!idx.length||!box){ m.internal=false; continue; }                 // empty joints are the robot check's business
       const names=idx.map(i=>String(cad.solids[i].name||""));
-      const allHw=names.every(n=>BIND_RULES.hardwareWords.test(n)||/^(part|body)\s*\d*$/i.test(n)&&false);
+      const allHw=names.every(n=>BIND_RULES.hardwareWords.test(n));
       if(box.extent<BIND_RULES.internalExtent){ m.internal=true; m.internalWhy="small"; reasons.small++; }
       else if(allHw&&box.extent<BIND_RULES.internalNamedExtent){ m.internal=true; m.internalWhy="hardware"; reasons.hardware++; }
       else m.internal=false;
       if(m.internal) internal++;
     }
-    if(reasons.small) why.push(reasons.small+" small turn"+(reasons.small===1?"":"s")+" (shafts, bearing races) left fixed.");
+    // a turn on a drive wheel's axle that carries nothing big is the wheel's own shaft, hub or
+    // bearing: the drive, not a mechanism (a URDF export gives each of them a joint)
+    const axles=wheelAxles(cad);
+    if(axles.length) for(const m of mechs){
+      if(m.internal||m.keep||m.manual||spec||m.couple||kindOf(m)==="linear"||!m.axis||!m.pivot) continue;
+      const box=boxOf(cad,subtree(m,0)); if(!box||box.extent>0.16) continue;
+      const on=axles.some(w=>Math.abs(dot(w.axis,m.axis))>Math.cos(5*DEG)&&(()=>{ const d=sub(m.pivot,w.c), t=dot(d,w.axis);
+        return Math.hypot(d[0]-w.axis[0]*t,d[1]-w.axis[1]*t,d[2]-w.axis[2]*t)<0.012&&Math.abs(t)<2.5*w.r+0.08; })());
+      if(on){ m.internal=true; m.internalWhy="axle"; reasons.axle=(reasons.axle||0)+1; internal++; }
+    }
+    // a turn on the same axis as the turn it hangs from (the gear on the gear a servo turns,
+    // a bearing's two races, a shaft in its bearing) is one motion, not two joints: the one
+    // with limits stays, else the one nearer the chassis, and the other turns with it
+    const lim=x=>!!(x.limits&&Number.isFinite(x.limits[0])&&Number.isFinite(x.limits[1]));
+    for(const m of mechs){
+      if(m.internal||m.keep||m.manual||spec||m.couple) continue;
+      const p=byId.get(m.parent); if(!p||p.internal||p.couple||p.keep||p.manual) continue;
+      if(kindOf(m)==="linear"||kindOf(p)==="linear"||!m.axis||!p.axis||!m.pivot||!p.pivot) continue;
+      if(Math.abs(dot(m.axis,p.axis))<Math.cos(3*DEG)) continue;
+      const d=sub(m.pivot,p.pivot), t=dot(d,p.axis);
+      if(Math.hypot(d[0]-p.axis[0]*t,d[1]-p.axis[1]*t,d[2]-p.axis[2]*t)>0.006) continue;
+      const drop=lim(m)&&!lim(p)?p:m;
+      drop.internal=true; drop.internalWhy="coaxial"; reasons.coaxial++; internal++;
+    }
+    if(reasons.small) why.push(reasons.small+" small turn"+(reasons.small===1?"":"s")+" (shafts, bearing races, rollers) left fixed.");
     if(reasons.hardware) why.push(reasons.hardware+" joint"+(reasons.hardware===1?"":"s")+" carrying only hardware (hubs, spacers, motor shafts) left fixed.");
+    if(reasons.axle) why.push(reasons.axle+" turn"+(reasons.axle===1?"":"s")+" on the drive wheels' axles (shafts, hubs, bearings) left to the drive.");
+    if(reasons.coaxial) why.push(reasons.coaxial+" turn"+(reasons.coaxial===1?"":"s")+" on the same axis as the turn "+(reasons.coaxial===1?"it hangs":"they hang")+" from (a gear on a gear, a shaft in its bearing) folded into "+(reasons.coaxial===1?"it":"them")+".");
     return {internal, mechanisms:mechs.length-internal, why};
   }
 

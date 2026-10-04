@@ -138,8 +138,11 @@ const {checkRobot, setupAuto}=(function(){
     const A=cadActuators(cad).filter(a=>a.role!=="drive");
     const onAxis=(a,m)=>{ if(Math.abs(dot(a.axis,m.axis))<Math.cos(4*DEG)) return false;
       const d=sub(a.pivot.map(v=>v/1000),m.pivot||[0,0,0]), t=dot(d,m.axis); return Math.hypot(d[0]-m.axis[0]*t,d[1]-m.axis[1]*t,d[2]-m.axis[2]*t)<0.008; };
+    const exactMates=!!(cad&&cad.mates&&cad.mates.source&&cad.mates.source!=="spec");
     if(A.length) for(const m of mechs){
-      if(normJointKind(m.kind)==="linear"||m.couple||!driven.has(m.id)||!m.axis) continue;
+      // a joint from the CAD's own mates (Onshape, a URDF export) has its axis exactly; this check is
+      // for axes the geometry guessed or a joint spec wrote by hand
+      if(normJointKind(m.kind)==="linear"||m.couple||(m.fromMate&&exactMates)||!driven.has(m.id)||!m.axis) continue;
       const dv=acts.find(d=>d.name===driven.get(m.id)); if(!dv) continue;
       const hit=A.find(a=>onAxis(a,m));
       if(!hit){ put({key:"axis:"+m.id, sev:"warn", joint:m.id, device:dv.name, ask:"look",
