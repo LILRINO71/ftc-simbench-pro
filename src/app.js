@@ -3021,7 +3021,7 @@ function boot(){
     // back from signing in to Onshape in this tab (no pop-up allowed): the card carries on with the pasted address
     const back=/^#onshape-(signed-in|signin-failed)/.exec(location.hash);
     if(back){ try{ history.replaceState(null,"",location.pathname+location.search); }catch(e){} ImportFlow.signedIn(back[1]==="signed-in",""); }
-    else if(new URLSearchParams(location.search).get("robot")!=="sample") loadDefaultRobot();
+    if(new URLSearchParams(location.search).get("robot")!=="sample") loadDefaultRobot();
   }catch(e){}
 }
 // three.js arrives as an ES module (tools/build.mjs): boot once it has
