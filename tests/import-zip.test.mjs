@@ -263,3 +263,17 @@ test('mass: the export\'s own figure when it has a material, its volume at the m
   const props = E.massProps(cad);
   assert.ok(props.kg > 0.5 && props.kg < 3, 'a plausible little robot: ' + props.kg.toFixed(2));
 });
+
+test('shooter: a robot read whole from its CAD brings its own shooter, so no stand-in is drawn for it', () => {
+  const Sim = E.Sim, Shots = E.Shots;
+  const saved = { cad: Sim.cad, opts: Sim.opts, cfg: Shots.cfg, footprint: Sim.footprint };
+  try {
+    Shots.cfg = { shooter: 'outtake', mountDeg: 0 }; Sim.opts = { shooterModel: 'auto' }; Sim.footprint = { hx: 0.2 };
+    Sim.cad = { source: 'urdf', parts: [], solids: [] };
+    assert.equal(Shots.module(), null, 'an exported robot: nothing drawn in');
+    Sim.cad = { source: 'step', parts: [{ name: 'Channel' }], solids: [] };
+    assert.ok(Shots.module(), 'a STEP with no flywheel part still gets the stand-in');
+    Sim.cad = { source: 'urdf', parts: [], solids: [] }; Sim.opts = { shooterModel: 'show' };
+    assert.ok(Shots.module(), 'asked to show it, it is drawn');
+  } finally { Sim.cad = saved.cad; Sim.opts = saved.opts; Shots.cfg = saved.cfg; Sim.footprint = saved.footprint; }
+});
