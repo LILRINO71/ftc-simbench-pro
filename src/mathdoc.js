@@ -250,7 +250,7 @@ function mdMassSection(X) {
 
   const cap = 20;
   for (const p of parts.slice(0, cap)) {
-    const vendor = /vendor|listed|catalog|published|spec/i.test(p.how || "");
+    const vendor = /vendor|listed|catalog|published|spec|cad/i.test(p.how || "");
     rows.push({ label: String(p.name || "part"), symbols: "", expr: "m = " + mdNum(p.kg) + " kg",
       value: p.kg, unit: "kg",
       note: p.how ? String(p.how) : "no note on how this mass was obtained",

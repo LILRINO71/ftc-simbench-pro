@@ -42,16 +42,19 @@ const MASS_MIN_T = THIN_T;
                entirely air, so the fill is tiny.
      fastener  steel 7850, minus thread valleys, drives and countersinks. */
 const MATERIALS = {
-  metal:       {density:2700, fill:0.18, label:"aluminium structure"},
-  plate:       {density:2700, fill:0.60, label:"aluminium plate, pocketed"},
-  servo:       {density:1800, fill:0.85, label:"servo"},
-  motor:       {density:3200, fill:0.63, label:"gearmotor"},
-  wheel:       {density:1400, fill:0.60, label:"wheel/tread"},
-  electronics: {density:1500, fill:0.35, label:"electronics"},
-  clear:       {density:1200, fill:0.90, label:"polycarbonate"},
-  printed:     {density:1240, fill:0.35, label:"3D print"},
-  belt:        {density:1200, fill:0.10, label:"belt/cable"},
-  fastener:    {density:7850, fill:0.55, label:"steel fastener"}
+  // density x fill is the mass of a part's convex hull; `solid` is the density of the
+  // material itself, for when the part's true volume is known (a CAD export's inertial)
+  metal:       {density:2700, fill:0.18, solid:2700, label:"aluminium structure"},
+  plate:       {density:2700, fill:0.60, solid:2700, label:"aluminium plate, pocketed"},
+  servo:       {density:1800, fill:0.85, solid:1800, label:"servo"},
+  motor:       {density:3200, fill:0.63, solid:3600, label:"gearmotor"},
+  wheel:       {density:1400, fill:0.60, solid:1200, label:"wheel/tread"},
+  electronics: {density:1500, fill:0.35, solid:1500, label:"electronics"},
+  clear:       {density:1200, fill:0.90, solid:1200, label:"polycarbonate"},
+  printed:     {density:1240, fill:0.35, solid:1100, label:"3D print"},
+  belt:        {density:1200, fill:0.10, solid:1200, label:"belt/cable"},
+  fastener:    {density:7850, fill:0.55, solid:7850, label:"steel fastener"},
+  game:        {density:0,    fill:0,    solid:0,    label:"game element"}
 };
 
 /* Parts whose published mass we actually know, best match first. Anything
@@ -75,6 +78,12 @@ const VENDOR_NOT = /\b(mount|mounts|bracket|strap|clamp|cable|wire|harness|clip|
 /* …and a published mass is only believable when the part it lands on is
    roughly the right size. Outside this band, the name matched something else. */
 const VENDOR_DENSITY = {lo:300, hi:9000};
+// a CAD-given mass over the part's hull: a hollow channel's hull is mostly air (down to ~50 kg/m^3), steel is 7800
+const CAD_DENSITY = {lo:40, hi:9000};
+// a team-drawn part of unknown material: between PLA (1240) and polycarbonate (1200), with some aluminium among them
+const CUSTOM_DENSITY = 1300;
+// Onshape's "Part 1", a bare "plate" or "body": a part the team drew, not a catalogue item
+const isCustomName = (n) => /^(part|body|solid|plate|bracket|mount|spacer|arm|link|cover|guard|hood|ramp)\b\s*\d*\s*$|^part\s*\d+/i.test(String(n || "").trim());
 
 /* Axis-aligned box of a point set: centre and the three side lengths.
    No points at all gives a zero box at the origin, never Infinity. */
@@ -175,6 +184,29 @@ function partMass(solid, opts){
     const lin = linearVendorMass(solid, pts);
     if(lin) return {kg:lin.kg, how:"vendor", density:(vol>0 ? lin.kg/vol : 0), fill:1, volume:vol, why:lin.why};
   }
+  let kind = (solid && solid.kind) || "metal";
+  // a game element drawn in the robot (an artifact in the hopper) is not the robot's mass;
+  // what it carries is the payload setting
+  if(kind === "game") return {kg:0, how:"game", density:0, fill:0, volume:vol, why:"a game element, not part of the robot"};
+  // the CAD's own mass (an Onshape URDF export's inertial). With a material set it is the
+  // real mass, kept when it is plausible for the part's hull. With no material Onshape's
+  // exporter writes the part at a density of 1 kg/m^3 — the number IS the part's volume
+  // in m^3 (checked on a goBILDA export: pins and rollers at 0.4-0.7 of their hull, channels
+  // at 0.1-0.3) — so that volume at the kind's solid density beats any hull-and-fill guess.
+  if(opts.cad !== false && solid && Number.isFinite(solid.kg) && solid.kg > 0 && vol > 0){
+    const d = solid.kg/vol;
+    if(d >= CAD_DENSITY.lo && d <= CAD_DENSITY.hi) return {kg:solid.kg, how:"cad", density:d, fill:1, volume:vol, why:"mass from the CAD's own material"};
+    if(d > 0.02 && d <= 1.05){
+      const k = (kind === "metal" && isPlateShape(pts)) ? "plate" : kind;
+      const mat = MATERIALS[k] || MATERIALS.metal;
+      let rho = Number.isFinite(mat.solid) ? mat.solid : mat.density, label = mat.label || k;
+      // a part with a vendor number is stock, nearly always aluminium; one the team drew
+      // itself ("Part 1", "Plate") is printed or cut from polycarbonate far more often than
+      // machined, and reading every one as aluminium weighed a robot 5 kg over
+      if((k === "metal" || k === "plate") && !solid.part && isCustomName(solid.name)){ rho = CUSTOM_DENSITY; label = "a part the team drew (printed or polycarbonate)"; }
+      return {kg:solid.kg*rho, how:"cad", density:rho, fill:1, volume:solid.kg, why:"the CAD's volume (no material set) at "+rho+" kg/m^3, "+label};
+    }
+  }
   let tbl = MATERIALS;
   if(opts.materials){                        // merge per kind: {metal:{density:5000}} keeps metal's fill
     tbl = Object.assign({}, MATERIALS);
@@ -183,7 +215,6 @@ function partMass(solid, opts){
     const m = opts.materials.metal;
     if(m && Number.isFinite(m.density) && !opts.materials.plate) tbl.plate = Object.assign({}, MATERIALS.plate, {density:m.density});
   }
-  let kind = (solid && solid.kind) || "metal";
   // a flat plate's hull is nearly all metal, unlike a channel's; the 0.18
   // structure fill read a 6 mm base plate at under a third of its weight
   if(kind === "metal" && isPlateShape(pts)) kind = "plate";
@@ -256,7 +287,7 @@ function massProps(cad, opts){
     const pm = partMass(s, opts), b = massBoxOf(s.pts || []);
     parts.push({name:s.name || "part", kg:pm.kg, how:pm.how});
     items.push({kg:pm.kg, com:{x:b.c[0], y:b.c[1], z:b.c[2]}, box:{L:b.L, W:b.W, H:b.H}});
-    if(pm.how === "vendor") vendorKg += pm.kg;
+    if(pm.how === "vendor" || pm.how === "cad") vendorKg += pm.kg;
     const top = b.c[2] + b.H/2; if(top > zTop) zTop = top;
   }
   if(!Number.isFinite(zTop)) zTop = 0;

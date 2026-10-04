@@ -108,6 +108,8 @@ function thinPoints(pts,max){
 function solidKind(name,pn){
   const s=String(name||"").toLowerCase(), p=String(pn||"");
   if(/screw|bolt|\bnut\b|washer|rivet|shcs|bhcs|fhcs|set ?screw|locknut/.test(s)) return "fastener";
+  // a season's game element drawn in the robot (DECODE's artifact, INTO THE DEEP's sample): not the robot
+  if(/\bartifacts?\b|\bspecimens?\b|\bsamples?\b|\bpixels?\b|game ?(piece|element)|am-3376|am-5201|am-5101/.test(s)||/^am-(3376|5201|5101)/.test(p)) return "game";
   if(/^520[234]-/.test(p)||/yellow ?jacket|gearmotor|\bmotor\b/.test(s)) return "motor";
   if(/^2000-0025/.test(p)||/\bservo\b/.test(s)) return "servo";
   if(/mecanum|omni|wheel|tire|tyre|traction|gecko|roller/.test(s)) return "wheel";
