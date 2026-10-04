@@ -116,6 +116,28 @@ The research behind the fixes is in
   normals (see docs/joints.md "What a real export taught"). It now loads
   with one question per unbound device and a plausible mass. Tests:
   `tests/urdf-onshape.test.mjs`.
+  Driving it then showed the last two things (2026-10-03, round three):
+  - **The drive follows the code.** The CAD read the owner's four motors
+    as inboard (left side to reverse); their code reverses only one left
+    motor and the robot drives straight on the field. The bench now takes
+    each drive wheel's mounting from what the code commands it on "stick
+    up" after setDirection (the VM measures it, the line reader is probed
+    once in `Sim.probeSense`), for tank and mecanum bases; the CAD's
+    reading is the cross-check, reported in the drive check and the robot
+    check as "the CAD reads N motors the other way". `OPTS.driveFrom`
+    ("code" | "cad") picks. A kiwi or X-drive keeps the CAD's reading:
+    their wheels sit at angles, so stick-up signs are kinematics.
+  - **A mecanum base is X.** The CAD read one wheel's rollers the other
+    hand (an "O"/mixed pattern), which made strafing spin the robot. Four
+    mecanum wheels are modelled X whatever the rollers read, with a note
+    naming the odd wheel.
+  Also from the owner's list: the Actuators dock cell is gone (the gauges
+  were noise), a robot read from its CAD gets no stand-in shooter drawn in,
+  Onshape's default greys are no colour (the part is drawn by what it is,
+  as a STEP's are), the CAD view has a "Back to the field" button, the
+  sample robot stays hidden until the default robot loads (shown only if
+  it can't), and the OpMode list starts with the default robot's own
+  TeleOp only; everything else is what the team uploads.
 - **URDF** (`src/urdf.js`): drop a `.urdf` with its meshes (STL, OBJ, glTF,
   GLB, COLLADA), loose or zipped. URDF is what the Fusion, SolidWorks and
   FreeCAD exporters write. Links become parts, joints become mates, and

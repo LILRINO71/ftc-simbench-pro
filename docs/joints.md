@@ -79,6 +79,13 @@ What a real export taught (a 1,900-link, 9.4-million-triangle robot, 2026-10-03)
   (`parallel_5_loop_closure`) stands for no named part and is left out.
 - **An intake roller is not a drive wheel**: a compact body with a wheel-shaped part is skipped
   as a wheel only when it sits on the floor.
+- **The drive follows the code.** The CAD read the four drive motors one way; the team's code
+  reverses a different set and the robot drives straight on the field. Each drive wheel's mounting
+  is now what the code commands it on "stick up" after `setDirection` (`Sim.probeSense` for the
+  line reader, the VM's own probe otherwise), for tank and mecanum bases; the CAD's reading is
+  reported as a disagreement, not applied. `OPTS.driveFrom="cad"` asks for the old behaviour.
+- **Four mecanum wheels are modelled X** whatever their rollers read (a real base is built X; an
+  "O" or a mix can't drive), with a note naming the wheel that read the other hand.
 
 **Sign in with Onshape** (`src/onshapelink.js`, `functions/onshape/`): in the **Get my robot from
 Onshape** pop-up, sign in through Onshape's own page once, then paste the assembly's address. It
