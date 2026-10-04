@@ -86,7 +86,7 @@ const {checkRobot, setupAuto}=(function(){
     else if(src==="onshape") put({key:"source", sev:"ok", text:cad.source==="urdf"?"Joints come from your URDF's joints, so axes, pivots and parts are exact.":"Joints come from your Onshape mates, so axes, pivots and parts are exact."});
     else if(src==="spec"&&!(cad.mates.auto)) put({key:"source", sev:"ok", text:"Joints come from a joint spec"+(cad.mates.name?" ("+cad.mates.name+")":"")+"."});
     else put({key:"source", sev:"note", ask:"mates", text:(src==="spec"?"Joints were found from the geometry":"Joints are guessed from the assembly")+
-      ". The Onshape bookmark or a URDF would make them exact."});
+      ". Bringing the robot from Onshape (its link or its export) would make them exact."});
 
     // every device the code moves
     const driven=new Map();                          // joint id -> device

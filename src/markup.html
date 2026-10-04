@@ -92,7 +92,7 @@
           <div id="mech"></div>
         </div>
         <div class="vp-chips">
-          <button class="vp-tour vp-os" id="vpOnshape" type="button" hidden><i aria-hidden="true"></i>Bring your robot<span>from Onshape, in two steps</span></button>
+          <button class="vp-tour vp-os" id="vpOnshape" type="button" hidden><i aria-hidden="true"></i>Bring your robot<span>paste your Onshape link</span></button>
           <button class="vp-tour vp-setup" id="vpSetup" type="button" hidden><i aria-hidden="true"></i>Review this robot<span>a few checks, once</span></button>
           <button class="vp-tour" id="vpTour" type="button" hidden><i aria-hidden="true"></i>New here? Take the tour<span>1 min</span></button>
         </div>
@@ -212,7 +212,6 @@
           <button type="button" id="exportMath" role="menuitem">Export the math<kbd>.md</kbd></button>
           <hr>
           <button type="button" id="helpBtn" role="menuitem">Take the tour</button>
-          <a id="supportBtn" href="https://buymeacoffee.com/" hidden target="_blank" rel="noopener" role="menuitem">Support the developers</a>
         </div>
       </div>
       <input type="file" id="sessionFile" accept=".ftcsim,.json" hidden>
@@ -234,23 +233,21 @@
     <button class="rail-strip" type="button" data-rail="left" aria-label="Show the left panel"><span>Robot · Code · Java · Tune</span></button>
 
     <section class="pane" data-pane="robot">
-      <div class="onshape-note" id="onshapeNote" hidden></div>
-
       <!-- the robot, as it is -->
       <div class="sec card" data-sec="cad">
         <div class="sec-head"><h3>Your robot</h3><span class="spacer"></span><span class="mono dim" id="vpDims">—</span></div>
-        <div class="drop ok" id="cadDrop" tabindex="0" role="button" aria-label="Load a robot: Onshape URDF zip, STEP, or URDF with meshes">
-          <div class="dt">Drop a robot here <small>Onshape URDF zip · STEP · URDF</small></div>
+        <div class="drop ok" id="cadDrop" tabindex="0" role="button" aria-label="Load a robot: an export zip or a STEP">
+          <div class="dt">Drop a robot here <small>Onshape export zip · STEP</small></div>
           <div class="ds" id="cadStatus">sample: fulll.step (measured)</div>
         </div>
-        <input type="file" id="cadFile" accept=".zip,.step,.stp,.STEP,.STP,.urdf,.stl,.STL,.glb,.gltf,.obj,.json" multiple hidden>
+        <input type="file" id="cadFile" accept=".zip,.step,.stp,.STEP,.STP,.json" multiple hidden>
         <div class="load-row">
           <button class="load-btn os" type="button" id="importOpen">
             <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v9m0 0 3.5-3.5M10 12 6.5 8.5M4 14.5v1A1.5 1.5 0 0 0 5.5 17h9a1.5 1.5 0 0 0 1.5-1.5v-1" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            <span><b>Bring your robot</b><small>Onshape export, two steps</small></span></button>
+            <span><b>Bring your robot</b><small>paste your Onshape link</small></span></button>
           <button class="load-btn" type="button" id="cadPick">
             <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 2.5h6.5L15 6v11.5H5z M11.5 2.5V6H15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
-            <span><b>Open a file</b><small>zip, STEP or URDF</small></span></button>
+            <span><b>Open a file</b><small>export zip or STEP</small></span></button>
         </div>
         <details class="fine"><summary>How the CAD was read</summary>
           <p class="hint" id="frameNote"></p>
@@ -274,28 +271,13 @@
         <summary><span>Advanced</span><small>joints, mates, hardware map, configuration, rig</small></summary>
 
         <div class="sec" data-sec="mates">
-          <div class="sec-head"><h3>Mates &amp; joints</h3><span class="pill" id="matePill">none</span><span class="spacer"></span>
+          <div class="sec-head"><h3>Joints</h3><span class="pill" id="matePill">none</span><span class="spacer"></span>
             <button class="btn-sm" id="mateClear" type="button" hidden>Remove</button></div>
-          <p class="hint">A robot from Onshape's URDF export brings its mates as exact joints. A plain STEP has none, so they're found from the geometry.
-            <button class="btn-sm" type="button" data-os-open id="onshapeQuick">Read the mates from Onshape instead</button></p>
-          <details class="mate-manual"><summary>By hand, with the assembly's URL</summary>
-          <div class="form2">
-            <span>Assembly URL</span>
-            <input id="mateUrl" type="url" placeholder="https://cad.onshape.com/documents/…/w/…/e/…" spellcheck="false" autocomplete="off">
-          </div>
-          <ol class="mate-steps hint" id="mateSteps">
-            <li>Paste the URL of the Onshape assembly you exported the STEP from.</li>
-            <li>Open the links below in a browser signed in to Onshape. No API keys needed.</li>
-            <li>Save each page (Ctrl+S) and drop the files here.</li>
-          </ol>
-          <div class="mate-links" id="mateLinks" hidden>
-            <a id="mateDefLink" target="_blank" rel="noopener noreferrer">Assembly definition (the mates)</a>
-            <a id="mateFeatLink" target="_blank" rel="noopener noreferrer">Assembly features (mate limits, optional)</a>
-          </div>
-          </details>
-          <div class="drop" id="mateDrop" tabindex="0" role="button" aria-label="Load the Onshape assembly JSON files">
-            <div class="dt">Onshape .json files, or a <a href="robots/into-the-deep/joints.json" target="_blank" rel="noopener">joint spec</a></div>
-            <div class="ds" id="mateStatus">Drop the assembly definition, and the features file too if you want limits.</div>
+          <p class="hint">A robot read from Onshape (its link or its export) brings its mates as exact joints. A plain STEP has none, so they're found from the geometry.
+            <button class="btn-sm" type="button" id="jointsOnshape">Bring the robot from Onshape</button></p>
+          <div class="drop" id="mateDrop" tabindex="0" role="button" aria-label="Load a joint sheet, a joint spec or a setup file">
+            <div class="dt">Joint sheet · <a href="robots/into-the-deep/joints.json" target="_blank" rel="noopener">joint spec</a> · setup file</div>
+            <div class="ds" id="mateStatus">Drop a joint sheet, a joint spec or a setup file.</div>
           </div>
           <input type="file" id="mateFile" accept=".json,application/json" multiple hidden>
           <div class="joint-acts" id="jointActs">
@@ -341,6 +323,7 @@
         </div>
         <div class="sec" data-sec="rig" data-collapsed="1">
           <div class="sec-head"><h3>Kinematic rig</h3><span class="pill" id="guessPill">—</span><span class="spacer"></span>
+            <button class="btn-sm" id="rigReset" type="button" title="Throw away every rig edit and detect the robot again">Re-detect</button>
             <button class="btn-sm" id="addJoint" type="button">+ Joint</button></div>
           <p class="hint">The rig is the model everything runs on, and it's yours: detection only seeds it. Edits save with this CAD.</p>
           <div class="scrollx"><table class="grid" id="rigTable"></table></div>
@@ -348,21 +331,10 @@
         <div class="sec" data-sec="chain" data-collapsed="1">
           <div class="sec-head"><h3>What moves with what</h3><span class="pill" id="rigPill">—</span></div>
           <div id="rigChain"></div>
-          <div class="slide"><label for="turretSlider">Turret radius</label>
-            <input type="range" id="turretSlider" min="15" max="250" step="5" value="55">
-            <span class="v" id="turretVal">55 %</span></div>
         </div>
         <div class="sec" data-sec="assembly" data-collapsed="1">
           <div class="sec-head"><h3>Assembly</h3><span class="pill" id="partPill">—</span></div>
           <div class="scroll-list"><table class="grid" id="treeTable"></table></div>
-        </div>
-        <div class="sec" data-sec="portable" data-collapsed="1">
-          <div class="sec-head"><h3>Portable rig</h3><span class="spacer"></span>
-            <button class="btn-sm" id="rigCopy" type="button">Copy</button>
-            <button class="btn-sm" id="rigApply" type="button">Apply</button>
-            <button class="btn-sm" id="rigReset" type="button">Re-detect</button></div>
-          <textarea id="rigJson" class="srcbox small" spellcheck="false" aria-label="Rig JSON"></textarea>
-          <p class="hint">Commit this next to your OpMode; next season starts from last season's rig.</p>
         </div>
       </details>
     </section>
@@ -547,147 +519,6 @@
     </div>
   </div>
 
-  <!-- Onshape, read live (the advanced way: a sign-in, or the bookmark) -->
-  <div class="overlay" id="osOverlay" hidden>
-    <div class="sheet os-sheet" role="dialog" aria-modal="true" aria-labelledby="osTitle">
-      <button class="sheet-x" id="osClose" type="button" aria-label="Close">×</button>
-
-      <div id="osGuide">
-        <h2 id="osTitle">Read the mates from Onshape</h2>
-        <p class="os-lead">The usual way needs no sign-in: in Onshape, right-click your assembly tab, <b>Export</b>, format <b>URDF</b>, and drop the zip on SimBench. This page is for the rest: reading your assembly live, with mate relations (gear and cascade ratios) that the export leaves out.</p>
-        <p class="os-warn" id="osPhone" hidden>This needs a computer: Chrome, Edge, Firefox, Safari or a Chromebook.</p>
-
-        <div id="osSignInWay">
-          <ol class="os-steps">
-            <li class="os-step" id="osStep1">
-              <span class="os-n">1</span>
-              <div class="os-body">
-                <h3>Sign in with Onshape</h3>
-                <p>A small Onshape window opens. Sign in if it asks, then click <b>Allow</b>. SimBench can only <b>read</b> your documents. You do this once per browser.</p>
-                <div class="os-row">
-                  <button class="btn-sm primary os-big" type="button" id="osSignIn">Sign in with Onshape</button>
-                  <span class="os-ok" id="osSignedIn" hidden>✓ Signed in to Onshape <button class="linkish" type="button" id="osSignOut">sign out</button></span>
-                </div>
-                <p class="os-tip" id="osSignTip" hidden></p>
-              </div>
-            </li>
-            <li class="os-step">
-              <span class="os-n">2</span>
-              <div class="os-body">
-                <h3>Copy your assembly's address</h3>
-                <p>In Onshape, open your robot and click its <b>Assembly</b> tab along the bottom (not a Part Studio). Then click the address bar at the top and press <kbd id="osKey3">Ctrl</kbd> + <kbd>C</kbd>.</p>
-                <svg class="os-pic" viewBox="0 0 360 96" aria-hidden="true">
-                  <rect x="1" y="1" width="358" height="94" rx="8" class="p-win"/>
-                  <rect x="10" y="8" width="340" height="18" rx="9" class="p-addr hi"/><text x="20" y="21" class="p-t">cad.onshape.com/documents/…/e/…</text>
-                  <text x="240" y="21" class="p-t acc">← copy this</text>
-                  <rect x="10" y="32" width="340" height="32" rx="4" class="p-canvas"/><text x="150" y="52" class="p-t dim">your robot</text>
-                  <rect x="10" y="70" width="86" height="18" rx="3" class="p-tab"/><text x="18" y="83" class="p-t dim">Part Studio 1</text>
-                  <rect x="102" y="70" width="86" height="18" rx="3" class="p-tab hi"/><text x="112" y="83" class="p-t">◈ Assembly 1</text>
-                  <path d="M226 79 h-30 M202 73 l-6 6 6 6" class="p-arrow"/><text x="232" y="83" class="p-t acc">open this tab first</text>
-                </svg>
-                <a class="btn-sm" href="https://cad.onshape.com/documents" target="_blank" rel="noopener">Open Onshape in a new tab ↗</a>
-              </div>
-            </li>
-            <li class="os-step">
-              <span class="os-n">3</span>
-              <div class="os-body">
-                <h3>Paste it here and get your robot</h3>
-                <form class="os-link" id="osLinkForm" autocomplete="off">
-                  <input type="url" id="osLink" spellcheck="false" placeholder="Paste your assembly's address (Ctrl + V)" aria-label="Your Onshape assembly's address">
-                  <button class="btn-sm primary" type="submit" id="osGet">Get my robot</button>
-                </form>
-                <p class="os-tip" id="osLinkTip" hidden></p>
-                <p class="dim">SimBench remembers this address, so next time it's one click.</p>
-              </div>
-            </li>
-          </ol>
-        </div>
-        <p class="os-warn" id="osNoSignIn" hidden>Sign in with Onshape isn't switched on for this copy of SimBench. Use Onshape's URDF export (Export → URDF, drop the zip here), or the bookmark below on a home computer.</p>
-
-        <details class="os-way" id="osBmWay"><summary>Or use the bookmark (home computers only)</summary>
-          <p class="os-warn">School computers block bookmarks that run code. If clicking it does nothing, or a tab says <code>about:blank#blocked</code>, use the URDF export instead.</p>
-          <p class="os-once">Steps 1 and 2 are <b>once per computer</b>. After that, getting your robot is just steps 3 and 4.</p>
-          <ol class="os-steps small">
-            <li class="os-step">
-              <span class="os-n">1</span>
-              <div class="os-body">
-                <h3>Show your bookmarks bar</h3>
-                <p>Press <kbd id="osKey1">Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>B</kbd>. A thin bar appears just under the address bar. <span class="dim">(Already there? Skip this.)</span></p>
-              </div>
-            </li>
-            <li class="os-step">
-              <span class="os-n">2</span>
-              <div class="os-body">
-                <h3>Drag this button up onto that bar</h3>
-                <div class="os-drag"><a class="bm-link big" id="osBookmark" href="#" draggable="true" title="Drag me onto your bookmarks bar">★ Send to SimBench</a>
-                  <span class="os-hand">Press, hold, drag it up, let go.</span></div>
-                <p>Drop it on the <b>bookmarks bar</b>, not on the Onshape page. Don't click it here; it only works on your Onshape tab.</p>
-                <p class="os-tip" id="osBmTip" hidden></p>
-                <details class="os-alt"><summary>Can't drag it? Add it by hand instead</summary>
-                  <ol>
-                    <li><button class="btn-sm primary" type="button" id="osCopy">Copy the bookmark</button> <span class="dim" id="osCopied"></span></li>
-                    <li>Right-click an empty spot on your bookmarks bar and choose <b>Add page…</b> (Chrome, Edge) or <b>Add Bookmark…</b> (Firefox).</li>
-                    <li>Name: <b>Send to SimBench</b>. In the <b>URL</b> box, paste (<kbd id="osKey2">Ctrl</kbd>+<kbd>V</kbd>). Save.</li>
-                  </ol>
-                </details>
-              </div>
-            </li>
-            <li class="os-step">
-              <span class="os-n">3</span>
-              <div class="os-body">
-                <h3>Open your robot's <u>assembly</u> in Onshape</h3>
-                <p>Sign in to Onshape, open your robot's document, and click the <b>Assembly</b> tab along the bottom. Not a Part Studio: the joints live in the assembly.</p>
-                <a class="btn-sm" href="https://cad.onshape.com/documents" target="_blank" rel="noopener">Open Onshape in a new tab ↗</a>
-              </div>
-            </li>
-            <li class="os-step">
-              <span class="os-n">4</span>
-              <div class="os-body">
-                <h3>Click <b>Send to SimBench</b> on your bookmarks bar</h3>
-                <p>A SimBench tab opens and reads your robot. <b>Keep the Onshape tab open</b> until your robot appears. A big robot takes about a minute.</p>
-              </div>
-            </li>
-          </ol>
-        </details>
-
-        <details class="os-help"><summary>It didn't work?</summary>
-          <dl>
-            <dt>The Onshape window didn't open</dt>
-            <dd>Your browser blocked the pop-up. Click <b>Sign in with Onshape</b> again: this time it opens in this tab and brings you back here.</dd>
-            <dt>Onshape asked me to sign in, then nothing happened</dt>
-            <dd>Finish signing in and click <b>Allow</b>. If the window is gone, click <b>Sign in with Onshape</b> again.</dd>
-            <dt>It says the link isn't an assembly</dt>
-            <dd>The address has to come from the <b>Assembly</b> tab, not a Part Studio or a drawing. Click that tab in Onshape, then copy the address again.</dd>
-            <dt>It says I'm not allowed (401 or 403)</dt>
-            <dd>The document has to be yours or shared with you (view access is enough). Click <b>sign out</b>, then sign in again with the Onshape account that owns the robot.</dd>
-            <dt>The bookmark does nothing, or I see about:blank#blocked</dt>
-            <dd>Your school blocks bookmarks that run code. Use Onshape's URDF export instead: it needs nothing but the zip.</dd>
-            <dt>It's taking a long time</dt>
-            <dd>Every part studio is read once; a robot with 100 of them takes a minute or two.</dd>
-          </dl>
-        </details>
-
-        <div class="os-foot">
-          <span class="dim">Read-only, with your own Onshape sign-in. Nothing is stored on our side.</span>
-          <span class="spacer"></span>
-          <button class="btn-sm primary" id="osDone" type="button">Close</button>
-        </div>
-      </div>
-
-      <div id="osProgress" hidden>
-        <h2 id="osProgTitle">Getting your robot from Onshape</h2>
-        <div class="os-meter" id="osMeter"><i id="osMeterFill"></i></div>
-        <p class="os-prog" id="osProgText">Waiting for your Onshape tab …</p>
-        <p class="hint" id="osProgHint">Keep your Onshape tab open until your robot appears.</p>
-        <div class="os-foot">
-          <button class="btn-sm" id="osShowSteps" type="button">Show the steps</button>
-          <span class="spacer"></span>
-          <button class="btn-sm primary" id="osSeeRobot" type="button" hidden>See my robot</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
   <div class="overlay" id="ghOverlay" hidden>
     <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="ghTitle">
       <button class="sheet-x" id="ghClose" type="button" aria-label="Close">×</button>
@@ -703,5 +534,4 @@
     </div>
   </div>
 
-  <div class="drop-veil" id="dropVeil" hidden><div><b>Drop it anywhere</b><span>Onshape URDF zip · STEP · .java OpModes · .ftcsim workspace · configuration .xml</span></div></div>
 </div>

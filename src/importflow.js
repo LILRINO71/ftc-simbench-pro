@@ -3,8 +3,9 @@
    ------------------------------------------------------------
    One card over the field says, at every moment, the one thing to do next:
 
-     bring      no robot of the team's own yet: the two Onshape steps (Export
-                as URDF, drop the zip), or any file at all
+     bring      no robot of the team's own yet: paste the Onshape assembly's
+                address (read through Sign in with Onshape, src/onshapelink.js,
+                in the engine worker), or drop the export zip or any file
      busy       reading it: one bar, plain words, the robot appears when done
      code       a robot, no code: drop the .java files or paste a GitHub repo
      review     both: what the bench worked out (up, front, drive base, mass,
@@ -22,6 +23,7 @@
    ============================================================ */
 const ImportFlow={
   state:"bring", dismissed:false, busy:null, code:null, last:null, sheetOpen:false, draft:null, showAll:false, showNames:false,
+  signin:{ready:null, signedIn:false}, pendingLink:null, tip:"", tipBad:false,
   init(){
     const card=$("#importCard"); if(!card) return;
     card.addEventListener("click",e=>this.click(e));
@@ -29,7 +31,11 @@ const ImportFlow={
     card.addEventListener("change",e=>this.sheetInput(e));
     card.addEventListener("submit",e=>{ e.preventDefault(); const f=e.target;
       if(f.id==="icGh"){ $("#ghUrl").value=$("#icGhUrl").value; GH.find().then(()=>{ if(!$("#ghOverlay").hidden) return; }); GH.open(true); }
+      if(f.id==="icLink") this.fromLink();
     });
+    // the sign-in window says how it went (functions/onshape callback page)
+    addEventListener("message",e=>{ if(e.origin===location.origin&&e.data&&e.data.type==="simbench-onshape-signin") this.signedIn(!!e.data.ok,String(e.data.msg||"")); });
+    this.refreshSignIn().then(()=>{ if(this.state==="bring") this.render(); });
     // the drop target inside the card takes anything the page takes
     card.addEventListener("dragover",e=>{ e.preventDefault(); const d=e.target.closest(".ic-drop"); if(d) d.classList.add("armed"); });
     card.addEventListener("dragleave",e=>{ const d=e.target.closest(".ic-drop"); if(d) d.classList.remove("armed"); });
@@ -81,24 +87,35 @@ const ImportFlow={
   renderBusy(){ const m=$("#icMeter"), t=$("#icProg"); if(!m||!this.busy) return;
     m.className="ic-meter"+(this.busy.frac==null?" busy":""); if(this.busy.frac!=null) m.firstElementChild.style.width=Math.round(Math.max(.04,Math.min(1,this.busy.frac))*100)+"%";
     if(t) t.textContent=this.busy.text||this.busy.title; },
-  /* the field's chip: offer the card when it isn't showing and there's something to do */
-  chip(){ const c=$("#vpSetup"); if(!c) return; const show=$("#importCard").hidden&&(this.compute()==="review"); c.hidden=!show; },
+  /* the field's chips: offer the card when it isn't showing and there's something to do */
+  chip(){
+    const hidden=$("#importCard").hidden;
+    const c=$("#vpSetup"); if(c) c.hidden=!(hidden&&this.compute()==="review");
+    // while the demo robot is on the field, offer the team's own
+    const o=$("#vpOnshape"); if(o){ let own=true; try{ own=ownRobot()||!!(CAD&&(CAD.source==="onshape"||CAD.source==="urdf")); }catch(e){} o.hidden=own||!hidden; }
+  },
 
   /* ---------------- the cards ---------------- */
   htmlBring(){
     const bad=this.last&&this.last.bad?`<p class="ic-why bad">${esc(this.last.bad)}</p>`:"";
-    return `<div class="ic-head"><div><h2>Bring your robot</h2><p>Two steps in Onshape, and it arrives with every joint from your mates, every part in its colour, and its real weight.</p></div>
+    const tip=this.tip?`<p class="ic-why${this.tipBad?" bad":""}" id="icTip">${esc(this.tip)}</p>`:`<p class="ic-why" id="icTip" hidden></p>`;
+    const S=this.signin||{}, relay=S.ready!==false, link=store.get("ftcbench.onshapeLink","")||"";
+    const dropZone=`<div class="ic-drop" data-ic="pick" role="button" tabindex="0"><b>Drop the export zip, or click to choose it</b><span>Onshape: right-click the Assembly tab → Export → URDF, GLB, Medium. Also a STEP, a URDF with its meshes, or a saved .ftcsim workspace</span></div>`;
+    const docs=`<a class="linkish" href="https://github.com/LILRINO71/ftc-simbench-pro/blob/main/docs/robot-setup.md" target="_blank" rel="noopener">Sim-ready CAD checklist ↗</a>`;
+    if(!relay) return `<div class="ic-head"><div><h2>Bring your robot</h2><p>Export it from Onshape and drop the zip: every joint from your mates, every part in its colour, its real weight. Nothing is uploaded; the robot is read on this computer.</p></div>
+      <button class="ic-x" type="button" data-ic="close" aria-label="Not now">×</button></div>
+      ${dropZone}${bad}
+      <div class="ic-row"><span>Not on Onshape?</span><button class="linkish" type="button" data-ic="fusion">Fusion, SolidWorks, FreeCAD →</button><span>·</span>${docs}<span>·</span><button class="linkish" type="button" data-ic="close">Keep the demo robot</button></div>`;
+    return `<div class="ic-head"><div><h2>Bring your robot</h2><p>Paste your Onshape assembly's address. It arrives with every joint from your mates, every part in its colour, and its real weight. Nothing to export, nothing to install.</p></div>
       <button class="ic-x" type="button" data-ic="close" aria-label="Not now">×</button></div>
       <div class="ic-steps">
-        <div class="ic-step"><span class="n">1</span><div><b>Export it from Onshape</b><p>Right-click your <b>Assembly</b> tab at the bottom of Onshape → <b>Export</b>. Format <code>URDF</code>, geometry <code>GLB</code>, resolution <code>Medium</code> (Fine is ten times the file for no gain here), compression off. A zip downloads.</p>
-          <svg class="ic-pic" viewBox="0 0 300 70" aria-hidden="true"><rect x="1" y="1" width="298" height="68" rx="8" fill="var(--card)" stroke="var(--sep-2)"/><rect x="10" y="8" width="280" height="30" rx="4" fill="var(--card-2)"/><text x="150" y="27" text-anchor="middle" font-size="10" fill="var(--label-3)">your robot</text>
-          <rect x="10" y="46" width="70" height="16" rx="3" fill="var(--card-2)"/><text x="18" y="58" font-size="9" fill="var(--label-3)">Part Studio 1</text><rect x="86" y="46" width="70" height="16" rx="3" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.5"/><text x="94" y="58" font-size="9" font-weight="600" fill="var(--accent-tx)">◈ Assembly 1</text>
-          <path d="M190 54 h-26 M170 49 l-6 5 6 5" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><text x="196" y="58" font-size="9.5" font-weight="600" fill="var(--accent-tx)">right-click → Export</text></svg></div></div>
-        <div class="ic-step"><span class="n">2</span><div><b>Drop the zip here</b><p>Nothing is uploaded: the robot is read on this computer. Works on school Chromebooks.</p></div></div>
+        <div class="ic-step"><span class="n">1</span><div><b>Open your robot's Assembly tab in Onshape</b><p>The assembly, not a Part Studio. If you made a <b>Sim</b> configuration (screws and nuts suppressed), pick it. Then copy the address bar.</p></div></div>
+        <div class="ic-step"><span class="n">2</span><div><b>Paste it here</b><p>${S.signedIn?"You're signed in to Onshape; the robot is read straight away.":"Onshape asks you once to let SimBench <b>read</b> your documents. SimBench never writes to them."}</p></div></div>
       </div>
-      <div class="ic-drop" data-ic="pick" role="button" tabindex="0"><b>Drop the zip, or click to choose it</b><span>Also a STEP file, a URDF with its meshes, or a saved .ftcsim workspace</span></div>
-      ${bad}
-      <div class="ic-row"><span>Not on Onshape?</span><button class="linkish" type="button" data-ic="fusion">Fusion, SolidWorks, FreeCAD →</button><span>·</span><button class="linkish" type="button" data-ic="onshape-live">Read Onshape live (advanced)</button><span>·</span><button class="linkish" type="button" data-ic="close">Keep the demo robot</button></div>`;
+      <form class="ic-link" id="icLink" autocomplete="off"><input type="url" id="icLinkUrl" value="${esc(link)}" placeholder="https://cad.onshape.com/documents/…/w/…/e/…" spellcheck="false" aria-label="Your Onshape assembly's address"><button class="btn-sm primary" type="submit">Get my robot</button></form>
+      ${tip}${bad}
+      <details class="ic-alt"><summary>No link to paste? Drop the export instead</summary>${dropZone}</details>
+      <div class="ic-row">${S.signedIn?`<button class="linkish" type="button" data-ic="signout">Sign out of Onshape</button><span>·</span>`:""}<button class="linkish" type="button" data-ic="fusion">Fusion, SolidWorks, FreeCAD →</button><span>·</span>${docs}<span>·</span><button class="linkish" type="button" data-ic="close">Keep the demo robot</button></div>`;
   },
   htmlBusy(){
     const b=this.busy||{};
@@ -194,9 +211,84 @@ const ImportFlow={
     else if(k==="sample-ok"){ this.sampleOk=CAD; this.render(true); }
     else if(k==="cad"){ CadView.enter(); $$("#viewSeg button").forEach(x=>x.classList.toggle("on",x.dataset.v==="cad")); }
     else if(k==="save") SetupUI.download();
-    else if(k==="onshape-live") OnshapeHelp.open();
+    else if(k==="signout") this.signOut();
     else if(k==="fusion") this.fusion();
     else if(k==="sheet") this.openSheet();
+  },
+  /* a word under the link box, without redrawing the card while someone is typing in it */
+  say(t,bad){ this.tip=t||""; this.tipBad=!!bad; const p=$("#icTip"); if(p){ p.textContent=this.tip; p.hidden=!this.tip; p.className="ic-why"+(bad?" bad":""); } else if(this.state==="bring") this.render(true); },
+
+  /* ---------------- the Onshape link (src/onshapelink.js through functions/onshape) ----------------
+     Whether this site can sign in to Onshape at all (it needs the relay), and whether this
+     browser has. ready is false on a plain static host: the card offers the export then. */
+  async refreshSignIn(){ this.signin=await onshapeSignInState(); return this.signin; },
+  signIn(){
+    const w=window.open("onshape/login","sb_onshape_login","popup,width=560,height=760");
+    // no pop-up allowed: sign in in this tab; Onshape sends it back to #onshape-signed-in
+    if(!w){ location.href="onshape/login"; return; }
+    this.say("Finish in the Onshape window: sign in if it asks, then click Allow. The robot is read as soon as you do.");
+  },
+  async signedIn(ok,msg){
+    const st=await this.refreshSignIn();
+    if(ok&&st.signedIn){
+      const href=this.pendingLink||store.get("ftcbench.onshapeLink","")||""; this.pendingLink=null;
+      this.say(""); this.dismissed=false; this.forced=true;
+      if(href&&onshapeRef(href)){ this.render(true); const i=$("#icLinkUrl"); if(i) i.value=href; this.fromLink(); }
+      else this.render(true);
+    } else { this.pendingLink=null; this.render(true); this.say("Onshape sign-in didn't finish"+(msg?": "+msg:"")+". Click Get my robot to try again.",true); }
+  },
+  async signOut(){ try{ await fetch("onshape/logout",{method:"POST",credentials:"same-origin"}); }catch(e){} await this.refreshSignIn(); this.render(true); },
+  /* the pasted address: checked, then read and built in the engine worker */
+  async fromLink(){
+    const inp=$("#icLinkUrl"), href=String(inp?inp.value:"").trim();
+    if(!onshapeRef(href)){ this.say(href?"That isn't an Onshape assembly address. In Onshape, click your Assembly tab, then copy the whole address from the address bar.":"Paste your assembly's address first.",true); if(inp) inp.focus(); return; }
+    store.set("ftcbench.onshapeLink",href);
+    const st=await this.refreshSignIn();
+    if(!st.ready){ this.say("Reading straight from Onshape isn't switched on for this copy of SimBench. Export the robot instead (below).",true); return; }
+    if(!st.signedIn){ this.pendingLink=href; this.signIn(); return; }
+    this.last=null; this.say("");
+    this.start("Reading your robot from Onshape","Through your Onshape sign-in, straight from the assembly. A big robot takes a minute or two; the page stays usable.");
+    let r;
+    try{ r=await EngineWorker.onshapeLink(href,{frame:{up:OPTS.up, shift:OPTS.shift}, onProgress:(t,d,n)=>this.progress(t,d,n)}); }
+    catch(e){
+      const m=String(e&&e.message||e);
+      if(/sign in|aren't allowed|can't read it/i.test(m)){ this.signin.signedIn=false; this.busy=null; this.render(true); this.say(m+".",true); return; }
+      this.fail("SimBench couldn't read your assembly: "+m+". "+(/isn't an assembly/.test(m)?"The address has to come from the Assembly tab, not a Part Studio or a drawing.":"Try again; if it keeps failing, export it (Export → URDF) and drop the zip."));
+      return;
+    }
+    const cad=r.cad, p=r.payload; cad.name=p.name||cad.name;
+    SetupUI.beforeParse&&SetupUI.beforeParse(cad.name);
+    LAST_STEP={name:cad.name, text:"", onshape:p, label:cad.name+" · from Onshape"};
+    JOINTS.spec=JOINTS.report=JOINTS.devices=null; JOINTS.name=JOINTS.step=null;
+    this.robotIn(cad,"Onshape");
+  },
+  /* a robot that arrived whole (the link, the export zip, a re-read with a new up or centre): onto the field */
+  robotIn(cad,from){
+    this.progress("Placing it on the field …",1,1);
+    MATES.name=cad.name; MATES.url=cad.onshape&&cad.onshape.url||null; MATES.report=cad.onshape&&cad.onshape.report||null;
+    // the team's own joint sheet for this robot, over what the mates' names declare (src/jointsheet.js)
+    const sheet=this.savedSheet(cad.name);
+    if(sheet){ try{ applyJointSheet(cad,mergeJointSheets(sheetFromTags(cad),sheet)); }catch(e){} }
+    this.sheetOpen=false; this.draft=null;
+    // which of the joints are mechanisms (the rest are bearings, shafts, rollers): before anything is said about them
+    classifyJoints(cad);
+    const n=cad.mechs.filter(m=>m.fromMate&&!m.internal).length, hid=cad.mechs.filter(m=>m.fromMate&&m.internal).length, decl=isExact(cad);
+    loadCAD(cad, cad.name+" · from "+from+" · "+cad.solids.length+" parts · "+n+(decl?" declared":"")+" joint"+(n===1?"":"s")+(hid?" ("+hid+(decl?" others held":" bearings and shafts left fixed")+")":""), "ok");
+    // the robot's own surfaces, thinned in the worker: exact geometry with nothing more to load
+    const ex=typeof urdfExact==="function"?urdfExact(cad):null;
+    if(ex&&ex.meshes.length){
+      EXACT={state:"ok", msg:null}; View.setExact(cad,ex);
+      const note=$("#exactNote"); if(note){ const tri=cad.onshape&&cad.onshape.triangles||(cad.urdf&&cad.urdf.triangles); note.textContent="Exact geometry: "+ex.meshes.length+" parts from "+ex.shapes+" shapes, "+(tri?(tri/1e6).toFixed(1)+" M triangles":"")+"."; note.className="hint"; }
+      if(CadView.on) CadView.renderTree();
+    }
+    recomputeChain(cad.mechs);
+    classifyJoints(cad);
+    const mine=savedJoints(cad.name); if(mine){ JOINTS.spec=mine; JOINTS.step=cad.name; JOINTS.name="your joints"; applyJoints(); }
+    $("#mateStatus").textContent=cad.name+" · whole robot from "+from+" · "+n+" joint"+(n===1?"":"s"); $("#mateDrop").className="drop ok";
+    $("#mateNote").innerHTML=(cad.onshape&&cad.onshape.why||[]).map(w=>"<li>"+esc(w)+"</li>").join("");
+    const pill=$("#matePill"); if(pill){ pill.textContent=n+" joint"+(n===1?"":"s"); pill.className="pill ok"; }
+    if(CODE) rebuild();
+    this.finish();
   },
   /* a device that moves nothing drawn: a live gauge, and no more questions about it */
   gauge(dev){ RIG_DEVICES[dev]=null; MAP[dev]=null; saveRig(); rebuild(); this.render(true); },
@@ -371,33 +463,9 @@ const ImportFlow={
       if(java.length){ this.busy=null; for(const j of java) addOpModeFromText(j.name.replace(/^.*[\\/]/,""),new TextDecoder().decode(j.data)); this.render(); return; }
       this.fail("That zip has no robot.urdf and no .java files in it."); return;
     }
-    this.progress("Placing it on the field …",1,1);
     const cad=r.cad; cad.name=r.name||file.name.replace(/\.zip$/i,"");
     LAST_STEP={name:cad.name, text:"", urdfZip:true, label:cad.name+" · from "+(/onshape|urdf/i.test(file.name)?"Onshape":"URDF")};
     JOINTS.spec=JOINTS.report=JOINTS.devices=null; JOINTS.name=JOINTS.step=null;
-    MATES.asm=MATES.features=MATES.name=MATES.report=MATES.url=null; MATES.fromLink=false;
-    // the team's own joint sheet for this robot, over what the mates' names declare (src/jointsheet.js)
-    const sheet=this.savedSheet(cad.name);
-    if(sheet){ try{ applyJointSheet(cad,mergeJointSheets(sheetFromTags(cad),sheet)); }catch(e){} }
-    this.sheetOpen=false; this.draft=null;
-    // which of the export's joints are mechanisms (the rest are bearings, shafts, rollers): before anything is said about them
-    classifyJoints(cad);
-    const n=cad.mechs.filter(m=>m.fromMate&&!m.internal).length, hid=cad.mechs.filter(m=>m.fromMate&&m.internal).length, decl=isExact(cad);
-    loadCAD(cad, cad.name+" · from URDF · "+cad.solids.length+" parts · "+n+(decl?" declared":"")+" joint"+(n===1?"":"s")+(hid?" ("+hid+(decl?" others held":" bearings and shafts left fixed")+")":""), "ok");
-    // the export's own surfaces, thinned in the worker: exact geometry with nothing more to load
-    const ex=typeof urdfExact==="function"?urdfExact(cad):null;
-    if(ex&&ex.meshes.length){
-      EXACT={state:"ok", msg:null}; View.setExact(cad,ex);
-      const note=$("#exactNote"); if(note){ note.textContent="Exact geometry: "+ex.meshes.length+" parts from "+ex.shapes+" shapes in the export, "+(cad.urdf?(cad.urdf.triangles/1e6).toFixed(1)+" M triangles":"")+"."; note.className="hint"; }
-      if(CadView.on) CadView.renderTree();
-    }
-    recomputeChain(cad.mechs);
-    classifyJoints(cad);
-    const mine=savedJoints(cad.name); if(mine){ JOINTS.spec=mine; JOINTS.step=cad.name; JOINTS.name="your joints"; applyJoints(); }
-    $("#mateStatus").textContent=cad.name+" · whole robot from URDF · "+n+" joint"+(n===1?"":"s"); $("#mateDrop").className="drop ok";
-    $("#mateNote").innerHTML=(cad.onshape&&cad.onshape.why||[]).map(w=>"<li>"+esc(w)+"</li>").join("");
-    const pill=$("#matePill"); if(pill){ pill.textContent=n+" joint"+(n===1?"":"s"); pill.className="pill ok"; }
-    if(CODE) rebuild();
-    this.finish();
+    this.robotIn(cad,"URDF");
   },
 };
