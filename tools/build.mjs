@@ -75,11 +75,9 @@ for (const v of VENDOR) if (v.files.every((f) => fs.existsSync(path.join(ROOT, .
 const fragment = [
   '<title>FTC SimBench Pro</title>',
   `<meta name="description" content="${DESC}">`,
-  '<link rel="preconnect" href="https://fonts.googleapis.com">',
-  '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>',
-  '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Barlow+Semi+Condensed:wght@600;700&family=JetBrains+Mono:wght@400;500;700&display=swap">',
-  // set the saved theme before anything paints, so there's no light flash
-  `<script>try{document.documentElement.setAttribute("data-theme",localStorage.getItem("ftcbench.theme")==="light"?"light":"dark")}catch(e){document.documentElement.setAttribute("data-theme","dark")}</script>`,
+  // the theme before anything paints, so there's no flash: the one saved in this
+  // browser, else the system's (light unless the system asks for dark)
+  `<script>try{var t=localStorage.getItem("ftcbench.theme");if(t!=="light"&&t!=="dark")t=matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";document.documentElement.setAttribute("data-theme",t)}catch(e){document.documentElement.setAttribute("data-theme","light")}</script>`,
   // three.js from this site (vendor/, served beside the page), the CDN only if that's missing
   '<script src="vendor/three/three.min.js"></script>',
   '<script>window.THREE||document.write(' + JSON.stringify('<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"><' + '/script>').replace(/<\//g, '<\\/') + ')</script>',
@@ -104,8 +102,9 @@ const favicon = 'data:image/svg+xml,' + encodeURIComponent(
   '<circle cx="23.4" cy="13" r="2.4" fill="#231A0E"/></svg>');
 const page = `<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n` +
   `<meta name="viewport" content="width=device-width, initial-scale=1">\n` +
-  `<meta name="color-scheme" content="dark light">\n` +
-  `<meta name="theme-color" content="#0F1012">\n` +
+  `<meta name="color-scheme" content="light dark">\n` +
+  `<meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)">\n` +
+  `<meta name="theme-color" content="#1D1D20" media="(prefers-color-scheme: dark)">\n` +
   `<meta property="og:type" content="website">\n` +
   `<meta property="og:site_name" content="FTC SimBench Pro">\n` +
   `<meta property="og:title" content="FTC SimBench Pro: drive your real robot before it's built">\n` +
@@ -133,7 +132,7 @@ const ICON = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect 
 fs.writeFileSync(path.join(DIST, 'icon.svg'), ICON, 'utf8');
 fs.writeFileSync(path.join(DIST, 'manifest.webmanifest'), JSON.stringify({
   name: 'FTC SimBench Pro', short_name: 'SimBench', description: SHARE, start_url: './', scope: './', display: 'standalone',
-  background_color: '#0F1012', theme_color: '#0F1012', icons: [{ src: 'icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' }],
+  background_color: '#F2F2F6', theme_color: '#FFFFFF', icons: [{ src: 'icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' }],
 }, null, 1), 'utf8');
 fs.writeFileSync(path.join(DIST, 'sw.js'), serviceWorker(build), 'utf8');
 // the picture a shared link shows (og:image)
