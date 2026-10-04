@@ -237,6 +237,31 @@ function meshEdgeSegs(m,creaseDeg){
   }
   const segs=new Float32Array(out); EDGE_CACHE.set(P,segs); return segs;
 }
+/* Unindexed positions and normals for an indexed mesh, each corner's normal the
+   average of the faces round its vertex that lean less than creaseDeg from its own
+   face: smooth over a cylinder or a fillet, a clean edge at a corner. */
+function creaseNormals(P,I,creaseDeg){
+  const nf=I.length/3, cosC=Math.cos((creaseDeg||45)*Math.PI/180);
+  const fn=new Float32Array(nf*3), at=new Map();
+  for(let t=0;t<nf;t++){
+    const a=I[3*t],b=I[3*t+1],c=I[3*t+2];
+    const ux=P[3*b]-P[3*a],uy=P[3*b+1]-P[3*a+1],uz=P[3*b+2]-P[3*a+2], vx=P[3*c]-P[3*a],vy=P[3*c+1]-P[3*a+1],vz=P[3*c+2]-P[3*a+2];
+    const x=uy*vz-uz*vy,y=uz*vx-ux*vz,z=ux*vy-uy*vx; const L=Math.hypot(x,y,z)||1; fn[3*t]=x/L; fn[3*t+1]=y/L; fn[3*t+2]=z/L;
+    for(const vv of [a,b,c]){ let l=at.get(vv); if(!l){ l=[]; at.set(vv,l); } l.push(t); }
+  }
+  const pos=new Float32Array(nf*9), nor=new Float32Array(nf*9);
+  for(let t=0;t<nf;t++){
+    const nx=fn[3*t],ny=fn[3*t+1],nz=fn[3*t+2];
+    for(let e=0;e<3;e++){
+      const vv=I[3*t+e], o=9*t+3*e;
+      pos[o]=P[3*vv]; pos[o+1]=P[3*vv+1]; pos[o+2]=P[3*vv+2];
+      let sx=0,sy=0,sz=0;
+      for(const u of at.get(vv)){ const d=fn[3*u]*nx+fn[3*u+1]*ny+fn[3*u+2]*nz; if(d>=cosC){ sx+=fn[3*u]; sy+=fn[3*u+1]; sz+=fn[3*u+2]; } }
+      const L=Math.hypot(sx,sy,sz)||1; nor[o]=sx/L; nor[o+1]=sy/L; nor[o+2]=sz/L;
+    }
+  }
+  return {pos, nor};
+}
 /* The model's edges per mechanism group, in the canonical frame. */
 function tessEdges(cad,res,asg,hidden){
   const out={};

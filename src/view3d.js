@@ -281,10 +281,17 @@ const View={
     const k=m.attributes.position.array; this.shapeCache=this.shapeCache||new Map();
     let e=this.shapeCache.get(k); if(e) return e;
     const g=new THREE.BufferGeometry();
-    g.setAttribute("position",new THREE.BufferAttribute(k,3));
-    if(m.attributes.normal&&m.attributes.normal.array) g.setAttribute("normal",new THREE.BufferAttribute(m.attributes.normal.array,3));
-    g.setIndex(new THREE.BufferAttribute(m.index.array,1));
-    if(!g.attributes.normal) g.computeVertexNormals();
+    if(m.shape){
+      // an export's thinned mesh has its vertices welded, so averaged normals smear every corner
+      // into a blob: crease-angle normals instead (smooth across a fillet, sharp at a 45-degree edge)
+      const C=creaseNormals(k,m.index.array,45);
+      g.setAttribute("position",new THREE.BufferAttribute(C.pos,3)); g.setAttribute("normal",new THREE.BufferAttribute(C.nor,3));
+    } else {
+      g.setAttribute("position",new THREE.BufferAttribute(k,3));
+      if(m.attributes.normal&&m.attributes.normal.array) g.setAttribute("normal",new THREE.BufferAttribute(m.attributes.normal.array,3));
+      g.setIndex(new THREE.BufferAttribute(m.index.array,1));
+      if(!g.attributes.normal) g.computeVertexNormals();
+    }
     const runs=[], faces=m.brep_faces&&m.brep_faces.length?m.brep_faces:[{first:0,last:m.index.array.length/3-1,color:null}];
     for(const f of faces){ const col=tessColorHex(f.color)||tessColorHex(m.color)||"", last=runs[runs.length-1];
       if(last&&last.col===col&&last.end===f.first) last.end=f.last+1; else runs.push({col, start:f.first, end:f.last+1}); }

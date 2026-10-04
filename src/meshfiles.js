@@ -233,8 +233,10 @@ function meshReduce(tri,opts){
   let mn=[Infinity,Infinity,Infinity], mx=[-Infinity,-Infinity,-Infinity];
   for(let i=0;i<tri.length;i+=3) for(let k=0;k<3;k++){ const v=tri[i+k]; if(v<mn[k]) mn[k]=v; if(v>mx[k]) mx[k]=v; }
   const diag=Math.hypot(mx[0]-mn[0],mx[1]-mn[1],mx[2]-mn[2])||0.01;
-  const budget=opts.budget||Math.max(1500,Math.min(24000,Math.round(diag*60000)));
-  let cell=Math.max(opts.minCell||0.0003,diag*0.004), r=null;
+  // a 50 mm roller keeps ~10,000 triangles, a 450 mm plate 60,000: a whole robot lands near
+  // 2-3 M, which a GPU draws at full rate and which keeps holes round and fillets smooth
+  const budget=opts.budget||Math.max(1500,Math.min(60000,Math.round(diag*150000)));
+  let cell=Math.max(opts.minCell||0.0002,diag*0.0025), r=null;
   if(tri.length/9<=budget*0.6&&!opts.always){ // small already: just weld
     r=meshDecimate(tri,Math.max(0.00005,diag*0.0005));
   } else for(let k=0;k<6;k++){ r=meshDecimate(tri,cell); if(r.idx.length/3<=budget) break; cell*=1.6; }
