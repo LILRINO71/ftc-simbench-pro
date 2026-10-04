@@ -67,11 +67,20 @@ test('composite wheels: each wheel’s hand is read off its floor roller, the st
   assert.ok(d.why.some((s) => /read off each wheel's own rollers.*the standard X pattern/.test(s)));
 });
 
-test('composite wheels: the same robot built "O" (every wheel the other hand) is modelled as drawn, and said to be wrong', () => {
+test('composite wheels: the same robot built "O" (every wheel the other hand) is simulated as built, in the X pattern, and the CAD\'s wheels are pointed out', () => {
+  // no team drives an "O" base; a CAD with one has copies of one wheel at the wrong corners.
+  // The real REVIVER export read FR, FL and BL as the other hand: modelled as drawn it couldn't strafe.
   const O = Object.fromEntries(Object.entries(XPAT).map(([k, v]) => [k, -v]));
   const d = E.driveFromCAD(robot({ hands: O }), { front: '+x' });
-  for (const w of d.wheels) assert.equal(w.roller, O[w.corner]);
-  assert.ok(d.why.some((s) => /can't turn in place/.test(s)));
+  for (const w of d.wheels) assert.equal(w.roller, XPAT[w.corner], `${w.corner} in the X pattern`);
+  assert.ok(d.why.some((s) => /"O" pattern.*can't turn in place.*standard X pattern is used.*FL, FR, BL, BR|wheels at .* are the other hand/.test(s)), d.why.join(' | '));
+});
+
+test('composite wheels: one wheel the wrong hand (a mix that could not strafe) is simulated in the X pattern too, naming that wheel', () => {
+  const mix = Object.assign({}, XPAT, { FR: -XPAT.FR });
+  const d = E.driveFromCAD(robot({ hands: mix }), { front: '+x' });
+  for (const w of d.wheels) assert.equal(w.roller, XPAT[w.corner]);
+  assert.ok(d.why.some((s) => /not a mecanum pattern.*wheel at FR is the other hand/.test(s)), d.why.join(' | '));
 });
 
 test('composite wheels: a flattened file (no sub-assemblies) still has its four wheels', () => {
@@ -133,4 +142,19 @@ test('composite wheels: the frame finds up and the front from the same wheels', 
   const F = E.robotFrame({ solids: cad.solids, bbox: { min: lo, max: hi } }, {});
   assert.equal(F.up, '-y', F.upWhy);
   assert.equal(F.originWhy, 'wheels');
+});
+
+
+test('composite wheels: a joint on a drive wheel\'s axle (its shaft, hub or bearing) is the drive\'s business, not a mechanism', () => {
+  // a URDF export gives the wheel's shaft and its bearing races joints of their own
+  const cad = robot();
+  const d = E.driveFromCAD(cad, { front: '+x' });
+  const w = d.wheels[0];
+  const shaft = { name: '2106 4008 0800', kind: 'metal', size: 0.08, pts: [], mech: 'shaft_spin' };
+  for (let i = 0; i < 40; i++) shaft.pts.push([w.c[0] + (i / 40 - 0.5) * 0.08 * w.axis[0], w.c[1] + (i / 40 - 0.5) * 0.08 * w.axis[1], w.c[2] + (i % 2 ? 0.004 : -0.004)]);
+  cad.solids.push(shaft);
+  cad.mechs = [{ id: 'shaft_spin', kind: 'revolute-lift', axis: w.axis.slice(), pivot: w.c.slice(), parent: 'chassis', limits: null, fromMate: { name: 'Revolute 3' } }];
+  const C = E.classifyJoints(cad);
+  assert.equal(cad.mechs[0].internalWhy, 'axle');
+  assert.ok(C.why.some((s) => /drive wheels' axles/.test(s)), C.why.join(' | '));
 });

@@ -179,8 +179,10 @@ function dtWheelOfParts(parts,name){
     if(Math.hypot(d[0]-t*g.axis[0],d[1]-t*g.axis[1],d[2]-t*g.axis[2])<0.45*g.r) continue;   // out at the rim
     rollers.push({c:pr.c, ax:pr.vec[0], tilt:Math.abs(dtDot(pr.vec[0],g.axis))});
   }
-  return {s:{name:name||"wheel ("+parts.length+" parts)", part:null}, g:Object.assign({},g,{grown:parts.length}), rollers};
+  return {s:{name:name||"wheel ("+parts.length+" parts)", part:null}, g:Object.assign({},g,{grown:parts.length}), rollers, parts};
 }
+/* the solids inside a set of composite wheels: none of them is a wheel of its own */
+function dtCompositeParts(comps){ const set=new Set(); for(const c of comps||[]) for(const s of c.parts||[]) set.add(s); return set; }
 const DT_WHEELPART=/roller|tread|tire|tyre|wheel|\bor\b|\bir\b|side ?plate|slant|hub/i;
 function dtCompositeWheels(solids){
   const out=[], groups=new Map();
@@ -475,10 +477,15 @@ function dtRollers(ws,why,F){
       why.push("The one mecanum wheel drawn is the other hand for its corner (read off its rollers), so the mirrored set would be an \"O\" base that can't turn in place. A real drive base is built in the standard X pattern, so that is used. Check that wheel in the CAD.");
       return;
     }
-    ws.forEach((w,i)=>{ w.roller=geo[i]; });
-    why.push("Roller handedness read off each wheel's own rollers in the CAD (the roller on the floor): "+(x?"the standard X pattern.":o?"an \"O\" pattern.":"not a standard pattern."));
-    if(o) why.push("In an \"O\" pattern every wheel pushes along a line through the middle of the robot, so it strafes but can't turn in place: each wheel is probably the other hand from the one it should be. Modelled as drawn.");
-    else if(!x) why.push("With these hands the real robot can't strafe properly: two wheels are probably on the wrong corners in the CAD. Modelled as drawn.");
+    if(x){ ws.forEach((w,i)=>{ w.roller=geo[i]; }); why.push("Roller handedness read off each wheel's own rollers in the CAD (the roller on the floor): the standard X pattern."); return; }
+    // Not X: an "O" (every wheel the other hand: it strafes but can't turn in place) or a
+    // mix (it can't strafe at all). No team drives that, so the CAD has the wrong wheel at
+    // some corner, as copies of one wheel often are. The robot is simulated as it is built,
+    // in the standard X pattern, and the CAD's wheels are pointed out.
+    const off=ws.filter((w,i)=>geo[i]!==xPat(w)).map(w=>w.corner);
+    ws.forEach(w=>{ w.roller=xPat(w); });
+    why.push("Roller handedness read off each wheel's own rollers in the CAD (the roller on the floor): "+(o?"an \"O\" pattern, which strafes but can't turn in place.":"not a mecanum pattern — a base with these hands can't strafe.")+
+      " No real drive base is built that way, so the standard X pattern is used. In the CAD the "+(off.length===1?"wheel at "+off[0]+" is":"wheels at "+off.join(", ")+" are")+" the other hand for "+(off.length===1?"its":"their")+" corner"+(off.length===1?"":"s")+".");
     return;
   }
   const hand=ws.map(dtHandFromName);
@@ -603,7 +610,7 @@ function driveFromCAD(cad,opts){
     return nothing("The CAD has no part solids, so there is nothing to read a drivetrain from.");
   }
   const cand=solids.filter(dtIsWheel);
-  const wheelOf=(s,g)=>({name:s.name||"", part:s.part||null, c:g.c, axis:g.axis, r:g.r, width:g.width, grown:g.grown||0,
+  const wheelOf=(s,g)=>({name:s.name||"", part:s.part||null, solid:s, c:g.c, axis:g.axis, r:g.r, width:g.width, grown:g.grown||0,
              x:0, y:0, z:0, ax:[0,0,0], skew:0, roller:0, steer:false, corner:null, alpha:0});
 
   // ---- each candidate as a cylinder, with the obvious non-wheels dropped
@@ -614,10 +621,14 @@ function driveFromCAD(cad,opts){
     if(!(g.r>0.012&&g.r<0.16) || g.round<0.75 || g.width>2.2*g.r){ odd++; continue; }
     ws.push(wheelOf(s,dtGrowWheel(g,solids)));
   }
-  const comp=dtDriveComposites(solids,F.up).wheels.map(c=>Object.assign(wheelOf(c.s,c.g),{rollers:c.rollers, composite:true}));
+  const DC=dtDriveComposites(solids,F.up);
+  const comp=DC.wheels.map(c=>Object.assign(wheelOf(c.s,c.g),{rollers:c.rollers, composite:true}));
   if(comp.length){
     const same=(a,b)=>Math.hypot(a.c[0]-b.c[0],a.c[1]-b.c[1],a.c[2]-b.c[2])<Math.max(0.012,0.4*Math.min(a.r,b.r))&&Math.abs(dtDot(a.axis,b.axis))>0.9;
-    ws=comp.concat(ws.filter(w=>!comp.some(c=>same(c,w))));
+    // a roller or hub inside a composite wheel is not a wheel of its own: grown about its own
+    // 45-degree axis, a mecanum roller read as a 170 mm wheel at the wrong height and took the floor with it
+    const owned=dtCompositeParts(DC.wheels);
+    ws=comp.concat(ws.filter(w=>!owned.has(w.solid)&&!comp.some(c=>same(c,w))));
     why.push(comp.length+" wheel"+(comp.length===1?" is":"s are")+" made of several parts together (a hub with rollers, a tread round a hub), found as "+
       (solids.some(s=>s.asm)?"the CAD's own wheel assemblies":"wheel parts packed round one centre")+".");
   }
