@@ -137,6 +137,14 @@ The research behind the fixes is in
     shows each pick with its reason as a note. The owner's export went
     from 7 questions to 0. A mate named after a device is never passive
     and binds first.
+  - **The UI, redone on the Apple design system** (the apple-design skill's
+    restraint rules: light by default following the system theme, one
+    accent, system type stack, type and space for hierarchy, glass only on
+    what floats over the field, springs that respect reduced motion, 44 px
+    targets): src/styles.css rewritten with the same selector inventory,
+    tokens on :root and under [data-theme="dark"]; the field and game
+    pieces in physically based materials with the studio environment map
+    (src/view3d.js). Screenshots in the session scratchpad ui/.
   Also from the owner's list: the Actuators dock cell is gone (the gauges
   were noise), a robot read from its CAD gets no stand-in shooter drawn in,
   Onshape's default greys are no colour (the part is drawn by what it is,

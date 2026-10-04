@@ -562,7 +562,8 @@ const View={
      change how it looks: brushed metal, not a mirror. A mirror-bright copy reflected
      the studio's lamps and read as a white blob on a Chromebook, which draws it. */
   liteMat(){ if(!this._liteMat){ const env=this.envMap(); this._liteMat=new THREE.MeshStandardMaterial({vertexColors:true, flatShading:true,
-      metalness:env?0.55:0.2, roughness:env?0.46:0.5, envMap:env||null, envMapIntensity:0.75}); this._liteMat.userData.shared=true; } return this._liteMat; },
+      // the exact copy's own metal finish, so switching copies changes nothing but the triangle count
+      metalness:env?REAL_MAT.metal.m:0.2, roughness:env?REAL_MAT.metal.r:0.5, envMap:env||null, envMapIntensity:0.75}); this._liteMat.userData.shared=true; } return this._liteMat; },
   /* drawn into the shadow map only */
   shadowMat(){ if(!this._shadowMat){ this._shadowMat=new THREE.MeshBasicMaterial({colorWrite:false, depthWrite:false}); this._shadowMat.userData.shared=true; } return this._shadowMat; },
   /* Which copy draws: the exact one up close, the light one in the driver's view
