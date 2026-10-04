@@ -38,11 +38,11 @@ const ImportFlow={
     if(this.busy) return "busy";
     const own=(()=>{ try{ return ownRobot()||!!(CAD&&(CAD.source==="onshape"||CAD.source==="urdf")); }catch(e){ return false; } })();
     if(!own) return store.get("ftcbench.import.seen","0")==="1"&&!this.forced?"done":"bring";
+    if(this.dismissed===CAD) return "done";                 // "Not now" closes any card for this robot
     if(!CODE||!(CODE.devices||[]).length) return "code";
     // the team's own robot with a sample OpMode still selected: binding the sample's devices to
     // their joints would only raise questions about a robot the sample was never written for
     if(this.sampleOk!==CAD&&typeof entry==="function"&&typeof CURRENT_ID!=="undefined"){ const e=entry(CURRENT_ID); if(e&&e.builtin) return "code"; }
-    if(this.dismissed===CAD) return "done";
     const A=SetupUI.auto(), allSetup=SETUP_STEPS.every(k=>SetupUI.isDone(k,A));
     const rc=RC, bind=this.bind();
     const asks=(rc?rc.need+rc.warn:0)+(bind?bind.open.length:0);
@@ -101,7 +101,7 @@ const ImportFlow={
       <p class="ic-sub">Big robots take a little while. The page stays usable.</p>`;
   },
   htmlCode(){
-    const n=CAD?CAD.solids.length:0, j=CAD?CAD.mechs.filter(m=>m.fromMate&&!m.internal).length:0;
+    const n=CAD?CAD.solids.length:0, j=CAD?CAD.mechs.filter(m=>m.fromMate&&!m.internal&&m.kind!=="fixed").length:0;
     const mass=(Sim.rig&&Sim.rig.props)||Physics.props, kg=mass&&!mass.assumed?mass.kg:(CAD&&CAD.onshape&&CAD.onshape.kg);
     const sample=CODE&&(CODE.devices||[]).length&&typeof entry==="function"&&entry(CURRENT_ID)&&entry(CURRENT_ID).builtin;
     return `<div class="ic-head"><div><h2>Now your code</h2><p><b>${esc(CAD?CAD.name:"Your robot")}</b> is in: ${n} parts${j?", "+j+" joint"+(j===1?"":"s")+" from your mates":""}${kg?", about "+kg.toFixed(1)+" kg":""}. Add the OpModes you run on the Control Hub, and every helper class they use.</p></div>
