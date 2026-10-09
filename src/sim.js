@@ -564,13 +564,7 @@ const Sim={
     const cmd=this.rig.devs.map((n,i)=>this.wheelCmd(n,W[i]&&W[i].mount));
     const st=Dyn.step(this.dstate,cmd,this.rig,dt);
     this.dstate=st;
-    // each drive encoder from its wheel's spin, back in the code's frame (see wheelCmd)
-    this.rig.devs.forEach((n,i)=>{
-      const s=this.dev[n], w=W[i]; if(!s||!w||s.kind!=="motor"||!this.driveWheel(n)) return;
-      const sg=(s.reversed?-1:1)*(w.mount===-1?-1:1), prev=s.ticks;
-      s.revs+=(st.wheelOmega[i]||0)*(w.gear||this.rig.gear||1)/(2*Math.PI)*sg*dt;
-      s.ticks=s.revs*s.tpr; s.vel=(s.ticks-prev)/dt;
-    });
+    // the drive encoders are counted from the wheels' spin in driveEncoders, after the walls
     const c=Math.cos(this.chassis.h), s=Math.sin(this.chassis.h);
     this.chassis.x += (st.v.x*c - st.v.y*s)*dt;
     this.chassis.y += (st.v.x*s + st.v.y*c)*dt;
