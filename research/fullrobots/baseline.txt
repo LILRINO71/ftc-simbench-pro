@@ -1,0 +1,132 @@
+A. CODE: each team's main TeleOp on one standard robot (mecanum-zup: goBILDA 4-wheel mecanum), all its other .java files as helpers
+   probes: gamepad1 held 1 s from a fresh START. F = left stick up goes >0.3 m forward (sideways <25 %, <15 deg); S = left stick right goes >0.2 m right;
+   T = right stick right turns >20 deg clockwise in place (<0.1 m). lay = stick layout read off the code: mec(anum) as above, trg = mecanum turning with the triggers; pov/arc(ade)/tnk drive and turn
+   with their own sticks and can't strafe (S "-"). Each probe runs twice: on the robot as built (its CAD's motor mounting, left side reversed), and on
+   the same robot with each drive motor mounted the way the code's own setDirection calls say (positive power rolls every wheel forward). drv upper case:
+   right as built; lower case: right only with the code's mounting (it reverses the other side, say), which also counts as driving correctly. The numbers
+   are for the variant drv shows. ctl = controls probed (not drive axes), mov = controls that moved a mechanism,
+   mech = non-drive motors/servos whose power/position/target changed while a control was held 1 s (against an unpressed run).
+
+team          TeleOp                       dev act drivetrain                lay   fwd m  right  cw deg drv  ctl mov mech  coverage every TeleOp  
+pedro         TeleOpBlue.java               14  12 4: lf/lb/rf/rb            mec    1.39   1.26   236.2 FST    8   5    5   100/117 2/2/2 of 3    
+rr05          RoadrunnerMecanumOp.java       0   0 -                         mec    0.00   0.00       0 ...    3   0    0     11/14 1/1/4 of 11   
+rr1team       IntegratedOpMode.java         14  11 4: leftFront/leftBack/ri~ mec    0.74   0.71    86.6 FST    0   0    0   100/103 5/6/2 of 10   
+t10158        TwoPersonDrive.java           16  15 4: leftFront/leftRear/ri~ arc    0.03    n/a     4.9 .-.   23  11    7   100/101 3/3/1 of 5    
+t11691        TeleOpMain.java               28  10 4: RL/RR/FL/FR            pov    0.90    n/a   148.1 F-T   26  19    6   100/117 1/1/1 of 1    
+t13115        FieldRelativeTeleop.java      11   8 4: backRight/frontRight/~ mec    0.00   0.00       0 ...   11   6    4   100/108 1/1/3 of 5    
+t16072        NoTurnTeleop.java             26  14 4: front_left_motor/fron~ mec    0.76   0.73   123.9 FST   24  14   10   100/122 2/2/2 of 5    
+t18244        HestiaTeleOp.java             12   9 4: leftFront/leftBack/ri~ mec    1.42   1.19   183.7 FST    9   6    5   100/106 1/2/1 of 3    
+t18763        Duo.java                      19  14 4: dtBackLeftMotor/dtFro~ trg    1.39   1.26   236.2 fst   14   6    7   100/102 2/2/2 of 2    
+t19922        SingleDriverTeleOp.java       18  13 4: leftFront/rightFront/~ trg    1.42   1.29   123.9 FST   12   7    9   100/100 2/2/1 of 4    
+t21337        SuperGoatedTeleop.java        10  10 4: frontLeftMotor/frontR~ mec    1.17   0.86   241.5 FST   14  10    4   100/100 3/3/2 of 4    
+t21836        Tele.java                     29  19 4: left front/left back/~ mec    1.42   1.23   241.5 FST   10   3    4   100/104 3/3/2 of 18   
+t24791        Riverhawks.java                6   6 4: frontLeftMotor/frontR~ pov    1.42    n/a   241.5 f-t    2   1    1     35/35 1/1/1 of 11   
+t25609        Teleop_Main_.java             18  12 -                         mec    0.00   0.00       0 ...   22   0    0   100/130 0/0/0 of 7    
+t25832        Teleop.java                   22  18 4: leftFront/leftBack/ri~ mec    1.27   1.29   123.9 FST    1   1    2   100/116 3/3/2 of 10   
+t27570        VisionGraspingTeleOp.java     12  11 -                         mec    0.00   0.00       0 ...    2   0    0   100/115 7/7/3 of 11   
+t7198         IntoDeepTeleOp.java           13   9 4: leftFront/rightFront/~ mec    1.42   1.29   241.5 FST   17   7    4   100/105 3/3/1 of 9    
+t8535         Main_Teleop.java              10   9 4: left_front_drive/left~ mec    1.10   1.04   183.7 FST   15   7    5   100/102 2/2/1 of 4    
+tCyberRaptors TankMain.java                  0   0 -                         mec    0.00   0.00       0 ...    0   0    0       0/0 0/0/0 of 8    
+tEverybot     TeleOpControlLinearOpMode.j~   8   8 4: left_front_drive/left~ mec    1.42   1.29   241.5 FST    6   6    4   100/100 1/1/1 of 1    
+tKleongf      RedTeleop.java                20  12 4: front_left_drive/back~ mec    1.39   1.17    93.6 FST   19   7    4   100/139 6/6/6 of 17   
+tLaSalle      TwoControllerDriverControll~  11   7 4: fL/fR/bL/bR            mec    0.64   0.64   140.3 ..T   16   5    1   100/100 0/1/2 of 2    
+tOakGrove     Robert.java                    7   4 4: left_front_drive/left~ mec    1.42   1.29   241.5 FST    0   0    0   100/104 2/2/0 of 3    
+tRocket       TeleOpFullNew.java             8   7 4: Front_Left/Front_Righ~ mec    0.00   0.00       0 ...   16   0    0   100/100 1/1/4 of 10   
+tRyali        TeleOpX.java                  13  12 4: rightFront/rightRear/~ mec    1.17   1.29   138.4 FST   17   9    8   127/127 1/1/2 of 2    
+tTechTigers   BlueTeleOpMode.java            0   0 -                         mec    0.00   0.00       0 ...   24   0    0       0/0 0/0/0 of 18   
+tTechTurb     Drive_V4.java                  0   0 4: leftFront/leftBack/ri~ mec    0.00   0.00       0 ...   23   0    0      1/12 0/0/1 of 9    
+tTechTurtles  Manual.java                   11   8 4: FrontLeftDrive/RearLe~ mec    1.42   1.20   241.5 FST    1   0    0   100/109 3/3/1 of 7    
+              ("every TeleOp" = drives correctly / drives at all / moves a mechanism, of the team's enabled @TeleOps)
+
+   reference code on the same robot (the bench's own known-good OpModes, the FTC SDK samples, the Road Runner 1.0 quickstart):
+reference     TeleOp                       dev act drivetrain                lay   fwd m  right  cw deg drv  ctl mov mech  coverage every TeleOp  
+itd-7832      sample_teleop.java            16  15 4: frontLeftMotor/backLe~ mec    1.42   1.20   241.5 FST   14  12   10   104/104               
+fixture       CompetitionTeleOp.java         9   8 4: fl/bl/fr/br            mec    1.42   1.19   241.5 fst    5   4    4     38/38               
+
+   why, per team (main TeleOp):
+   pedro         drives correctly; 5/8 mechanism devices move (5/8 controls); 17 stmts skipped (mostly: a library call the bench doesn't model (it does nothing here))
+   rr05          drives through Road Runner 0.5 setWeightedDrivePower, which the bench doesn't run; no mechanism moves (3 controls tried, 0 non-drive actuators found); 3 stmts skipped (mostly: calls into other classes aren't simulated)
+   rr1team       drives correctly; no mechanism moves (0 controls tried, 7 non-drive actuators found); 3 stmts skipped (mostly: a library call the bench doesn't model (it does nothing here))
+   t10158        drivetrain found, robot did not move; 7/11 mechanism devices move (11/23 controls); 1 stmts skipped (mostly: a library call the bench doesn't model (it does nothing here)); reads battery voltage
+   t11691        drives correctly; 6/6 mechanism devices move (19/26 controls); 17 stmts skipped (mostly: a library call the bench doesn't model (it does nothing here)); gamepad edge detection
+   t13115        drivetrain found, robot did not move; 4/4 mechanism devices move (6/11 controls); 8 stmts skipped (mostly: a library call the bench doesn't model (it does nothing here))
+   t16072        drives correctly; 10/10 mechanism devices move (14/24 controls); 22 stmts skipped (mostly: a library call the bench doesn't model (it does nothing here))
+   t18244        drives correctly; 5/5 mechanism devices move (6/9 controls); 6 stmts skipped (mostly: a library call the bench doesn't model (it does nothing here))
+   t18763        drives correctly with its motors mounted the way its setDirection calls say (as built: stick up drives BACKWARD -1.39 m, strafe goes LEFT 1.26 m, turn goes LEFT 236.2 deg); 7/10 mechanism devices move (6/14 controls); 2 stmts skipped (mostly: a library call the bench doesn't model (it does nothing here))
+   t19922        drives correctly; 9/9 mechanism devices move (7/12 controls); gamepad edge detection
+   t21337        drives correctly; 4/4 mechanism devices move (10/14 controls)
+   t21836        drives correctly; 4/15 mechanism devices move (3/10 controls); 4 stmts skipped (mostly: a library call the bench doesn't model (it does nothing here))
+   t24791        drives correctly with its motors mounted the way its setDirection calls say (as built: stick up SPINS -241.5 deg, turn stick moves it -1.43 m fwd, 0.00 m right); 1/2 mechanism devices move (1/2 controls)
+   t25609        12 actuators, but none fed straight from a stick (no drivetrain); no mechanism moves (22 controls tried, 8 non-drive actuators found); 30 stmts skipped (mostly: a library call the bench doesn't model (it does nothing here))
+   t25832        drives correctly; 2/14 mechanism devices move (1/1 controls); 16 stmts skipped (mostly: a library call the bench doesn't model (it does nothing here))
+   t27570        11 actuators, but none fed straight from a stick (no drivetrain); no mechanism moves (2 controls tried, 11 non-drive actuators found); 15 stmts skipped (mostly: a library call the bench doesn't model (it does nothing here))
+   t7198         drives correctly; 4/5 mechanism devices move (7/17 controls); 5 stmts skipped (mostly: a library call the bench doesn't model (it does nothing here))
+   t8535         drives correctly; 5/5 mechanism devices move (7/15 controls); 2 stmts skipped (mostly: a library call the bench doesn't model (it does nothing here))
+   tCyberRaptors no main loop found (extends LinearOpMode); no mechanism moves (0 controls tried, 0 non-drive actuators found)
+   tEverybot     drives correctly; 4/4 mechanism devices move (6/6 controls)
+   tKleongf      drives correctly; 4/8 mechanism devices move (7/19 controls); 39 stmts skipped (mostly: a library call the bench doesn't model (it does nothing here))
+   tLaSalle      drives wrong: stick up 0.64 m fwd, -0.02 m right, strafe 0.64 m right, 0.03 m fwd; fwd+strafe moves only because the sim drifts: the wheels are commanded against each other; 1/3 mechanism devices move (5/16 controls)
+   tOakGrove     drives correctly; no mechanism moves (0 controls tried, 0 non-drive actuators found); 4 stmts skipped (mostly: a library call the bench doesn't model (it does nothing here))
+   tRocket       drivetrain found, robot did not move; no mechanism moves (16 controls tried, 3 non-drive actuators found)
+   tRyali        drives correctly; 8/8 mechanism devices move (9/17 controls); reads battery voltage
+   tTechTigers   no main loop found (extends BaseTeleOpMode); no mechanism moves (24 controls tried, 0 non-drive actuators found); reads battery voltage
+   tTechTurb     drives through Road Runner 1.0 MecanumDrive.setDrivePowers, which the bench doesn't run; no mechanism moves (23 controls tried, 0 non-drive actuators found); 11 stmts skipped (mostly: not a form the interpreter understands)
+   tTechTurtles  drives correctly; no mechanism moves (1 controls tried, 4 non-drive actuators found); 9 stmts skipped (mostly: a library call the bench doesn't model (it does nothing here))
+
+B. CAD: through the page's path for a new robot (parse, frame, front from the wheels, the joint finder or a joint spec)
+
+cad                               MB parse s units      parts size mm              kg up  front    drive         joints
+centerstage-deposit             89.1     9.0 METRE        104 263x277x489        1.01 +z  +x?      unknown 0          9
+centerstage-intake              23.4     3.4 METRE        131 199x421x148        2.09 +z  +x?      unknown 0          4
+ftc19234-itd-claw               13.7     1.9 MILLIMETRE    31 65x134x56          0.12 +z  +x?      unknown 0          1
+ftc30843-decode-intake           5.6     1.0 MILLIMETRE     2 145x124x169        0.06 +z  +x?      unknown 0          0
+ftc8375-worlds-2016             22.4     3.2 INCH         299 709x457x1066      16.57 +z  +x?      unknown 4         10
+ftc8400-arm-2024                43.1     4.2 INCH         215 112x360x455        1.15 +z  +x?      unknown 0          1
+gobilda-uchannel-chassis        46.8     5.6 METRE        634 373x440x104        2.97 +y  +y       mecanum 4          0
+ultimate-drivebase               4.5     0.5 INCH          77 438x152x103        1.47 -y  +x       unknown 3          0
+itd-7832                        50.2     5.6 METRE        773 465x450x492        8.98 +z  +x       mecanum 4         15
+itd-7832-spec                   50.2     5.9 METRE        773 465x450x492        8.98 +z  -x       mecanum 4        17s
+fixture-assembly                 0.0     0.0 METRE          2 130x50x120         0.02 +z  +x?      unknown 0          0
+   up: the CAD's own axis the frame turned to +z. front: in the robot frame after that; "?" = the wheels don't give the front axis, so +x
+   was used. drive: what driveFromCAD found (0 wheels: the sim drives a drawn base). joints "s": from a joint spec, else from the finder.
+   parse s is measured while the code workers run, so it is a rough figure.
+
+   what a team is asked, and what the robot does. Q = robot-check items (ANSWER+CONFIRM) + setup steps not done + status-light rows.
+   with code: drv = the probe above on THIS robot (F S T; lower case = right only with the motors mounted as the code says, not as this CAD has them:
+   fine for the ITD code on another team's robot, wrong for a team's own code); joint = devices the code moves (not the drive) that have a joint to move.
+
+cad                           Q no code    Q ITD code   ITD drv joint  Q own code   own drv joint  
+centerstage-deposit           4 (1+3+0)    10 (4+3+3)   FST     4/10                               
+centerstage-intake            3 (0+3+0)    7 (2+3+2)    FST     2/10                               
+ftc19234-itd-claw             4 (1+3+0)    8 (3+3+2)    FST     1/10                               
+ftc30843-decode-intake        5 (2+3+0)    9 (4+3+2)    FST     1/10                               
+ftc8375-worlds-2016           3 (0+3+0)    8 (3+3+2)    FS.     3/10                               
+ftc8400-arm-2024              4 (1+3+0)    7 (2+3+2)    FST     1/10                               
+gobilda-uchannel-chassis      1 (0+1+0)    3 (0+1+2)    FST     4/10                               
+ultimate-drivebase            3 (1+2+0)    8 (3+2+3)    F..     0/10                               
+itd-7832                      1 (0+1+0)    8 (0+1+7)    FST     5/10                               
+itd-7832-spec                 0 (0+0+0)    2 (0+0+2)    FST     10/10                              
+fixture-assembly              5 (2+3+0)    9 (4+3+2)    FST     1/10   9 (4+3+2)    fst     1/4    
+
+   notes, per CAD:
+   centerstage-deposit           1.01 kg; front not from wheels; no drive wheels (drawn base); finder 9 joints (5 actuators, 1 slides, 8 "Check:" notes); no code: 1 mass:warn; ITD code: 2 kind:warn, 1 drive:fail, 1 mass:warn (4 buttons); status 3
+   centerstage-intake            front not from wheels; no drive wheels (drawn base); finder 4 joints (2 actuators, 0 slides, 2 "Check:" notes); ITD code: 1 drive:fail, 1 swing:warn (1 buttons); status 2
+   ftc19234-itd-claw             0.12 kg; front not from wheels; no drive wheels (drawn base); finder 1 joints (1 actuators, 0 slides, 1 "Check:" notes); no code: 1 mass:warn; ITD code: 1 drive:fail, 1 mass:warn, 1 kind:warn (2 buttons); status 2
+   ftc30843-decode-intake        0.06 kg; front not from wheels; no drive wheels (drawn base); finder 0 joints (1 actuators, 0 slides, 0 "Check:" notes); no code: 1 empty:fail, 1 mass:warn; ITD code: 1 empty:fail, 1 drive:fail, 1 mass:warn, 1 axis:warn (2 buttons); status 2
+   ftc8375-worlds-2016           front not from wheels; 4 wheels, kind unknown; finder 10 joints (8 actuators, 1 slides, 7 "Check:" notes); ITD code: 1 swing:fail, 1 kind:warn, 1 drive:warn (4 buttons); status 2; drives wrong: turn 288.5 deg with 0.24 m drift
+   ftc8400-arm-2024              1.15 kg; front not from wheels; no drive wheels (drawn base); finder 1 joints (2 actuators, 2 slides, 1 "Check:" notes); no code: 1 mass:warn; ITD code: 1 drive:fail, 1 mass:warn; status 2
+   gobilda-uchannel-chassis      finder 0 joints (4 actuators, 0 slides, 0 "Check:" notes); ITD code: robot check asks nothing; status 2
+   ultimate-drivebase            1.47 kg; 3 wheels, kind unknown; finder 0 joints (2 actuators, 0 slides, 0 "Check:" notes); no code: 1 mass:warn; ITD code: 2 drive:warn, 1 mass:warn (1 buttons); status 3; drives wrong: strafe SPINS -59 deg, turn 303.5 deg with 0.06 m drift
+   itd-7832                      finder 15 joints (15 actuators, 2 slides, 3 "Check:" notes); ITD code: robot check asks nothing; status 7
+   itd-7832-spec                 17 joints from its spec; ITD code: robot check asks nothing; status 2
+   fixture-assembly              0.02 kg; front not from wheels; no drive wheels (drawn base); finder 0 joints (1 actuators, 0 slides, 0 "Check:" notes); no code: 1 empty:fail, 1 mass:warn; ITD code: 1 empty:fail, 1 drive:fail, 1 mass:warn, 1 axis:warn (2 buttons); status 2; own code: 1 empty:fail, 1 drive:fail, 1 mass:warn, 1 axis:warn; drives wrong: stick up drives BACKWARD -1.32 m, strafe goes LEFT 1.21 m, turn goes LEFT 239.8 deg (right with its motors mounted as its setDirection calls say; the CAD has no drive wheels and the drawn base assumes the left side reversed); 1/4 on a joint
+   skipped: REVIVER (Current Bot).step (not found); V1.1- BASE CURRENT--.step (not found)
+
+SUMMARY
+  CODE (main TeleOp, 28 teams): drives correctly 18/28 (16 with the standard robot's motor mounting), drives at all 19/28, moves a mechanism 18/28
+  CODE (every enabled TeleOp, 190): drives correctly 55, drives at all 58, moves a mechanism 44; teams with any TeleOp that drives correctly 23/28
+  REFERENCE code: drives correctly 2/2, moves a mechanism 2/2
+  CAD: parse 11/11; questions median 3 with no code, 8 with the ITD TeleOp; ITD TeleOp drives correctly on 9/11, its 10 mechanism devices on a joint: median 2; own code drives correctly 0/1
+  CODE drives correctly 18/28, drives at all 19/28, mechanisms 18/28 | CAD parse 11/11, questions median 3 (no code) / 8 (ITD code)
+  (330 s, engine 34d03fe, 2026-10-02)
+

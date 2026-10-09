@@ -1,0 +1,196 @@
+{
+ "about": "Where each team folder of the code corpus came from: a public GitHub repo at a fixed commit, TeamCode .java only. corpus.mjs --fetch rebuilds a missing folder from this. The code stays under its owners' terms and out of this repo; we only read it.",
+ "teams": {
+  "ftclib": {
+   "group": "reference",
+   "files": []
+  },
+  "pedro": {
+   "group": "team",
+   "repo": "MrWansBoxes/BananaBox16169Decode",
+   "sha": "bf59c9b278e7a3776294c8d1d6dc2dafe4d4929d",
+   "primary": "TeamCode/src/main/java/org/firstinspires/ftc/teamcode/pedroPathing/TeleOpBlue.java"
+  },
+  "rr05": {
+   "group": "team",
+   "repo": "rocketbooster1000/PowerPlay",
+   "sha": "3dafe63c363a838d7ea1e0569ee60f2f811d94d8",
+   "primary": "TeamCode/src/main/java/org/firstinspires/ftc/teamcode/opmodes/teleop/RoadrunnerMecanumOp.java"
+  },
+  "rr1": {
+   "group": "reference",
+   "files": [
+    "LocalizationTest.java",
+    "MecanumDrive.java"
+   ]
+  },
+  "rr1team": {
+   "group": "team",
+   "repo": "chsbacon/FTC-CENTERSTAGE-7080",
+   "sha": "7d87c9242643e81e1f860db951ceee3c050aa245",
+   "primary": "TeamCode/src/main/java/org/firstinspires/ftc/teamcode/opmodes/IntegratedOpMode.java"
+  },
+  "sdk": {
+   "group": "reference",
+   "files": [
+    "BasicOmniOpMode_Linear.java",
+    "BasicOpMode_Linear.java",
+    "ConceptExternalHardwareClass.java",
+    "ConceptGamepadEdgeDetection.java",
+    "RobotHardware.java",
+    "RobotTeleopMecanumFieldRelativeDrive.java",
+    "RobotTeleopTank_Iterative.java"
+   ]
+  },
+  "t10158": {
+   "group": "team",
+   "repo": "AnyiLin/10158-Centerstage",
+   "sha": "802b9f7ee2dca5115df6d80bb0b423afd3e7700e",
+   "primary": "TeamCode/src/main/java/org/firstinspires/ftc/teamcode/competition/teleop/TwoPersonDrive.java"
+  },
+  "t11691": {
+   "group": "team",
+   "repo": "scrippsdragons11691/FtcRobotController-11691-CenterStage",
+   "sha": "a60dabec4cc7e94d62163ad201143adef64ab2c1",
+   "primary": "TeamCode/src/main/java/org/firstinspires/ftc/teamcode/TeleOpMain.java"
+  },
+  "t13115": {
+   "group": "team",
+   "repo": "Saketh-Ayyagari/FTC13115-IntoTheDeep",
+   "sha": "5460646ff2fd81821cb2ed95c3d9b5a3ba81fc83",
+   "primary": "TeamCode/src/main/java/org/firstinspires/ftc/teamcode/FieldRelativeTeleop.java"
+  },
+  "t16072": {
+   "group": "team",
+   "repo": "ftc16072/IntoTheDeep24-25",
+   "sha": "e2633f1c2d39a47cdb6837821671d4e9ad684bd5",
+   "primary": "TeamCode/src/main/java/org/firstinspires/ftc/teamcode/ftc16072/OpModes/NoTurnTeleop.java"
+  },
+  "t18244": {
+   "group": "team",
+   "repo": "Hestia18244/FTC-IntoTheDeep-18244",
+   "sha": "81ebaae81ab7e4093714d7b77f3c8ccb34dc52bc",
+   "primary": "TeamCode/src/main/java/org/firstinspires/ftc/teamcode/opmodes/teleop/HestiaTeleOp.java"
+  },
+  "t18763": {
+   "group": "team",
+   "repo": "KookyBotz/CenterStage",
+   "sha": "30ff374cda7469fc291d56dd3f947093a2c5b5db",
+   "primary": "TeamCode/src/main/java/org/firstinspires/ftc/teamcode/opmode/teleop/Duo.java"
+  },
+  "t19922": {
+   "group": "team",
+   "repo": "rh-robotics/19922-CSRC",
+   "sha": "a5b4d52a116db2b9c2fa23e3414dbccacb2e3439",
+   "primary": "TeamCode/src/main/java/org/firstinspires/ftc/teamcode/teleop/SingleDriverTeleOp.java"
+  },
+  "t21337": {
+   "group": "team",
+   "repo": "TeamDinobyte21337/FTC-Centerstage-21337",
+   "sha": "9bfd5315587b9eac5ed086eb55b74563a034e22b",
+   "primary": "TeamCode/src/main/java/org/firstinspires/ftc/teamcode/SuperGoatedTeleop.java"
+  },
+  "t21836": {
+   "group": "team",
+   "repo": "arshadanas/21836-IntoTheDeep",
+   "sha": "118b0d530ca58f611b66c15dbdefc65e4fd0d666",
+   "primary": "TeamCode/src/main/java/org/firstinspires/ftc/teamcode/opmode/Tele.java"
+  },
+  "t24791": {
+   "group": "team",
+   "repo": "ftc24791/2025-2026-Decode",
+   "sha": "0e8eefec3945529674e26978201a725d0c12675f",
+   "primary": "TeamCode/src/main/java/org/firstinspires/ftc/teamcode/opmodes/teleops/Riverhawks.java"
+  },
+  "t25609": {
+   "group": "team",
+   "repo": "LOAD-Robotics-Team-25609/Decode-Robot-Code",
+   "sha": "930f5dd231ee4f7bcf90c328f1ec9be2f73616a7",
+   "primary": "TeamCode/src/main/java/org/firstinspires/ftc/teamcode/LOADCode/Main_/Teleop_/Teleop_Main_.java"
+  },
+  "t25832": {
+   "group": "team",
+   "repo": "FTC-Ripples-25832/ripples-25832-IntoTheDeep",
+   "sha": "56646314c0ce789e4cd1708c4e4658e7d98e8c2d",
+   "primary": "TeamCode/src/main/java/org/firstinspires/ftc/teamcode/opmodes/teleop/Teleop.java"
+  },
+  "t27570": {
+   "group": "team",
+   "repo": "BlueDarkUP/FTC-27570-INTOTHEDEEP-WRC",
+   "sha": "34665f33a34e9d0bbef9caa3c3773ce0257ee88d",
+   "primary": "TeamCode/src/main/java/org/firstinspires/ftc/teamcode/vision/VisionGraspingTeleOp.java"
+  },
+  "t7198": {
+   "group": "team",
+   "repo": "AnacortesRobotics/2024-2025-INTOTHEDEEP-7198",
+   "sha": "e467e5f1f3dbf5573e3349bb74d2434ad20ba173",
+   "primary": "TeamCode/src/main/java/org/firstinspires/ftc/teamcode/IntoDeepTeleOp.java"
+  },
+  "t8535": {
+   "group": "team",
+   "repo": "FTC8535-SharkBytes/2024_2025_FTC8535_IntoTheDeep",
+   "sha": "f60384b71bd26d3ca601225e823847d111afd660",
+   "primary": "TeamCode/src/main/java/org/firstinspires/ftc/teamcode/Main_Teleop.java"
+  },
+  "tCyberRaptors": {
+   "group": "team",
+   "repo": "CyberRaptors/Decode",
+   "sha": "594576f65bc793cc7bf8b5d2bd9b84095808b5d6",
+   "primary": "TeamCode/src/main/java/org/firstinspires/ftc/teamcode/teleop/normal/opmodes/TankMain.java"
+  },
+  "tEverybot": {
+   "group": "team",
+   "repo": "Robonauts-Everybot/FTC-Everybot-Code-2025-DECODE",
+   "sha": "ba63477926f0b33a5bcdd1ec4ba00c767eafd035",
+   "primary": "TeamCode/src/main/java/org/firstinspires/ftc/teamcode/TeleOpControlLinearOpMode.java"
+  },
+  "tKleongf": {
+   "group": "team",
+   "repo": "kleongf/FTC_Decode",
+   "sha": "6aa84a87eaa09c862eb707c4f604191bbcedb1d1",
+   "primary": "TeamCode/src/main/java/org/firstinspires/ftc/teamcode/decode2026/opmode/teleop/RedTeleop.java"
+  },
+  "tLaSalle": {
+   "group": "team",
+   "repo": "LaSalleRobots/PowerPlay",
+   "sha": "fd0ca86b7026a9e71f6a33de8334d6152814d4c7",
+   "primary": "TeamCode/src/main/java/org/firstinspires/ftc/teamcode/TwoControllerDriverControlled.java"
+  },
+  "tOakGrove": {
+   "group": "team",
+   "repo": "OakGroveRobotics/2023-2024",
+   "sha": "44e1bb2df7fad7382dea210d0e6dec19b6a6144c",
+   "primary": "TeamCode/src/main/java/org/firstinspires/ftc/teamcode/Robert.java"
+  },
+  "tRocket": {
+   "group": "team",
+   "repo": "rocketbooster1000/PowerPlay",
+   "sha": "3dafe63c363a838d7ea1e0569ee60f2f811d94d8",
+   "primary": "TeamCode/src/main/java/org/firstinspires/ftc/teamcode/opmodes/teleop/TeleOpFullNew.java"
+  },
+  "tRyali": {
+   "group": "team",
+   "repo": "ryalisuchir/CenterStage",
+   "sha": "333ad701d6864faa0cb2e6cdf9205de18adaea84",
+   "primary": "TeamCode/src/main/java/org/firstinspires/ftc/teamcode/Drive/OpModes/TeleOp/TeleOpX.java"
+  },
+  "tTechTigers": {
+   "group": "team",
+   "repo": "techtigers-ftc/intothedeep",
+   "sha": "ad2d7a3246fb89f27127be61bfeb3b4cd368acdc",
+   "primary": "TeamCode/src/main/java/org/firstinspires/ftc/teamcode/opmodes/BlueTeleOpMode.java"
+  },
+  "tTechTurb": {
+   "group": "team",
+   "repo": "Technical-Turbulence-FTC/IntoTheDeepFTC",
+   "sha": "4376fb7b90b96a54fbd0f8d7f5289418661041e0",
+   "primary": "TeamCode/src/main/java/teamcode/Teleop/Drive_V4.java"
+  },
+  "tTechTurtles": {
+   "group": "team",
+   "repo": "Tech-Turtles/Decode",
+   "sha": "5a7a374f48496381d6bb6d7cae99a329d2751c20",
+   "primary": "TeamCode/src/main/java/org/firstinspires/ftc/teamcode/opmode/teleop/Manual.java"
+  }
+ }
+}
