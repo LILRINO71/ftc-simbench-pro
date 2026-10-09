@@ -9,11 +9,27 @@
    into pts, wound counter-clockwise seen from outside, or null when the
    points are flat or too few (the caller falls back to a box). */
 function convexHull(pts){
+  // A point a hair off a face (the coplanar points all over a flat plate) made sliver faces
+  // whose normals are rounding noise, and the hull came out open: a 6 mm plate's "volume" was
+  // 250 times its own box, and it weighed 31 kg. So a point within a millionth of the part's
+  // size of a face counts as on it, a hull that still isn't closed is built again looser, and
+  // one that never closes is no hull (the caller uses the box).
+  for(const tol of [1e-6,1e-5,1e-4]){ const h=convexHullAt(pts,tol); if(!h||hullClosed(h.faces)) return h; }
+  return null;
+}
+/* every edge used once each way: a closed, consistently wound surface */
+function hullClosed(faces){
+  const e=new Set();
+  for(const [a,b,c] of faces) for(const k of [a+","+b,b+","+c,c+","+a]){ if(e.has(k)) return false; e.add(k); }
+  for(const k of e){ const i=k.indexOf(","); if(!e.has(k.slice(i+1)+","+k.slice(0,i))) return false; }
+  return true;
+}
+function convexHullAt(pts,tol){
   const n=pts.length; if(n<4) return null;
   const mn=[Infinity,Infinity,Infinity], mx=[-Infinity,-Infinity,-Infinity];
   for(const p of pts) for(let k=0;k<3;k++){ if(p[k]<mn[k]) mn[k]=p[k]; if(p[k]>mx[k]) mx[k]=p[k]; }
   const diag=Math.hypot(mx[0]-mn[0],mx[1]-mn[1],mx[2]-mn[2]); if(!(diag>0)) return null;
-  const eps=diag*1e-9;
+  const eps=diag*tol;
   const sub=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]];
   const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
   const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
@@ -110,6 +126,9 @@ function solidKind(name,pn){
   if(/screw|bolt|\bnut\b|washer|rivet|shcs|bhcs|fhcs|set ?screw|locknut/.test(s)) return "fastener";
   // a season's game element drawn in the robot (DECODE's artifact, INTO THE DEEP's sample): not the robot
   if(/\bartifacts?\b|\bspecimens?\b|\bsamples?\b|\bpixels?\b|game ?(piece|element)|am-3376|am-5201|am-5101/.test(s)||/^am-(3376|5201|5101)/.test(p)) return "game";
+  // BIOBUZZ's POLLEN and NECTAR (AndyMark am-5852), only when the whole name is the ball: a team's
+  // "pollen intake" or "nectar ramp" is robot
+  if(/^(am[- ]?5852\b.*|(biobuzz |ftc )?(red |blue |yellow )?(pollen|nectar)( ball)?( \d+)?)$/.test(s.trim())||/^am-5852/.test(p)) return "game";
   if(/^520[234]-/.test(p)||/yellow ?jacket|gearmotor|\bmotor\b/.test(s)) return "motor";
   if(/^2000-0025/.test(p)||/\bservo\b/.test(s)) return "servo";
   if(/mecanum|omni|wheel|tire|tyre|traction|gecko|roller/.test(s)) return "wheel";
