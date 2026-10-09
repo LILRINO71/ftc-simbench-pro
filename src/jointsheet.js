@@ -42,6 +42,8 @@
    it.
    ============================================================ */
 const JOINT_SHEET_FORMAT="ftc-simbench.jointsheet";
+// words that name a part or join a phrase, never a device: a mate called "Servo Horn" describes, it doesn't declare
+const JT_PART_WORDS=/^(horn|mount|mounts|bracket|plate|shaft|axle|gear|gearbox|pulley|hub|bearing|spacer|standoff|coupler|coupling|clamp|block|case|cover|holder|side|pivot|joint|mate|to|and|on|the|with|of|in)$/i;
 
 const {jointTag, jointNameKey, onshapeMateName, sheetFromTags, applyJointSheet, clearJointSheet, mergeJointSheets, sheetBindings, checkJointSheet, tagFor, isExact}=(function(){
   const DEG=Math.PI/180;
@@ -72,6 +74,9 @@ const {jointTag, jointNameKey, onshapeMateName, sheetFromTags, applyJointSheet, 
       const r=/^x(\d+)(?:p(\d+))?$/.exec(l); if(r){ ratio=+(r[1]+(r[2]?"."+r[2]:"")); continue; }
       rest.push(w);
     }
+    // "Servo Horn", "Motor Mount to Plate": a team describing the parts, not declaring a device.
+    // Read as a declaration it would make the robot exact and hold every other joint
+    if(DRIVEN.has(drive)&&rest.length&&rest.every(w=>JT_PART_WORDS.test(w))) return null;
     const t={drive, rev};
     if(drive==="follow"){ if(!rest.length) return null; t.follows=rest.join(" "); if(ratio!=null) t.ratio=ratio; }
     else if(DRIVEN.has(drive)) t.devices=rest;

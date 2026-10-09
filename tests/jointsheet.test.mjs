@@ -241,3 +241,12 @@ test('exact needs a device: a lone "free" or "follow" in a team\'s own mate name
   const src = rc.items.find((i) => i.key === 'source');
   assert.equal(src.ask, 'declare'); assert.match(src.text, /worked out from what they carry/);
 });
+
+test('jointTag: a team\'s descriptive mate name ("Servo Horn", "Motor Mount to Plate") declares nothing', () => {
+  for (const n of ['Servo Horn', 'servo_horn', 'Motor Mount to Plate', 'motor_shaft', 'Servo pivot', 'Motor Gearbox (1)'])
+    assert.equal(E.jointTag(n), null, n);
+  // a device name among them is still a declaration
+  assert.deepEqual(E.jointTag('servo clawServo').devices, ['clawServo']);
+  assert.deepEqual(E.jointTag('motor armMotor').devices, ['armMotor']);
+  assert.deepEqual(E.jointTag('motor arm').devices, ['arm']);
+});
