@@ -16,7 +16,7 @@
    always did, so nothing is lost but the smoothness.
    ============================================================ */
 const EngineWorker={
-  worker:null, seq:0, pending:{}, dead:false,
+  worker:null, seq:0, pending:{}, dead:false, ready:null,
   /* where the engine lives: next to the page, named by the build */
   src(){
     const name=typeof SIMBENCH_ENGINE_URL==="string"?SIMBENCH_ENGINE_URL:null;
@@ -26,6 +26,8 @@ const EngineWorker={
   /* the worker's own code: load the engine, answer jobs */
   body(engineUrl){
     return `importScripts(${JSON.stringify(engineUrl)});
+// the engine loaded: only now does the page hand over a job (and a zip's bytes with it)
+postMessage({ready:true});
 const say=(id,t,d,n)=>postMessage({id, progress:String(t||""), done:d, total:n});
 // typed arrays travel without a copy; plain number arrays are copied, so the big ones are converted
 function pack(cad){
@@ -71,7 +73,12 @@ onmessage=async e=>{
     const url=this.src(); if(!url){ this.dead=true; return null; }
     try{
       const w=new Worker(URL.createObjectURL(new Blob([this.body(url)],{type:"text/javascript"})));
-      w.onmessage=e=>{ const m=e.data, p=this.pending[m.id]; if(!p) return;
+      // a job waits for the engine to load in the worker: a zip's bytes are handed over (not
+      // copied), and handed to a worker whose engine never loaded (an old page after a deploy,
+      // a blocked file) they could not be read on the page instead
+      let ready; this.ready=new Promise((res,rej)=>{ ready={res,rej}; }); this.ready.catch(()=>{});
+      w.onmessage=e=>{ const m=e.data; if(m&&m.ready){ ready.res(); return; }
+        const p=this.pending[m.id]; if(!p) return;
         if(m.progress!==undefined){ if(p.onProgress) p.onProgress(m.progress,m.done,m.total); return; }
         // a result that arrives after the main one (the joints, the shape units): its promise
         if(m.late){ const L=p.late&&p.late[m.late]; if(L) L.resolve(m.value); if(p.late&&Object.values(p.late).every(x=>x.done=x.done||x===L)) delete this.pending[m.id]; return; }
@@ -83,6 +90,7 @@ onmessage=async e=>{
       w.onerror=e=>{ e.preventDefault&&e.preventDefault();
         // it never started (the engine file didn't load): everything pending runs on the page instead
         const err=new Error("worker: "+(e.message||"stopped"));
+        ready.rej(Object.assign(new Error(err.message),{fallback:true}));
         for(const id in this.pending){ const p=this.pending[id]; delete this.pending[id];
           // a job whose bytes were handed to the worker can't run again on the page: the worker
           // died on it (a browser out of memory on a huge export), so say that instead
@@ -97,8 +105,11 @@ onmessage=async e=>{
   run(msg,transfer,onProgress){
     const w=this.get();
     if(!w) return Promise.reject(Object.assign(new Error("no worker"),{fallback:true}));
-    const id=++this.seq;
-    return new Promise((resolve,reject)=>{ this.pending[id]={resolve,reject,onProgress,handed:!!(transfer&&transfer.length)}; w.postMessage(Object.assign({id},msg),transfer||[]); });
+    return this.ready.then(()=>{
+      if(this.dead||this.worker!==w) throw Object.assign(new Error("no worker"),{fallback:true});
+      const id=++this.seq;
+      return new Promise((resolve,reject)=>{ this.pending[id]={resolve,reject,onProgress,handed:!!(transfer&&transfer.length)}; w.postMessage(Object.assign({id},msg),transfer||[]); });
+    });
   },
   /* the same work on the page, when there is no worker */
   async local(msg,onProgress){
