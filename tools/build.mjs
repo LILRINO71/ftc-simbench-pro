@@ -12,6 +12,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { minifyJS, minifyCSS, minifyHTML } from './minify.mjs';
 import { buildRobot } from './stepgen.mjs';
+import { threeLoaderScript } from './threeloader.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const rd = (...p) => fs.readFileSync(path.join(ROOT, ...p), 'utf8');
@@ -29,11 +30,10 @@ export const ORDER = ['hardware', 'samples', 'step', 'hull', 'inertia', 'expr', 
 // The browser-side files: everything before them is the engine, which also ships on
 // its own as dist/engine.js for the background worker (src/engineworker.js).
 export const BROWSER = ['tessellate', 'view3d', 'cadview', 'engineworker', 'importflow', 'app'];
-// three.js, as an ES module from the CDN (no UMD build exists any more). The page
-// loads it with an import map, puts it on window.THREE with the add-ons the view
-// uses, and only then boots the app (src/app.js waits for "three-ready").
+// three.js, as ES modules from a CDN, with a second one (tools/threeloader.mjs). The
+// page puts it on window.THREE with the add-ons the view uses, and only then boots
+// the app (src/app.js waits for "three-ready").
 export const THREE_VERSION = '0.186.1';
-export const THREE_CDN = `https://cdn.jsdelivr.net/npm/three@${THREE_VERSION}/`;
 
 const argv = process.argv.slice(2);
 const MIN = argv.includes('--min');
@@ -81,20 +81,8 @@ const fragment = [
   '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">',
   // the saved theme before anything paints, so there's no flash; light is the default
   `<script>try{var t=localStorage.getItem("ftcbench.theme");document.documentElement.setAttribute("data-theme",t==="dark"?"dark":t==="light"?"light":(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"))}catch(e){document.documentElement.setAttribute("data-theme","light")}</script>`,
-  // three.js and the add-ons the view uses, as ES modules; the app boots on "three-ready"
-  `<script type="importmap">${JSON.stringify({ imports: { three: THREE_CDN + 'build/three.module.min.js', 'three/addons/': THREE_CDN + 'examples/jsm/' } })}</script>`,
-  `<script type="module">
-import * as THREE from "three";
-import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
-import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
-import { GTAOPass } from "three/addons/postprocessing/GTAOPass.js";
-import { SMAAPass } from "three/addons/postprocessing/SMAAPass.js";
-import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
-import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
-window.THREE = THREE;
-window.THREE_ADDONS = { EffectComposer, RenderPass, GTAOPass, SMAAPass, OutputPass, RoomEnvironment };
-window.dispatchEvent(new Event("three-ready"));
-</script>`,
+  // three.js and the add-ons the view uses, with a second CDN (tools/threeloader.mjs); the app boots on "three-ready"
+  threeLoaderScript(THREE_VERSION),
   `<style>\n${css}</style>`,
   markup,
   `<script>\n${safe(shotJs)}</script>`,
