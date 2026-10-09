@@ -204,3 +204,38 @@ test('sign in with Onshape: not switched on (no app secrets), the page falls bac
   g.fetch = async () => new Response('<!doctype html>', { status: 404 });
   try { assert.deepEqual(await E.onshapeSignInState(), { ready: false, signedIn: false }); } finally { g.fetch = was; }
 });
+
+test('sign in with Onshape: a kept copy of a Part Studio is only for a team that can open its document', async () => {
+  // the edge cache, as Cloudflare's caches.default
+  const kept = new Map(), was = globalThis.caches;
+  globalThis.caches = { default: { match: async (k) => { const r = kept.get(k.url); return r ? r.clone() : undefined; }, put: async (k, r) => { kept.set(k.url, r); } } };
+  try {
+    const [gk] = Object.keys(R.onshape.geom), [ps, config] = gk.split('|');
+    const shapes = `/onshape/api/partstudios/d/${ps.replace(/\/m\//, '/m/')}/tessellatedfaces?configuration=${encodeURIComponent(config)}`;
+    // team A owns the document: read from Onshape, and kept
+    const osA = onshape(), a = browser(osA);
+    await a.signIn();
+    const first = await a.go(shapes);
+    assert.equal(first.status, 200);
+    assert.equal(first.headers.get('X-SimBench-Cache'), 'miss');
+    assert.equal(kept.size, 1);
+    // team B's account can't open it (a private document): Onshape says 403, and the kept copy stays kept
+    const osB = onshape(), b = browser(osB);
+    await b.signIn();
+    const inner = osB.fetch;
+    osB.fetch = async (u, init) => (String(u).includes('/api/documents/' + D) ? new Response('{}', { status: 403 }) : inner(u, init));
+    const denied = await b.go(shapes);
+    assert.equal(denied.status, 403);
+    assert.equal(denied.headers.get('X-SimBench-Cache'), null);
+    assert.doesNotMatch(await denied.text(), /facets/);
+    // team C can open it: served from the copy, after one small check, never the shapes again
+    const osC = onshape(), c = browser(osC);
+    await c.signIn();
+    const hit = await c.go(shapes);
+    assert.equal(hit.status, 200);
+    assert.equal(hit.headers.get('X-SimBench-Cache'), 'hit');
+    assert.equal(hit.headers.get('Cache-Control'), 'no-store');
+    assert.match(await hit.text(), /facets/);
+    assert.deepEqual(osC.calls.map((x) => x.u), [`https://cad.onshape.com/api/documents/${D}`]);
+  } finally { globalThis.caches = was; }
+});

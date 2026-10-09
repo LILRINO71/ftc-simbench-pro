@@ -147,13 +147,29 @@ export async function handle(request, env, fetchImpl = fetch) {
     const cacheable = CACHEABLE.test(path);
     const key = cacheable ? new Request("https://simbench-onshape-cache/" + path + url.search) : null;
     const store = cacheable && typeof caches !== "undefined" ? caches.default : null;
-    if (store) { const hit = await store.match(key).catch(() => null); if (hit) { const h = new Headers(hit.headers); h.set("X-SimBench-Cache", "hit"); return new Response(hit.body, { status: hit.status, headers: h }); } }
-    const call = () => fetchImpl(API + path + url.search, { headers: { Authorization: "Bearer " + t.a, Accept: "application/json" } });
-    let r = await call();
-    if (r.status === 401 && !fresh) { if (!(await refresh())) return signedOut(); r = await call(); }
+    const call = (p, q) => fetchImpl(API + p + (q || ""), { headers: { Authorization: "Bearer " + t.a, Accept: "application/json" } });
+    // one call, renewing the token once if Onshape says it ran out; null when it can't be renewed
+    const ask = async (p, q) => { let r = await call(p, q); if (r.status === 401 && !fresh) { if (!(await refresh())) return null; r = await call(p, q); } return r; };
+    const keepToken = async (h) => { if (fresh) h.append("Set-Cookie", setCookie(COOKIE, await seal(env, t), 60 * 60 * 24 * 30)); return h; };
+    if (store) {
+      const hit = await store.match(key).catch(() => null);
+      if (hit) {
+        // A kept copy was read with someone else's sign-in, and the document may be private:
+        // it is only for a team that can open the document itself, which Onshape says with
+        // its cheapest call. (The shapes are the expensive part; this is one small read.)
+        const did = /\/d\/([0-9a-f]{24})\//i.exec(path)[1];
+        const can = await ask("documents/" + did);
+        if (!can) return signedOut();
+        if (!can.ok) return json({ error: "access", message: "Your Onshape account can't open that document." }, can.status === 404 ? 404 : 403, Object.fromEntries(await keepToken(new Headers())));
+        const h = await keepToken(new Headers(hit.headers)); h.set("X-SimBench-Cache", "hit"); h.set("Cache-Control", "no-store");
+        return new Response(hit.body, { status: hit.status, headers: h });
+      }
+    }
+    const r = await ask(path, url.search);
+    if (!r) return signedOut();
     const headers = new Headers({ "Content-Type": r.headers.get("Content-Type") || "application/json", "Cache-Control": "no-store" });
     const ra = r.headers.get("Retry-After"); if (ra) headers.set("Retry-After", ra);
-    if (fresh) headers.append("Set-Cookie", setCookie(COOKIE, await seal(env, t), 60 * 60 * 24 * 30));
+    await keepToken(headers);
     if (store && r.ok) {
       const body = await r.arrayBuffer();
       const keep = new Response(body, { status: 200, headers: { "Content-Type": headers.get("Content-Type"), "Cache-Control": "public, max-age=" + (/\/v\//.test(path) ? 60 * 60 * 24 * 30 : 60 * 60 * 24 * 7) } });
