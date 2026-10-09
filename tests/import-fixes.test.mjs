@@ -52,8 +52,9 @@ test('joint spec: a mate joint flipped with the rig panel\'s ± stays flipped wh
   const by = (id) => again.mechs.find((m) => m.id === id);
   for (const revs of [0.05, -0.05, 0.6, -0.6]) {
     const s = { kind: 'motor', revs, ticks: revs * 537.7, tpr: 537.7, act: 0, restPos: 0 };
-    assert.ok(Math.abs(E.mateJointQ(by('Arm Pivot'), s) - E.mateJointQ(arm, s)) < 1e-9, 'arm at ' + revs + ' turns: ' + E.mateJointQ(by('Arm Pivot'), s) + ' vs ' + E.mateJointQ(arm, s));
-    assert.ok(Math.abs(E.mateJointQ(by('Lift Stage'), s) - E.mateJointQ(lift, s)) < 1e-9, 'lift at ' + revs + ' turns');
+    assert.ok(Math.abs(E.mateJointQ(by('Arm Pivot'), s) - E.mateJointQ(arm, s)) < 1e-5,   // a written spec rounds its limits
+      'arm at ' + revs + ' turns: ' + E.mateJointQ(by('Arm Pivot'), s) + ' vs ' + E.mateJointQ(arm, s));
+    assert.ok(Math.abs(E.mateJointQ(by('Lift Stage'), s) - E.mateJointQ(lift, s)) < 1e-5, 'lift at ' + revs + ' turns');
   }
   // and an unflipped joint writes no dir at all
   assert.equal(spec.joints.find((j) => j.id === 'Claw').dir, undefined);
