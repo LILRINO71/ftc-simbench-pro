@@ -2770,8 +2770,10 @@ const Perf={ema:16.7, t:0, pr:Math.min(devicePixelRatio||1,2), downAt:-1e9, quie
     if(now-this.t<2000) return; this.t=now;
     const cap=Math.min(devicePixelRatio||1,2), min=Math.min(cap,0.75);
     if(this.ema>26){
-      if(this.pr>min+0.01){ this.pr=Math.max(min,this.pr-0.25); this.set(); this.downAt=now; }
-      else if(View.postOn){ View.postOn=false; }
+      // the passes (ambient occlusion above all) cost the most and are missed least: off first,
+      // then fewer pixels, then the robot's light copy
+      if(View.post&&View.postOn){ View.postOn=false; this.downAt=now; }
+      else if(this.pr>min+0.01){ this.pr=Math.max(min,this.pr-0.25); this.set(); this.downAt=now; }
       else if(!View.lowGfx){ View.lowGfx=true; View.applyQuality(); }
     }else if(this.ema<18.5&&now-this.downAt>20000){
       // room to spare: the full robot back once (a computer that can't keep up goes back to light for good)
