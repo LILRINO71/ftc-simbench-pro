@@ -125,7 +125,8 @@ test('online: each sees the other\'s robot where it is, and the AI robots and th
   const past = [];
   run(hub, [H, G], 6, (pc) => {
     if (pc === G) { pc.sim.chassis.y += 0.6 * 0.02; pc.sim.vel = { x: 0, y: 0.6 }; }
-    else past.push({ t: H.clock.t, bots: H.M.bots.map((b) => ({ x: b.x, y: b.y })) });
+    else past.push({ t: H.clock.t, bots: H.M.bots.map((b) => ({ x: b.x, y: b.y })),
+      field: JSON.stringify([H.F.hive, H.F.tips, H.M.floor.map((e) => e.id).sort(), H.O.scoreOut(H.M.score(H.sim))]) });
   });
   const hp = G.M.players.find((p) => p.id === 'host'), gp = H.M.players.find((p) => p.id === 'guest');
   assert.ok(hp && gp, 'each has the other');
@@ -137,10 +138,13 @@ test('online: each sees the other\'s robot where it is, and the AI robots and th
     const m = G.M.bots.find((x) => x.id === b.id), d = Math.hypot(m.x - then.bots[i].x, m.y - then.bots[i].y);
     assert.ok(d < 0.04, `${b.name}: ${(d * 100).toFixed(1)} cm from where the host had it 0.1 s before`);
   });
-  assert.deepEqual(G.F.hive, H.F.hive);
-  assert.deepEqual(G.F.tips, H.F.tips);
-  assert.deepEqual(G.M.floor.map((e) => e.id).sort(), H.M.floor.map((e) => e.id).sort());
-  assert.deepEqual(G.O.score, H.O.scoreOut(H.M.score(H.sim)));
+  // the field as the host had it when the snapshot the guest shows was sent: 0.1 s back, give or take
+  // a snapshot (12 a second). Compared with the host's field now, an AI pickup in the last 0.1 s
+  // looked like a difference (one run in six, with the match's random seed).
+  const seen = JSON.stringify([G.F.hive, G.F.tips, G.M.floor.map((e) => e.id).sort(), G.O.score]);
+  const window = past.filter((p) => p.t >= H.clock.t - 100 - 1000 / 12 - 25 && p.t <= H.clock.t - 100 + 25);
+  assert.ok(window.length > 2);
+  assert.ok(window.some((p) => p.field === seen), `the guest's field is the host's from 0.1 s before:\n${seen}\n${window.map((p) => p.field).join('\n')}`);
 });
 
 test('online: two robots that meet push each other apart, each computer moving its own', () => {
