@@ -1007,7 +1007,8 @@ JVM.prototype.run=function*(m,self,args,owner){
   const sc=new JvScope(self&&self.__cap?self.__cap:null,{self,cls:owner||(self&&self.__c),meth:m});
   this.bindParams(m.params,args,sc);
   this.depth=(this.depth||0)+1;
-  if(this.depth>400){ this.depth=0; throw this.jthrow("StackOverflowError","calls nested too deep in "+m.name+"()"); }
+  // this frame never reaches the finally below, so it gives its level back itself
+  if(this.depth>400){ this.depth--; throw this.jthrow("StackOverflowError","calls nested too deep in "+m.name+"()"); }
   const prevCls=this.curCls, prevM=this.curMeth; this.curCls=owner||(self&&self.__c)||prevCls; this.curMeth=m.name;
   try{
     const r=yield* this.exBlock(m.body.body,sc);
