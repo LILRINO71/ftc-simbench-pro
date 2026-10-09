@@ -85,7 +85,7 @@ const {applyJointSpec, jointSpecSelect, followQ, linkPin, sliderCrank, rodAngle,
     const c=m.couple; if(!c) return null;
     const q=get(c.to); if(q==null) return null;
     const L=c.link;
-    if(!L) return q*(Number.isFinite(c.ratio)?c.ratio:1);
+    if(!L) return q*(Number.isFinite(c.ratio)?c.ratio:1)+(Number.isFinite(c.offset)?c.offset:0);   // a URDF mimic's offset
     if(c.via==="slider-crank") return sliderCrank(L,q);
     if(c.via==="rod"){ const e=get(L.slider); return rodAngle(L,q,e==null?0:e,m.axis); }
     if(c.via==="four-bar") return fourBarAngle(L,q,m.axis);

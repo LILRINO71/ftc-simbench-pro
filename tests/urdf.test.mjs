@@ -86,3 +86,17 @@ test('urdf: STL meshes dropped with it, binary and ASCII; a missing one is named
 test('urdf: a xacro file is refused with what to do', async () => {
   await assert.rejects(E.urdfRobot('<robot xmlns:xacro="x"><xacro:macro name="m"/></robot>', {}, 'x'), /xacro/);
 });
+
+test('urdf: a mimic\'s offset is kept (follower = multiplier x leader + offset), and a multiplier of 0 holds it at the offset', async () => {
+  const withOff = URDF.replace('<mimic joint="arm" multiplier="-0.5"/>', '<mimic joint="arm" multiplier="-0.5" offset="0.2"/>');
+  const cad = await E.urdfRobot(withOff, {}, 'urdfbot');
+  const j = Object.fromEntries(cad.mechs.filter((m) => m.fromMate).map((m) => [m.id, m]));
+  assert.deepEqual([j.claw.couple.to, j.claw.couple.ratio, j.claw.couple.offset], ['arm', -0.5, 0.2]);
+  const q = E.jointValues(cad.mechs, (m) => (m.id === 'arm' ? 0.4 : m.couple ? null : 0));
+  assert.ok(Math.abs(q.get('claw') - (-0.5 * 0.4 + 0.2)) < 1e-9, 'claw at ' + q.get('claw'));
+  const held = await E.urdfRobot(URDF.replace('<mimic joint="arm" multiplier="-0.5"/>', '<mimic joint="arm" multiplier="0" offset="0.1"/>'), {}, 'urdfbot');
+  const h = Object.fromEntries(held.mechs.filter((m) => m.fromMate).map((m) => [m.id, m]));
+  assert.equal(h.claw.couple.ratio, 0, 'a multiplier of 0 is 0, not 1');
+  const q2 = E.jointValues(held.mechs, (m) => (m.id === 'arm' ? 0.4 : m.couple ? null : 0));
+  assert.ok(Math.abs(q2.get('claw') - 0.1) < 1e-9, 'held at its offset: ' + q2.get('claw'));
+});

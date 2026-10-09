@@ -140,7 +140,9 @@ async function urdfRobot(text,files,name,opts){
     if(lim&&type!=="continuous"&&(lim.attrs.lower!=null||lim.attrs.upper!=null)){ lo=+lim.attrs.lower||0; hi=+lim.attrs.upper||0;
       if(Math.abs(lo)>=URDF_NO_LIMIT&&Math.abs(hi)>=URDF_NO_LIMIT){ lo=null; hi=null; } }
     const mm=urdfKid(j,"mimic");
-    J.push({name:j.attrs.name||("joint "+J.length), type, parent:p, child:c, axis, lo, hi, mimic:mm?{joint:mm.attrs.joint, ratio:mm.attrs.multiplier!=null?+mm.attrs.multiplier:1}:null});
+    // a mimic joint sits at multiplier * leader + offset (offset in its own m or rad); a multiplier of 0 holds it at the offset
+    const num=(v,d)=>{ const x=v==null?NaN:+v; return Number.isFinite(x)?x:d; };
+    J.push({name:j.attrs.name||("joint "+J.length), type, parent:p, child:c, axis, lo, hi, mimic:mm?{joint:mm.attrs.joint, ratio:num(mm.attrs.multiplier,1), offset:num(mm.attrs.offset,0)}:null});
   }
   // links with no shape are Onshape's connectors (a planar or cylindrical mate in pieces, a loop closure): collapse through them
   const hasShape=l=>urdfKids(l,"visual").some(v=>urdfKid(v,"geometry")&&urdfKid(v,"geometry").kids.length);
@@ -334,7 +336,7 @@ async function urdfRobot(text,files,name,opts){
         {message:{parameterId:linr?"limitZMin":"limitAxialZMin",expression:q(j.lo||0)}},{message:{parameterId:linr?"limitZMax":"limitAxialZMax",expression:q(j.hi||0)}}]}}); }
   });
   for(const j of J){ if(!j.mimic||!j.fid) continue; const leader=byJName.get(j.mimic.joint); if(!leader) continue;
-    features.push({id:"R"+j.fid,suppressed:false,featureType:"mateRelation",featureData:{name:"mimic "+j.mimic.joint,relationType:"LINEAR",mates:[{featureId:leader},{featureId:j.fid}],relationRatio:j.mimic.ratio,reverseDirection:false}}); }
+    features.push({id:"R"+j.fid,suppressed:false,featureType:"mateRelation",featureData:{name:"mimic "+j.mimic.joint,relationType:"LINEAR",mates:[{featureId:leader},{featureId:j.fid}],relationRatio:j.mimic.ratio,relationOffset:j.mimic.offset||0,reverseDirection:false}}); }
   const hints=urdfHintsFromRecords(J,W);
   const asm={rootAssembly:{documentId:"URDF",elementId:"EROOT",configuration:"default",fullConfiguration:"default",documentMicroversion:"MV",instances,occurrences,features,patterns:[]},subAssemblies,parts:[]};
   // ---- the CAD, in the robot frame, with the mates as joints ----

@@ -127,7 +127,9 @@ function parseOnshapeAssembly(json){
         grab(d.mates||d.mateIds||d.matedEntities);
         relations.push({name:d.name||"relation", type:String(d.relationType||"").toUpperCase(), ids,
                         ratio:+(d.relationRatio!=null?d.relationRatio:(d.ratio!=null?d.ratio:NaN)),
-                        length:+(d.relationLength!=null?d.relationLength:NaN), reverse:!!d.reverseDirection, prefix});
+                        length:+(d.relationLength!=null?d.relationLength:NaN), reverse:!!d.reverseDirection, prefix,
+                        // relationOffset: a URDF mimic's offset (src/urdf.js), in the follower's own m or rad
+                        offset:+(d.relationOffset!=null?d.relationOffset:0)});
       }else if(f.featureType==="mateGroup"){
         const occ=(d.occurrences||[]).map(o=>prefix.concat(Array.isArray(o)?o:(o.occurrence||[])));
         if(occ.length>1) groups.push({name:d.name||"group", occ});
@@ -500,12 +502,13 @@ function applyOnshapeMates(cad,json,opts){
       continue;
     }
     const k=r.type==="RACK_AND_PINION"||r.type==="SCREW"?(Number.isFinite(r.length)?r.length/(2*Math.PI):NaN)
-           :(Number.isFinite(r.ratio)&&r.ratio!==0?r.ratio:1);
+           :(Number.isFinite(r.ratio)?r.ratio:1);       // a ratio of 0 (a URDF mimic held still) is 0
     if(!Number.isFinite(k)) continue;
     // an _inv mate's axis was turned round, so its value runs the other way:
-    // the ratio turns round once for each end that was
-    const flip=ms.reduce((s,m)=>s*(mateNameHint(m.fromMate.name).inv?-1:1),1);
-    ms[1].couple={to:ms[0].id, ratio:(r.reverse?-1:1)*flip*k, via:r.type.toLowerCase().replace(/_/g," ")};
+    // the ratio turns round once for each end that was, the offset with the follower
+    const inv=m=>mateNameHint(m.fromMate.name).inv?-1:1;
+    ms[1].couple={to:ms[0].id, ratio:(r.reverse?-1:1)*inv(ms[0])*inv(ms[1])*k||0, via:r.type.toLowerCase().replace(/_/g," ")};
+    if(Number.isFinite(r.offset)&&r.offset) ms[1].couple.offset=inv(ms[1])*r.offset;
     why.push("\""+ms[1].id+"\" follows \""+ms[0].id+"\" through a "+r.type.toLowerCase().replace(/_/g," ")+" relation (ratio "+(+k.toFixed(4))+").");
   }
 
