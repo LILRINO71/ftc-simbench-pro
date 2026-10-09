@@ -577,3 +577,19 @@ test('online: someone arriving mid-match watches the match as it is now: no robo
   assert.deepEqual(G2.M.bots.map((b) => b.id).sort(), aiIds);
   assert.equal(H.M.players.length, 0, 'and the host sees no robot of theirs');
 });
+
+test('network: TURN servers the site hands out reach Trystero (netConnect), so WebRTC can go over port 443', async () => {
+  const E = loadWithField();
+  const joins = [];
+  const fake = { selfId: 'me', joinRoom(cfg, name) { joins.push({ cfg, name });
+    const act = () => ({ send() {}, onMessage: null });
+    return { makeAction: act, onPeerJoin: null, onPeerLeave: null, leave() {} }; } };
+  const ice = [{ urls: ['turns:turn.cloudflare.com:443?transport=tcp'], username: 'u', credential: 'c' }];
+  const answers = { '/room/health': { ready: false, turn: true }, '/room/turn': { iceServers: ice, turn: true } };
+  const fetch = async (u) => { const k = new URL(u).pathname; return { ok: k in answers, json: async () => answers[k] }; };
+  const { T, via } = await E.netConnect({ base: 'https://sb.test', fetch, trystero: async () => fake });
+  assert.equal(via, 'webrtc+turn');
+  T.join('m-ABCDE');
+  assert.deepEqual(joins[0].cfg.turnConfig, ice, 'the TURN servers are in the room config');
+  assert.deepEqual(joins[0].cfg.relayConfig.urls, E.NET_RELAYS, 'and the relays are still ours');
+});

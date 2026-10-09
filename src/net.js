@@ -104,11 +104,13 @@ function netLoopback(){
 }
 /* The browser's network: Trystero, WebRTC between the players' browsers,
    found through public Nostr relays. Loaded the first time a player goes online. */
-async function netTrystero(load){
+async function netTrystero(load,extra){
   load=load||(u=>import(u));
+  // extra: more of Trystero's room config, e.g. {turnConfig}: TURN servers on port 443 (src/netrelay.js netConnect)
+  extra=extra&&typeof extra==="object"?extra:{};
   let T; try{ T=await load(NET_LIB); }catch(e){ T=await load(NET_LIB2); }
   const out={self:T.selfId, onError:null, join(name){
-    const r=T.joinRoom({appId:NET_APP, relayConfig:{urls:NET_RELAYS}}, name, {onJoinError:d=>{ if(out.onError) out.onError(Object.assign({room:name},d)); }});
+    const r=T.joinRoom(Object.assign({}, extra, {appId:NET_APP, relayConfig:{urls:NET_RELAYS}}), name, {onJoinError:d=>{ if(out.onError) out.onError(Object.assign({room:name},d)); }});
     const a=r.makeAction("m"), b=r.makeAction("b");
     let msg=null, bin=null, jn=null, lv=null;
     a.onMessage=(d,meta)=>{ if(msg) msg(d, meta&&meta.peerId); };
