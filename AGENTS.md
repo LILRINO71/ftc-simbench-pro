@@ -36,7 +36,6 @@ Read this file before you start, and again before you push.
 | agent | files / area | for |
 | --- | --- | --- |
 | Claude | `src/match.js` (new), `src/field.js`, `src/shots.js`, `src/sim.js` (the match), `src/onshapelink.js` (new), `src/robotcheck.js` (new), `src/markup.html` + `src/styles.css` (Robot check section), `src/jointspec.js`, `src/autorig.js`, `src/cadview.js` (joint editor), `src/app.js` (joints panel), `src/view3d.js` (joint preview), `src/roadrunner.js`, `src/net.js` (new), `src/robotlite.js` (new), `src/drivetrain.js` + `src/frame.js` + `src/step.js` (wheels built from many parts), `tools/build.mjs` (module order, link preview), `src/view3d.js` (match robots, light copy), `src/app.js` + `src/markup.html` + `src/styles.css` (online panel) | the joint finder and editor; online matches (players on different computers in one match) |
-| Claude | `docs/onshape-app-store.md` (new), `DEPLOY.md` (App Store section), `docs/README.md` | the Onshape App Store plan |
 
 Done and released: drive direction, the 25f54d3 sim and parser fixes,
 `autoMap`, Onshape mates (`src/mates.js`) and the pasted Onshape link (`src/onshapelink.js`,
