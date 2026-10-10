@@ -4,6 +4,46 @@ The handoffs live here, the newest first. The two older ones below mention `rese
 `research/realcad`, `research_notes/` and `reports/`: those folders were removed on 2026-10-04 as
 unused (nothing in the build or the tests read them); the measurements they held stay in the text.
 
+## 2026-10-09: review fixes, and what the Onshape link costs
+
+On main. A review of the 2026-10-08 online and tier commits, plus a look at the link route
+against Onshape's API limits now that the OAuth app is registered (`/onshape/status` on the
+live site says `ready:true`).
+
+### What changed
+
+- **Onshape's yearly allowance** (`functions/onshape`, `src/onshapelink.js`). A private app's
+  calls all count against its owner (2,500 a year on Free or EDU Student). A spent allowance
+  (402) now stops the read and sends the team to the export zip; before, every Part Studio was
+  silently left out. The edge cache's access check cost a call, the same as the read it saved;
+  documents Onshape says are public are now remembered for a day, so kept library parts cost
+  nothing. A linked part the team can only reach through its own document is read fresh rather
+  than refused. DEPLOY.md "Quota", "Listing the app in the App Store" and "School networks"
+  have the numbers and the steps.
+- **Online rooms** (`src/netrelay.js`, `workers/room/room.js`): an SSE stream that drops gets
+  its retries; batches are sized in UTF-8 bytes and only ask for keepalive while it fits; the
+  room's ledger takes a player's ticks out of order, keeps its window across hibernation,
+  replays only the ticks it has, and caps a POST while reading it.
+- **Device tiers**: iPad Safari (a Mac user agent with touch points) starts at tier 0, and Macs
+  in Safari ("Apple GPU") at tier 2 again.
+
+### Measured here
+
+- `npm test`: 772 green (11 new tests, each failing before its fix). `npm run build:ship` clean.
+
+### Still open
+
+- The first real import through the live app hasn't been watched from here: call count and time
+  on a REVIVER-sized robot, `tessellatedfaces` size, COTS colours and masses.
+- A robot in a school's own Onshape enterprise (`myschool.onshape.com`) is read through
+  `cad.onshape.com`; untried.
+- The App Store listing (free, and exempt from the allowance) needs the owner: Developer
+  Relations, the agreement, five beta testers.
+- The room's ledger lives in memory; a room that hibernates keeps its window but not its history
+  (a replay after that has nothing before the pause). Persisting it is for when lockstep lands.
+- The WebSocket client's "dropped" branch is unreachable (a hello resets the count, and a retry
+  that never gets in falls back to SSE, which reports). Harmless; left as is.
+
 ## 2026-10-04 (later): the pasted Onshape link is the way in, and the repo is swept
 
 Branch `claude/onshape-link`, on top of `claude/exact-joints`. The owner asked for the import the

@@ -53,19 +53,22 @@ and the sign-in needs an app secret, so the read goes through `functions/onshape
 Onshape's OAuth page, then a read-only pass-through of exactly the calls the robot reader makes
 (`ALLOWED` in that file), with the team's token in an encrypted HttpOnly cookie that only
 `/onshape/*` ever sees. Part Studio shapes and masses pinned to a version or microversion are kept
-in the edge cache (`CACHEABLE`), so a goBILDA part read by one team is served to the next from the
-cache and the app's API quota goes further.
+in the edge cache (`CACHEABLE`); what that saves against Onshape's yearly allowance is under
+**Quota** below.
 
 Until it is set up, `/onshape/status` answers `ready:false`, the import card hides the link box
 and offers the URDF export zip instead. Nothing else breaks.
 
 ### Register the Onshape app (owner, once)
 
-1. Go to <https://dev-portal.onshape.com>, sign in with your Onshape account, and open
-   **OAuth applications → Create new OAuth application**.
+1. In Onshape: your account icon (top right) → **My account → Developer → OAuth applications →
+   Create new OAuth application** (or <https://dev-portal.onshape.com>). Use the account that
+   should carry the quota (below): a personal one, not one your school manages, so the app
+   doesn't vanish with a graduation.
    - **Name:** `FTC SimBench` (teams see this on Onshape's Allow page)
    - **Primary format:** `com.ftcsimbench.app` (any unique reverse-domain name; it can't change later)
    - **Summary:** `Reads your robot's assembly so SimBench can simulate it.`
+   - **Type:** `Connected Cloud App` (a site outside Onshape, not a tab inside it)
    - **Redirect URLs:** `https://ftc-simbench-pro.pages.dev/onshape/callback`
      (add every other hostname the site is served from, one per line)
    - **OAuth URL:** `https://ftc-simbench-pro.pages.dev/`
@@ -79,17 +82,71 @@ and offers the URDF export zip instead. Nothing else breaks.
 4. **Deployments → the latest one → Retry deployment**, so the function sees them.
 5. Open the site. The import card now shows the link box. Paste an assembly's address, click
    **Get my robot**, click **Allow** on Onshape's page, and the robot arrives.
-6. Try it with a teammate's Onshape account too. A private OAuth app can be authorised by any
-   Onshape user, but if Onshape shows them an error instead of the Allow page, open the app in
-   the dev portal and add a **store entry** (it can stay unlisted).
+6. Try it with a teammate's Onshape account too, signed in on their own computer. If Onshape
+   shows them an error instead of the Allow page, open the app in the dev portal and add a
+   **store entry** (it stays private). Their reads still count against your allowance.
 
 ### Quota
 
-Onshape meters API calls per app. A private app has a yearly allowance that counts against the
-app owner's plan; every import costs one call for the assembly, one for its features, and two per
-Part Studio the robot uses (one for shapes, one for masses). The edge cache absorbs the Part Studio
-calls for library parts after the first team reads them. If the allowance runs low, publishing the
-app in Onshape's App Store lifts the limit; teams can always fall back to the export zip meanwhile.
+Onshape meters API calls per year (<https://onshape-public.github.io/docs/auth/limits/>, checked
+2026-10-09):
+
+- An app that isn't publicly listed in the Onshape App Store is a **private** app, and every call it
+  makes counts against **the app owner's** allowance, whoever signed in: 2,500 calls a year on a
+  Free, Standard or EDU Student account, 5,000 per user on Professional. An app created under a
+  school's or company's settings counts against that company. Calls that fail (4xx, 5xx) don't
+  count, and neither does anything teams do in Onshape itself.
+- When the allowance is spent, Onshape answers **402** to every call until the year renews, and more
+  can only be bought from Onshape. SimBench then stops the read and tells the team to drop the
+  export zip, which uses no API at all.
+- Calls from an app **listed publicly in the App Store** count against nobody. That is the only free
+  way to let every team use the link; see below.
+- See what's used: **My account → Developer → View your API usage**. Onshape emails at 25, 50, 75
+  and 100 %.
+
+What one import costs: one call for the document's name, one for the assembly, one for its
+features, one per subassembly that has mates, and two per Part Studio the robot places parts from
+(shapes, masses). A robot built from 100 Part Studios is about 200 calls the first time, so 2,500 is
+roughly a dozen first reads of a big robot a year. Repeats cost less:
+
+- **The browser** keeps every Part Studio it has read (IndexedDB, up to 400). Reading the same
+  robot again on the same computer costs the first three calls plus two per Part Studio that
+  changed. Parts inserted from other documents (goBILDA, REV) are pinned to a version and never
+  change; the team's own Part Studios in a workspace are keyed by the document's microversion, so
+  any edit anywhere in that document makes all of them new. Pasting the address of a **version**
+  (Onshape: Versions and history → Create version → open it → copy the address) keeps them
+  pinned too.
+- **The edge cache** keeps Part Studios at a version or microversion. A kept copy of a private
+  document still costs one call (the check that this team may open it, same as reading it), but a
+  document Onshape says is public (goBILDA's, REV's, any published library) is remembered for a day
+  and its kept copies cost nothing. Cloudflare's cache is per data centre, so this helps teams in the
+  same region.
+
+So, on a private app: the link is for your own team and a few testers, and other teams use the
+export zip.
+
+### Listing the app in the App Store (free, and no quota)
+
+Onshape's launch checklist (<https://onshape-public.github.io/docs/app-store/checklist/>): OAuth2
+(done), a store entry with a description and screenshots, at least five beta testers, Onshape's
+developer agreement (ask Developer Relations, <onshape-developer-relations@ptc.com>), their QA pass
+(up to a week), and a support contact. The checklist asks for a price; ask Developer Relations to
+confirm a free listing, and have an adult (a mentor) sign the agreement if the owner is under 18.
+Until it's listed, nothing changes for teams except that the link works within the owner's
+allowance.
+
+### School networks and Chromebooks
+
+- The sign-in is first-party: the cookie belongs to the SimBench site and is set when Onshape sends
+  the team back, so blocking third-party cookies (common on managed Chromebooks) doesn't affect it.
+  A blocked pop-up signs in in the same tab instead.
+- The web filter has to let through: the site (`ftc-simbench-pro.pages.dev`; some filters block all
+  of `*.pages.dev`, so ask IT for that one name, or put the site on a custom domain),
+  `cad.onshape.com` and `oauth.onshape.com` (any school that uses Onshape already allows them),
+  `cdn.jsdelivr.net` (three.js and OpenCascade; `esm.sh` is the fallback) and Google Fonts.
+- A robot in a school's own Onshape enterprise (an address like `myschool.onshape.com`) is read
+  through `cad.onshape.com` and that hasn't been tried; if it fails, use the export zip.
+- Online matches over a school network need the rooms below.
 
 ## Online rooms (do this once, so matches work on school networks)
 

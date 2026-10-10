@@ -176,6 +176,10 @@ check the live build by comparing its `SIMBENCH_BUILD` hash with a local ship bu
   The follower uses the team's gains, but its feedforward is the bench's own, taken from the CAD's
   motors and wheels, and the localizer is perfect. Tuned `kS`/`kV`/`kA` values belong to one real
   robot's encoders and battery.
+- **The Onshape link runs on a yearly allowance.** Until the app is listed in Onshape's App Store,
+  every read counts against its owner's 2,500 API calls a year, and a big robot's first read is a
+  couple of hundred. When it runs out, the card says so and the export zip (no API at all) takes
+  over. See [DEPLOY.md](DEPLOY.md), "Quota".
 - **Shipped code can be read.** The ship build strips comments, which is not encryption. Nothing
   secret belongs in a browser bundle.
 
