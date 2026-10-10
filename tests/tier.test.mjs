@@ -32,5 +32,16 @@ test('tiers: each tier\'s budget follows the design (shadows, pixel ratio, light
 
 test('tiers: an iPad says "Apple GPU" like a Mac, and still starts light', () => {
   assert.equal(E.deviceTier({ renderer: 'Apple GPU', mobile: true, memoryGB: 8 }).tier, 0);
-  assert.equal(E.deviceTier({ renderer: 'Apple GPU', mobile: false, memoryGB: 8 }).tier, 1);
+});
+
+test('tiers: an iPad in Safari sends a Mac\'s user agent, and is still a tablet; a Mac in Safari is Apple silicon', () => {
+  const ipadSafari = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15';
+  assert.equal(E.tierMobile(ipadSafari, 5), true, 'a Mac with a touch screen is an iPad');
+  assert.equal(E.tierMobile(ipadSafari, 0), false, 'a Mac');
+  assert.equal(E.tierMobile('Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Mobile/15E148', 5), true);
+  assert.equal(E.tierMobile('Mozilla/5.0 (Linux; Android 14; Pixel 8) Mobile Safari/537.36', 5), true);
+  assert.equal(E.tierMobile('Mozilla/5.0 (X11; CrOS x86_64 14541.0.0) Chrome/128.0 Safari/537.36', 10), false, 'a touch-screen Chromebook is a laptop');
+  // Safari masks the renderer: every Apple silicon Mac reads "Apple GPU" and has no deviceMemory
+  assert.equal(t({ renderer: 'Apple GPU', mobile: E.tierMobile(ipadSafari, 0), cores: 8, webgl2: true }), 2);
+  assert.equal(t({ renderer: 'Apple GPU', mobile: E.tierMobile(ipadSafari, 5), cores: 8, webgl2: true }), 0);
 });

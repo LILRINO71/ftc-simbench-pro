@@ -129,7 +129,7 @@ const View={
     try{ const q=new URLSearchParams(location.search).get("tier"), s=localStorage.getItem("ftcbench.tier"), v=q!=null?q:s;
       if(v!=null&&/^[012]$/.test(v)) override=+v; }catch(e){}
     const t=deviceTier({memoryGB:navigator.deviceMemory, cores:navigator.hardwareConcurrency, renderer, webgl2,
-      mobile:/Mobi|Android/i.test(navigator.userAgent||""), override});
+      mobile:tierMobile(navigator.userAgent, navigator.maxTouchPoints), override});
     try{ console.info("bench: drawing tier "+t.tier+" — "+t.why); }catch(e){}
     return t;
   },

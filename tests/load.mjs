@@ -38,7 +38,7 @@ const EXPORTS = [
   'FTCSIM_MAGIC', 'packSession', 'unpackSession', 'sessionFromBench',
   'mathReport', 'mathText', 'mathMarkdown',
   'parseRepoRef', 'rawUrlsFor', 'pickOpModes', 'javaLooksLikeOpMode',
-  'TOUR', 'statusOf', 'STATUS_RANK', 'deviceTier', 'TIER_BUDGETS',
+  'TOUR', 'statusOf', 'STATUS_RANK', 'deviceTier', 'tierMobile', 'TIER_BUDGETS',
 ];
 
 function engineSource() {

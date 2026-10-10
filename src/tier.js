@@ -22,6 +22,13 @@ const TIER_BUDGETS=[
   {tier:1, shadows:1024, pixelRatio:1, lite:false, substeps:4, ownTris:600000, otherTris:100000},
   {tier:2, shadows:2048, pixelRatio:2, lite:false, substeps:4, ownTris:Infinity, otherTris:Infinity},
 ];
+/* A phone or a tablet, from the user agent and the touch points. iPadOS
+   Safari sends a Mac's user agent ("Macintosh; Intel Mac OS X"), so a
+   "Mac" with a touch screen is an iPad: no Mac has one. */
+function tierMobile(ua, touchPoints){
+  const s=String(ua||"");
+  return /Mobi|Android|iPhone|iPad/i.test(s)||(/Macintosh/.test(s)&&Number(touchPoints)>1);
+}
 /* info: {memoryGB, cores, renderer (the unmasked WebGL renderer string),
    webgl2, mobile, override (0|1|2 or null)} -> {tier, why, budget} */
 function deviceTier(info){
@@ -32,9 +39,10 @@ function deviceTier(info){
   const mem=Number.isFinite(i.memoryGB)?i.memoryGB:null, cores=Number.isFinite(i.cores)?i.cores:null;
   if(/swiftshader|llvmpipe|softpipe|software|microsoft basic render/.test(r)) return pick(0,"the browser is drawing in software ("+(i.renderer||"no GPU")+")");
   if(i.webgl2===false) return pick(0,"no WebGL 2");
-  // a phone or a tablet first: an iPad says "Apple GPU" just like a Mac does
+  // a phone or a tablet first: an iPad says "Apple GPU" just like a Mac does (tierMobile tells them apart)
   if(i.mobile) return pick(0,"a phone or tablet");
-  const discrete=/nvidia|geforce|quadro|rtx|gtx|radeon (rx|pro)|radeon\(tm\) rx|apple m\d/.test(r)&&!/intel/.test(r);
+  // Safari names no chip: every Apple silicon Mac is "Apple GPU" there (Chrome says "Apple M2")
+  const discrete=/nvidia|geforce|quadro|rtx|gtx|radeon (rx|pro)|radeon\(tm\) rx|apple m\d|apple gpu/.test(r)&&!/intel/.test(r);
   const weakGpu=/mali-g(5|7)\d|mali-t|powervr|adreno \(tm\) [1-6]\d\d|adreno [1-6]\d\d|intel.*(hd graphics (4|5)\d\d|uhd graphics (600|605|610|615|617|620))|intel.*(jasperlake|gemini ?lake|elkhart)/.test(r);
   if(mem!=null&&mem<=4) return pick(0,mem+" GB of memory");
   if(weakGpu&&(mem==null||mem<=8)) return pick(0,"an entry-level GPU ("+i.renderer+")");
