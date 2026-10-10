@@ -135,6 +135,9 @@ confirm a free listing, and have an adult (a mentor) sign the agreement if the o
 Until it's listed, nothing changes for teams except that the link works within the owner's
 allowance.
 
+The whole plan, step by step, with the email to send, what QA checks and where SimBench stands,
+and whether the link is accurate: [docs/onshape-app-store.md](docs/onshape-app-store.md).
+
 ### School networks and Chromebooks
 
 - The sign-in is first-party: the cookie belongs to the SimBench site and is set when Onshape sends
