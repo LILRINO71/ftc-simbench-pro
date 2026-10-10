@@ -164,20 +164,21 @@ export class RoomCore {
     for (const id of this.targets(from, f.header.to)) this.outBin(id, { t: 'b', from, meta: f.header.meta || {} }, f.payload);
   }
   /* ---- lockstep: each player's commands, by tick ----
-     A player's ticks only go forward, and never far past the newest tick anyone
+     A tick's command is said once, and never far past the newest tick anyone
      has said: one player can't fill the ledger with the far future, or push the
-     real history out of it. */
+     real history out of it. A player's ticks may arrive out of order: an SSE
+     client's batches are separate POSTs, and the later one can land first. */
   command(from, m) {
     const tick = m.tick, p = this.peers.get(from);
     if (!p || !Number.isInteger(tick) || typeof m.d !== 'string' || m.d.length > 2048) return;
-    if (tick < this.ledgerMin || tick <= p.lastTick || tick > Math.max(this.ledgerMax, p.lastTick) + this.L.tickAhead) return;
+    if (tick < this.ledgerMin || tick > Math.max(this.ledgerMax, p.lastTick) + this.L.tickAhead) return;
     let row = this.ledger.get(tick);
     if (!row) { row = new Map(); this.ledger.set(tick, row); }
     if (row.has(from)) return;               // a tick's command is said once
-    row.set(from, m.d); p.lastTick = tick;
+    row.set(from, m.d); if (tick > p.lastTick) p.lastTick = tick;
     this.ledgerSize += m.d.length + 16;
     if (tick > this.ledgerMax) this.ledgerMax = tick;
-    // the oldest go first, by walking up from the oldest kept (ticks come in order)
+    // the oldest go first, by walking up from the oldest kept
     while ((this.ledger.size > this.L.ledgerTicks || this.ledgerSize > this.L.ledgerBytes) && this.ledgerMin <= this.ledgerMax) {
       const old = this.ledger.get(this.ledgerMin);
       if (old) { for (const d of old.values()) this.ledgerSize -= d.length + 16; this.ledger.delete(this.ledgerMin); }
@@ -185,11 +186,17 @@ export class RoomCore {
     }
     for (const id of this.targets(from, null)) this.out(id, { t: 'cmd', from, tick, d: m.d });
   }
+  /* the ticks kept, from fromTick on: only the ticks there are (they can be 120
+     apart), and one replay a second per player */
   replay(to, fromTick) {
+    const p = this.peers.get(to); if (!p) return;
+    const t = this.now(); if (p.replayAt != null && t - p.replayAt < 1000) { this.out(to, { t: 'err', why: 'slow-down' }); return; }
+    p.replayAt = t;
     const start = Math.max(this.ledgerMin, Number.isInteger(fromTick) ? fromTick : 0);
+    const ticks = [...this.ledger.keys()].filter((k) => k >= start).sort((a, b) => a - b);
     let rows = [];
-    for (let k = start; k <= this.ledgerMax; k++) {
-      const r = this.ledger.get(k); if (r) rows.push([k, [...r]]);
+    for (const k of ticks) {
+      rows.push([k, [...this.ledger.get(k)]]);
       if (rows.length === 200) { this.out(to, { t: 'replay', rows, done: false }); rows = []; }
     }
     this.out(to, { t: 'replay', rows, done: true });
@@ -208,11 +215,16 @@ export class RoomDO {
   }
   room(name) {
     if (!this.core) this.core = new RoomCore(name);
-    // after hibernation the sockets are still there; the room around them is rebuilt
+    // after hibernation the sockets are still there; the room around them is rebuilt, and each
+    // player's newest tick (kept on its socket) puts the ledger's window back where the match
+    // is, or a match past tick 120 could never say another command
     for (const ws of this.ctx.getWebSockets()) {
       const a = ws.deserializeAttachment && ws.deserializeAttachment();
-      if (a && a.id && !a.refused && !this.core.peers.has(a.id))
-        this.core.peers.set(a.id, { conn: wsConn(ws), tok: a.tok, ws, kind: 'ws', tokens: this.core.L.burst, bytes: this.core.L.bytesPerSec, at: Date.now(), lastTick: -1 });
+      if (a && a.id && !a.refused && !this.core.peers.has(a.id)) {
+        const lastTick = Number.isInteger(a.lastTick) ? a.lastTick : -1;
+        this.core.peers.set(a.id, { conn: wsConn(ws), tok: a.tok, ws, kind: 'ws', tokens: this.core.L.burst, bytes: this.core.L.bytesPerSec, at: Date.now(), lastTick });
+        if (lastTick > this.core.ledgerMax) this.core.ledgerMax = lastTick;
+      }
     }
     return this.core;
   }
@@ -246,9 +258,9 @@ export class RoomDO {
     if (!core.owns(id, tok)) return new Response(JSON.stringify({ t: 'err', why: 'not-yours' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
     const binary = /octet-stream/.test(request.headers.get('Content-Type') || '');
     const cap = binary ? core.L.binBytes + 4100 : core.L.textBytes;
-    if (+(request.headers.get('Content-Length') || 0) > cap) return new Response(JSON.stringify({ t: 'err', why: 'too-big' }), { status: 413 });
-    if (binary) { const b = new Uint8Array(await request.arrayBuffer()); if (b.length <= cap) core.bin(id, b); }
-    else { const t = await request.text(); core.text(id, t); }
+    const body = await readCapped(request, cap);
+    if (!body) return new Response(JSON.stringify({ t: 'err', why: 'too-big' }), { status: 413 });
+    if (binary) core.bin(id, body); else core.text(id, dec.decode(body));
     return new Response('{}', { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
   }
   webSocketMessage(ws, msg) {
@@ -256,8 +268,29 @@ export class RoomDO {
     const core = this.room(a.room), p = core.peers.get(a.id);
     if (!p || p.ws !== ws) return;           // a socket that's been replaced says nothing
     if (typeof msg === 'string') core.text(a.id, msg); else core.bin(a.id, msg);
+    // the newest tick, kept on the socket every 20, for a room rebuilt after hibernating (room())
+    if (p.lastTick >= (Number.isInteger(a.lastTick) ? a.lastTick : -1) + 20) ws.serializeAttachment(Object.assign({}, a, { lastTick: p.lastTick }));
   }
   webSocketClose(ws) { const a = ws.deserializeAttachment(); if (a && !a.refused) this.room(a.room).leave(a.id, ws); }
   webSocketError(ws) { this.webSocketClose(ws); }
+}
+/* a request's body, or null when it is bigger than cap: refused by its
+   Content-Length when it says one, and otherwise stopped while it's read, so
+   a body sent with no length (chunked) is never read whole into memory */
+async function readCapped(request, cap) {
+  if (+(request.headers.get('Content-Length') || 0) > cap) return null;
+  if (!request.body) return new Uint8Array(0);
+  const rd = request.body.getReader(), parts = [];
+  let n = 0;
+  for (;;) {
+    const { done, value } = await rd.read();
+    if (done) break;
+    n += value.length;
+    if (n > cap) { try { await rd.cancel(); } catch (e) {} return null; }
+    parts.push(value);
+  }
+  const out = new Uint8Array(n); let at = 0;
+  for (const p of parts) { out.set(p, at); at += p.length; }
+  return out;
 }
 const wsConn = (ws) => ({ kind: 'ws', ws, send: (d) => ws.send(d), close: (c, w) => ws.close(c, w) });

@@ -240,3 +240,62 @@ test('room: the ledger takes each player\'s ticks in order and only a little ahe
   for (let t = 2; t < 60; t++) cmd('alice', t);
   assert.equal(R.ledgerMax, 59);
 });
+
+test('room: a player\'s commands that arrive out of order (two SSE batches, the later one first) are all kept', () => {
+  const R = new RoomCore('r7'), a = conn(), b = conn();
+  R.join('alice', a, T('alice')); R.join('bobby', b, T('bobby'));
+  const cmd = (tick, d) => R.text('alice', JSON.stringify({ t: 'cmd', tick, d }));
+  cmd(0, 'x'); cmd(1, 'y');
+  cmd(3, 'w'); cmd(2, 'v');
+  assert.deepEqual(b.heard.filter((m) => m.t === 'cmd').map((m) => m.tick), [0, 1, 3, 2], 'tick 2 is not lost for landing after 3');
+  cmd(2, 'again');
+  assert.equal(R.ledger.get(2).get('alice'), 'v', 'a tick is still said once');
+});
+
+test('room: rebuilt after hibernating, a match past tick 120 still has its commands taken', () => {
+  // the sockets survive hibernation, with what was kept on them; the room in memory doesn't
+  const sock = (att) => { const s = { sent: [], att, deserializeAttachment: () => s.att, serializeAttachment: (v) => { s.att = v; }, send: (d) => s.sent.push(d), close() {} }; return s; };
+  const sa = sock({ id: 'alice1', tok: T('alice1'), room: 'r8' }), sb = sock({ id: 'bobby1', tok: T('bobby1'), room: 'r8' });
+  const D = new RoomDO({ getWebSockets: () => [sa, sb] }, {});
+  for (let k = 0; k < 6000; k++) D.room('r8').command('alice1', { t: 'cmd', tick: k, d: 'a' });
+  D.webSocketMessage(sa, JSON.stringify({ t: 'cmd', tick: 6000, d: 'a' }));
+  assert.ok(sa.att.lastTick >= 5980, 'the newest tick is kept on the socket: ' + sa.att.lastTick);
+  assert.equal(sa.att.tok, T('alice1'), 'and the rest of what was kept stays');
+  // hibernation: a new object, the same sockets
+  const D2 = new RoomDO({ getWebSockets: () => [sa, sb] }, {});
+  sb.sent.length = 0;
+  D2.webSocketMessage(sa, JSON.stringify({ t: 'cmd', tick: 6001, d: 'after' }));
+  assert.deepEqual(sb.sent.map((s) => JSON.parse(s)).filter((m) => m.t === 'cmd').map((m) => m.tick), [6001]);
+});
+
+test('room: a replay sends only the ticks kept, however far apart, and one a second', () => {
+  let t = 0; const R = new RoomCore('r9', { now: () => t }), a = conn(), b = conn();
+  R.join('alice', a, T('alice')); R.join('bobby', b, T('bobby'));
+  for (let k = 0; k <= 30 * 120; k += 120) R.command('alice', { t: 'cmd', tick: k, d: 'j' + k });
+  R.replay('bobby', 0);
+  const rows = b.heard.filter((m) => m.t === 'replay').flatMap((m) => m.rows);
+  assert.equal(rows.length, 31);
+  assert.deepEqual(rows.slice(0, 2), [[0, [['alice', 'j0']]], [120, [['alice', 'j120']]]]);
+  R.replay('bobby', 0);
+  assert.equal(b.heard.at(-1).why, 'slow-down', 'a second replay straight away waits');
+  t = 1500; R.replay('bobby', 3000);
+  assert.deepEqual(b.heard.at(-1).rows.map((r) => r[0]), [3000, 3120, 3240, 3360, 3480, 3600]);
+});
+
+test('relay: a POST with no length is cut off at the cap while it is read, and an oversize binary says 413', async () => {
+  const D = new RoomDO({ getWebSockets: () => [] }, {});
+  const core = D.room('r10'), heard = [];
+  core.join('alice1', { kind: 'sse', send() {}, close() {} }, T('alice1'));
+  core.join('bobby1', { kind: 'sse', send: (m) => heard.push(JSON.parse(m)), close() {} }, T('bobby1'));
+  let pulled = 0;
+  const stream = (chunks, size) => new ReadableStream({ pull(c) { if (pulled >= chunks) { c.close(); return; } pulled++; c.enqueue(new Uint8Array(size).fill(32)); } });
+  const post = (type, body) => D.fetch(new Request('https://sb.example/room/r10/send?id=alice1&tok=' + T('alice1'), { method: 'POST', headers: { 'Content-Type': type }, body, duplex: 'half' }));
+  const r = await post('application/json', stream(1000, 16384));
+  assert.equal(r.status, 413);
+  assert.ok(pulled < 20, 'stopped reading at the cap, not after 16 MB: ' + pulled + ' chunks');
+  const big = await post('application/octet-stream', new Uint8Array(core.L.binBytes + 5000));
+  assert.equal(big.status, 413, 'not a 200 for a frame that was dropped');
+  const ok = await post('application/json', JSON.stringify({ t: 'm', d: 'hi' }));
+  assert.equal(ok.status, 200);
+  assert.deepEqual(heard.filter((m) => m.t === 'm').map((m) => m.d), ['hi']);
+});
