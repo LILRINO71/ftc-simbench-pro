@@ -299,3 +299,65 @@ test('relay: a POST with no length is cut off at the cap while it is read, and a
   assert.equal(ok.status, 200);
   assert.deepEqual(heard.filter((m) => m.t === 'm').map((m) => m.d), ['hi']);
 });
+
+/* an SSE client on its own: a stream the test drives by hand, POSTs that wait until the test answers them */
+function sseClient() {
+  const streams = [], posts = [], timers = [], errors = [];
+  class ES { constructor(url) { this.url = url; this.readyState = 0; streams.push(this); } close() { this.readyState = 2; this.closed = true; } }
+  const fetch = (u, init) => new Promise((ok) => posts.push({ init, bytes: typeof init.body === 'string' ? new TextEncoder().encode(init.body).length : init.body.length, answer: () => ok({ ok: true, json: async () => ({}) }) }));
+  const setTimeout = (f, ms) => { const t = { f, ms, alive: true }; timers.push(t); return t; };
+  const R = E.netRelay({ base: 'https://sb.example', self: 'alice1', tok: T('alice1'), sse: true, EventSource: ES, fetch, setTimeout, clearTimeout: (t) => { if (t) t.alive = false; } });
+  R.onError = (e) => errors.push(e);
+  const room = R.join('r11');
+  const hello = (s) => s.onmessage({ data: JSON.stringify({ t: 'hello', peers: [] }) });
+  const fire = () => { for (let g = 0; g < 100; g++) { const t = timers.find((x) => x.alive); if (!t) break; t.alive = false; t.f(); } };
+  return { R, room, streams, posts, errors, hello, fire };
+}
+
+test('relay: an SSE stream that drops mid-match gets the browser\'s retries, not a fatal error on the second one', () => {
+  const c = sseClient(), s = c.streams[0];
+  c.hello(s);
+  s.onerror({});                                   // wifi drops: the browser starts retrying
+  s.onerror({});                                   // its first retry fails too, while the wifi is still down
+  assert.deepEqual(c.errors, [], 'still in the match');
+  c.hello(s);                                      // back: the room says hello again
+  for (let i = 0; i < 5; i++) s.onerror({});
+  assert.deepEqual(c.errors, [], 'five failures in a row are still retried');
+  s.onerror({});
+  assert.equal(c.errors.at(-1).error, 'unreachable', 'a sixth is given up on');
+  // a stream that never got in is reported at once
+  const d = sseClient(); d.streams[0].onerror({});
+  assert.equal(d.errors.at(-1).error, 'unreachable');
+});
+
+test('relay: an SSE stream the browser gave up on (an error answer) is opened again', () => {
+  const c = sseClient(), s = c.streams[0];
+  c.hello(s);
+  s.readyState = 2; s.onerror({});                 // a 502 while the site redeploys: EventSource stops for good
+  assert.deepEqual(c.errors, []);
+  c.fire();
+  assert.equal(c.streams.length, 2, 'a new stream');
+  assert.ok(s.closed && !c.streams[1].closed);
+  c.hello(c.streams[1]);
+  c.room.send({ k: 'state' }); c.fire();
+  assert.equal(c.posts.length, 1, 'and it talks again');
+});
+
+test('relay: an SSE client\'s batches stay under the room\'s 64 KB in UTF-8 bytes, chat in any script', () => {
+  const c = sseClient(); c.hello(c.streams[0]);
+  for (let i = 0; i < 30; i++) c.room.send({ k: 'chat', text: '中'.repeat(2000) });
+  c.fire(); c.posts.forEach((p) => p.answer()); c.fire();
+  assert.ok(c.posts.length >= 3);
+  for (const p of c.posts) assert.ok(p.bytes <= 64 * 1024, p.bytes + ' bytes is over the room\'s cap');
+});
+
+test('relay: keepalive is only asked for while the 64 KB a browser allows in flight has room', async () => {
+  const c = sseClient(); c.hello(c.streams[0]);
+  for (let i = 0; i < 3; i++) c.room.send({ k: 'big', text: 'x'.repeat(50000) });
+  c.fire();
+  assert.equal(c.posts.length, 3);
+  assert.deepEqual(c.posts.map((p) => p.init.keepalive), [true, false, false], 'a second keepalive POST in flight would be refused');
+  c.posts[0].answer(); await new Promise((r) => setImmediate(r));
+  c.room.send({ k: 'small' }); c.fire();
+  assert.equal(c.posts.at(-1).init.keepalive, true, 'room again once the first is answered');
+});

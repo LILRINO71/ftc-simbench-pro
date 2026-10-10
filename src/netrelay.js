@@ -28,6 +28,8 @@ function netRandomId(n){
   (typeof crypto!=="undefined"&&crypto.getRandomValues?crypto:{getRandomValues:x=>{ for(let i=0;i<x.length;i++) x[i]=Math.floor(Math.random()*256); return x; }}).getRandomValues(a);
   return Array.from(a,b=>A[b%36]).join("");
 }
+/* a string's length in UTF-8 bytes, which is what the room and the browser's limits count */
+function netUtf8Len(s){ let n=0; for(let i=0;i<s.length;i++){ const c=s.charCodeAt(i); n+=c<0x80?1:c<0x800?2:(c>=0xd800&&c<0xdc00)?(i++,4):3; } return n; }
 /* binary frames, as workers/room/room.js reads them: [u32 header length][header JSON][payload] */
 function netPackBin(header,payload){
   const h=new TextEncoder().encode(JSON.stringify(header)), p=payload instanceof Uint8Array?payload:new Uint8Array(payload||0);
@@ -43,7 +45,6 @@ function netUnpackBin(buf){
   if(!header||typeof header!=="object") return null;
   return {header, payload:u.slice(4+n)};
 }
-const netB64=u8=>{ let s=""; for(let i=0;i<u8.length;i+=0x8000) s+=String.fromCharCode.apply(null,u8.subarray(i,i+0x8000)); return btoa(s); };
 const netUnB64=s=>{ try{ return Uint8Array.from(atob(String(s||"")),c=>c.charCodeAt(0)); }catch(e){ return null; } };
 
 /* opts: base (the site, default this page's origin), self, WebSocket,
@@ -61,13 +62,13 @@ function netRelay(opts){
   const tok=o.tok||netRandomId(24);
   const out={self, onError:null, mode:null, join(name){
     const url=base+"/room/"+encodeURIComponent(name), q="?id="+encodeURIComponent(self)+"&tok="+encodeURIComponent(tok);
-    let ws=null, es=null, mode=null, ready=false, closed=false, timer=null, postT=null, tries=0;
+    let ws=null, es=null, mode=null, ready=false, closed=false, timer=null, postT=null, tries=0, inRoom=false, keepBytes=0;
     const queue=[], posts=[], peers=new Set();
     const H={msg:null, bin:null, join:null, leave:null, time:[], cmd:null, replay:null};
     const err=d=>{ if(out.onError) out.onError(Object.assign({room:name, via:mode},d)); };
     const handle=m=>{
       if(!m||typeof m!=="object") return;
-      if(m.t==="hello"){ ready=true; tries=0; out.mode=mode; stop(timer);
+      if(m.t==="hello"){ ready=true; inRoom=true; tries=0; out.mode=mode; stop(timer);
         // back after a drop: whoever left meanwhile has left, whoever came has come
         const now=new Set((m.peers||[]).filter(p=>typeof p==="string"));
         for(const p of [...peers]) if(!now.has(p)){ peers.delete(p); if(H.leave) H.leave(p); }
@@ -82,13 +83,21 @@ function netRelay(opts){
       else if(m.t==="replay"){ if(H.replay) H.replay(m.rows||[],!!m.done); }
       else if(m.t==="err") err({error:m.why||"error"});
     };
-    const post=(body,type)=>F(url+"/send"+q,{method:"POST", headers:{"Content-Type":type}, body, keepalive:body.length<60000})
-      .then(r=>{ if(!r.ok) err({error:"send-"+r.status}); }).catch(()=>err({error:"send-failed"}));
+    /* keepalive lets a POST finish after the page goes, but a browser allows
+       64 KB of keepalive bodies in flight in all and refuses the fetch past
+       that: only the POSTs that fit in what's left are sent with it */
+    const post=(body,type)=>{
+      const n=typeof body==="string"?netUtf8Len(body):body.length, keep=keepBytes+n<=60000;
+      if(keep) keepBytes+=n;
+      return F(url+"/send"+q,{method:"POST", headers:{"Content-Type":type}, body, keepalive:keep})
+        .then(r=>{ if(!r.ok) err({error:"send-"+r.status}); }).catch(()=>err({error:"send-failed"}))
+        .then(()=>{ if(keep) keepBytes-=n; });
+    };
     // what an SSE client says goes up in POSTs: JSON in batches under the room's
-    // 64 KB, and each binary on its own as raw bytes
+    // 64 KB (counted in UTF-8 bytes, as the room counts them), and each binary on its own as raw bytes
     const flushPosts=()=>{ postT=null; if(!posts.length||closed) return;
       const batch=[]; let size=2;
-      while(posts.length&&batch.length<64){ const s=JSON.stringify(posts[0]).length+1; if(batch.length&&size+s>60000) break; batch.push(posts.shift()); size+=s; }
+      while(posts.length&&batch.length<64){ const s=netUtf8Len(JSON.stringify(posts[0]))+1; if(batch.length&&size+s>60000) break; batch.push(posts.shift()); size+=s; }
       post(JSON.stringify(batch),"application/json");
       if(posts.length) postT=later(flushPosts,RELAY_POST_MS); };
     const say=m=>{
@@ -111,8 +120,14 @@ function netRelay(opts){
       es=new ES(url+"/sse"+q);
       es.onmessage=e=>{ let m; try{ m=JSON.parse(e.data); }catch(x){ return; } handle(m); };
       // the browser reconnects a dropped stream by itself, with the same secret, and the
-      // room takes it back; one that never got in, or keeps failing, is reported
-      es.onerror=()=>{ if(closed) return; if(!ready||++tries>5){ err({error:"unreachable", fatal:true}); try{ es.close(); }catch(x){} } else ready=false; };
+      // room takes it back (its hello resets the count); a stream the browser gave up on
+      // (an error answer) is opened again here. One that never got in, or keeps failing,
+      // is reported
+      es.onerror=()=>{ if(closed) return;
+        if(!inRoom||++tries>5){ err({error:"unreachable", fatal:true}); try{ es.close(); }catch(x){} return; }
+        ready=false;
+        if(es.readyState===2){ const me=es; es=null; try{ me.close(); }catch(x){} later(()=>{ if(!closed&&!es) sse(); },1000*tries); }
+      };
     };
     // a socket that's been given up on says nothing more, closes quietly, and can't start a second fallback
     const drop=s=>{ if(!s) return; s.onopen=s.onmessage=s.onclose=s.onerror=null; try{ s.close(); }catch(e){} };
