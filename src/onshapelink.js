@@ -27,6 +27,7 @@
    hardware suppressed, and the definition is read in it.
    ============================================================ */
 const ONSHAPE_FORMAT="ftc-simbench.onshape";
+const ONSHAPE_QUOTA="this copy of SimBench has used up its yearly allowance of Onshape reads (Onshape answered 402)";
 
 /* An Onshape document address: its host, the assembly it points at, and the
    configuration it is open in, or null. Accepts the address bar as copied
@@ -62,6 +63,9 @@ function onshapeRead(host, ref, opt){
   const get=(u,n)=>{ n=n||0; return fetchImpl(u,{credentials:cred,headers:{Accept:"application/json"}}).then(r=>{
     if((r.status===429||r.status===503)&&n<5){ const s=+(r.headers&&r.headers.get&&r.headers.get("Retry-After")); return new Promise(ok=>setTimeout(ok,(s>0?s*1000:1500*Math.pow(2,n)))).then(()=>get(u,n+1)); }
     if(r.status===401||r.status===403) throw fail(opt.denied||("Onshape said you aren't allowed to read it ("+r.status+"): sign in with Onshape again"),r.status);
+    // 402: the app's yearly allowance of API calls is used up. Every call after it is refused too,
+    // so the read stops here instead of leaving each part studio out as if it couldn't be opened
+    if(r.status===402) throw fail(ONSHAPE_QUOTA,402);
     if(!r.ok) throw fail("Onshape said "+r.status,r.status); return r.json(); }); };
   const cfg=ref.config?"&configuration="+encodeURIComponent(ref.config):"";
   say("Reading the assembly …");
@@ -69,7 +73,7 @@ function onshapeRead(host, ref, opt){
     get(base+"?includeMateFeatures=true&includeMateConnectors=true&includeNonSolids=false&excludeSuppressed=true"+cfg).catch(e=>{
       // a Part Studio or a drawing has no assembly definition: Onshape answers 400 or 404
       if(e.status===400||e.status===404) throw fail("this isn't an assembly",e.status); throw e; }),
-    get(base+"/features"+(cfg?"?"+cfg.slice(1):"")).catch(()=>null)])
+    get(base+"/features"+(cfg?"?"+cfg.slice(1):"")).catch(e=>{ if(e&&e.status===402) throw e; return null; })])
   .then(r=>{
     const asm=r[0], features=r[1], featuresBy={}; let noLimits=0;
     if(!asm||!asm.rootAssembly) throw fail("this isn't an assembly");
@@ -81,7 +85,7 @@ function onshapeRead(host, ref, opt){
       const c=d.fullConfiguration||d.configuration||"default", key=[d.documentId||"",d.elementId||"",c].join("|");
       const ck="features|"+d.documentId+"/m/"+d.documentMicroversion+"/e/"+d.elementId+"|"+c, cache=opt.cache||null;
       const read=()=>get(host+"/api/assemblies/d/"+d.documentId+"/m/"+d.documentMicroversion+"/e/"+d.elementId+"/features?configuration="+encodeURIComponent(c)+(d.documentId!==ref.did?"&linkDocumentId="+ref.did:""))
-        .then(f=>{ featuresBy[key]=f; if(cache&&f) try{ Promise.resolve(cache.put(ck,{features:f})).catch(()=>{}); }catch(e){} },e=>{ if(e&&e.status===401) throw e; noLimits++; });
+        .then(f=>{ featuresBy[key]=f; if(cache&&f) try{ Promise.resolve(cache.put(ck,{features:f})).catch(()=>{}); }catch(e){} },e=>{ if(e&&(e.status===401||e.status===402)) throw e; noLimits++; });
       const kept=cache?Promise.resolve().then(()=>cache.get(ck)).catch(()=>null):Promise.resolve(null);
       return kept.then(hit=>{ if(hit&&hit.features){ featuresBy[key]=hit.features; return; } return read(); });
     }));
@@ -108,7 +112,7 @@ function onshapeRead(host, ref, opt){
         get(ps+"/tessellatedfaces"+q+"&outputFaceAppearances=true&outputFacetNormals=false&chordTolerance=0.0015&angleTolerance=0.35"),
         get(ps+"/massproperties"+q+"&massAsGroup=false&useMassPropertyOverrides=true").catch(()=>null)
       ]).then(t=>{ geom[j.key]={parts:osCompactTess(t[0]), mass:osCompactMass(t[1])}; if(cache) try{ Promise.resolve(cache.put(j.key,geom[j.key])).catch(()=>{}); }catch(e){} },
-        e=>{ if(e&&e.status===401) throw e; geom[j.key]=null; });   // a studio this user can't read (403) is left out, named by the builder
+        e=>{ if(e&&(e.status===401||e.status===402)) throw e; geom[j.key]=null; });   // a studio this user can't read (403) is left out, named by the builder
       const kept=cache?Promise.resolve().then(()=>cache.get(j.key)).catch(()=>null):Promise.resolve(null);
       return kept.then(hit=>{ if(hit&&hit.parts){ geom[j.key]=hit; hits++; return; } return fresh(); })
         .then(()=>{ done++; say("Reading part shapes: "+done+" of "+jobs.length+" part studios"+(hits?" ("+hits+" already here)":"")+" …",done,jobs.length); return one(); });

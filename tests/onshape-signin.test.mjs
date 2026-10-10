@@ -293,3 +293,56 @@ test('sign in with Onshape: a kept copy of a Part Studio is only for a team that
     assert.deepEqual(osC.calls.map((x) => x.u), [`https://cad.onshape.com/api/documents/${D}`]);
   } finally { globalThis.caches = was; }
 });
+
+test('sign in with Onshape: the yearly allowance used up mid-read stops the read and says so, instead of leaving parts out', async () => {
+  const os = onshape(), b = browser(os);
+  await b.signIn();
+  // Onshape answers 402 once the app owner's annual API calls are spent; every call after it too
+  const inner = os.fetch;
+  os.fetch = async (u, init) => (/\/partstudios\//.test(String(u)) ? new Response('{"message":"API limit reached"}', { status: 402 }) : inner(u, init));
+  await assert.rejects(onPage(b, () => E.onshapeFromLink(LINK, () => {})), (e) => e.status === 402 && /yearly allowance/.test(e.message));
+  // spent before the read starts: the assembly itself says so
+  os.fetch = async () => new Response('{}', { status: 402 });
+  await assert.rejects(onPage(b, () => E.onshapeFromLink(LINK, () => {})), (e) => e.status === 402);
+});
+
+test('sign in with Onshape: kept copies of a public library part cost the next team no call; a linked part and a spent allowance are read as Onshape says', async () => {
+  const kept = new Map(), was = globalThis.caches;
+  globalThis.caches = { default: { match: async (k) => { const r = kept.get(k.url); return r ? r.clone() : undefined; }, put: async (k, r) => { kept.set(k.url, r); } } };
+  const docSays = (os, answer) => { const inner = os.fetch; os.fetch = async (u, init) => (String(u).includes('/api/documents/' + D) ? (os.calls.push({ u: String(u) }), answer()) : inner(u, init)); };
+  try {
+    const [gk] = Object.keys(R.onshape.geom), [ps, config] = gk.split('|');
+    const shapes = `/onshape/api/partstudios/d/${ps}/tessellatedfaces?configuration=${encodeURIComponent(config)}`;
+    // a library anyone can open: team A reads it, team B's check hears "public", team C pays nothing
+    const osA = onshape(), a = browser(osA); await a.signIn();
+    assert.equal((await a.go(shapes)).headers.get('X-SimBench-Cache'), 'miss');
+    const osB = onshape(), b = browser(osB); await b.signIn();
+    docSays(osB, () => Response.json({ name: 'goBILDA parts', public: true }));
+    assert.equal((await b.go(shapes)).headers.get('X-SimBench-Cache'), 'hit');
+    assert.equal(osB.calls.length, 1, 'one check');
+    const osC = onshape(), c = browser(osC); await c.signIn();
+    const hit = await c.go(shapes);
+    assert.equal(hit.headers.get('X-SimBench-Cache'), 'hit');
+    assert.match(await hit.text(), /facets/);
+    assert.deepEqual(osC.calls, [], 'no call at all against the yearly allowance');
+    // a private document isn't remembered: every team still shows it can open it
+    kept.clear();
+    await a.go(shapes);
+    const osE = onshape(), e = browser(osE); await e.signIn();
+    await e.go(shapes); await e.go(shapes);
+    assert.equal(osE.calls.length, 2, 'a check each time');
+    // placed from the team's own document: the library itself is refused, but the read through the link is Onshape's to decide
+    const L = 'f'.repeat(24), linked = shapes + '&linkDocumentId=' + L;
+    await a.go(linked);
+    const osF = onshape(), f = browser(osF); await f.signIn();
+    docSays(osF, () => new Response('{}', { status: 403 }));
+    const viaLink = await f.go(linked);
+    assert.equal(viaLink.status, 200, 'not refused by the check that can\'t carry the link');
+    assert.match(await viaLink.text(), /facets/);
+    assert.ok(osF.calls.at(-1).u.includes('linkDocumentId=' + L), 'read fresh, through the link');
+    // the allowance spent: said as 402, not "your account can't open that document"
+    const osG = onshape(), g = browser(osG); await g.signIn();
+    docSays(osG, () => new Response('{"message":"API limit reached"}', { status: 402 }));
+    assert.equal((await g.go(shapes)).status, 402);
+  } finally { globalThis.caches = was; }
+});

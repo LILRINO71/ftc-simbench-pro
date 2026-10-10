@@ -183,14 +183,37 @@ export async function handle(request, env, fetchImpl = fetch) {
       if (hit) {
         // A kept copy was read with someone else's sign-in, and the document may be private:
         // it is only for a team that can open the document itself, which Onshape says with
-        // its cheapest call. (The shapes are the expensive part; this is one small read.)
+        // its cheapest call. That call counts against the app's yearly allowance just as the
+        // shapes would, so a document Onshape has said is public (goBILDA's, REV's, a
+        // published library: anyone can open those) is remembered for a day, and its kept
+        // copies then cost no call at all.
         const did = /\/d\/([0-9a-f]{24})\//i.exec(path)[1];
-        const c = await ask("documents/" + did);
-        if (c.out) return c.out;
-        const can = c.r;
-        if (!can.ok) return json({ error: "access", message: "Your Onshape account can't open that document." }, can.status === 404 ? 404 : 403, Object.fromEntries(await keepToken(new Headers())));
-        const h = await keepToken(new Headers(hit.headers)); h.set("X-SimBench-Cache", "hit"); h.set("Cache-Control", "no-store");
-        return new Response(hit.body, { status: hit.status, headers: h });
+        const open = new Request("https://simbench-onshape-cache/public/" + did);
+        let serve = !!(await store.match(open).catch(() => null));
+        if (!serve) {
+          const c = await ask("documents/" + did);
+          if (c.out) return c.out;
+          const can = c.r;
+          if (can.ok) {
+            serve = true;
+            const info = await can.json().catch(() => null);
+            if (info && info.public === true) try { await store.put(open, new Response("1", { headers: { "Cache-Control": "public, max-age=86400" } })); } catch (e) {}
+          } else if (can.status !== 403 && can.status !== 404) {
+            // Onshape busy (429, 5xx) or the app's allowance used up (402): said as a fresh read would say it
+            const h = await keepToken(new Headers({ "Content-Type": can.headers.get("Content-Type") || "application/json", "Cache-Control": "no-store" }));
+            const ra = can.headers.get("Retry-After"); if (ra) h.set("Retry-After", ra);
+            return new Response(can.body, { status: can.status, headers: h });
+          } else if (!url.searchParams.get("linkDocumentId")) {
+            return json({ error: "access", message: "Your Onshape account can't open that document." }, can.status === 404 ? 404 : 403, Object.fromEntries(await keepToken(new Headers())));
+          }
+          // refused, but placed from the team's own document (linkDocumentId): a team can read a
+          // library part through the document that uses it without being able to open the library,
+          // and only the read itself can carry the link. Onshape decides on a fresh read, below.
+        }
+        if (serve) {
+          const h = await keepToken(new Headers(hit.headers)); h.set("X-SimBench-Cache", "hit"); h.set("Cache-Control", "no-store");
+          return new Response(hit.body, { status: hit.status, headers: h });
+        }
       }
     }
     const got = await ask(path, url.search);
