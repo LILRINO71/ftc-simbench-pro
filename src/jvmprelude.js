@@ -45,6 +45,10 @@ public enum DistanceUnit { METER(1.0), CM(0.01), MM(0.001), INCH(0.0254);
   public double toMm(double v){ return v*metres/0.001; }
 }`,
 `package org.firstinspires.ftc.robotcore.external.navigation;
+public enum CurrentUnit { AMPS, MILLIAMPS;
+  public double convert(double v, CurrentUnit from){ return from==this ? v : (this==AMPS ? v/1000.0 : v*1000.0); }
+}`,
+`package org.firstinspires.ftc.robotcore.external.navigation;
 public enum AxesReference { EXTRINSIC, INTRINSIC }`,
 `package org.firstinspires.ftc.robotcore.external.navigation;
 public enum AxesOrder { XZX, XYX, YXY, YZY, ZYZ, ZXZ, XZY, XYZ, YXZ, YZX, ZYX, ZXY }`,
@@ -1347,17 +1351,173 @@ public class MecanumConstants {
   public MecanumConstants useBrakeModeInTeleOp(boolean b){ return this; } public MecanumConstants useVoltageCompensation(boolean b){ return this; }
   public MecanumConstants nominalVoltage(double v){ return this; } public MecanumConstants motorCachingThreshold(double v){ return this; }
 }`,
+`package com.pedropathing.geometry;
+public class BezierCurve {
+  protected Pose[] pts;
+  public BezierCurve(Object... points){
+    if (points.length == 1 && points[0] instanceof java.util.List){
+      java.util.List<Object> l = (java.util.List<Object>) points[0];
+      pts = new Pose[l.size()];
+      for (int i = 0; i < pts.length; i++) pts[i] = (Pose) l.get(i);
+    } else {
+      pts = new Pose[points.length];
+      for (int i = 0; i < points.length; i++) pts[i] = (Pose) points[i];
+    }
+  }
+  public int controlPointCount(){ return pts.length; }
+  public Pose getFirstControlPoint(){ return pts[0]; }
+  public Pose getLastControlPoint(){ return pts[pts.length - 1]; }
+  public double[] at(double t){
+    int n = pts.length;
+    double[] xs = new double[n];
+    double[] ys = new double[n];
+    for (int i = 0; i < n; i++){ xs[i] = pts[i].getX(); ys[i] = pts[i].getY(); }
+    for (int r = 1; r < n; r++) for (int i = 0; i < n - r; i++){ xs[i] = xs[i] + (xs[i + 1] - xs[i]) * t; ys[i] = ys[i] + (ys[i + 1] - ys[i]) * t; }
+    return new double[]{ xs[0], ys[0] };
+  }
+  public Pose getPose(double t){ double[] p = at(t); return new Pose(p[0], p[1], 0); }
+  public double length(){
+    double len = 0; double[] a = at(0);
+    for (int k = 1; k <= 40; k++){ double[] b = at(k / 40.0); len += Math.hypot(b[0] - a[0], b[1] - a[1]); a = b; }
+    return len;
+  }
+}`,
+`package com.pedropathing.geometry;
+public class BezierLine extends BezierCurve {
+  public BezierLine(Object a, Object b){ super(a, b); }
+}`,
+`package com.pedropathing.geometry;
+public class BezierPoint extends BezierCurve {
+  public BezierPoint(Object a){ super(a); }
+}`,
+`package com.pedropathing.paths;
+public class PathConstraints {
+  public PathConstraints(double... values){}
+}`,
+`package com.pedropathing.ftc.localization.constants;
+public class PinpointConstants { public PinpointConstants(){} }`,
+`package com.pedropathing.ftc.localization.constants;
+public class OTOSConstants { public OTOSConstants(){} }`,
+`package com.pedropathing.paths;
+import com.pedropathing.geometry.BezierCurve;
+import com.pedropathing.geometry.Pose;
+public class Path {
+  public BezierCurve curve;
+  private int mode = 0;
+  private double h0, h1;
+  private boolean reversed;
+  private double len = -1;
+  private java.util.ArrayList<Double> cbAt = new java.util.ArrayList<>();
+  private java.util.ArrayList<Boolean> cbTimed = new java.util.ArrayList<>();
+  private java.util.ArrayList<Runnable> cbRun = new java.util.ArrayList<>();
+  public Path(BezierCurve c){ curve = c; }
+  public BezierCurve getCurve(){ return curve; }
+  public void setLinearHeadingInterpolation(double a, double b){ mode = 1; h0 = a; h1 = b; }
+  public void setLinearHeadingInterpolation(double a, double b, double end){ setLinearHeadingInterpolation(a, b); }
+  public void setConstantHeadingInterpolation(double h){ mode = 2; h0 = h; h1 = h; }
+  public void setTangentHeadingInterpolation(){ mode = 0; }
+  public void setReversed(boolean r){ reversed = r; }
+  public boolean isReversed(){ return reversed; }
+  public Pose getPoint(double t){ return curve.getPose(t); }
+  public double length(){ if (len < 0) len = curve.length(); return len; }
+  public double getHeadingGoal(double t){
+    if (mode == 1){ double d = h1 - h0; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI; return h0 + d * Math.max(0, Math.min(1, t)); }
+    if (mode == 2) return h0;
+    double a = Math.max(0, Math.min(0.99, t));
+    double[] p = curve.at(a); double[] q = curve.at(a + 0.01);
+    double h = Math.atan2(q[1] - p[1], q[0] - p[0]);
+    return reversed ? h + Math.PI : h;
+  }
+  public double closestT(double x, double y, double near){
+    double lo = Math.max(0, near - 0.05), hi = Math.min(1, near + 0.25);
+    double best = lo, bd = 1e18;
+    for (int k = 0; k <= 16; k++){
+      double tt = lo + (hi - lo) * k / 16.0; double[] p = curve.at(tt);
+      double d = (p[0] - x) * (p[0] - x) + (p[1] - y) * (p[1] - y);
+      if (d < bd){ bd = d; best = tt; }
+    }
+    double step = (hi - lo) / 16.0;
+    for (int k = 0; k < 8; k++){
+      step *= 0.5;
+      double a = Math.max(0, best - step), b = Math.min(1, best + step);
+      double[] pa = curve.at(a); double[] pb = curve.at(b);
+      double da = (pa[0] - x) * (pa[0] - x) + (pa[1] - y) * (pa[1] - y), db = (pb[0] - x) * (pb[0] - x) + (pb[1] - y) * (pb[1] - y);
+      if (da < bd){ bd = da; best = a; }
+      if (db < bd){ bd = db; best = b; }
+    }
+    return Math.max(0, Math.min(1, Math.max(best, near - 0.02)));
+  }
+  public void addCallback(double at, boolean timed, Runnable r){ cbAt.add(at); cbTimed.add(timed); cbRun.add(r); }
+  public int callbackCount(){ return cbRun.size(); }
+  public double callbackAt(int i){ return cbAt.get(i); }
+  public boolean callbackTimed(int i){ return cbTimed.get(i); }
+  public Runnable callback(int i){ return cbRun.get(i); }
+}`,
+`package com.pedropathing.paths;
+public class PathChain {
+  private Path[] paths;
+  public PathChain(Object... ps){
+    paths = new Path[ps.length];
+    for (int i = 0; i < ps.length; i++) paths[i] = ps[i] instanceof Path ? (Path) ps[i] : new Path((com.pedropathing.geometry.BezierCurve) ps[i]);
+  }
+  public int size(){ return paths.length; }
+  public Path getPath(int i){ return paths[i]; }
+}`,
+`package com.pedropathing.paths;
+import com.pedropathing.geometry.BezierCurve;
+public class PathBuilder {
+  private java.util.ArrayList<Path> list = new java.util.ArrayList<>();
+  private Path last;
+  public PathBuilder(){}
+  public PathBuilder(Object follower){}
+  public PathBuilder(Object follower, Object constraints){}
+  public PathBuilder addPath(Object o){ last = o instanceof Path ? (Path) o : new Path((BezierCurve) o); list.add(last); return this; }
+  public PathBuilder addPaths(Object... os){ for (Object o : os) addPath(o); return this; }
+  public PathBuilder setLinearHeadingInterpolation(double a, double b){ if (last != null) last.setLinearHeadingInterpolation(a, b); return this; }
+  public PathBuilder setLinearHeadingInterpolation(double a, double b, double end){ return setLinearHeadingInterpolation(a, b); }
+  public PathBuilder setLinearHeadingInterpolation(double a, double b, double end, double start){ return setLinearHeadingInterpolation(a, b); }
+  public PathBuilder setConstantHeadingInterpolation(double h){ if (last != null) last.setConstantHeadingInterpolation(h); return this; }
+  public PathBuilder setTangentHeadingInterpolation(){ if (last != null) last.setTangentHeadingInterpolation(); return this; }
+  public PathBuilder setReversed(){ if (last != null) last.setReversed(true); return this; }
+  public PathBuilder setReversed(boolean r){ if (last != null) last.setReversed(r); return this; }
+  public PathBuilder setGlobalLinearHeadingInterpolation(double a, double b){
+    double d = b - a; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI;
+    int n = list.size();
+    for (int i = 0; i < n; i++) list.get(i).setLinearHeadingInterpolation(a + d * i / n, a + d * (i + 1) / n);
+    return this;
+  }
+  public PathBuilder setGlobalLinearHeadingInterpolation(double a, double b, double end){ return setGlobalLinearHeadingInterpolation(a, b); }
+  public PathBuilder setGlobalConstantHeadingInterpolation(double h){ for (int i = 0; i < list.size(); i++) list.get(i).setConstantHeadingInterpolation(h); return this; }
+  public PathBuilder setGlobalTangentHeadingInterpolation(){ for (int i = 0; i < list.size(); i++) list.get(i).setTangentHeadingInterpolation(); return this; }
+  public PathBuilder setGlobalReversed(){ for (int i = 0; i < list.size(); i++) list.get(i).setReversed(true); return this; }
+  public PathBuilder addParametricCallback(double t, Runnable r){ if (last != null) last.addCallback(t, false, r); return this; }
+  public PathBuilder addTemporalCallback(double ms, Runnable r){ if (last != null) last.addCallback(ms, true, r); return this; }
+  public PathChain build(){
+    Object[] arr = new Object[list.size()];
+    for (int i = 0; i < arr.length; i++) arr[i] = list.get(i);
+    return new PathChain(arr);
+  }
+}`,
 `package com.pedropathing.follower;
 import com.qualcomm.robotcore.hardware.*;
 import com.pedropathing.ftc.drivetrains.MecanumConstants;
 import com.pedropathing.geometry.Pose;
+import com.pedropathing.geometry.BezierCurve;
+import com.pedropathing.paths.Path;
+import com.pedropathing.paths.PathChain;
+import com.pedropathing.paths.PathBuilder;
 public class Follower {
   private DcMotorEx lf, lr, rf, rr;
-  private double fwd, str, turn, offset, maxPower = 1;
+  private double fwd, str, turn, offset, maxPower = 1, maxScale = 1;
   private boolean robotCentric = true, teleop = false;
-  private Pose start = new Pose();
-  private double headingZero;
-  private boolean busy = false;
+  private double px0, py0, ph0, sx0, sy0, sh0;
+  private Path[] chain;
+  private double[] lengths;
+  private int index;
+  private double t, pathStart, endSince = -1;
+  private boolean busy, holdEnd, holding;
+  private Pose holdPose;
+  private boolean[] fired;
   public Follower(HardwareMap hw){ initStatics(hw); }
   public Follower(HardwareMap hw, Class<?> fConstants, Class<?> lConstants){ simbench.Pedro.load(fConstants, lConstants); initStatics(hw); }
   public Follower(HardwareMap hw, MecanumConstants c){ init(hw, c.leftFrontMotorName, c.leftRearMotorName, c.rightFrontMotorName, c.rightRearMotorName,
@@ -1367,44 +1527,141 @@ public class Follower {
   private void init(HardwareMap hw, String lfn, String lrn, String rfn, String rrn, DcMotorSimple.Direction lfd, DcMotorSimple.Direction lrd, DcMotorSimple.Direction rfd, DcMotorSimple.Direction rrd, double maxPower){
     lf = hw.get(DcMotorEx.class, lfn); lr = hw.get(DcMotorEx.class, lrn); rf = hw.get(DcMotorEx.class, rfn); rr = hw.get(DcMotorEx.class, rrn);
     lf.setDirection(lfd); lr.setDirection(lrd); rf.setDirection(rfd); rr.setDirection(rrd);
-    this.maxPower = maxPower; headingZero = simbench.Sim.heading(); }
-  public void setStartingPose(Pose p){ start = p; headingZero = simbench.Sim.heading(); }
+    this.maxPower = maxPower; setStartingPose(new Pose()); }
+  public void setStartingPose(Pose p){ px0 = p.getX(); py0 = p.getY(); ph0 = p.getHeading(); sx0 = simbench.Sim.x(); sy0 = simbench.Sim.y(); sh0 = simbench.Sim.heading(); }
   public void setPose(Pose p){ setStartingPose(p); }
   public void setCurrentPoseWithOffset(Pose p){ setStartingPose(p); }
-  public Pose getPose(){ return new Pose(start.getX(), start.getY(), start.getHeading() + simbench.Sim.heading() - headingZero); }
+  public Pose getPose(){
+    double dx = (simbench.Sim.x() - sx0) / 0.0254, dy = (simbench.Sim.y() - sy0) / 0.0254, r = ph0 - sh0;
+    return new Pose(px0 + dx * Math.cos(r) - dy * Math.sin(r), py0 + dx * Math.sin(r) + dy * Math.cos(r), ph0 + simbench.Sim.heading() - sh0);
+  }
   public double getHeading(){ return getPose().getHeading(); }
   public double getTotalHeading(){ return getHeading(); }
-  public void startTeleopDrive(){ teleop = true; }
-  public void startTeleopDrive(boolean brake){ teleop = true; }
-  public void startTeleOpDrive(){ teleop = true; }
-  public void startTeleOpDrive(boolean brake){ teleop = true; }
+  public com.pedropathing.math.Vector getVelocity(){
+    double r = ph0 - sh0, vx = simbench.Sim.vx() / 0.0254, vy = simbench.Sim.vy() / 0.0254;
+    com.pedropathing.math.Vector v = new com.pedropathing.math.Vector();
+    v.setOrthogonalComponents(vx * Math.cos(r) - vy * Math.sin(r), vx * Math.sin(r) + vy * Math.cos(r));
+    return v;
+  }
+  public com.pedropathing.math.Vector getAcceleration(){ return new com.pedropathing.math.Vector(); }
+  public void startTeleopDrive(){ teleop = true; busy = false; holding = false; }
+  public void startTeleopDrive(boolean brake){ startTeleopDrive(); }
+  public void startTeleOpDrive(){ startTeleopDrive(); }
+  public void startTeleOpDrive(boolean brake){ startTeleopDrive(); }
   public void setTeleOpDrive(double forward, double strafe, double turn, boolean robotCentric){ setTeleOpDrive(forward, strafe, turn, robotCentric, 0); }
   public void setTeleOpDrive(double forward, double strafe, double turn){ setTeleOpDrive(forward, strafe, turn, true, 0); }
-  public void setTeleOpDrive(double forward, double strafe, double turn, boolean robotCentric, double offsetHeading){ fwd = forward; str = strafe; this.turn = turn; this.robotCentric = robotCentric; offset = offsetHeading; teleop = true; }
+  public void setTeleOpDrive(double forward, double strafe, double turn, boolean robotCentric, double offsetHeading){ fwd = forward; str = strafe; this.turn = turn; this.robotCentric = robotCentric; offset = offsetHeading; teleop = true; busy = false; holding = false; }
   public void setTeleOpMovementVectors(double forward, double strafe, double heading){ setTeleOpDrive(forward, strafe, heading, true, 0); }
   public void setTeleOpMovementVectors(double forward, double strafe, double heading, boolean robotCentric){ setTeleOpDrive(forward, strafe, heading, robotCentric, 0); }
   public void setMaxPower(double p){ maxPower = p; }
+  public void setMaxPowerScaling(double p){ maxPower = p; }
+  public double getMaxPowerScaling(){ return maxPower; }
+  public PathBuilder pathBuilder(){ return new PathBuilder(this); }
+  public PathBuilder pathBuilder(Object constraints){ return new PathBuilder(this, constraints); }
+  public void followPath(Object p){ followPath(p, true); }
+  public void followPath(Object p, double power, boolean hold){ maxScale = power; followPath(p, hold); }
+  public void followPath(Object p, boolean hold){
+    if (p instanceof PathChain){ PathChain c = (PathChain) p; chain = new Path[c.size()]; for (int i = 0; i < chain.length; i++) chain[i] = c.getPath(i); }
+    else if (p instanceof Path) chain = new Path[]{ (Path) p };
+    else if (p instanceof BezierCurve) chain = new Path[]{ new Path((BezierCurve) p) };
+    else return;
+    lengths = new double[chain.length];
+    for (int i = 0; i < chain.length; i++) lengths[i] = chain[i].length();
+    index = 0; t = 0; holdEnd = hold; holding = false; teleop = false; busy = chain.length > 0;
+    startPath();
+  }
+  private void startPath(){ pathStart = simbench.Sim.now(); endSince = -1; fired = new boolean[chain[index].callbackCount()]; }
+  public void holdPoint(Pose p){ holdPose = p; holding = true; busy = false; teleop = false; }
+  public void holdPoint(Object p, boolean b){ holdPoint((Pose) p); }
+  public void turnTo(double rad){ Pose p = getPose(); holdPoint(new Pose(p.getX(), p.getY(), rad)); }
+  public void turnToDegrees(double deg){ turnTo(Math.toRadians(deg)); }
+  public void turn(double rad, boolean left){ turnTo(getHeading() + (left ? rad : -rad)); }
+  public void turnDegrees(double deg, boolean left){ turn(Math.toRadians(deg), left); }
+  public boolean isTurning(){ return holding && holdPose != null && Math.abs(wrap(holdPose.getHeading() - getHeading())) > Math.toRadians(2); }
+  public boolean isBusy(){ return busy; }
+  public boolean atParametricEnd(){ return !busy || t >= 0.995; }
+  public double getCurrentTValue(){ return t; }
+  public int getChainIndex(){ return index; }
+  public double getCurrentPathNumber(){ return index; }
+  public boolean isRobotStuck(){ return false; }
+  public boolean isLocalizationNAN(){ return false; }
+  public Pose getClosestPose(){ return busy ? chain[index].getPoint(t) : getPose(); }
+  public void breakFollowing(){ busy = false; holding = false; teleop = false; stopMotors(); }
+  public void deactivateAllPIDFs(){} public void activateAllPIDFs(){}
   public void update(){
-    if (!teleop) return;
-    double f = fwd, s = str;
-    if (!robotCentric) { double h = getHeading() - offset; double c = Math.cos(-h), sn = Math.sin(-h); double nf = f*c - s*sn; double ns = f*sn + s*c; f = nf; s = ns; }
-    double a = f - s - turn, b = f + s - turn, c = f + s + turn, d = f - s + turn;
+    if (teleop){
+      double f = fwd, s = str;
+      if (!robotCentric) { double h = getHeading() - offset; double c = Math.cos(-h), sn = Math.sin(-h); double nf = f*c - s*sn; double ns = f*sn + s*c; f = nf; s = ns; }
+      power(f, s, turn);
+      return;
+    }
+    Pose p = getPose();
+    com.pedropathing.math.Vector v = getVelocity();
+    double vx = v.getXComponent(), vy = v.getYComponent();
+    if (busy){
+      Path cur = chain[index];
+      t = cur.closestT(p.getX(), p.getY(), t);
+      double now = simbench.Sim.now();
+      for (int i = 0; i < fired.length; i++){
+        if (fired[i]) continue;
+        boolean due = cur.callbackTimed(i) ? (now - pathStart) * 1000 >= cur.callbackAt(i) : t >= cur.callbackAt(i);
+        if (due){ fired[i] = true; cur.callback(i).run(); }
+      }
+      boolean last = index == chain.length - 1;
+      Pose end = cur.getPoint(1);
+      double endDist = Math.hypot(end.getX() - p.getX(), end.getY() - p.getY());
+      double remain = endDist;
+      for (int i = index + 1; i < chain.length; i++) remain += lengths[i];
+      double fx, fy;
+      if (last && (t >= 0.995 || endDist < 4)){
+        fx = (end.getX() - p.getX()) * 0.12 - vx * 0.012; fy = (end.getY() - p.getY()) * 0.12 - vy * 0.012;
+      } else {
+        double a = Math.min(t, 0.99);
+        double[] q0 = cur.curve.at(a); double[] q1 = cur.curve.at(a + 0.01);
+        double tx = q1[0] - q0[0], ty = q1[1] - q0[1], tl = Math.hypot(tx, ty);
+        if (tl < 1e-9){ tx = end.getX() - p.getX(); ty = end.getY() - p.getY(); tl = Math.max(1e-9, Math.hypot(tx, ty)); }
+        double speed = Math.max(0.2, Math.min(1, remain / 18.0));
+        Pose c = cur.getPoint(t);
+        fx = tx / tl * speed + (c.getX() - p.getX()) * 0.12;
+        fy = ty / tl * speed + (c.getY() - p.getY()) * 0.12;
+      }
+      double goal = cur.getHeadingGoal(t);
+      steer(fx, fy, goal, p.getHeading());
+      if (!last){
+        if (t >= 0.98 || endDist < 2){ index++; t = 0; startPath(); }
+        return;
+      }
+      if (t >= 0.995 || endDist < 1.5){
+        if (endSince < 0) endSince = now;
+        boolean settled = endDist < 1 && Math.abs(wrap(cur.getHeadingGoal(1) - p.getHeading())) < Math.toRadians(3);
+        if (settled || now - endSince > 0.5){
+          busy = false;
+          if (holdEnd){ holding = true; holdPose = new Pose(end.getX(), end.getY(), cur.getHeadingGoal(1)); } else stopMotors();
+        }
+      }
+      return;
+    }
+    if (holding && holdPose != null){
+      double fx = (holdPose.getX() - p.getX()) * 0.12 - vx * 0.012, fy = (holdPose.getY() - p.getY()) * 0.12 - vy * 0.012;
+      steer(fx, fy, holdPose.getHeading(), p.getHeading());
+    }
+  }
+  private void steer(double fx, double fy, double goal, double h){
+    double tr = Math.max(-1, Math.min(1, wrap(goal - h) * 1.4));
+    double f = fx * Math.cos(h) + fy * Math.sin(h), s = -fx * Math.sin(h) + fy * Math.cos(h);
+    double m = Math.hypot(f, s);
+    if (m > 1){ f /= m; s /= m; }
+    power(f, s, tr);
+  }
+  private void power(double f, double s, double tr){
+    double a = f - s - tr, b = f + s - tr, c = f + s + tr, d = f - s + tr;
     double m = Math.max(Math.max(Math.abs(a), Math.abs(b)), Math.max(Math.abs(c), Math.abs(d)));
-    double k = m > maxPower ? maxPower / m : 1;
+    double cap = teleop ? maxPower : Math.min(maxPower, maxScale);
+    double k = m > cap ? cap / m : 1;
     lf.setPower(a * k); lr.setPower(b * k); rf.setPower(c * k); rr.setPower(d * k);
   }
-  public void followPath(Object path){ teleop = false; busy = false; }
-  public void followPath(Object path, boolean hold){ followPath(path); }
-  public void followPath(Object path, double maxPower, boolean hold){ followPath(path); }
-  public boolean isBusy(){ return busy; }
-  public void breakFollowing(){ teleop = false; lf.setPower(0); lr.setPower(0); rf.setPower(0); rr.setPower(0); }
-  public void holdPoint(Object p){} public void turnTo(double r){} public void turnToDegrees(double d){}
-  public Object pathBuilder(){ return null; }
-  public Pose getClosestPose(){ return getPose(); }
-  public com.pedropathing.math.Vector getVelocity(){ return new com.pedropathing.math.Vector(); }
-  public com.pedropathing.math.Vector getAcceleration(){ return new com.pedropathing.math.Vector(); }
-  public boolean atParametricEnd(){ return true; }
-  public void deactivateAllPIDFs(){} public void activateAllPIDFs(){}
+  private void stopMotors(){ lf.setPower(0); lr.setPower(0); rf.setPower(0); rr.setPower(0); }
+  private static double wrap(double a){ while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; }
 }`,
 `package com.pedropathing.follower;
 import com.qualcomm.robotcore.hardware.HardwareMap;
@@ -1413,6 +1670,14 @@ public class FollowerBuilder {
   private HardwareMap hw; private MecanumConstants drive = new MecanumConstants();
   public FollowerBuilder(Object constants, HardwareMap hw){ this.hw = hw; }
   public FollowerBuilder mecanumDrivetrain(MecanumConstants c){ drive = c; return this; }
+  public FollowerBuilder mecanumExDrivetrain(MecanumConstants c){ drive = c; return this; }
+  public FollowerBuilder pinpointLocalizer(Object c){ return this; }
+  public FollowerBuilder OTOSLocalizer(Object c){ return this; }
+  public FollowerBuilder twoWheelLocalizer(Object c){ return this; }
+  public FollowerBuilder threeWheelLocalizer(Object c){ return this; }
+  public FollowerBuilder threeWheelIMULocalizer(Object c){ return this; }
+  public FollowerBuilder driveEncoderLocalizer(Object c){ return this; }
+  public FollowerBuilder pathConstraints(Object c){ return this; }
   public Follower build(){ return new Follower(hw, drive); }
 }`,
 `package com.pedropathing.ftc;
@@ -1425,7 +1690,7 @@ const JV_PRELUDE_NATIVES={
   "simbench.Pedro":{s:{*load(vm,a){ for(const c of a) if(c&&c.__type) yield* vm.ready(c.__type); return null; }}},
 };
 /* Builders the Java above doesn't spell out: any other setter returns the builder itself */
-const JV_BUILDERS=["com.pedropathing.ftc.drivetrains.MecanumConstants","com.pedropathing.follower.FollowerBuilder","com.pedropathing.follower.FollowerConstants","com.pedropathing.ftc.FollowerBuilder"];
+const JV_BUILDERS=["com.pedropathing.ftc.drivetrains.MecanumConstants","com.pedropathing.ftc.localization.constants.PinpointConstants","com.pedropathing.ftc.localization.constants.OTOSConstants","com.pedropathing.paths.PathBuilder","com.pedropathing.follower.FollowerBuilder","com.pedropathing.follower.FollowerConstants","com.pedropathing.ftc.FollowerBuilder"];
 
 let JV_PRELUDE_UNITS=null;
 function jvPrelude(){

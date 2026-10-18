@@ -350,16 +350,20 @@ const JV_OTOS_M={
   getVersionInfo(){}, selfTest(){ return true; }, getDeviceName(vm,o){ return o.n.name; }, close(){},
 };
 const JV_DIST_M={
-  getDistance(vm,o,a){ const m=vm.host&&vm.host.ray?vm.host.ray():8.19; return jvLen(m>2?8.19:m,a[0]||"CM"); },
+  getDistance(vm,o,a){ const m=vm.host&&vm.host.ray?vm.host.ray(o.n.name):8.19; return jvLen(m>2?8.19:m,a[0]||"CM"); },
   getDeviceName(vm,o){ return o.n.name; }, close(){}, didTimeoutOccur(){ return false; },
 };
+/* a colour sensor reads what its own host says (each one by name: two intake
+   mouths see different balls); a host with no per-sensor answer gives the floor */
+const jvRGB=(vm,o)=>vm.host&&vm.host.color?vm.host.color(o.n.name):[120,120,120];
 const JV_COLOR_M={
-  red(vm,o){ return (vm.host&&vm.host.color?vm.host.color():[120,120,120])[0]; },
-  green(vm,o){ return (vm.host&&vm.host.color?vm.host.color():[120,120,120])[1]; },
-  blue(vm,o){ return (vm.host&&vm.host.color?vm.host.color():[120,120,120])[2]; },
-  alpha(){ return 255; }, argb(vm,o){ const c=vm.host&&vm.host.color?vm.host.color():[120,120,120]; return (255<<24)|(c[0]<<16)|(c[1]<<8)|c[2]; },
-  getNormalizedColors(vm,o){ const c=vm.host&&vm.host.color?vm.host.color():[120,120,120]; return vm.mk(JV_HW+"NormalizedRGBA",{red:c[0]/255,green:c[1]/255,blue:c[2]/255,alpha:1}); },
-  getDistance(vm,o,a){ return jvLen(0.2,a[0]||"CM"); }, getLightDetected(){ return 0.1; }, getRawLightDetected(){ return 100; },
+  red(vm,o){ return jvRGB(vm,o)[0]; },
+  green(vm,o){ return jvRGB(vm,o)[1]; },
+  blue(vm,o){ return jvRGB(vm,o)[2]; },
+  alpha(){ return 255; }, argb(vm,o){ const c=jvRGB(vm,o); return (255<<24)|(c[0]<<16)|(c[1]<<8)|c[2]; },
+  getNormalizedColors(vm,o){ const c=jvRGB(vm,o); return vm.mk(JV_HW+"NormalizedRGBA",{red:c[0]/255,green:c[1]/255,blue:c[2]/255,alpha:1}); },
+  getDistance(vm,o,a){ const m=vm.host&&vm.host.colorDist?vm.host.colorDist(o.n.name):null; return jvLen(m==null?0.2:m,a[0]||"CM"); },
+  getLightDetected(){ return 0.1; }, getRawLightDetected(){ return 100; },
   enableLed(){}, setGain(){}, getGain(){ return 1; }, setI2cAddress(){}, getI2cAddress(vm){ return vm.opaqueVal("I2cAddr"); },
   getDeviceName(vm,o){ return o.n.name; }, close(){},
 };
@@ -616,7 +620,11 @@ function jvNatives(){
   d("com.qualcomm.robotcore.util.RobotLog",{s:{}, });
   N["com.qualcomm.robotcore.util.RobotLog"].sany=true;
   // a direct line to the sim for the Java libraries below (tick, odometry)
+  // the robot where the sim has it (metres, field frame) and how fast it's going there: Pedro's localizer
+  const jvWorldVel=vm=>{ const v=vm.host&&vm.host.vel?vm.host.vel():{x:0,y:0}, h=vm.host?vm.host.heading():0, c=Math.cos(h), s=Math.sin(h); return {x:v.x*c-v.y*s, y:v.x*s+v.y*c}; };
   d("simbench.Sim",{s:{tick(){ return {__block:{gate:true}}; }, now(vm){ return vm.host?vm.host.now():0; }, heading(vm){ return vm.host?vm.host.heading():0; },
+    x(vm){ return vm.host&&vm.host.pose?vm.host.pose().x:0; }, y(vm){ return vm.host&&vm.host.pose?vm.host.pose().y:0; },
+    vx(vm){ return jvWorldVel(vm).x; }, vy(vm){ return jvWorldVel(vm).y; },
     *mecanum(vm,a){ // a: [lf, lb, rb, rf] motors, then the four powers in that order (normalised by the caller)
       for(let k=0;k<4;k++) if(a[k]) yield* vm.invoke(a[k],"setPower",[jvNum(a[k+4])],null); }}});
   return N;
