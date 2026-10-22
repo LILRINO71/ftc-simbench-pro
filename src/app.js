@@ -3180,6 +3180,7 @@ function boot(){
   requestAnimationFrame(frame);
   try{
     if(/^#join=/i.test(location.hash)) NetUI.invited(location.hash.slice(6));
+    if(/^#path=/i.test(location.hash)&&PathEdit.fromHash) setTimeout(()=>PathEdit.fromHash(),800);   // a shared path, once the robot is in
     // back from signing in to Onshape in this tab (no pop-up allowed): the card carries on with the pasted address
     const back=/^#onshape-(signed-in|signin-failed)/.exec(location.hash);
     if(back){ try{ history.replaceState(null,"",location.pathname+location.search); }catch(e){} ImportFlow.signedIn(back[1]==="signed-in",""); }

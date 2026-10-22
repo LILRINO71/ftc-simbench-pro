@@ -99,6 +99,24 @@ function pedroClean(P){
   const name=String(P.name||"SimBench Path").replace(/[^\w .-]+/g,"").trim().slice(0,40)||"SimBench Path";
   return {format:PEDRO_FORMAT, v:1, name, start:pose(P.start), legs};
 }
+/* A path in a link (#path=...): the numbers only, as compact text, base64url. A dozen legs
+   is a few hundred characters, fine in a Discord message. pedroFromHash reads it back
+   through pedroClean, so a link can only ever give a path within the field. */
+function pedroToHash(P){
+  const n=v=>Math.round(v*10)/10, H={n:P.name, s:[n(P.start.x),n(P.start.y),n(P.start.h)],
+    l:P.legs.map(L=>[n(L.to.x),n(L.to.y),n(L.to.h),PEDRO_HEADINGS.indexOf(L.heading),L.reversed?1:0,n(L.wait),(L.ctrl||[]).map(c=>[n(c[0]),n(c[1])])])};
+  const bytes=new TextEncoder().encode(JSON.stringify(H));
+  let bin=""; for(const b of bytes) bin+=String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+}
+function pedroFromHash(h){
+  let s=String(h||"").replace(/-/g,"+").replace(/_/g,"/"); while(s.length%4) s+="=";
+  if(s.length>20000) throw new Error("that link is too long to be a path");
+  const bin=atob(s), bytes=Uint8Array.from(bin,c=>c.charCodeAt(0)), H=JSON.parse(new TextDecoder().decode(bytes));
+  if(!H||!Array.isArray(H.s)||!Array.isArray(H.l)) throw new Error("that link has no path in it");
+  return pedroClean({name:H.n, start:{x:H.s[0],y:H.s[1],h:H.s[2]},
+    legs:H.l.map(L=>({to:{x:L[0],y:L[1],h:L[2]}, heading:PEDRO_HEADINGS[L[3]]||"linear", reversed:!!L[4], wait:L[5], ctrl:Array.isArray(L[6])?L[6]:[]}))});
+}
 /* the Java class name for the path's name */
 function pedroClass(name){
   const w=String(name||"").replace(/[^A-Za-z0-9 ]+/g," ").trim().split(/\s+/).filter(Boolean).map(s=>s[0].toUpperCase()+s.slice(1));

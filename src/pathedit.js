@@ -34,6 +34,14 @@ const PathEdit={
     $("#peNew").addEventListener("click",()=>{ this.P=pedroNew(this.startHere()); this.sel=null; this.changed(); });
     $("#peName").addEventListener("input",e=>{ if(this.P){ this.P.name=e.target.value.slice(0,40); this.store(); this.renderCode(); } });
     $("#peFile").addEventListener("click",()=>this.download());
+    $("#peLink").addEventListener("click",()=>this.shareLink());
+    // a shared link opens its path (and keeps the address clean afterwards)
+    const fromHash=()=>{ const m=/^#path=([A-Za-z0-9_-]+)/.exec(location.hash||""); if(!m) return;
+      try{ history.replaceState(null,"",location.pathname+location.search); }catch(e){}
+      try{ this.P=pedroFromHash(m[1]); this.store(); this.open(); this.say("Opened a shared path. Run it, or change it and share it back."); }
+      catch(e){ this.open(); this.say("That path link couldn't be read: "+e.message); } };
+    addEventListener("hashchange",fromHash);
+    this.fromHash=fromHash;
     try{ const s=store.get("ftcbench.pedroPath",null); if(s) this.P=pedroClean(JSON.parse(s)); }catch(e){ this.P=null; }
   },
   /* the robot where it stands, in Pedro's frame */
@@ -186,6 +194,11 @@ const PathEdit={
   },
   saveJava(){ const J=this.java(); this.file(J.file,J.src,"text/x-java"); },
   download(){ this.file(pedroClass(this.P.name)+".pedropath.json",JSON.stringify(this.P,null,1),"application/json"); },
+  async shareLink(){
+    const url=location.origin+location.pathname+"#path="+pedroToHash(this.P);
+    let ok=false; try{ await navigator.clipboard.writeText(url); ok=true; }catch(e){}
+    this.say(ok?"Link copied: whoever opens it gets this path in the editor.":"Copy this link: "+url);
+  },
   file(name,text,type){ const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([text],{type})); a.download=name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),5000); },
   say(t){ const s=$("#peMsg"); if(s){ s.textContent=t||""; s.hidden=!t; } },
   /* a dropped .pedropath.json opens here */

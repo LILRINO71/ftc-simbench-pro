@@ -111,3 +111,20 @@ test('pedro path: a leg that drives the robot into a HIVE is named before it run
   const clear = { start: { x: 12, y: 72, h: 0 }, legs: [{ to: { x: 12, y: 100, h: 90 }, ctrl: [], heading: 'linear', reversed: false, wait: 0 }] };
   assert.deepEqual(F.pedroHits(clear, obs, 0.2), []);
 });
+
+test('pedro path: a share link carries the path and gives back the same path; a hostile link gives a clean one or nothing', () => {
+  const P = { format: E.PEDRO_FORMAT, v: 1, name: 'Blue far', start: { x: 12, y: 72, h: 0 }, legs: [
+    { to: { x: 36, y: 72, h: 0 }, ctrl: [], heading: 'constant', reversed: false, wait: 0.5 },
+    { to: { x: 30, y: 110, h: 90 }, ctrl: [[38, 95]], heading: 'linear', reversed: true, wait: 0 } ] };
+  const h = E.pedroToHash(P);
+  assert.match(h, /^[A-Za-z0-9_-]+$/, 'only URL-safe characters');
+  assert.ok(h.length < 300, h.length + ' characters');
+  assert.deepEqual(E.pedroFromHash(h), E.pedroClean(P));
+  // made up by hand: far off the field, a script for a name, fifty legs
+  const evil = Buffer.from(JSON.stringify({ n: '<img onerror=x>', s: [1e9, -1e9, 5], l: Array.from({ length: 50 }, () => [999, 2, 0, 7, 1, 99, [[1, 2]]]) })).toString('base64url');
+  const Q = E.pedroFromHash(evil);
+  assert.equal(Q.name, 'img onerrorx'); assert.equal(Q.start.x, 180); assert.equal(Q.legs.length, 40);
+  assert.equal(Q.legs[0].heading, 'linear'); assert.equal(Q.legs[0].wait, 30);
+  assert.throws(() => E.pedroFromHash('not-a-path'));
+  assert.throws(() => E.pedroFromHash('a'.repeat(30000)));
+});

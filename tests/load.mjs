@@ -28,7 +28,7 @@ const EXPORTS = [
   'MATERIALS', 'hullVolume', 'partMass', 'massProps', 'inertiaOf',
   'driveFromCAD', 'DRIVE_KINDS', 'ikMatrix', 'fkFromIk', 'wheelSpeeds', 'chassisFromWheels',
   'Dyn', 'tractionLimit', 'motorTorque', 'wheelLoads', 'JoltMech', 'JOLT_LIB',
-  'onshapeRead', 'onshapeGeomCache', 'pedroToField', 'fieldToPedro', 'pedroNew', 'pedroCurves', 'bezierAt', 'pedroPolyline', 'pedroLength', 'pedroCheck', 'pedroHits', 'pedroClean', 'pedroClass', 'pedroJava', 'PEDRO_CONSTANTS_JAVA', 'PEDRO_FORMAT', 'onshapeRef', 'onshapeFromLink', 'onshapeSignInState', 'checkOnshapePayload', 'onshapeLinks', 'ONSHAPE_FORMAT', 'parseOnshapeAssembly', 'applyMateLimits', 'matchOnshapeParts', 'applyOnshapeMates', 'mateQty',
+  'onshapeRead', 'onshapeGeomCache', 'pedroToField', 'fieldToPedro', 'pedroNew', 'pedroCurves', 'bezierAt', 'pedroPolyline', 'pedroLength', 'pedroCheck', 'pedroHits', 'pedroClean', 'pedroToHash', 'pedroFromHash', 'pedroClass', 'pedroJava', 'PEDRO_CONSTANTS_JAVA', 'PEDRO_FORMAT', 'onshapeRef', 'onshapeFromLink', 'onshapeSignInState', 'checkOnshapePayload', 'onshapeLinks', 'ONSHAPE_FORMAT', 'parseOnshapeAssembly', 'applyMateLimits', 'matchOnshapeParts', 'applyOnshapeMates', 'mateQty',
   'cadFromOnshape', 'urdfStl', 'urdfXml', 'urdfRobot', 'urdfRobotFromZip', 'urdfExact', 'urdfApplyHints', 'meshReduce', 'meshDecimate', 'stlTriangles', 'zipEntries', 'zipRead', 'gltfRead', 'objRead', 'meshRead', 'bindDevices', 'classifyJoints', 'BIND_RULES', 'onshapeGeomKey', 'osColor', 'osCompactTess', 'osCompactMass',
   'rrDetect', 'rrParseHelpers', 'rrAttach', 'rrBuildPlan', 'rrSample', 'RRRuntime',
   'autoRig', 'ARActuators', 'ARSlides', 'ARCarry',
