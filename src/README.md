@@ -43,6 +43,7 @@ was designed in, not the build order.
 | `bind.js` | Which joints are mechanisms at all (`classifyJoints`: the library's bearing races and motor shafts come through as joints and are marked internal), and which device drives each (`bindDevices`: names, the actuator kind on the axis, the code's travel, elimination; a coupling hint becomes a coupling when the code drives its leader). What is left is a question with its candidates. |
 | `robotcheck.js` | The robot check: the joints against the team's OpMode (devices, joints, drivetrain, a small swing of each joint against the frame), as questions with likely answers. See [../docs/robot-check.md](../docs/robot-check.md). |
 | `jointspec.js` | Joint specs (`ftc-sim-bench.joints`). Part picks by path, name and position; axis, pivot, travel, devices, rest poses; followers (ratio, slider-crank, rod); hand fixes. Also the joint editor's helpers: `specFromCad`, `suggestJoint`, and `mateJointQ`/`jointValues`, which the sim and the view share. See [../docs/joints.md](../docs/joints.md). |
+| `pedrogen.js` | Pedro paths: a drawn path (a start, legs as lines or curves, heading modes, reversed, waits) in Pedro's coordinates (the bench's field moved by 72 in), checked against the field's obstacles, and written as the Pedro Pathing 2.x OpMode a team would write, with a stand-in `Constants` for the bench. |
 
 ## Code → behaviour
 
@@ -86,6 +87,12 @@ was designed in, not the build order.
 | `cadview.js` | The Onshape-style CAD view and the click-to-fix joint editor. |
 | `engineworker.js` | The engine (`dist/engine-<hash>.js`) in a Web Worker: a STEP is parsed, its joints found and its shapes cut off the page's thread; a URDF zip is unpacked and built there too. Falls back to the page when a worker can't start. |
 | `importflow.js` | The import card: bring the robot, add the code, review what was found and answer the little that's left. Draws `bind.js` and `robotcheck.js`; decides nothing itself. |
+| `recorder.js` | Match clips: the 3D view with the score bar, clock and robot drawn on top, recorded by MediaRecorder (WebM, MP4 in Safari), played back in the viewport, saved or shared. |
+| `sounds.js` | The match's cues, synthesised with Web Audio: start, the last ten seconds, the end horn, scoring, a stop. |
+| `results.js` | The results card at the final buzzer, personal bests per robot / OpMode / period / AI skill, the ghost of the best run, and the run report (distance, speed, time still, contacts). |
+| `minimap.js` | The field from above, from the user's drivers' side: zones, HIVEs, FLOWERs, robots, balls. |
+| `pathedit.js` | The path editor panel: draw and drag a Pedro path on the field, its Java live, Run on the bench. |
+| `keybinds.js` | Keyboard bindings: Classic and WASD layouts, any control on any key, kept in the browser. |
 | `app.js` | The UI: panels, the OpMode library and helper classes, file intake, the default robot loader, mates and joint specs, the joint editor's actions, sessions. |
 | `markup.html`, `styles.css` | The page. |
 

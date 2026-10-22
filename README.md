@@ -59,6 +59,8 @@ project. There are four layers, from exact to automatic:
 | **The match** | An alliance partner and two opponents the bench drives, and both alliances' human players, playing AUTO or TELEOP by the manual's rules, sharing the HIVEs with the team's robot, with a live scoreboard. | ✅ `src/match.js`, [docs/match.md](docs/match.md) |
 | **The import card** | One card over the field says the one thing to do next: bring the robot (paste the Onshape link, or drop the export), add the code, then a review of what the bench worked out (up, front, drive base, mass, joints, device bindings) with the few questions only the team can answer, each with a "show me" that moves the part. Reading happens in a Web Worker, so the page never freezes. | ✅ `src/importflow.js`, `src/engineworker.js`, [docs/robot-setup.md](docs/robot-setup.md) |
 | **Online matches** | One match with other teams, each on their own computer with their own robot and code: Quick match, a room code or an invite link, alliance chat, marks on the field. Browsers connect directly; the host's bench keeps the score. | ✅ `src/net.js`, [docs/online.md](docs/online.md) |
+| **Driver practice** | Match clips with the score on them (● Clip, or every run), match sounds, a results card with the score line by line, a personal best per robot and OpMode, a see-through ghost of your best run to race, and a run report (distance, speed, time still, what you hit). Chase and Robot cam views, a minimap from your drivers' side, a WASD layout or any key on any control, and start spots to pick or save. | ✅ `src/recorder.js`, `src/sounds.js`, `src/results.js`, `src/minimap.js`, `src/keybinds.js` |
+| **Path editor** | Draw an auto on the field (lines and curves, heading modes, reversed legs, waits) and get its Pedro Pathing 2.x OpMode: copy it, save the .java, or run it on the bench right away. Warns about a leg that drives into a HIVE. | ✅ `src/pedrogen.js`, `src/pathedit.js` |
 | **Robot check** | Checks the joints, wherever they came from, against the team's own OpMode: every motor and servo it moves has a joint, every joint carries parts and is driven, nothing swings through the frame. What it can't confirm becomes a question in the team's device names, with the likely answers and a button to see each one move. | ✅ `src/robotcheck.js`, [docs/robot-check.md](docs/robot-check.md) |
 
 The goal is that every robot ends up right: exact from Onshape mates when there are any, and
@@ -101,6 +103,9 @@ Open **https://ftc-simbench-pro.pages.dev**. It loads GearGurus 7832's Into The 
   (**Export → URDF**), a `.step` or a saved `.ftcsim` workspace drop in the same way. The
   Sim-ready CAD standard is in [docs/robot-setup.md](docs/robot-setup.md).
 - `?robot=sample` opens the small built-in sample instead.
+- **Paths** (under the field) draws an auto and writes its Pedro Pathing code; **Run on the bench** drives it.
+- **Clip** records the field with the score on it; turn on **AI robots** in **Match** for a full match, the results card and your personal best. **Map**, **Chase** and **Robot cam** help when the field is hard to see.
+- No controller? The keyboard is one: pick **WASD** or move any control to any key under the controller button at the top.
 - **Online** in the top bar plays one match with other teams, each on their own computer. Use
   **Quick match**, or host and send the invite link ([docs/online.md](docs/online.md)).
 
