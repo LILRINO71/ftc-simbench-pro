@@ -84,3 +84,42 @@ test('results: one personal best per robot, OpMode, period and opponents; beaten
   assert.equal(beat.isNew, true); assert.equal(beat.prev.score, 40); assert.equal(beat.best.score, 52);
   assert.equal(X.bestUpdate('{not json', 5).isNew, true, 'a broken entry is no best');
 });
+
+const V = new Function(fs.readFileSync(path.join(ROOT, 'src', 'view3d.js'), 'utf8').match(/function followCamPose[\s\S]*?\n}\n/)[0] + '\nreturn { followCamPose };')();
+const M = load('minimap.js', ['mapPoint', 'mapHeading', 'minimapItems']);
+
+test('cameras: Chase sits behind and above the robot, Robot cam on its front edge, both looking where it faces', () => {
+  for (const h of [0, Math.PI / 2, 2.5]) {
+    const ch = { x: 0.4, y: -0.3, h }, f = [Math.cos(h), -Math.sin(h)];        // forward, in the scene's (x, -y)
+    const C = V.followCamPose('chase', ch, { hx: 0.23, size: 0.45, top: 0.3 });
+    const along = (p) => (p[0] - ch.x) * f[0] + (p[2] + ch.y) * f[1];
+    assert.ok(along(C.pos) < -1 && C.pos[1] > 0.7, 'behind and above: ' + C.pos);
+    assert.ok(along(C.look) > 0, 'looking ahead of it');
+    const P = V.followCamPose('pov', ch, { hx: 0.23, size: 0.45, top: 0.3 });
+    assert.ok(Math.abs(along(P.pos) - 0.26) < 1e-9 && Math.abs(P.pos[1] - 0.35) < 1e-9, 'on the front edge at the frame: ' + P.pos);
+    assert.ok(along(P.look) > 3 && P.look[1] < P.pos[1], 'ahead and a little down');
+  }
+});
+
+test('minimap: your alliance wall at the bottom, up the field is up, headings turn with it', () => {
+  // red drives from -x: the red wall at the bottom, +x up, -y to the right
+  assert.deepEqual(M.mapPoint(0, 0, 'red', 72, 144, 144), [72, 72]);
+  assert.deepEqual(M.mapPoint(-72, 0, 'red', 72, 144, 144), [72, 144]);
+  assert.deepEqual(M.mapPoint(0, -72, 'red', 72, 144, 144), [144, 72]);
+  // blue drives from +x: the blue wall at the bottom
+  assert.deepEqual(M.mapPoint(72, 0, 'blue', 72, 144, 144), [72, 144]);
+  assert.deepEqual(M.mapPoint(0, 72, 'blue', 72, 144, 144), [144, 72]);
+  // a robot facing away from its own drivers points up the map (-pi/2: screen up), for either alliance
+  assert.ok(Math.abs(M.mapHeading(0, 'red') + Math.PI / 2) < 1e-12);
+  assert.ok(Math.abs(M.mapHeading(Math.PI, 'blue') + Math.PI / 2) < 1e-12);
+});
+
+test('minimap: zones, HIVEs, FLOWERs, balls and robots, all in field inches; yours marked', () => {
+  const items = M.minimapItems({ zones: { red: { x0: -70, x1: -60, y0: 24, y1: 46 } }, hives: { red: -12.75, blue: 12.75 }, flowers: [{ x: -23.5, y: 68.2 }],
+    balls: [{ x: 0.0254, y: 0, kind: 'pollen' }, { x: NaN, y: 0 }], robots: [{ x: 0.0254 * 10, y: 0, h: 1, hx: 0.2, hy: 0.2, al: 'blue', me: true }] });
+  const by = (t) => items.filter((i) => i.t === t);
+  assert.equal(by('zone').length, 1); assert.equal(by('hive').length, 2); assert.equal(by('flower').length, 1);
+  assert.deepEqual(by('ball').map((b) => Math.round(b.x)), [1], 'a ball with no place is left out');
+  const r = by('robot')[0];
+  assert.ok(Math.abs(r.x - 10) < 1e-9 && r.me && r.al === 'blue' && Math.abs(r.hx - 0.2 / 0.0254) < 1e-9);
+});

@@ -6,7 +6,7 @@
       <div class="vp-top">
         <div class="vp-title" id="vpTitle">—</div>
         <div class="seg seg-glass" id="viewSeg" role="group" aria-label="Camera">
-          <button data-v="iso" class="on">Robot</button><button data-v="side">Side</button><button data-v="top">Top</button><button data-v="field">Driver</button><button data-v="cad" title="Inspect the CAD the way Onshape shows it">CAD</button>
+          <button data-v="iso" class="on">Robot</button><button data-v="side">Side</button><button data-v="top">Top</button><button data-v="field">Driver</button><button data-v="chase" title="Behind the robot, turning as it turns">Chase</button><button data-v="pov" title="From the robot's front, like a camera on it">Robot cam</button><button data-v="cad" title="Inspect the CAD the way Onshape shows it">CAD</button>
         </div>
         <div class="vp-fill"></div>
       </div>
@@ -102,6 +102,7 @@
         <div class="cad-hint">Right-drag rotate · middle-drag pan · scroll zoom · click a part</div>
       </div>
 
+      <canvas class="minimap" id="minimap" hidden aria-label="Minimap: the field from above"></canvas>
       <div class="vp-bottom">
         <div class="pip panel-glass" id="pip" hidden>
           <button class="pip-head" id="pipHead" type="button" aria-expanded="true"><span>Arm torque</span><span id="pipDeg">—</span></button>
@@ -115,6 +116,7 @@
         <div class="vp-readout">
           <span id="vpPose">—</span>
           <button class="btn-ghost rec-btn" id="recBtn" type="button" hidden><i aria-hidden="true"></i><span>Clip</span></button>
+          <button class="btn-ghost map-btn" id="mapBtn" type="button" aria-pressed="false" title="The whole field from above, as your drivers face it">Map</button>
           <button class="btn-ghost snd-btn" id="soundBtn" type="button" aria-pressed="true" aria-label="Match sounds"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 6h3l4-3v10l-4-3H2z"/><path class="w" d="M11 5.5a3.5 3.5 0 0 1 0 5M12.8 3.8a6 6 0 0 1 0 8.4" fill="none"/></svg></button>
           <button class="btn-ghost" id="resetPose" type="button" title="Back to the start position on your alliance wall">Reset pose</button>
         </div>

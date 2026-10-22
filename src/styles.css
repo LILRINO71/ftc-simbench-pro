@@ -972,3 +972,10 @@ button.rmbtn{color:var(--label-3);} button.rmbtn:hover{color:var(--fail);}
 .rs-table td+td{text-align:right; font-family:var(--mono); font-size:12px;}
 .rs-table tr.tot td{font-weight:700; font-size:14px;}
 .rs-best{margin:10px 0 0; padding:8px 10px; border-radius:10px; background:var(--accent-soft); color:var(--accent-tx);}
+
+/* the minimap (src/minimap.js) */
+.viewport canvas.minimap{position:absolute; z-index:5; right:calc(var(--right) + 2*var(--gap)); bottom:calc(var(--dock) + 3*var(--gap) + 34px); width:168px; height:168px;
+  border-radius:12px; box-shadow:0 4px 18px rgba(0,0,0,.25); pointer-events:none; cursor:default;}
+.map-btn.on{background:var(--accent-soft); color:var(--accent-tx);}
+.viewport.cad .minimap{display:none!important;}
+@media (max-width:760px){ .viewport canvas.minimap{width:120px; height:120px;} }

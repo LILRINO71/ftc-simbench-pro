@@ -2566,7 +2566,7 @@ function frame(now){
     lp.title=LoopTime.slow()?"Each 20 ms tick takes "+Math.round(LoopTime.ms)+" ms on this computer, so the robot runs slower than real time. Lighter graphics (fewer shadows) or closing other tabs helps.":"";
     $$(".bindrow").forEach(r=>r.classList.toggle("active",!!Sim.pad[activePad][r.dataset.btn]));
     MathTab.tick(); if(slowN++%5===0) Status.render(); NetUI.slow();
-    matchWatch(); Recorder.tick();
+    matchWatch(); Recorder.tick(); Minimap.tick();
   }); }
   requestAnimationFrame(frame);
 }
@@ -3048,7 +3048,7 @@ function boot(){
   $("#matchOn").addEventListener("change",e=>{ store.set("ftcbench.match",e.target.checked?"1":"0"); if(Online.inMatch()) return; if(Sim.phase!=="running") resetMatch(); else { Match.on=e.target.checked; if(!Match.on) resetMatch(); } });
   $("#matchSkill").addEventListener("change",e=>{ store.set("ftcbench.matchSkill",e.target.value); if(Online.inMatch()) return; if(Sim.phase!=="running") resetMatch(); else Match.skill=e.target.value; });
   $("#practice").addEventListener("change",e=>{ store.set("ftcbench.practice",e.target.checked?"1":"0"); updateClock(); });
-  NetUI.init(); SetupUI.init(); ImportFlow.init(); Recorder.init(); Sounds.init(); Results.init();
+  NetUI.init(); SetupUI.init(); ImportFlow.init(); Recorder.init(); Sounds.init(); Results.init(); Minimap.init();
 
   // code
   $("#addOpMode").addEventListener("click",()=>$("#codeFile").click());
@@ -3130,7 +3130,7 @@ function boot(){
       OPTS.startPose=Object.assign({},Sim.chassis);
     }
     const v=q.get("view");
-    if(v&&/^(iso|front|side|top|field|cad)$/.test(v)){ if(v==="cad") CadView.enter(); else View.setView(v); $$("#viewSeg button").forEach(x=>x.classList.toggle("on",x.dataset.v===v)); }
+    if(v&&/^(iso|front|side|top|field|chase|pov|cad)$/.test(v)){ if(v==="cad") CadView.enter(); else View.setView(v); $$("#viewSeg button").forEach(x=>x.classList.toggle("on",x.dataset.v===v)); }
     ["left","right"].forEach(side=>{ const t=TAB_RENAMED[q.get(side)]||q.get(side), nav=$(`.tabs[data-tabs="${side}"]`);
       if(t&&nav&&nav.querySelector(`button[data-tab="${t}"]`)) selectTab(nav,t); });
     if(q.get("start")==="1") dsStart();

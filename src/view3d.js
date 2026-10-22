@@ -1227,7 +1227,7 @@ const View={
       };
       setL(J.a,1); setL(J.b,-1);
     }
-    const marks=this.mode!=="field";
+    const marks=!/^(field|chase|pov)$/.test(this.mode);          // joint markers only in the robot views
     for(const m of this.markers||[]) m.visible=marks;
     if(Field.ok) this.updateField();
   },
@@ -1558,8 +1558,23 @@ const View={
     return g;
   },
 
+  /* Two cameras that ride with the robot (src/view3d.js followCamPose): "chase", above and
+     behind it, turning as it turns, the way a driving game shows a car; "pov", on its front
+     edge looking where it drives, like a webcam on the robot */
+  followCam(){
+    const ch=Sim.chassis||{x:0,y:0,h:0}, fp=Sim.footprint||{hx:0.23}, top=(this.lift0||0.2)+(Sim.base?Sim.base.H:0);
+    const P=followCamPose(this.mode,ch,{hx:fp.hx||0.23, size:this.size||0.45, top});
+    const pos=new THREE.Vector3(P.pos[0],P.pos[1],P.pos[2]), look=new THREE.Vector3(P.look[0],P.look[1],P.look[2]);
+    // the chase camera eases after the robot (a hard follow jitters with every bump); the robot's own camera doesn't
+    if(this.mode==="chase"&&this.followPos&&!this.followJump){ this.followPos.lerp(pos,0.12); this.followLook.lerp(look,0.2); }
+    else { this.followPos=pos; this.followLook=look; this.followJump=false; }
+    this.cam.position.copy(this.followPos); this.cam.lookAt(this.followLook);
+    this.look=this.followLook.clone();
+    if(this.sun){ const L=this.look; this.sun.position.set(L.x+this.sunOff.x,this.sunOff.y,L.z+this.sunOff.z); this.sun.target.position.set(L.x,0,L.z); this.sun.target.updateMatrixWorld(); }
+  },
   setView(v){
     this.mode=v; this.applyQuality();
+    if(v==="chase"||v==="pov"){ this.followJump=true; return; }
     if(v==="field"){
       // from behind the alliance's own wall, where the drivers stand
       this.theta=this.alliance==="blue"?0:Math.PI; this.phi=0.82; this.rad=(this.fieldSize||3.58)*1.5; return;
@@ -1573,6 +1588,7 @@ const View={
   render(){
     if(!this.cam) return;
     if(typeof CadView!=="undefined"&&CadView.on){ CadView.render(); return; }
+    if(this.mode==="chase"||this.mode==="pov"){ this.followCam(); this.draw(this.cam); return; }
     // robot views follow the chassis as it drives; the field view holds still
     const target=new THREE.Vector3(0,0,0);
     if(this.mode==="field") target.set(this.alliance==="blue"?0.25:-0.25,0.3,0);
@@ -1615,6 +1631,16 @@ function deviceOn(mechId){
    2.2 turns through the chassis: a joint stops at the sweep a servo on it
    would get, a slide at its maxExt. */
 function H_OF(D){ return D.field.half*IN; }
+/* Where a camera that rides with the robot sits and looks, in the scene's frame (x, up, -y):
+   ch the chassis pose (m, rad CCW from +x), o.hx its half length, o.size its size, o.top
+   the height of its frame. "chase": behind and above, looking a little ahead of it;
+   "pov": on its front edge at the frame's height, looking 3 m ahead and slightly down. */
+function followCamPose(mode,ch,o){
+  const c=Math.cos(ch.h||0), s=Math.sin(ch.h||0), at=(d,y)=>[ch.x+c*d, y, -(ch.y+s*d)];
+  if(mode==="pov"){ const edge=(o.hx||0.23)+0.03, y=Math.max(0.18,(o.top||0.2)+0.05); return {pos:at(edge,y), look:at(edge+3,Math.max(0.05,y-0.35))}; }
+  const sz=Math.max(0.3,o.size||0.45);
+  return {pos:at(-(1.1+sz*1.3),0.7+sz*0.9), look:at(0.7,0.15)};
+}
 function mechPose(m,s,size){
   const k=normJointKind(m.kind), dir=m.dir||1, travel=s.act-s.restPos;
   // an Onshape mate: right-handed about the mate's own axis, inside its limits,
