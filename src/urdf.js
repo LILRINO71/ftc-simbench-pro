@@ -182,7 +182,12 @@ async function urdfRobot(text,files,name,opts){
     for(const k in fileByPath) if(k.endsWith("/"+s)||s.endsWith("/"+k)) return fileByPath[k];
     return fileByBase[base(fn)]||null; };
   // a file is bytes, or a zip entry read when it is needed (src/meshfiles.js zipEntries lazy)
-  const bytesOf=async f=>f&&(typeof f.read==="function"?await f.read():f);
+  // a zip entry's bytes, inflating it once; prefetch() starts the next ones inflating while this
+  // one is read, so the import isn't left waiting on one file at a time
+  const inflating=new Map();
+  const bytesOf=async f=>{ if(!f) return f; if(typeof f.read!=="function") return f;
+    let p=inflating.get(f); if(!p){ p=f.read(); inflating.set(f,p); } const b=await p; inflating.delete(f); return b; };
+  const prefetch=fs=>{ for(const f of fs) if(f&&typeof f.read==="function"&&!inflating.has(f)) inflating.set(f,f.read()); };
   const sidecars={}; for(const k in files) if(/\.(bin|mtl)$/i.test(k)) sidecars[base(k)]=await bytesOf(files[k]);
   const shapes=[], shapeOf=new Map(), missing=new Set();
   let triBefore=0, triAfter=0, nShape=0;
@@ -197,6 +202,7 @@ async function urdfRobot(text,files,name,opts){
     let tri, color=mc;
     if(shape.tag==="mesh"){
       const f=findMesh(shape.attrs.filename); if(!f){ missing.add(base(shape.attrs.filename)); return null; }
+      const qi=meshQueue.indexOf(f,qAt); if(qi>=0){ qAt=qi; prefetch(meshQueue.slice(qi+1,qi+4)); }
       let M; try{ M=meshRead(shape.attrs.filename,await bytesOf(f),sidecars); }catch(e){ missing.add(base(shape.attrs.filename)+" ("+e.message+")"); return null; }
       tri=M.tri; if(!color&&M.color) color=M.color;
       if(sc[0]!==1||sc[1]!==1||sc[2]!==1){ tri=Float32Array.from(tri); for(let k=0;k<tri.length;k+=3){ tri[k]*=sc[0]; tri[k+1]*=sc[1]; tri[k+2]*=sc[2]; } }
@@ -205,7 +211,10 @@ async function urdfRobot(text,files,name,opts){
     // into the link's frame (the visual's origin), then thinned
     if(O.t.some(v=>v)||O.r.some((row,i)=>row.some((v,k)=>Math.abs(v-(i===k?1:0))>1e-9))){
       const out=new Float32Array(tri.length);
-      for(let k=0;k<tri.length;k+=3){ const q=urdfPt(O,[tri[k],tri[k+1],tri[k+2]]); out[k]=q[0]; out[k+1]=q[1]; out[k+2]=q[2]; }
+      // inline: urdfPt's arrays for every vertex were a tenth of the import
+      const r=O.r, t=O.t;
+      for(let k=0;k<tri.length;k+=3){ const x=tri[k], y=tri[k+1], z=tri[k+2];
+        out[k]=r[0][0]*x+r[0][1]*y+r[0][2]*z+t[0]; out[k+1]=r[1][0]*x+r[1][1]*y+r[1][2]*z+t[1]; out[k+2]=r[2][0]*x+r[2][1]*y+r[2][2]*z+t[2]; }
       tri=out;
     }
     const R=meshReduce(tri,opts.reduce||{}); triBefore+=R.before; triAfter+=R.after;
@@ -227,6 +236,10 @@ async function urdfRobot(text,files,name,opts){
   const nice=s=>String(s||"").replace(/\.(stl|glb|gltf|obj)$/i,"").replace(/^_+|_+$/g,"").replace(/_/g," ").replace(/\s+/g," ").trim();
   const partNo=s=>{ const pn=/(\d{4})[_\- ](\d{4})[_\- ](\d{3,4})(?![\d])/.exec(String(s||"")); return pn?pn[1]+"-"+pn[2]+"-"+pn[3].padStart(4,"0"):null; };
   const toSrgb=v=>v<=0.0031308?12.92*v:1.055*Math.pow(v,1/2.4)-0.055;
+  // the mesh files in the order they'll be read, for prefetch()
+  const meshQueue=[], qSeen=new Set(); let qAt=0;
+  for(const l of realLinks) for(const v of urdfKids(l,"visual")){ const g=urdfKid(v,"geometry"), sh=g&&g.kids[0];
+    if(sh&&sh.tag==="mesh"){ const f=findMesh(sh.attrs.filename); if(f&&!qSeen.has(f)){ qSeen.add(f); meshQueue.push(f); } } }
   for(const l of realLinks){
     li++;
     const nm=l.attrs.name, Wl=W.get(nm), isRoot=nm===root.attrs.name;

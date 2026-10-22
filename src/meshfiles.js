@@ -105,6 +105,9 @@ function gltfRead(bytes,files){
     const v=views[a.bufferView], buf=buffers[v.buffer]; if(!buf) return null;
     const [sz,get]=CT[a.componentType]||[], nc=NC[a.type]||1; if(!get) return null;
     const stride=v.byteStride||sz*nc, base=(v.byteOffset||0)+(a.byteOffset||0);
+    // tightly packed and aligned (the usual case): the numbers as they lie, no copy
+    const at=buf.byteOffset+base, T=a.componentType===5126?Float32Array:a.componentType===5125?Uint32Array:a.componentType===5123?Uint16Array:null;
+    if(T&&!a.normalized&&stride===sz*nc&&at%sz===0&&base+a.count*stride<=buf.byteLength) return new T(buf.buffer,at,a.count*nc);
     const bd=new DataView(buf.buffer,buf.byteOffset,buf.byteLength);
     const out=new Float64Array(a.count*nc);
     const norm=a.normalized?(a.componentType===5120?127:a.componentType===5121?255:a.componentType===5122?32767:65535):0;
@@ -135,31 +138,40 @@ function gltfRead(bytes,files){
   const walk=(i,P,depth)=>{ if(depth>64||!nodes[i]) return; const M=mul(P,trs(nodes[i])); mats[i]=M; for(const c of nodes[i].children||[]) walk(c,M,depth+1); };
   for(const r of roots) walk(r,I,0);
   // triangles, placed; one colour index per triangle
-  const tris=[], tc=[], palette=[], palKey=new Map();
+  const palette=[], palKey=new Map();
   const colIdx=c=>{ const k=c?c.map(v=>Math.round(v*255)).join(","):""; if(palKey.has(k)) return palKey.get(k); palette.push(c); palKey.set(k,palette.length-1); return palette.length-1; };
-  const area=new Map();
+  // every primitive's positions and indices read once, then the triangles written straight into
+  // typed arrays (pushing them into a plain Array and copying it out was a third of the import)
+  const prims=[]; let total=0;
   nodes.forEach((n,ni)=>{
     if(n.mesh==null||!mats[ni]) return;
-    const M=mats[ni], mesh=json.meshes[n.mesh]; if(!mesh) return;
+    const mesh=json.meshes[n.mesh]; if(!mesh) return;
     for(const pr of mesh.primitives||[]){
       if(pr.mode!=null&&pr.mode!==4) continue;                  // triangles only
       const pos=read(pr.attributes&&pr.attributes.POSITION); if(!pos) continue;
-      const idx=pr.indices!=null?read(pr.indices):null, nv=pos.length/3;
-      const ci=colIdx(matColor(pr.material));
-      const put=k=>{ const x=pos[3*k],y=pos[3*k+1],z=pos[3*k+2];
-        tris.push(M[0]*x+M[4]*y+M[8]*z+M[12], M[1]*x+M[5]*y+M[9]*z+M[13], M[2]*x+M[6]*y+M[10]*z+M[14]); };
-      const count=idx?idx.length:nv;
-      for(let t=0;t+2<count;t+=3){
-        const a=idx?idx[t]:t, b=idx?idx[t+1]:t+1, c=idx?idx[t+2]:t+2;
-        if(a>=nv||b>=nv||c>=nv) continue;
-        const at=tris.length; put(a); put(b); put(c); tc.push(ci);
-        const ux=tris[at+3]-tris[at],uy=tris[at+4]-tris[at+1],uz=tris[at+5]-tris[at+2],wx=tris[at+6]-tris[at],wy=tris[at+7]-tris[at+1],wz=tris[at+8]-tris[at+2];
-        area.set(ci,(area.get(ci)||0)+Math.hypot(uy*wz-uz*wy,uz*wx-ux*wz,ux*wy-uy*wx));
-      }
+      const idx=pr.indices!=null?read(pr.indices):null, count=idx?idx.length:pos.length/3;
+      prims.push({M:mats[ni], pos, idx, ci:colIdx(matColor(pr.material))}); total+=Math.floor(count/3);
     }
   });
-  let best=null, bestA=-1; for(const [ci,a] of area) if(palette[ci]&&a>bestA){ bestA=a; best=palette[ci]; }
-  return {tri:Float32Array.from(tris), color:best, colors:Uint16Array.from(tc), palette};
+  const tris=new Float32Array(total*9), tc=new Uint16Array(total), area=new Float64Array(Math.max(1,palette.length));
+  const multi=palette.length>1;                            // one colour: no areas to weigh
+  if(!multi) area[0]=1;
+  let nt=0;
+  for(const P of prims){
+    const M=P.M, pos=P.pos, idx=P.idx, nv=pos.length/3, count=idx?idx.length:nv, ci=P.ci;
+    for(let t=0;t+2<count;t+=3){
+      const a=idx?idx[t]:t, b=idx?idx[t+1]:t+1, c=idx?idx[t+2]:t+2;
+      if(a>=nv||b>=nv||c>=nv) continue;
+      const o=nt*9;
+      for(let j=0;j<3;j++){ const k=3*(j===0?a:j===1?b:c), x=pos[k], y=pos[k+1], z=pos[k+2], q=o+3*j;
+        tris[q]=M[0]*x+M[4]*y+M[8]*z+M[12]; tris[q+1]=M[1]*x+M[5]*y+M[9]*z+M[13]; tris[q+2]=M[2]*x+M[6]*y+M[10]*z+M[14]; }
+      const ux=tris[o+3]-tris[o],uy=tris[o+4]-tris[o+1],uz=tris[o+5]-tris[o+2],wx=tris[o+6]-tris[o],wy=tris[o+7]-tris[o+1],wz=tris[o+8]-tris[o+2];
+      if(multi) area[ci]+=Math.hypot(uy*wz-uz*wy,uz*wx-ux*wz,ux*wy-uy*wx);
+      tc[nt++]=ci;
+    }
+  }
+  let best=null, bestA=-1; for(let ci=0;ci<palette.length;ci++) if(palette[ci]&&area[ci]>bestA){ bestA=area[ci]; best=palette[ci]; }
+  return {tri:nt*9===tris.length?tris:tris.slice(0,nt*9), color:best, colors:nt===tc.length?tc:tc.slice(0,nt), palette};
 }
 
 /* ---- OBJ (with its MTL's Kd for colour) ---- */
@@ -211,19 +223,31 @@ function stlTriangles(buf){
    hole becomes a 12-sided one. {pos: Float32Array, idx: Uint32Array}. */
 function meshDecimate(tri,cell){
   const n=tri.length/3, inv=1/cell;
-  const key=new Map(), pos=[], idx=new Uint32Array(n);
-  // the grid key as one number: 21 bits per axis about the origin
+  // cells counted from the mesh's own corner, as exact small integers: a cell key packed
+  // into one number ran past 2^53 (the z term alone was ~2^62), its x bits rounded away,
+  // and every vertex in a 1024-cell-wide band merged: a part could thin to nothing
+  let mx=Infinity, my=Infinity, mz=Infinity;
+  for(let i=0;i<tri.length;i+=3){ const x=tri[i], y=tri[i+1], z=tri[i+2]; if(x<mx) mx=x; if(y<my) my=y; if(z<mz) mz=z; }
+  // an open-addressed table of vertex ids (a Map of numbers was half the import's time)
+  let cap=16; while(cap<n*2) cap*=2;
+  const mask=cap-1, table=new Int32Array(cap).fill(-1);
+  const cx=new Int32Array(n), cy=new Int32Array(n), cz=new Int32Array(n), pos=new Float32Array(n*3), idx=new Uint32Array(n);
+  let nv=0;
   for(let i=0;i<n;i++){
     const x=tri[3*i], y=tri[3*i+1], z=tri[3*i+2];
-    const k=(Math.round(x*inv)+1048576)+(Math.round(y*inv)+1048576)*2097152+(Math.round(z*inv)+1048576)*4398046511104;
-    let v=key.get(k);
-    if(v===undefined){ v=pos.length/3; key.set(k,v); pos.push(x,y,z); }
-    idx[i]=v;
+    const ix=Math.round((x-mx)*inv)|0, iy=Math.round((y-my)*inv)|0, iz=Math.round((z-mz)*inv)|0;
+    let h=(Math.imul(ix,73856093)^Math.imul(iy,19349663)^Math.imul(iz,83492791))&mask;
+    for(;;){
+      const v=table[h];
+      if(v<0){ table[h]=nv; cx[nv]=ix; cy[nv]=iy; cz[nv]=iz; pos[3*nv]=x; pos[3*nv+1]=y; pos[3*nv+2]=z; idx[i]=nv++; break; }
+      if(cx[v]===ix&&cy[v]===iy&&cz[v]===iz){ idx[i]=v; break; }
+      h=(h+1)&mask;
+    }
   }
   // drop the triangles that collapsed to a line or a point
   let m=0; const out=new Uint32Array(n);
-  for(let t=0;t<n;t+=3){ const a=idx[t], b=idx[t+1], c=idx[t+2]; if(a===b||b===c||a===c) continue; out[m]=a; out[m+1]=b; out[m+2]=c; m+=3; }
-  return {pos:Float32Array.from(pos), idx:out.slice(0,m)};
+  for(let t=0;t+2<n;t+=3){ const a=idx[t], b=idx[t+1], c=idx[t+2]; if(a===b||b===c||a===c) continue; out[m]=a; out[m+1]=b; out[m+2]=c; m+=3; }
+  return {pos:pos.slice(0,3*nv), idx:out.slice(0,m)};
 }
 /* The grid for a part: fine enough that an M4 hole still reads, coarse enough
    that the whole robot stays a few million triangles. Starts from the part's
@@ -237,9 +261,29 @@ function meshReduce(tri,opts){
   // 2-3 M, which a GPU draws at full rate and which keeps holes round and fillets smooth
   const budget=opts.budget||Math.max(1500,Math.min(60000,Math.round(diag*150000)));
   let cell=Math.max(opts.minCell||0.0002,diag*0.0025), r=null;
+  // where the budget will land, from the surface area: a grid of cell c leaves about 2A/c^2
+  // triangles on a surface of area A, so the first pass starts near the right grid instead of
+  // the finest (the full-detail pass was most of the import)
+  if(tri.length/9>budget*0.6||opts.always){
+    let A=0;
+    for(let i=0;i<tri.length;i+=9){ const ux=tri[i+3]-tri[i],uy=tri[i+4]-tri[i+1],uz=tri[i+5]-tri[i+2],wx=tri[i+6]-tri[i],wy=tri[i+7]-tri[i+1],wz=tri[i+8]-tri[i+2];
+      A+=0.5*Math.hypot(uy*wz-uz*wy,uz*wx-ux*wz,ux*wy-uy*wx); }
+    cell=Math.max(cell,Math.sqrt(2*A/budget)*0.85);
+  }
   if(tri.length/9<=budget*0.6&&!opts.always){ // small already: just weld
     r=meshDecimate(tri,Math.max(0.00005,diag*0.0005));
-  } else for(let k=0;k<6;k++){ r=meshDecimate(tri,cell); if(r.idx.length/3<=budget) break; cell*=1.6; }
+  } else {
+    // a surface's triangles go as 1/cell^2, so after one pass the cell that meets the budget is
+    // known nearly exactly: two passes, where stepping by 1.6 took up to six of the whole mesh
+    r=meshDecimate(tri,cell);
+    // far under the budget (a thin part's area guess runs coarse): once finer, aiming at 80%
+    const floor=Math.max(opts.minCell||0.0002,diag*0.0025);
+    if(r.idx.length/3<budget*0.55&&cell>floor*1.01){
+      const c2=Math.max(floor,cell*Math.sqrt(Math.max(1,r.idx.length/3)/(budget*0.8))), r2=meshDecimate(tri,c2);
+      if(r2.idx.length/3<=budget){ r=r2; cell=c2; }
+    }
+    for(let k=0;k<4&&r.idx.length/3>budget;k++){ cell*=Math.max(1.15,Math.min(6,Math.sqrt(r.idx.length/3/budget)*1.1)); r=meshDecimate(tri,cell); }
+  }
   return {pos:r.pos, idx:r.idx, box:{min:mn,max:mx}, diag, before:tri.length/9, after:r.idx.length/3};
 }
 
