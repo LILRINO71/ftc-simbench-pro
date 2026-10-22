@@ -286,11 +286,12 @@ function updateClock(){
   const P=PERIOD[kind], practice=$("#practice").checked&&!Online.inMatch();
   const t=(Sim.phase==="running"||Sim.phase==="stopped")?Sim.t:0;
   const c=$("#dsClock");
-  if(practice){ c.textContent=clockText(t); $("#dsBar").style.width="0"; c.classList.remove("low"); return; }
+  if(practice){ c.textContent=clockText(t); $("#dsBar").style.width="0"; c.classList.remove("low"); Sounds.clock(t,0,false); return; }
   const rem=P-t;
   c.textContent=clockText(Math.ceil(rem-1e-6));
   $("#dsBar").style.width=Math.min(100,t/P*100).toFixed(1)+"%";
   c.classList.toggle("low",Sim.phase==="running"&&rem<=10);
+  Sounds.clock(t,P,Sim.phase==="running");              // the start, the last ten seconds, the buzzer (src/sounds.js)
   if(Sim.phase==="running"&&rem<=0) dsStop();          // the match period ended
 }
 
@@ -310,7 +311,31 @@ function resetMatch(){
     seed:1+Math.floor(Math.random()*99999), skill:$("#matchSkill").value});
   renderMatchHud(true);
 }
-let HUD_T=0;
+let HUD_T=0, LAST_SCORE=null;
+/* What a clip shows on top of the field (src/recorder.js), refreshed with the page's slow loop */
+let REC_HUD={};
+/* The match as it goes, for the clip, the sounds and the results: a run that starts may
+   start a clip; one that reaches its final buzzer shows the results (src/results.js) */
+const WATCH={phase:null};
+function matchWatch(){
+  const ph=Sim.phase, kind=CODE&&CODE.kind==="Autonomous"?"Autonomous":"TeleOp", P=PERIOD[kind];
+  const practice=$("#practice").checked&&!Online.inMatch(), live=Match.live();
+  const t=(ph==="running"||ph==="stopped")?Sim.t:0;
+  const S=live?LAST_SCORE:null, final=(!practice&&ph==="stopped"&&t>=P-0.05)||Online.state==="done";
+  REC_HUD={match:!!S, red:S?S.red.total:0, blue:S?S.blue.total:0, period:kind, clock:$("#dsClock").textContent, final,
+    robot:CAD&&CAD.name, opmode:CODE&&CODE.opmode, site:/^(localhost|127[.]|\[)/.test(location.hostname)?null:location.hostname};
+  if(S&&ph==="running") Sounds.scored((S[Shots.alliance]||S.red).total); else Sounds.lastScore=null;
+  const was=WATCH.phase; WATCH.phase=ph;
+  if(ph==="running"&&was!=="running"&&!Recorder.on&&Recorder.wantsAuto()&&!Recorder.start(true)) $("#cadStatus").textContent=Recorder.why||"";
+  if(was==="running"&&ph!=="running"){
+    if(!final) Sounds.play("stop");
+    const meta={robot:CAD&&CAD.name, opmode:CODE&&CODE.opmode, period:kind, skill:Online.inMatch()?"online":live?$("#matchSkill").value:"solo"};
+    const al=Online.inMatch()&&Online.myAl()?Online.myAl():Shots.alliance;
+    const auto=Recorder.on&&Recorder.auto;
+    const after=()=>{ if(final&&S) Results.show(S,al,meta); else if(Recorder.url&&auto) Recorder.show(); };
+    if(auto) setTimeout(()=>Recorder.stop().then(after),1500); else after();
+  }
+}
 function renderMatchHud(force){
   const hud=$("#matchHud"); if(!hud) return;
   const on=Match.live();
@@ -318,6 +343,7 @@ function renderMatchHud(force){
   const now=performance.now(); if(!force&&now-HUD_T<200) return; HUD_T=now;
   // online, the host keeps the score; a guest shows the host's
   const S=Online.guest()&&Online.score?Online.score:Match.score(Sim);
+  LAST_SCORE=S;
   $("#mhRed").textContent=S.red.total; $("#mhBlue").textContent=S.blue.total;
   const P=Match.period==="Autonomous"?"AUTO":"TELEOP";
   const cd=Online.playing()?Online.countdown():0;
@@ -2518,7 +2544,7 @@ function frame(now){
     acc+=dt;
     stepFixed(8);
     NetUI.tick();
-    View.update(); View.render(); Pads.mirror();
+    View.update(); View.render(); Recorder.frame(REC_HUD); Pads.mirror();
   });
   slowAcc+=dt;
   if(slowAcc>=0.05){ slowAcc=0; guarded(()=>{
@@ -2540,6 +2566,7 @@ function frame(now){
     lp.title=LoopTime.slow()?"Each 20 ms tick takes "+Math.round(LoopTime.ms)+" ms on this computer, so the robot runs slower than real time. Lighter graphics (fewer shadows) or closing other tabs helps.":"";
     $$(".bindrow").forEach(r=>r.classList.toggle("active",!!Sim.pad[activePad][r.dataset.btn]));
     MathTab.tick(); if(slowN++%5===0) Status.render(); NetUI.slow();
+    matchWatch(); Recorder.tick();
   }); }
   requestAnimationFrame(frame);
 }
@@ -3021,7 +3048,7 @@ function boot(){
   $("#matchOn").addEventListener("change",e=>{ store.set("ftcbench.match",e.target.checked?"1":"0"); if(Online.inMatch()) return; if(Sim.phase!=="running") resetMatch(); else { Match.on=e.target.checked; if(!Match.on) resetMatch(); } });
   $("#matchSkill").addEventListener("change",e=>{ store.set("ftcbench.matchSkill",e.target.value); if(Online.inMatch()) return; if(Sim.phase!=="running") resetMatch(); else Match.skill=e.target.value; });
   $("#practice").addEventListener("change",e=>{ store.set("ftcbench.practice",e.target.checked?"1":"0"); updateClock(); });
-  NetUI.init(); SetupUI.init(); ImportFlow.init();
+  NetUI.init(); SetupUI.init(); ImportFlow.init(); Recorder.init(); Sounds.init(); Results.init();
 
   // code
   $("#addOpMode").addEventListener("click",()=>$("#codeFile").click());

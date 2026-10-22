@@ -15,6 +15,22 @@
       <!-- the import card: everything about getting a robot in, one place -->
       <section class="import-card" id="importCard" hidden aria-live="polite"></section>
 
+      <!-- a match clip played back (src/recorder.js) -->
+      <section class="replay-panel panel-glass" id="replayPanel" hidden aria-label="Replay">
+        <div class="rp-head"><b>Replay</b><span class="rp-info" id="replayInfo"></span><span class="spacer"></span><button class="btn-sm" id="replayClose" type="button">Close</button></div>
+        <video id="replayVideo" controls playsinline></video>
+        <div class="rp-acts"><button class="btn-sm primary" id="replaySave" type="button">Save clip</button><button class="btn-sm" id="replayShare" type="button" hidden>Share</button><span class="rp-fine">Post it to your team's Discord.</span></div>
+      </section>
+
+      <!-- the final buzzer (src/results.js) -->
+      <section class="results-panel panel-glass" id="resultsPanel" hidden aria-label="Match results" aria-live="polite">
+        <div class="rs-head"><h2 id="resultsHead">—</h2><span class="spacer"></span><button class="ic-x" id="resultsClose" type="button" aria-label="Close">×</button></div>
+        <p class="rs-sub" id="resultsSub"></p>
+        <table class="rs-table" id="resultsTable"></table>
+        <p class="rs-best" id="resultsBest"></p>
+        <div class="rs-acts"><button class="btn-sm primary" id="resultsAgain" type="button">Play again</button><button class="btn-sm" id="resultsReplay" type="button" hidden>Watch the replay</button></div>
+      </section>
+
       <aside class="online-panel panel-glass" id="onlinePanel" hidden aria-label="Online match">
         <div class="onp-head"><b id="onpTitle">Play online</b><span class="onp-sub" id="onpSub"></span><span class="spacer"></span>
           <button class="btn-sm" id="onpClose" type="button" title="Hide this panel; the match goes on">Hide</button></div>
@@ -98,6 +114,8 @@
         </div>
         <div class="vp-readout">
           <span id="vpPose">—</span>
+          <button class="btn-ghost rec-btn" id="recBtn" type="button" hidden><i aria-hidden="true"></i><span>Clip</span></button>
+          <button class="btn-ghost snd-btn" id="soundBtn" type="button" aria-pressed="true" aria-label="Match sounds"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 6h3l4-3v10l-4-3H2z"/><path class="w" d="M11 5.5a3.5 3.5 0 0 1 0 5M12.8 3.8a6 6 0 0 1 0 8.4" fill="none"/></svg></button>
           <button class="btn-ghost" id="resetPose" type="button" title="Back to the start position on your alliance wall">Reset pose</button>
         </div>
       </div>
@@ -176,6 +194,7 @@
           <label class="mm-row skill"><span><b>How good the AI teams are</b></span>
             <select class="match-skill" id="matchSkill" aria-label="AI skill"><option value="rookie">Rookie</option><option value="typical" selected>Typical</option><option value="elite">Elite</option></select></label>
           <label class="mm-row"><input type="checkbox" id="practice"><span><b>No time limit</b><small>Practice: the clock counts up and never stops the OpMode</small></span></label>
+          <label class="mm-row"><input type="checkbox" id="recAuto"><span><b>Clip every run</b><small>Record each run from START to the end, with the score on it, to watch back or save</small></span></label>
         </div>
       </div>
 
