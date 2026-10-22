@@ -31,7 +31,7 @@ const EXPORTS = [
   'onshapeRead', 'onshapeGeomCache', 'pedroToField', 'fieldToPedro', 'pedroNew', 'pedroCurves', 'bezierAt', 'pedroPolyline', 'pedroLength', 'pedroCheck', 'pedroHits', 'pedroClean', 'pedroToHash', 'pedroFromHash', 'pedroClass', 'pedroJava', 'PEDRO_CONSTANTS_JAVA', 'PEDRO_FORMAT', 'onshapeRef', 'onshapeFromLink', 'onshapeSignInState', 'checkOnshapePayload', 'onshapeLinks', 'ONSHAPE_FORMAT', 'parseOnshapeAssembly', 'applyMateLimits', 'matchOnshapeParts', 'applyOnshapeMates', 'mateQty',
   'cadFromOnshape', 'urdfStl', 'urdfXml', 'urdfRobot', 'urdfRobotFromZip', 'urdfExact', 'urdfApplyHints', 'meshReduce', 'meshDecimate', 'stlTriangles', 'zipEntries', 'zipRead', 'gltfRead', 'objRead', 'meshRead', 'bindDevices', 'classifyJoints', 'BIND_RULES', 'onshapeGeomKey', 'osColor', 'osCompactTess', 'osCompactMass',
   'rrDetect', 'rrParseHelpers', 'rrAttach', 'rrBuildPlan', 'rrSample', 'RRRuntime',
-  'autoRig', 'ARActuators', 'ARSlides', 'ARCarry',
+  'autoRig', 'actuatorsOf', 'ARActuators', 'ARSlides', 'ARCarry',
   'JOINT_SHEET_FORMAT', 'jointTag', 'jointNameKey', 'onshapeMateName', 'sheetFromTags', 'applyJointSheet', 'clearJointSheet', 'mergeJointSheets', 'sheetBindings', 'checkJointSheet', 'tagFor', 'isExact',
   'JOINT_SPEC_FORMAT', 'applyJointSpec', 'jointSpecSelect', 'followQ', 'linkPin', 'sliderCrank', 'rodAngle', 'fourBarPin', 'jointValues', 'mateJointQ', 'specFromCad', 'suggestJoint',
   'robotFrame', 'frameUp', 'applyFrame', 'canonicalizeCAD', 'frontToRobot', 'robotToWorld', 'frontFromWheels', 'frontAcrossWheels', 'frameMatrix', 'FRAME_UP_ROWS', 'buildRig', 'ASSUMED_KG', 'findingHTML',

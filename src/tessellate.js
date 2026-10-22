@@ -262,6 +262,50 @@ function creaseNormals(P,I,creaseDeg){
   }
   return {pos, nor};
 }
+/* Where each mechanism group's parts are drawn. A joint held as drawn (internal:
+   a motor shaft, a label, a bearing; or fixed) never moves, so its parts can go
+   in the group above it, and an export robot with 359 joints draws in a few
+   groups instead of one per joint. moving: ids that do move after all (a
+   device drives it, or it was seen to move). Returns id -> group id. */
+function tessFold(mechs,moving){
+  const byId=new Map(), led=new Set();
+  for(const m of mechs||[]){ byId.set(m.id,m); if(m.couple&&m.couple.to) led.add(m.couple.to); }
+  const held=m=>!!m&&(m.internal||m.kind==="fixed")&&!m.couple&&!m.passive&&!led.has(m.id)&&!m.q0&&!(moving&&moving.has(m.id));
+  const memo=new Map();
+  return id=>{
+    if(memo.has(id)) return memo.get(id);
+    let g=id;
+    for(let n=0;n<512&&g!=="chassis"&&held(byId.get(g));n++) g=byId.get(g).parent||"chassis";
+    memo.set(id,g); return g;
+  };
+}
+/* Copies of shapes merged into one mesh, so parts that appear once or twice
+   draw together instead of one draw call each. Each item is a shape's
+   triangles start..end (unindexed pos and nor, or indexed by idx) placed by m,
+   a column-major 4x4. Returns unindexed {pos, nor, ranges}: ranges are
+   [{start, j}] in triangles, sorted, for picking. */
+function tessBatch(items){
+  let n=0; for(const it of items) n+=Math.max(0,it.end-it.start);
+  const pos=new Float32Array(n*9), nor=new Float32Array(n*9), ranges=[];
+  let t=0;
+  for(const it of items){
+    const E=it.m, P=it.pos, N=it.nor, I=it.idx||null;
+    // a mirrored copy winds its triangles the other way, so its faces still face out
+    const det=E[0]*(E[5]*E[10]-E[9]*E[6])-E[4]*(E[1]*E[10]-E[9]*E[2])+E[8]*(E[1]*E[6]-E[5]*E[2]), order=det<0?[0,2,1]:[0,1,2];
+    if(!ranges.length||ranges[ranges.length-1].j!==it.j) ranges.push({start:t, j:it.j});
+    for(let f=it.start;f<it.end;f++,t++){
+      for(let k=0;k<3;k++){
+        const v=I?I[3*f+order[k]]:3*f+order[k], o=9*t+3*k;
+        const x=P[3*v], y=P[3*v+1], z=P[3*v+2];
+        pos[o]=E[0]*x+E[4]*y+E[8]*z+E[12]; pos[o+1]=E[1]*x+E[5]*y+E[9]*z+E[13]; pos[o+2]=E[2]*x+E[6]*y+E[10]*z+E[14];
+        const a=N[3*v], b=N[3*v+1], c=N[3*v+2];
+        const nx=E[0]*a+E[4]*b+E[8]*c, ny=E[1]*a+E[5]*b+E[9]*c, nz=E[2]*a+E[6]*b+E[10]*c, L=Math.hypot(nx,ny,nz)||1;
+        nor[o]=nx/L; nor[o+1]=ny/L; nor[o+2]=nz/L;
+      }
+    }
+  }
+  return {pos, nor, ranges};
+}
 /* The model's edges per mechanism group, in the canonical frame. */
 function tessEdges(cad,res,asg,hidden){
   const out={};

@@ -9,6 +9,8 @@ const FIELD_COL={tile:0x303336, seam:0x474b50, ground:0x0e0c09, alu:0xa9b0b8, ra
   arm:0x4a4f55, logo:0x1b1d20, honey:0xf2b230};
 // the most triangles one material group of the robot gets edge lines for (see mkSolids)
 const VIEW_EDGE_TRIS=200000;
+// a shape with fewer copies than this is merged into its group's mesh rather than instanced (see applyInstanced)
+const INST_MIN=3;
 const ROBOT_MAT={
   metal:{color:0xa9b1ba, metalness:0.55, roughness:0.42},
   motor:{color:0x2b2d31, metalness:0.45, roughness:0.45},
@@ -387,14 +389,19 @@ const View={
   /* Per-shape surfaces as instances: one InstancedMesh per shape per
      mechanism group and finish, so a 773-part robot is ~150 draw calls over
      its 99 shapes' triangles, not 3.4 million copied ones. Each copy keeps its
-     own index (userData.js) for picking and hiding. */
+     own index (userData.js) for picking and hiding. A shape with one or two
+     copies (an export robot is mostly those) is merged instead: one mesh per
+     group and colour, its triangles mapped back to parts (userData.ranges). */
   applyInstanced(cad,res,asg,hidden){
     // the drive wheels turn: every chassis copy whose centre sits inside a drive
     // wheel's cylinder (hub, rollers, side plates, the wheel's own screws) goes
     // in that wheel's spin group, which update() turns about the axle
     const dw=(typeof driveFromCAD==="function"?driveFromCAD(cad,{front:(Sim.opts&&Sim.opts.front)||"+x"}).wheels:[]).filter(w=>w.c&&w.axis);
-    const wheelOf=j=>{
-      if(asg.group[j]!=="chassis"||!dw.length) return -1;
+    // a joint held as drawn is drawn with the group above it (tessFold); one seen moving is split back out
+    const fold=tessFold(cad.mechs,this.movingMechs(cad));
+    this.folded=new Set((cad.mechs||[]).filter(m=>fold(m.id)!==m.id).map(m=>m.id));
+    const wheelOf=(j,g)=>{
+      if(g!=="chassis"||!dw.length) return -1;
       const b=asg.boxes&&asg.boxes[j]; if(!b||!Number.isFinite(b.min[0])) return -1;
       const p=[(b.min[0]+b.max[0])/2,(b.min[1]+b.max[1])/2,(b.min[2]+b.max[2])/2], ext=partExtent(b);
       for(let k=0;k<dw.length;k++){
@@ -414,32 +421,53 @@ const View={
         this.spinWheels.push({G, av, a:w.axis.slice(), c:w.c.slice()}); }
       return {parent:spinG[k].G, off:spinG[k].off};
     };
-    const bins=new Map();
+    const bins=new Map(), got=new Set();
     res.meshes.forEach((m,j)=>{
       if(hidden&&hidden.has(j)) return;
       if(!m.index||!m.index.array||!m.index.array.length) return;
-      const g=asg.group[j], si=asg.solid[j], kind=(si>=0&&cad.solids[si]&&cad.solids[si].kind)||"metal";
-      const wk=wheelOf(j), k=m.attributes.position.array, key=g+"|"+kind+"|"+wk;
+      const g=fold(asg.group[j]), si=asg.solid[j], kind=(si>=0&&cad.solids[si]&&cad.solids[si].kind)||"metal";
+      got.add(asg.group[j]);
+      const wk=wheelOf(j,g), k=m.attributes.position.array, key=g+"|"+kind+"|"+wk;
       let b=bins.get(k); if(!b){ b=new Map(); bins.set(k,b); }
       let e=b.get(key); if(!e){ e={m, g, kind, wk, js:[]}; b.set(key,e); }
       e.js.push(j);
     });
-    const got=new Set(), edgeBins=new Map();
+    const edgeBins=new Map(), batches=new Map();
     this.instHolder=new Map();                       // copy -> where it lives, for highlights
     for(const b of bins.values()) for(const e of b.values()){
       const h=holder(e.g,e.wk), parent=h.parent; if(!parent) continue;
       for(const j of e.js) this.instHolder.set(j,h);
       const place=j=>{ this.instMatrix(cad,res.meshes[j],M); return h.off?M.premultiply(h.off):M; };
-      const S=this.instGeo(e.m), mats=S.runs.map(r=>this.finishMat(r.col||null,e.kind));
+      const S=this.instGeo(e.m);
+      if(S.eg){ let L=edgeBins.get(parent); if(!L){ L=[]; edgeBins.set(parent,L); }
+        for(const j of e.js) L.push({a:S.eg.attributes.position.array, m:place(j).clone()}); }
+      got.add(e.g);
+      // a shape with only a copy or two (most of an export's parts): its triangles join
+      // one mesh per group and finish, where an instance each was ~2,600 draw calls
+      if(e.js.length<INST_MIN){
+        let byMat=batches.get(parent); if(!byMat){ byMat=new Map(); batches.set(parent,byMat); }
+        const P=S.g.attributes.position.array, N=S.g.attributes.normal.array, I=S.g.index?S.g.index.array:null;
+        for(const j of e.js){ const mj=Float64Array.from(place(j).elements);
+          for(const r of S.runs){ const key=r.col+"|"+e.kind; let B=byMat.get(key); if(!B){ B={col:r.col, kind:e.kind, items:[]}; byMat.set(key,B); }
+            B.items.push({pos:P, nor:N, idx:I, m:mj, j, start:r.start, end:r.end}); } }
+        continue;
+      }
+      const mats=S.runs.map(r=>this.finishMat(r.col||null,e.kind));
       const inst=new THREE.InstancedMesh(S.g,mats.length===1?mats[0]:mats,e.js.length);
       e.js.forEach((j,i)=>inst.setMatrixAt(i,place(j)));
       inst.instanceMatrix.needsUpdate=true;
       // the geometry's own bounds are one copy's; the copies are all over the robot
       inst.frustumCulled=false; inst.castShadow=true; inst.receiveShadow=true;
       inst.userData.js=e.js;
-      parent.add(inst); this.exactG.push(inst); got.add(e.g);
-      if(S.eg){ let L=edgeBins.get(parent); if(!L){ L=[]; edgeBins.set(parent,L); }
-        for(const j of e.js) L.push({a:S.eg.attributes.position.array, m:place(j).clone()}); }
+      parent.add(inst); this.exactG.push(inst);
+    }
+    for(const [parent,byMat] of batches) for(const B of byMat.values()){
+      const R=tessBatch(B.items), geo=new THREE.BufferGeometry();
+      geo.setAttribute("position",new THREE.BufferAttribute(R.pos,3)); geo.setAttribute("normal",new THREE.BufferAttribute(R.nor,3));
+      geo.computeBoundingSphere();
+      const mesh=new THREE.Mesh(geo,this.finishMat(B.col||null,B.kind)); mesh.castShadow=true; mesh.receiveShadow=true;
+      mesh.userData.ranges=R.ranges;                 // which part each triangle is, for picking
+      parent.add(mesh); this.exactG.push(mesh);
     }
     // every copy's edges in one set of lines per group (one draw, where one per copy was ~800)
     for(const [parent,L] of edgeBins){
@@ -454,9 +482,17 @@ const View={
     }
     this.hullBase={}; for(const g in this.hullOf){ this.hullBase[g]=!got.has(g); this.hullOf[g].visible=this.hullBase[g]&&!this.useLite; }
   },
+  /* joints that move after all: a device drives it, the joint editor is trying it, or update() saw it move */
+  movingMechs(cad){
+    if(!this.moved||this.moved.cad!==cad) this.moved={cad, ids:new Set()};
+    const out=new Set(this.moved.ids);
+    for(const m of (cad&&cad.mechs)||[]) if(typeof deviceOn==="function"&&deviceOn(m.id)) out.add(m.id);
+    if(this.preview&&this.preview.id) out.add(this.preview.id);
+    return out;
+  },
   applyExact(){
     for(const o of this.exactG||[]){ if(o.parent) o.parent.remove(o); this.dispose(o); }
-    this.exactG=[];
+    this.exactG=[]; this.folded=null;
     const {cad,res}=this.exact, hidden=this.hiddenParts;
     const asg=this.exactAsg=tessAssign(cad,res,this.turretScale);
     if(res.perShape){
@@ -1209,13 +1245,18 @@ const View={
       const p=mechPose(m,s,this.size);
       return p.ang!=null?p.ang:(p.d!=null?p.d:null);
     });
+    let refold=false;
     for(const m of this.cad.mechs){
       if(!m._g) continue;
       let q=drawn.get(m.id); if(q==null) continue;
       if(m.couple&&!deviceOn(m.id)) q=mateClamp(m,q);
+      // a held joint drawn with the group above it has moved: draw it on its own from now on
+      if(this.folded&&this.folded.has(m.id)&&Math.abs(q)>1e-3){ this.folded.delete(m.id); this.movingMechs(this.cad); this.moved.ids.add(m.id); refold=true; }
       if(normJointKind(m.kind)==="linear") m._g.position.copy(this.v3(m.pivot).add(this.vAxis(m.axis).multiplyScalar(q)));
       else m._g.quaternion.setFromAxisAngle(this.vAxis(m.axis), q);
     }
+    if(refold&&this.exact&&this.exact.cad===this.cad){ this.applyExact();
+      if(typeof CadView!=="undefined"&&CadView.sel) CadView.light(CadView.sel,"sel"); }
     for(const J of this.jawSets||[]){
       const dn=deviceOn(J.mech.id);
       const s=dn?Sim.dev[dn]:null;
