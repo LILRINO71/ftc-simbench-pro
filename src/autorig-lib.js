@@ -82,7 +82,11 @@ function hull3(P) {
     for (const [u, w] of edges.values()) mk(u, w, i);
     if (faces.length > 4000) faces = faces.filter((f) => f.alive);
   }
-  return faces.filter((f) => f.alive).map((f) => ({ n: f.n, d: f.d }));
+  const live = faces.filter((f) => f.alive), out = live.map((f) => ({ n: f.n, d: f.d }));
+  // the hull's own corners: a box round them is the box round every point
+  const vs = new Set(); for (const f of live) for (const v of f.v) vs.add(v);
+  out.pts = [...vs].map((i) => P[i]);
+  return out;
 }
 // signed distance of p outside the hull (<=0 inside); coarse (max plane distance)
 const hullOut = (H, p) => { let m = -Infinity; for (const f of H) { const v = dot(f.n, p) - f.d; if (v > m) m = v; } return m; };
@@ -106,11 +110,13 @@ function basisOf(n) {
 function obbOf(P, H) {
   const normals = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
   for (const f of H || []) if (!normals.some((m) => Math.abs(dot(m, f.n)) > 0.9995)) normals.push(f.n);
+  // only the hull's corners can touch the box: projecting them alone was most of finding the actuators
+  const V = H && H.pts && H.pts.length >= 4 ? H.pts : P;
   let best = null;
   for (const nrm of normals) {
     const [u, v] = basisOf(nrm);
     let h0 = Infinity, h1 = -Infinity;
-    const Q = P.map((p) => { const h = dot(p, nrm); if (h < h0) h0 = h; if (h > h1) h1 = h; return [dot(p, u), dot(p, v)]; });
+    const Q = V.map((p) => { const h = dot(p, nrm); if (h < h0) h0 = h; if (h > h1) h1 = h; return [dot(p, u), dot(p, v)]; });
     const C = hull2(Q);
     for (let i = 0; i < C.length; i++) {
       const e = sub([...C[(i + 1) % C.length], 0], [...C[i], 0]); const L = Math.hypot(e[0], e[1]); if (L < 1e-12) continue;

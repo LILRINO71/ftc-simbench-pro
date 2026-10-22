@@ -721,18 +721,22 @@ function renderRig(){
     $("#rigChain").innerHTML=""; $("#rigPill").textContent="none"; $("#rigCount").textContent=""; $("#guessPill").textContent="—"; return; }
   RIG_SPOTS=rigSpots();
   const spotOpts=RIG_SPOTS.map((s,i)=>`<option value="${i}">${esc(s.name.slice(0,30))} (${s.loc.map(v=>(v*1000).toFixed(0)).join(",")})</option>`).join("");
+  // the "moves with" and "pivot at" lists fill when opened: every joint in every row's list
+  // was 130,000 options on a 359-joint export, most of a second each time the table drew
+  const parentOpts=m=>[`<option value="chassis"${m.parent==="chassis"?" selected":""}>chassis (frame)</option>`]
+    .concat(M.filter(x=>x.id!==m.id).map(x=>`<option value="${esc(x.id)}"${m.parent===x.id?" selected":""}>${esc(mlabel(x))}</option>`)).join("");
   t.innerHTML=`<tr><th>name</th><th>joint</th><th>moves with</th><th>pivot at</th><th>dir</th><th></th></tr>`+
     M.map(m=>{
       const kopts=Object.keys(JOINT_KINDS).map(k=>`<option value="${k}"${m.kind===k?" selected":""}>${JOINT_KINDS[k].label}</option>`).join("");
-      const popts=[`<option value="chassis"${m.parent==="chassis"?" selected":""}>chassis (frame)</option>`]
-        .concat(M.filter(x=>x.id!==m.id).map(x=>`<option value="${esc(x.id)}"${m.parent===x.id?" selected":""}>${esc(mlabel(x))}</option>`)).join("");
+      const pm=m.parent==="chassis"?null:M.filter(x=>x.id===m.parent)[0];
+      const popts=m.parent==="chassis"?`<option value="chassis" selected>chassis (frame)</option>`:`<option value="${esc(m.parent)}" selected>${esc(pm?mlabel(pm):m.parent)}</option>`;
       const dot=m.inferred?`<span class="guess" title="inferred — confirm or change it"></span>`:`<span class="guess set" title="you set this"></span>`;
       return `<tr class="${m.manual?"manual":""}">
         <td><input class="rigname" data-rigname="${esc(m.id)}" value="${esc(mlabel(m))}" aria-label="Name for ${esc(m.id)}">${dot}</td>
         <td><select data-rigkind="${esc(m.id)}" aria-label="Joint type for ${esc(mlabel(m))}">${kopts}</select></td>
         <td><select data-rigparent="${esc(m.id)}" aria-label="What ${esc(mlabel(m))} moves with">${popts}</select></td>
         <td><select data-rigspot="${esc(m.id)}" aria-label="Pivot location for ${esc(mlabel(m))}">
-          <option value="">as measured (${m.pivot?m.pivot.map(v=>(v*1000).toFixed(0)).join(","):"—"})</option>${spotOpts}</select></td>
+          <option value="">as measured (${m.pivot?m.pivot.map(v=>(v*1000).toFixed(0)).join(","):"—"})</option></select></td>
         <td><button class="dirbtn" data-rigdir="${esc(m.id)}" title="Flip which way this joint travels">${m.dir>0?"+":"−"}</button></td>
         <td>${m.manual?`<button class="rmbtn" data-rigrm="${esc(m.id)}" title="Remove this joint">×</button>`:""}</td></tr>`;
     }).join("");
@@ -744,6 +748,10 @@ function renderRig(){
       <div class="cc">mounted on ${esc(par)} — ${carries.length?"swings <b>"+carries.map(c=>esc(mlabel(M.filter(x=>x.id===c)[0]||{id:c}))).join("</b>, <b>")+"</b> with it":"carries nothing further"}</div></div>`;
   }).join("");
   $("#rigPill").textContent=M.length+" joint"+(M.length===1?"":"s");
+  const fill=(s,html)=>{ if(s.dataset.full) return; s.dataset.full="1"; const keep=s.value; s.insertAdjacentHTML("beforeend",html); s.value=keep; };
+  t.querySelectorAll("[data-rigparent]").forEach(s=>{ const go=()=>{ if(s.dataset.full) return; const m=byMech(s.dataset.rigparent); if(!m) return; s.innerHTML=""; fill(s,parentOpts(m)); };
+    s.addEventListener("pointerdown",go); s.addEventListener("focus",go); });
+  t.querySelectorAll("[data-rigspot]").forEach(s=>{ const go=()=>fill(s,spotOpts); s.addEventListener("pointerdown",go); s.addEventListener("focus",go); });
   t.querySelectorAll("[data-rigkind]").forEach(s=>s.addEventListener("change",()=>{ const m=byMech(s.dataset.rigkind); if(!m) return; m.kind=s.value; m.inferred=false; rigChanged(); }));
   t.querySelectorAll("[data-rigparent]").forEach(s=>s.addEventListener("change",()=>{ const m=byMech(s.dataset.rigparent); if(!m) return; m.parent=s.value; m.inferred=false; rigChanged(); }));
   t.querySelectorAll("[data-rigdir]").forEach(b=>b.addEventListener("click",()=>{ const m=byMech(b.dataset.rigdir); if(!m) return; m.dir=(m.dir>0?-1:1); m.inferred=false; renderRig(); saveRig(); }));

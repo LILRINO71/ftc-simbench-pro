@@ -108,8 +108,16 @@ function massBoxOf(pts){
    keeps a mirrored hull honest. Too few, coincident or coplanar points
    cannot be hulled — those fall back to the oriented box, which is what
    the 3-D view draws for them too. */
+const HULL_VOL = new WeakMap();      // points -> volume: every rebuild weighs every part again (1,938 hulls on an export robot)
 function hullVolume(pts){
   if(!pts || pts.length < 1) return 0;
+  const c = HULL_VOL.get(pts);
+  if(c && c.n === pts.length) return c.v;
+  const v = hullVolumeOf(pts);
+  HULL_VOL.set(pts, {n:pts.length, v});
+  return v;
+}
+function hullVolumeOf(pts){
   const b = massBoxOf(pts), boxVol = b.L*b.W*b.H;
   let P = pts, h = pts.length>=4 ? convexHull(pts) : null;
   if(!h){ P = boxCorners(pts); h = convexHull(P); }

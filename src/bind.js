@@ -167,7 +167,7 @@ const {classifyJoints, bindDevices}=(function(){
   function actuators(cad){
     if(ACTS.has(cad)) return ACTS.get(cad);
     let A=[];
-    try{ if(typeof ARActuators!=="undefined") A=(ARActuators.findActuators(cad,{driveFromCAD:c=>driveFromCAD(c,{}), hwFromPart}).actuators||[]).filter(a=>a.role!=="drive"); }catch(e){ A=[]; }
+    try{ if(typeof actuatorsOf==="function") A=actuatorsOf(cad).filter(a=>a.role!=="drive"); }catch(e){ A=[]; }
     ACTS.set(cad,A); return A;
   }
   function actuatorOn(cad,m){

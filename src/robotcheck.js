@@ -50,13 +50,8 @@ const {checkRobot, setupAuto}=(function(){
   }
   const sevRank={fail:0,warn:1,note:2,ok:3};
   // from the geometry alone, so once per CAD (the joints change, the parts don't)
-  const ACTS=new WeakMap(), MASS=new WeakMap();
-  function cadActuators(cad){
-    if(!cad||typeof ARActuators==="undefined") return [];
-    if(ACTS.has(cad)) return ACTS.get(cad);
-    let A=[]; try{ A=ARActuators.findActuators(cad,{driveFromCAD:c=>driveFromCAD(c,{}), hwFromPart}).actuators||[]; }catch(e){ A=[]; }
-    ACTS.set(cad,A); return A;
-  }
+  const MASS=new WeakMap();
+  function cadActuators(cad){ return typeof actuatorsOf==="function"?actuatorsOf(cad):[]; }
   function cadMass(cad){
     if(MASS.has(cad)) return MASS.get(cad);
     let kg=0; try{ kg=massProps(cad).kg||0; }catch(e){ kg=0; }

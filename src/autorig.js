@@ -256,3 +256,15 @@ const {autoRig}=(function(){
   }
   return {autoRig};
 })();
+/* Every servo and motor output on a robot, found once per CAD with the default
+   drive and shared: the device binder (src/bind.js) and the robot check
+   (src/robotcheck.js) each searched for themselves, 3 s apiece on a 1,938-part
+   export. The parts don't change; a new robot is a new CAD. */
+const ACTUATORS_OF=new WeakMap();
+function actuatorsOf(cad){
+  if(!cad||typeof cad!=="object"||typeof ARActuators==="undefined") return [];
+  if(ACTUATORS_OF.has(cad)) return ACTUATORS_OF.get(cad);
+  let A=[];
+  try{ A=ARActuators.findActuators(cad,{driveFromCAD:c=>driveFromCAD(c,{}), hwFromPart}).actuators||[]; }catch(e){ A=[]; }
+  ACTUATORS_OF.set(cad,A); return A;
+}
