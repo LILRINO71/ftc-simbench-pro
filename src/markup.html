@@ -237,6 +237,11 @@
             <input type="range" id="deadzone" min="0" max="0.3" step="0.01" value="0.08">
             <span class="v" id="deadzoneVal">0.08</span></div>
           <p class="hint" id="ctrlNote">Plug in an Xbox, PlayStation or Logitech controller and press any button on it. Browsers only report a controller after a button press.</p>
+          <div class="kb-head"><b>Keyboard</b><span class="spacer"></span>
+            <select id="keyPreset" aria-label="Keyboard layout"><option value="classic">Classic (I J K L)</option><option value="wasd">WASD</option></select>
+            <button class="btn-sm" id="keyReset" type="button" title="Back to the layout's own keys">Reset</button></div>
+          <div class="kb-list" id="keyBinds"></div>
+          <p class="hint" id="keyNote"></p>
         </div>
       </div>
 
@@ -400,7 +405,7 @@
         <ul class="howto">
           <li><b>Drag the robot</b> on the field to move it. Shift-drag or right-drag turns it.</li>
           <li><b>Plug in a controller</b> and press a button: it becomes gamepad1 or gamepad2.</li>
-          <li><b>Keys</b> <kbd>I</kbd><kbd>J</kbd><kbd>K</kbd><kbd>L</kbd> drive, <kbd>U</kbd><kbd>O</kbd> turn, <kbd>A</kbd><kbd>B</kbd><kbd>X</kbd><kbd>Y</kbd>, <kbd>Q</kbd><kbd>E</kbd> bumpers, arrows d-pad, <kbd>F</kbd> fire. Each key goes to the gamepad your code reads it from.</li>
+          <li><b>Keys</b> <span id="keyHint"><kbd>I</kbd><kbd>J</kbd><kbd>K</kbd><kbd>L</kbd> drive, <kbd>U</kbd><kbd>O</kbd> turn, <kbd>A</kbd><kbd>B</kbd><kbd>X</kbd><kbd>Y</kbd>, <kbd>Q</kbd><kbd>E</kbd> bumpers, arrows d-pad, <kbd>F</kbd> fire</span>. Each key goes to the gamepad your code reads it from; change them under the controller button at the top.</li>
         </ul>
       </div>
     </section>

@@ -21,7 +21,7 @@ const TOUR = [
     body: "The bench works out which way is up, where the front is, the drive base, and which of your <code>hardwareMap</code> devices drives which joint. The review card shows those as facts and asks only what it can't know, in your own device names, with a button that moves the part.",
     tip: "Answers are kept with the robot. Save setup writes one file a teammate can drop in with it." },
   { id: "drive", tab: "teleop", target: "#viewport", title: "Drive it",
-    body: "Press <b>INIT</b> then <b>START</b>. Plug in a controller and press a button on it, or use <kbd>I</kbd><kbd>J</kbd><kbd>K</kbd><kbd>L</kbd>. Drag the robot on the field to move it, shift-drag to turn it.",
+    body: "Press <b>INIT</b> then <b>START</b>. Plug in a controller and press a button on it, or use the keyboard (the keys, and a WASD layout, are under the controller button at the top). Drag the robot on the field to move it, shift-drag to turn it.",
     tip: "The robot has real mass now: it leans under acceleration, and it can break traction." },
   { id: "shot", tab: "shot", target: '[data-pane="shot"]', title: "Shoot the HIVE",
     body: "If your code spins a flywheel and runs a feeder, SimBench launches BIOBUZZ POLLEN with the real ball flight model — drag, spin, the CELL lip, and the 190 g tipping point.",

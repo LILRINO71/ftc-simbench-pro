@@ -24,10 +24,10 @@ export const SITE = 'https://ftc-simbench-pro.pages.dev';
 // earlier ones define. The engine never touches the DOM; only view3d and app do.
 export const ORDER = ['hardware', 'samples', 'step', 'hull', 'inertia', 'expr', 'jvm', 'jvmlib', 'jvmprelude', 'jvmrun', 'java', 'roadrunner', 'mapping', 'robotconfig',
   'compare', 'analyze', 'drivetrain', 'frame', 'mates', 'onshapelink', 'onshapecad', 'meshfiles', 'urdf', 'jointspec', 'jointsheet', 'pedrogen', 'autorig-lib', 'autorig', 'robotcheck', 'bind', 'dynamics', 'joltmech', 'field', 'shots', 'match', 'robotlite', 'net', 'netrelay', 'controllers', 'session', 'mathdoc',
-  'gitimport', 'onboarding', 'sim', 'tier', 'tessellate', 'view3d', 'cadview', 'engineworker', 'importflow', 'recorder', 'sounds', 'results', 'minimap', 'pathedit', 'app'];
+  'gitimport', 'onboarding', 'sim', 'tier', 'tessellate', 'view3d', 'cadview', 'engineworker', 'importflow', 'recorder', 'sounds', 'results', 'minimap', 'pathedit', 'keybinds', 'app'];
 // The browser-side files: everything before them is the engine, which also ships on
 // its own as dist/engine.js for the background worker (src/engineworker.js).
-export const BROWSER = ['tessellate', 'view3d', 'cadview', 'engineworker', 'importflow', 'recorder', 'sounds', 'results', 'minimap', 'pathedit', 'app'];
+export const BROWSER = ['tessellate', 'view3d', 'cadview', 'engineworker', 'importflow', 'recorder', 'sounds', 'results', 'minimap', 'pathedit', 'keybinds', 'app'];
 // three.js, as ES modules from a CDN, with a second one (tools/threeloader.mjs). The
 // page puts it on window.THREE with the add-ons the view uses, and only then boots
 // the app (src/app.js waits for "three-ready").
