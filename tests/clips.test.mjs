@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const load = (file, names) => new Function(fs.readFileSync(path.join(ROOT, 'src', file), 'utf8') + `\nreturn { ${names.join(', ')} };`)();
-const R = load('recorder.js', ['recPickType', 'recSize', 'recFileName', 'recHud', 'REC_TYPES']);
+const R = load('recorder.js', ['recPickType', 'recSize', 'recFileName', 'recHud', 'REC_TYPES', 'recMaxFor']);
 const S = load('sounds.js', ['soundCues', 'SOUND_CUES']);
 const X = load('results.js', ['resultRows', 'resultWinner', 'bestKey', 'bestUpdate']);
 
@@ -191,4 +191,9 @@ test('results: the card shows the score as the buzzer left it, not the HUD\'s ol
   env.Sim.phase = 'stopped'; env.Sim.t = 120;
   W.matchWatch();
   assert.equal(shown && shown.red.total, 34, 'the score at the buzzer');
+});
+
+test('clip: a tier-0 machine records at 480p, the rest at 720p', () => {
+  assert.equal(R.recMaxFor(0), 854); assert.equal(R.recMaxFor(1), 1280); assert.equal(R.recMaxFor(undefined), 1280);
+  assert.deepEqual(R.recSize(1366, 768, R.recMaxFor(0)), { w: 854, h: 480 });
 });

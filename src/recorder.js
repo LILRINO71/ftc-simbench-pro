@@ -28,6 +28,8 @@ function recSize(w,h,max){
   const k=Math.min(1,max/Math.max(w,h)), even=v=>Math.max(2,Math.round(v*k/2)*2);
   return {w:even(w), h:even(h)};
 }
+/* the clip's long side for a drawing tier: 854 (480p) on tier 0, else 1280 (720p) */
+function recMaxFor(tier){ return tier===0?854:REC_MAX; }
 /* a file name a team can tell apart later: the robot, the date and time, the right extension */
 function recFileName(robot,when,type){
   const slug=String(robot||"robot").replace(/\.(step|stp|zip|urdf)$/i,"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,40)||"robot";
@@ -59,7 +61,8 @@ const Recorder={
     if(this.on) return true;
     if(!this.supported()){ this.why="This browser can't record video. Chrome, Edge and Firefox can."; return false; }
     const src=View.ren&&View.ren.domElement; if(!src){ this.why="The 3D view isn't ready yet."; return false; }
-    const S=recSize(src.width,src.height);
+    // a tier-0 machine (src/tier.js: a school Chromebook) records at 480p, so the clip doesn't cost it frames
+    const S=recSize(src.width,src.height,recMaxFor(View.tier&&View.tier.tier));
     this.cv=document.createElement("canvas"); this.cv.width=S.w; this.cv.height=S.h;
     this.ctx=this.cv.getContext("2d");
     this.type=recPickType(t=>MediaRecorder.isTypeSupported(t));
@@ -99,7 +102,9 @@ const Recorder={
     if(!this.on||!this.ctx) return;
     const src=View.ren&&View.ren.domElement; if(!src) return;
     const c=this.ctx, W=this.cv.width, H=this.cv.height;
-    if(!this.bg){ try{ this.bg=getComputedStyle(document.getElementById("viewport")).backgroundColor; }catch(e){} if(!this.bg||/rgba\(0, 0, 0, 0\)|transparent/.test(this.bg)) this.bg="#dfe4ea"; }
+    if(!this.bg){ try{ this.bg=getComputedStyle(document.getElementById("viewport")).backgroundColor; }catch(e){}
+      // the view shows the page through it: the page's own background, light or dark
+      if(!this.bg||/rgba\(0, 0, 0, 0\)|transparent/.test(this.bg)) this.bg=document.documentElement.getAttribute("data-theme")==="dark"?"#1c1c1e":"#dfe4ea"; }
     c.fillStyle=this.bg; c.fillRect(0,0,W,H);                // the view is transparent where the page shows through
     c.drawImage(src,0,0,W,H);
     const h=recHud(hud), k=H/720;
