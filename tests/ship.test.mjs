@@ -188,5 +188,5 @@ test('minifier: HTML keeps one space between inline elements', () => {
   assert.ok(m.includes('<b>a</b> <i>b</i> <button>x</button> <button>y</button>'), m);
   assert.ok(m.includes('<ul><li>') && m.includes('</li><li>') && m.includes('</ul><p><span>c</span></p>'), 'around block tags it still goes: ' + m);
   const page = minifyHTML(fs.readFileSync(path.join(ROOT, 'src', 'markup.html'), 'utf8'));
-  assert.ok(page.includes('<b>Keys</b> <kbd>I</kbd>'), 'the help line in the page');
+  assert.ok(page.includes('<b>Keys</b> <span id="keyHint"><kbd>I</kbd>'), 'the help line in the page');
 });
