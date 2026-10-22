@@ -33,6 +33,31 @@ function bestUpdate(stored,score,when){
   return {best:isNew?{score, when:when||null}:prev, prev, isNew};
 }
 
+/* ---- the ghost: the best run's path, raced against ----
+   A trace is the robot's pose ten times a second, [t, x, y, h] in seconds, metres and
+   radians, kept with the best. ghostAt says where the ghost is at time t. */
+const GHOST_HZ=10, GHOST_MAX=GHOST_HZ*130;
+/* add a sample when at least a tenth of a second has gone since the last */
+function ghostRecord(trace,t,c){
+  if(!(t>=0)||!c||!isFinite(c.x)) return trace;
+  const last=trace[trace.length-1];
+  if(!last||t-last[0]>=1/GHOST_HZ-1e-9){ if(trace.length<GHOST_MAX) trace.push([+t.toFixed(2),+c.x.toFixed(3),+c.y.toFixed(3),+c.h.toFixed(3)]); }
+  return trace;
+}
+/* the pose at t, between the samples either side (the heading the short way round); null off the ends */
+function ghostAt(trace,t){
+  if(!trace||trace.length<2||!(t>=trace[0][0])||t>trace[trace.length-1][0]) return null;
+  let lo=0, hi=trace.length-1;
+  while(hi-lo>1){ const m=(lo+hi)>>1; if(trace[m][0]<=t) lo=m; else hi=m; }
+  const a=trace[lo], b=trace[hi], k=b[0]>a[0]?(t-a[0])/(b[0]-a[0]):0;
+  let dh=b[3]-a[3]; dh=Math.atan2(Math.sin(dh),Math.cos(dh));
+  return {x:a[1]+(b[1]-a[1])*k, y:a[2]+(b[2]-a[2])*k, h:a[3]+dh*k};
+}
+/* a stored trace, or null when it isn't one */
+function ghostRead(s){
+  try{ const g=JSON.parse(s); return Array.isArray(g)&&g.length>1&&g.every(p=>Array.isArray(p)&&p.length===4&&p.every(Number.isFinite))?g:null; }catch(e){ return null; }
+}
+
 const Results={
   init(){
     const p=$("#resultsPanel"); if(!p) return;
@@ -46,7 +71,7 @@ const Results={
     const p=$("#resultsPanel"); if(!p||!S) return;
     const win=resultWinner(S), mine=S[al]||{total:0};
     const key=bestKey(meta), B=bestUpdate(store.get(key,null),mine.total,new Date().toISOString().slice(0,10));
-    if(B.isNew) store.set(key,JSON.stringify(B.best));
+    if(B.isNew){ store.set(key,JSON.stringify(B.best)); if(meta&&meta.trace&&meta.trace.length>1) store.set(key+".ghost",JSON.stringify(meta.trace)); }
     $("#resultsHead").innerHTML=win==="tie"?"Tie":`<span class="${win}">${win==="red"?"Red":"Blue"} wins</span>`;
     $("#resultsSub").textContent=(al==="red"?"You were red":"You were blue")+" · "+(meta&&meta.period==="Autonomous"?"AUTO":"TELEOP")+(meta&&meta.skill?" · "+meta.skill+" AI":"");
     $("#resultsTable").innerHTML="<tr><th></th><th class='red'>Red</th><th class='blue'>Blue</th></tr>"+

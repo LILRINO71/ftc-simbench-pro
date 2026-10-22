@@ -316,7 +316,7 @@ let HUD_T=0, LAST_SCORE=null;
 let REC_HUD={};
 /* The match as it goes, for the clip, the sounds and the results: a run that starts may
    start a clip; one that reaches its final buzzer shows the results (src/results.js) */
-const WATCH={phase:null};
+const WATCH={phase:null, trace:[], ghost:null};
 function matchWatch(){
   const ph=Sim.phase, kind=CODE&&CODE.kind==="Autonomous"?"Autonomous":"TeleOp", P=PERIOD[kind];
   const practice=$("#practice").checked&&!Online.inMatch(), live=Match.live();
@@ -326,10 +326,17 @@ function matchWatch(){
     robot:CAD&&CAD.name, opmode:CODE&&CODE.opmode, site:/^(localhost|127[.]|\[)/.test(location.hostname)?null:location.hostname};
   if(S&&ph==="running") Sounds.scored((S[Shots.alliance]||S.red).total); else Sounds.lastScore=null;
   const was=WATCH.phase; WATCH.phase=ph;
+  const meta0={robot:CAD&&CAD.name, opmode:CODE&&CODE.opmode, period:kind, skill:Online.inMatch()?"online":live?$("#matchSkill").value:"solo"};
+  if(ph==="running"&&was!=="running"){
+    WATCH.trace=[];
+    // race your best: the ghost of the best run with this robot, OpMode, period and opponents
+    const g=$("#ghostOn"); WATCH.ghost=g&&g.checked&&!Online.inMatch()?ghostRead(store.get(bestKey(meta0)+".ghost",null)):null;
+  }
+  if(ph==="running") ghostRecord(WATCH.trace,Sim.t,Sim.chassis);
   if(ph==="running"&&was!=="running"&&!Recorder.on&&Recorder.wantsAuto()&&!Recorder.start(true)) $("#cadStatus").textContent=Recorder.why||"";
   if(was==="running"&&ph!=="running"){
     if(!final) Sounds.play("stop");
-    const meta={robot:CAD&&CAD.name, opmode:CODE&&CODE.opmode, period:kind, skill:Online.inMatch()?"online":live?$("#matchSkill").value:"solo"};
+    const meta=Object.assign({trace:WATCH.trace},meta0);
     const al=Online.inMatch()&&Online.myAl()?Online.myAl():Shots.alliance;
     const auto=Recorder.on&&Recorder.auto;
     const after=()=>{ if(final&&S) Results.show(S,al,meta); else if(Recorder.url&&auto) Recorder.show(); };
@@ -1095,6 +1102,7 @@ function placeAtStart(){
   if(mine&&Field.ok&&Sim.footprint) Field.collide(Sim.chassis,Sim.footprint,Sim.obstacles);
   OPTS.startPose=Object.assign({},Sim.chassis);
 }
+function wireGhost(){ const g=$("#ghostOn"); if(!g) return; g.checked=store.get("ftcbench.ghost","1")!=="0"; g.addEventListener("change",()=>store.set("ftcbench.ghost",g.checked?"1":"0")); }
 function wireStartSel(){
   const sel=$("#startSel"); if(!sel) return;
   sel.value=startSlot();
@@ -2568,6 +2576,7 @@ function frame(now){
     acc+=dt;
     stepFixed(8);
     NetUI.tick();
+    View.setGhost(WATCH.ghost&&Sim.phase==="running"?ghostAt(WATCH.ghost,Sim.t):null, Sim.footprint);
     View.update(); View.render(); Recorder.frame(REC_HUD); Pads.mirror();
   });
   slowAcc+=dt;
@@ -3125,7 +3134,7 @@ function boot(){
   $("#viewSeg").addEventListener("click",e=>{ const b=e.target.closest("button"); if(!b) return;
     $$("#viewSeg button").forEach(x=>x.classList.toggle("on",x===b));
     if(b.dataset.v==="cad") CadView.enter(); else { CadView.exit(); View.setView(b.dataset.v); } });
-  $("#resetPose").addEventListener("click",placeAtStart); wireStartSel();
+  $("#resetPose").addEventListener("click",placeAtStart); wireStartSel(); wireGhost();
   wireShotTab();
   $("#padSeg").addEventListener("click",e=>{ const b=e.target.closest("button"); if(b) setActivePad(+b.dataset.pad); });
 

@@ -134,3 +134,20 @@ test('starts: centre, a tile left and a tile right along the wall, as each allia
   assert.ok(Math.abs(bl.y + tile) < 1e-9 && bl.x > 0 && Math.abs(bl.h - Math.PI) < 1e-12, 'blue faces -x: its left is -y');
   assert.deepEqual(F.startPose('red', fp, 'nonsense'), c, 'anything else is the centre');
 });
+
+const G = load('results.js', ['ghostRecord', 'ghostAt', 'ghostRead', 'GHOST_MAX']);
+test('ghost: ten samples a second, the pose between them, the heading the short way round, nothing off the ends', () => {
+  const tr = [];
+  for (let t = 0; t <= 1.0001; t += 0.02) G.ghostRecord(tr, t, { x: t, y: 2 * t, h: 0 });
+  assert.equal(tr.length, 11, 'one every tenth of a second');
+  const p = G.ghostAt(tr, 0.45);
+  assert.ok(Math.abs(p.x - 0.45) < 1e-9 && Math.abs(p.y - 0.9) < 1e-9);
+  assert.equal(G.ghostAt(tr, 1.5), null); assert.equal(G.ghostAt(tr, -1), null); assert.equal(G.ghostAt([], 0), null);
+  // across +-pi: 3.1 to -3.1 is 0.08 rad through pi, not 6.2 back round
+  const h = G.ghostAt([[0, 0, 0, 3.1], [1, 0, 0, -3.1]], 0.5).h;
+  assert.ok(Math.abs(Math.cos(h) + 1) < 0.01, 'halfway is pi: ' + h);
+  assert.deepEqual(G.ghostRead(JSON.stringify(tr)), tr);
+  assert.equal(G.ghostRead('[[0,1,2]]'), null); assert.equal(G.ghostRead('nope'), null);
+  const long = []; for (let t = 0; t < 200; t += 0.1) G.ghostRecord(long, t, { x: 0, y: 0, h: 0 });
+  assert.equal(long.length, G.GHOST_MAX, 'capped at a match and a bit');
+});

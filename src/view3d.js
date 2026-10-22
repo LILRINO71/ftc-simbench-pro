@@ -1572,6 +1572,27 @@ const View={
     this.look=this.followLook.clone();
     if(this.sun){ const L=this.look; this.sun.position.set(L.x+this.sunOff.x,this.sunOff.y,L.z+this.sunOff.z); this.sun.target.position.set(L.x,0,L.z); this.sun.target.updateMatrixWorld(); }
   },
+  /* The ghost of the best run (src/results.js): a see-through box of the robot's footprint at
+     pose p (field metres and radians), with a stripe at its front; null hides it */
+  setGhost(p,fp){
+    if(!p){ if(this.ghostG) this.ghostG.visible=false; return; }
+    if(!this.scene) return;
+    const hx=(fp&&fp.hx)||0.23, hy=(fp&&fp.hy)||0.23, h=Math.min(0.5,(fp&&fp.h)||0.35), key=[hx,hy,h].map(v=>v.toFixed(3)).join("|");
+    if(!this.ghostG||this.ghostKey!==key){
+      if(this.ghostG){ this.scene.remove(this.ghostG); this.ghostG.traverse(o=>o.geometry&&o.geometry.dispose()); }
+      const g=new THREE.Group(), mat=new THREE.MeshBasicMaterial({color:0x7cf29a, transparent:true, opacity:0.22, depthWrite:false});
+      const box=new THREE.Mesh(new THREE.BoxGeometry(2*hx,h,2*hy),mat); box.position.y=h/2; g.add(box);
+      const edge=new THREE.LineSegments(new THREE.EdgesGeometry(box.geometry),new THREE.LineBasicMaterial({color:0x7cf29a, transparent:true, opacity:0.8}));
+      edge.position.y=h/2; g.add(edge);
+      const nose=new THREE.Mesh(new THREE.BoxGeometry(0.04,h*0.6,2*hy*0.8),new THREE.MeshBasicMaterial({color:0x7cf29a, transparent:true, opacity:0.6, depthWrite:false}));
+      nose.position.set(hx-0.02,h*0.3,0); g.add(nose);
+      g.renderOrder=4; this.scene.add(g); this.ghostG=g; this.ghostKey=key;
+    }
+    const fx=(fp&&fp.ox)||0, fy=(fp&&fp.oy)||0, c=Math.cos(p.h), s=Math.sin(p.h);
+    this.ghostG.visible=true;
+    this.ghostG.position.set(p.x+fx*c-fy*s,0,-(p.y+fx*s+fy*c));
+    this.ghostG.rotation.y=p.h;
+  },
   /* The path editor's path on the field (src/pathedit.js): pts [[x, y], ...] in field
      metres, a line just above the tiles; null takes it away */
   setPath(pts){
