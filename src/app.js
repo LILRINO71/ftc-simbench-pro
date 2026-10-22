@@ -1552,6 +1552,7 @@ function takeJson(file){
       loadOnshapeRobot(p); return;
     }
     if(j&&j.format===SETUP_FORMAT){ SetupUI.take(j,file.name); return; }
+    if(j&&j.format===PEDRO_FORMAT){ PathEdit.take(text); return; }
     if(j&&j.format===JOINT_SHEET_FORMAT){ ImportFlow.takeSheet(j,file.name); return; }
     if(j&&j.format===JOINT_SPEC_FORMAT){
       // dropped together with its STEP, the small spec is read first: it waits for
@@ -3048,7 +3049,7 @@ function boot(){
   $("#matchOn").addEventListener("change",e=>{ store.set("ftcbench.match",e.target.checked?"1":"0"); if(Online.inMatch()) return; if(Sim.phase!=="running") resetMatch(); else { Match.on=e.target.checked; if(!Match.on) resetMatch(); } });
   $("#matchSkill").addEventListener("change",e=>{ store.set("ftcbench.matchSkill",e.target.value); if(Online.inMatch()) return; if(Sim.phase!=="running") resetMatch(); else Match.skill=e.target.value; });
   $("#practice").addEventListener("change",e=>{ store.set("ftcbench.practice",e.target.checked?"1":"0"); updateClock(); });
-  NetUI.init(); SetupUI.init(); ImportFlow.init(); Recorder.init(); Sounds.init(); Results.init(); Minimap.init();
+  NetUI.init(); SetupUI.init(); ImportFlow.init(); Recorder.init(); Sounds.init(); Results.init(); Minimap.init(); PathEdit.init();
 
   // code
   $("#addOpMode").addEventListener("click",()=>$("#codeFile").click());

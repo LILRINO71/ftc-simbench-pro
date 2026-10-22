@@ -15,6 +15,24 @@
       <!-- the import card: everything about getting a robot in, one place -->
       <section class="import-card" id="importCard" hidden aria-live="polite"></section>
 
+      <!-- the path editor: draw an auto, get its Pedro Pathing code (src/pathedit.js, src/pedrogen.js) -->
+      <section class="path-panel panel-glass" id="pathPanel" hidden aria-label="Path editor">
+        <div class="pe-head"><b>Paths</b><input id="peName" class="pe-name" maxlength="40" aria-label="The auto's name" spellcheck="false"><span class="pe-info" id="peInfo"></span><span class="spacer"></span>
+          <button class="btn-sm" id="peNew" type="button" title="Start again from where the robot stands">New</button><button class="btn-sm" id="peClose" type="button">Close</button></div>
+        <div class="pe-body">
+          <div class="pe-left">
+            <canvas id="peField" class="pe-field" aria-label="The field from above: click to add a leg, drag a point to move it"></canvas>
+            <p class="pe-fine">Click the field to add a leg. Drag a pose, a purple control point, or the dot on a pose's nose to turn it. Pedro coordinates: inches, (0, 0) bottom left, red wall on the left.</p>
+          </div>
+          <div class="pe-right">
+            <div class="pe-legs" id="peLegs"></div>
+            <div class="pe-acts"><button class="btn-sm primary" id="peRun" type="button">Run on the bench</button><button class="btn-sm" id="peCopy" type="button">Copy Java</button><button class="btn-sm" id="peSave" type="button">Save .java</button><button class="btn-sm" id="peFile" type="button" title="The path itself, for a teammate to open here">Save path</button></div>
+            <p class="pe-msg" id="peMsg" hidden></p>
+            <pre class="pe-code" id="peCode"></pre>
+          </div>
+        </div>
+      </section>
+
       <!-- a match clip played back (src/recorder.js) -->
       <section class="replay-panel panel-glass" id="replayPanel" hidden aria-label="Replay">
         <div class="rp-head"><b>Replay</b><span class="rp-info" id="replayInfo"></span><span class="spacer"></span><button class="btn-sm" id="replayClose" type="button">Close</button></div>
@@ -116,6 +134,7 @@
         <div class="vp-readout">
           <span id="vpPose">—</span>
           <button class="btn-ghost rec-btn" id="recBtn" type="button" hidden><i aria-hidden="true"></i><span>Clip</span></button>
+          <button class="btn-ghost path-btn" id="pathBtn" type="button" title="Draw an auto on the field and get its Pedro Pathing code">Paths</button>
           <button class="btn-ghost map-btn" id="mapBtn" type="button" aria-pressed="false" title="The whole field from above, as your drivers face it">Map</button>
           <button class="btn-ghost snd-btn" id="soundBtn" type="button" aria-pressed="true" aria-label="Match sounds"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 6h3l4-3v10l-4-3H2z"/><path class="w" d="M11 5.5a3.5 3.5 0 0 1 0 5M12.8 3.8a6 6 0 0 1 0 8.4" fill="none"/></svg></button>
           <button class="btn-ghost" id="resetPose" type="button" title="Back to the start position on your alliance wall">Reset pose</button>

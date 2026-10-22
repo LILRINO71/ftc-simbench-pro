@@ -1572,6 +1572,15 @@ const View={
     this.look=this.followLook.clone();
     if(this.sun){ const L=this.look; this.sun.position.set(L.x+this.sunOff.x,this.sunOff.y,L.z+this.sunOff.z); this.sun.target.position.set(L.x,0,L.z); this.sun.target.updateMatrixWorld(); }
   },
+  /* The path editor's path on the field (src/pathedit.js): pts [[x, y], ...] in field
+     metres, a line just above the tiles; null takes it away */
+  setPath(pts){
+    if(this.pathLine){ this.pathLine.parent&&this.pathLine.parent.remove(this.pathLine); this.pathLine.geometry.dispose(); this.pathLine=null; }
+    if(!pts||pts.length<2||!this.scene) return;
+    const g=new THREE.BufferGeometry().setFromPoints(pts.map(p=>new THREE.Vector3(p[0],0.012,-p[1])));
+    this.pathLine=new THREE.Line(g,this.pathMat||(this.pathMat=new THREE.LineBasicMaterial({color:0xf2c230, depthTest:false, transparent:true, opacity:0.95})));
+    this.pathLine.renderOrder=5; this.scene.add(this.pathLine);
+  },
   setView(v){
     this.mode=v; this.applyQuality();
     if(v==="chase"||v==="pov"){ this.followJump=true; return; }
