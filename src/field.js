@@ -68,12 +68,16 @@ const Field={
 
   /* Legal start (G304): own side, touching the alliance wall, facing the field,
      clear of the LOADING ZONE and the FLOWER on that wall. */
-  startPose(alliance,fp){
+  /* slot: "centre" (the default), "left" or "right" one tile along the wall as that
+     alliance's drivers see it (red stands at -x facing +x, so their left is +y; blue's is -y) */
+  startPose(alliance,fp,slot){
     const H=this.half(), s=alliance==="blue"?1:-1;
     const hx=(fp&&fp.hx)||0.2286, ox=(fp&&fp.ox)||0, oy=(fp&&fp.oy)||0;
-    // the BOX touches the wall and sits on the centre line; the pose is the
-    // drivetrain centre, which is wherever the box's offset puts it
-    return {x:s*(H-hx+ox), y:s*oy, h:alliance==="blue"?Math.PI:0};
+    const tile=(this.data&&this.data.field&&this.data.field.field.tile||23.5)*IN;
+    const along=slot==="left"?1:slot==="right"?-1:0;
+    // the BOX touches the wall and sits on the centre line (or a tile off it); the pose is
+    // the drivetrain centre, which is wherever the box's offset puts it
+    return {x:s*(H-hx+ox), y:s*oy-s*along*tile, h:alliance==="blue"?Math.PI:0};
   },
 
   /* Things a robot can't drive through, flattened to 2-D capsules at the

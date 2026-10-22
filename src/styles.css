@@ -1016,3 +1016,7 @@ button.rmbtn{color:var(--label-3);} button.rmbtn:hover{color:var(--fail);}
 .kb-row:hover{background:var(--fill-4, rgba(120,120,128,.08)); color:var(--label);}
 .kb-row kbd{font-family:var(--mono); font-size:11px; min-width:22px; text-align:center; padding:1px 5px; border-radius:5px; background:var(--card-2); border:1px solid var(--sep-2, rgba(60,60,67,.18)); color:var(--label);}
 .kb-row.wait kbd{background:var(--accent-soft); color:var(--accent-tx); border-color:var(--accent-line);}
+
+/* the start picker beside Reset pose */
+.start-sel{font:inherit; font-family:var(--body, inherit); font-size:11.5px; color:var(--label-2); background:var(--fill-3); border:0; border-radius:7px; padding:3px 6px; pointer-events:auto; cursor:pointer;}
+@media (max-width:760px){ .start-sel{max-width:96px;} }

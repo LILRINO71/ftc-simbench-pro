@@ -137,6 +137,9 @@
           <button class="btn-ghost path-btn" id="pathBtn" type="button" title="Draw an auto on the field and get its Pedro Pathing code">Paths</button>
           <button class="btn-ghost map-btn" id="mapBtn" type="button" aria-pressed="false" title="The whole field from above, as your drivers face it">Map</button>
           <button class="btn-ghost snd-btn" id="soundBtn" type="button" aria-pressed="true" aria-label="Match sounds"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 6h3l4-3v10l-4-3H2z"/><path class="w" d="M11 5.5a3.5 3.5 0 0 1 0 5M12.8 3.8a6 6 0 0 1 0 8.4" fill="none"/></svg></button>
+          <select class="start-sel" id="startSel" aria-label="Where Reset pose puts the robot" title="Where Reset pose puts the robot">
+            <option value="centre">Start: centre</option><option value="left">Start: a tile left</option><option value="right">Start: a tile right</option>
+            <option value="mine">Start: my spot</option><option value="save">Save this spot as my start</option></select>
           <button class="btn-ghost" id="resetPose" type="button" title="Back to the start position on your alliance wall">Reset pose</button>
         </div>
       </div>

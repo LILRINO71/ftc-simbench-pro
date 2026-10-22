@@ -1084,9 +1084,32 @@ const poseText=c=>Field.ok
   ? `x ${(c.x/IN).toFixed(1)} · y ${(c.y/IN).toFixed(1)} in · ${Math.round(wrap180(c.h*180/Math.PI))}°`
   : `x ${c.x.toFixed(2)} m · y ${c.y.toFixed(2)} m · ${Math.round(c.h*180/Math.PI)}°`;
 function setHTML(el,html){ if(el&&el.innerHTML!==html) el.innerHTML=html; }
+/* Where Reset pose puts the robot (the Start picker beside it): a spot on the alliance's
+   wall, or "My spot", a pose the driver saved, one per alliance, kept in this browser */
+function startSlot(){ const v=store.get("ftcbench.startSlot","centre"); return /^(centre|left|right|mine)$/.test(v)?v:"centre"; }
+function mySpot(al){ try{ const p=JSON.parse(store.get("ftcbench.mySpot."+al,"null")); return p&&isFinite(p.x)&&isFinite(p.y)&&isFinite(p.h)&&Math.abs(p.x)<2&&Math.abs(p.y)<2?p:null; }catch(e){ return null; } }
 function placeAtStart(){
-  const p=Field.ok?Field.startPose(Shots.alliance,footprintOf(CAD,OPTS.front)):{x:0,y:0,h:0};
-  Sim.chassis={x:p.x,y:p.y,h:p.h}; OPTS.startPose=Object.assign({},p);
+  const slot=startSlot(), mine=slot==="mine"?mySpot(Shots.alliance):null;
+  const p=mine||(Field.ok?Field.startPose(Shots.alliance,footprintOf(CAD,OPTS.front),slot):{x:0,y:0,h:0});
+  Sim.chassis={x:p.x,y:p.y,h:p.h};
+  if(mine&&Field.ok&&Sim.footprint) Field.collide(Sim.chassis,Sim.footprint,Sim.obstacles);
+  OPTS.startPose=Object.assign({},Sim.chassis);
+}
+function wireStartSel(){
+  const sel=$("#startSel"); if(!sel) return;
+  sel.value=startSlot();
+  sel.addEventListener("change",()=>{
+    if(sel.value==="save"){
+      if(Sim.phase==="running"){ sel.value=startSlot(); return; }
+      const c=Sim.chassis; store.set("ftcbench.mySpot."+Shots.alliance,JSON.stringify({x:+c.x.toFixed(4),y:+c.y.toFixed(4),h:+c.h.toFixed(4)}));
+      store.set("ftcbench.startSlot","mine"); sel.value="mine";
+      $("#cadStatus").textContent="Saved this spot as your "+Shots.alliance+" start. Reset pose comes back here.";
+      return;
+    }
+    store.set("ftcbench.startSlot",sel.value);
+    if(sel.value==="mine"&&!mySpot(Shots.alliance)){ $("#cadStatus").textContent="No spot saved for "+Shots.alliance+" yet: drag the robot where you start, then pick Save this spot."; return; }
+    if(Sim.phase!=="running"){ placeAtStart(); resetMatch(); }
+  });
 }
 /* online: the match deals the alliance (NetUI.begin passes dealt); nobody changes sides mid-match */
 function setAlliance(al,move,dealt){
@@ -3102,7 +3125,7 @@ function boot(){
   $("#viewSeg").addEventListener("click",e=>{ const b=e.target.closest("button"); if(!b) return;
     $$("#viewSeg button").forEach(x=>x.classList.toggle("on",x===b));
     if(b.dataset.v==="cad") CadView.enter(); else { CadView.exit(); View.setView(b.dataset.v); } });
-  $("#resetPose").addEventListener("click",placeAtStart);
+  $("#resetPose").addEventListener("click",placeAtStart); wireStartSel();
   wireShotTab();
   $("#padSeg").addEventListener("click",e=>{ const b=e.target.closest("button"); if(b) setActivePad(+b.dataset.pad); });
 
