@@ -167,3 +167,28 @@ test('run report: distance, top speed, time standing still, when it last moved, 
   assert.equal(RR.runReport(spin, [], 30).still, 0);
   assert.deepEqual(RR.runReport(null, null, 0), { dist: 0, top: 0, still: 0, lastMove: 0, hits: [], len: 0 });
 });
+
+/* matchWatch (src/app.js), the page's eye on a run, with the rest of the page stood in for */
+function watchHarness(env) {
+  const src = fs.readFileSync(path.join(ROOT, 'src', 'app.js'), 'utf8');
+  const a = src.indexOf('const WATCH={'), z = src.indexOf('\nfunction renderMatchHud(');
+  const names = Object.keys(env);
+  return new Function(...names, `let REC_HUD={};\n${src.slice(a, z)}\nreturn { matchWatch, WATCH, get REC_HUD(){ return REC_HUD; } };`)(...names.map((n) => env[n]));
+}
+test('results: the card shows the score as the buzzer left it, not the HUD\'s older copy', async () => {
+  let shown = null, live = { red: { total: 30 }, blue: { total: 20 } };
+  const el = (v) => ({ checked: false, value: v || '', textContent: '1:00' });
+  const env = {
+    Sim: { phase: 'running', t: 50, chassis: { x: 0, y: 0, h: 0 }, bump: null }, CODE: { kind: 'TeleOp', opmode: 'T' }, CAD: { name: 'R' }, PERIOD: { TeleOp: 120, Autonomous: 30 },
+    $: (q) => (q === '#matchSkill' ? el('typical') : el()), Match: { live: () => true, score: () => live },
+    Online: { inMatch: () => false, guest: () => false, state: 'off', score: null }, LAST_SCORE: { red: { total: 30 }, blue: { total: 20 } },
+    Shots: { alliance: 'red' }, Sounds: { scored() {}, play() {}, lastScore: null }, Recorder: { on: false, wantsAuto: () => false, url: null },
+    Results: { show: (S) => { shown = S; } }, store: { get: () => null }, bestKey: () => 'k', ghostRead: () => null, ghostRecord: () => {}, location: { hostname: 'x' },
+  };
+  const W = watchHarness(env);
+  W.matchWatch();                                     // running
+  live = { red: { total: 34 }, blue: { total: 20 } }; // a ball in at the last instant; the HUD hasn't caught up
+  env.Sim.phase = 'stopped'; env.Sim.t = 120;
+  W.matchWatch();
+  assert.equal(shown && shown.red.total, 34, 'the score at the buzzer');
+});

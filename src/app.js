@@ -344,7 +344,9 @@ function matchWatch(){
     const meta=Object.assign({trace:WATCH.trace, hits:WATCH.hits},meta0);
     const al=Online.inMatch()&&Online.myAl()?Online.myAl():Shots.alliance;
     const auto=Recorder.on&&Recorder.auto;
-    const after=()=>{ if(final&&S) Results.show(S,al,meta); else if(Recorder.url&&auto) Recorder.show(); };
+    // the score as the buzzer left it (the HUD's copy can be a fifth of a second old)
+    const Sf=live?(Online.guest()&&Online.score?Online.score:Match.score(Sim)):null;
+    const after=()=>{ if(final&&Sf) Results.show(Sf,al,meta); else if(Recorder.url&&auto) Recorder.show(); };
     if(auto) setTimeout(()=>Recorder.stop().then(after),1500); else after();
   }
 }
