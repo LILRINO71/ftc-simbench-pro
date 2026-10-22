@@ -316,7 +316,7 @@ let HUD_T=0, LAST_SCORE=null;
 let REC_HUD={};
 /* The match as it goes, for the clip, the sounds and the results: a run that starts may
    start a clip; one that reaches its final buzzer shows the results (src/results.js) */
-const WATCH={phase:null, trace:[], ghost:null};
+const WATCH={phase:null, trace:[], ghost:null, hits:[], bump:null};
 function matchWatch(){
   const ph=Sim.phase, kind=CODE&&CODE.kind==="Autonomous"?"Autonomous":"TeleOp", P=PERIOD[kind];
   const practice=$("#practice").checked&&!Online.inMatch(), live=Match.live();
@@ -328,15 +328,20 @@ function matchWatch(){
   const was=WATCH.phase; WATCH.phase=ph;
   const meta0={robot:CAD&&CAD.name, opmode:CODE&&CODE.opmode, period:kind, skill:Online.inMatch()?"online":live?$("#matchSkill").value:"solo"};
   if(ph==="running"&&was!=="running"){
-    WATCH.trace=[];
+    WATCH.trace=[]; WATCH.hits=[]; WATCH.bump=null;
     // race your best: the ghost of the best run with this robot, OpMode, period and opponents
     const g=$("#ghostOn"); WATCH.ghost=g&&g.checked&&!Online.inMatch()?ghostRead(store.get(bestKey(meta0)+".ghost",null)):null;
   }
-  if(ph==="running") ghostRecord(WATCH.trace,Sim.t,Sim.chassis);
+  if(ph==="running"){
+    ghostRecord(WATCH.trace,Sim.t,Sim.chassis);
+    // each time the robot comes up against something, once per contact
+    if(Sim.bump&&Sim.bump!==WATCH.bump) WATCH.hits.push({t:+Sim.t.toFixed(1), what:Sim.bump});
+    WATCH.bump=Sim.bump||null;
+  }
   if(ph==="running"&&was!=="running"&&!Recorder.on&&Recorder.wantsAuto()&&!Recorder.start(true)) $("#cadStatus").textContent=Recorder.why||"";
   if(was==="running"&&ph!=="running"){
     if(!final) Sounds.play("stop");
-    const meta=Object.assign({trace:WATCH.trace},meta0);
+    const meta=Object.assign({trace:WATCH.trace, hits:WATCH.hits},meta0);
     const al=Online.inMatch()&&Online.myAl()?Online.myAl():Shots.alliance;
     const auto=Recorder.on&&Recorder.auto;
     const after=()=>{ if(final&&S) Results.show(S,al,meta); else if(Recorder.url&&auto) Recorder.show(); };

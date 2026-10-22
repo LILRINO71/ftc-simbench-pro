@@ -53,6 +53,22 @@ function ghostAt(trace,t){
   let dh=b[3]-a[3]; dh=Math.atan2(Math.sin(dh),Math.cos(dh));
   return {x:a[1]+(b[1]-a[1])*k, y:a[2]+(b[2]-a[2])*k, h:a[3]+dh*k};
 }
+/* What the run was like, from its trace and the times it hit something ([{t, what}]):
+   distance (m), top speed (m/s), time standing still (s), when it last moved (s), the hits
+   (each thing once, with how many times and the first time) */
+function runReport(trace,hits,len){
+  const R={dist:0, top:0, still:0, lastMove:0, hits:[], len:len||0};
+  for(let i=1;i<(trace||[]).length;i++){
+    const a=trace[i-1], b=trace[i], dt=b[0]-a[0]; if(!(dt>0)) continue;
+    const d=Math.hypot(b[1]-a[1],b[2]-a[2]), turn=Math.abs(Math.atan2(Math.sin(b[3]-a[3]),Math.cos(b[3]-a[3])));
+    R.dist+=d; R.top=Math.max(R.top,d/dt);
+    if(d/dt<0.03&&turn/dt<0.05) R.still+=dt; else R.lastMove=b[0];
+  }
+  const by=new Map();
+  for(const h of hits||[]){ const k=String(h.what||"something"); const e=by.get(k); if(e) e.n++; else by.set(k,{what:k, n:1, t:h.t}); }
+  R.hits=[...by.values()].sort((a,b)=>a.t-b.t);
+  return R;
+}
 /* a stored trace, or null when it isn't one */
 function ghostRead(s){
   try{ const g=JSON.parse(s); return Array.isArray(g)&&g.length>1&&g.every(p=>Array.isArray(p)&&p.length===4&&p.every(Number.isFinite))?g:null; }catch(e){ return null; }
@@ -66,6 +82,13 @@ const Results={
     $("#resultsReplay").addEventListener("click",()=>{ this.hide(); Recorder.show(); });
   },
   hide(){ const p=$("#resultsPanel"); if(p) p.hidden=true; },
+  reportHtml(R,period){
+    const ft=m=>(m/0.3048).toFixed(0)+" ft", sec=s=>s.toFixed(1)+" s";
+    const rows=[["Driven",ft(R.dist)],["Top speed",(R.top/0.3048).toFixed(1)+" ft/s"],["Standing still",sec(R.still)]];
+    if(period==="Autonomous") rows.push(["Last moved at",sec(R.lastMove)+(R.len?" of "+R.len:"")]);
+    const hit=R.hits.length?R.hits.map(h=>esc(h.what)+(h.n>1?" ×"+h.n:"")+" ("+sec(h.t)+")").join(", "):"nothing";
+    return `<div class="rs-rep">${rows.map(r=>`<span><small>${r[0]}</small><b>${r[1]}</b></span>`).join("")}</div><p class="rs-hits${R.hits.length?" bad":""}">Hit: ${hit}</p>`;
+  },
   /* the final buzzer: S is the score, al the user's alliance */
   show(S,al,meta){
     const p=$("#resultsPanel"); if(!p||!S) return;
@@ -78,6 +101,8 @@ const Results={
       resultRows(S).map(r=>`<tr class="${r.total?"tot":""}"><td>${esc(r.label)}</td><td>${r.red}</td><td>${r.blue}</td></tr>`).join("");
     $("#resultsBest").innerHTML=B.isNew&&B.prev?`<b>New personal best: ${mine.total}</b> (was ${B.prev.score})`
       :B.isNew?`<b>First score on the board: ${mine.total}</b>`:`Your best here: <b>${B.best.score}</b>${B.best.when?" ("+esc(B.best.when)+")":""}`;
+    const rep=meta&&meta.trace?runReport(meta.trace,meta.hits,meta.period==="Autonomous"?30:120):null;
+    $("#resultsReport").innerHTML=rep?this.reportHtml(rep,meta.period):"";
     $("#resultsReplay").hidden=!Recorder.url;
     p.hidden=false;
   },

@@ -151,3 +151,19 @@ test('ghost: ten samples a second, the pose between them, the heading the short 
   const long = []; for (let t = 0; t < 200; t += 0.1) G.ghostRecord(long, t, { x: 0, y: 0, h: 0 });
   assert.equal(long.length, G.GHOST_MAX, 'capped at a match and a bit');
 });
+
+const RR = load('results.js', ['runReport']);
+test('run report: distance, top speed, time standing still, when it last moved, and what it hit', () => {
+  // 1 m/s for 2 s along x, then 3 s still
+  const tr = [];
+  for (let i = 0; i <= 50; i++) { const t = i / 10; tr.push([t, Math.min(t, 2), 0, 0]); }
+  const R = RR.runReport(tr, [{ t: 2.1, what: 'the red wall' }, { t: 2.4, what: 'the red wall' }, { t: 1.2, what: 'HIVE leg' }], 30);
+  assert.ok(Math.abs(R.dist - 2) < 1e-9 && Math.abs(R.top - 1) < 1e-9);
+  assert.ok(Math.abs(R.still - 3) < 1e-6, 'still ' + R.still);
+  assert.ok(Math.abs(R.lastMove - 2) < 1e-9);
+  assert.deepEqual(R.hits.map((h) => [h.what, h.n, h.t]), [['HIVE leg', 1, 1.2], ['the red wall', 2, 2.1]], 'each thing once, in order of first hit');
+  // turning in place is moving
+  const spin = [[0, 0, 0, 0], [0.1, 0, 0, 0.3], [0.2, 0, 0, 0.6]];
+  assert.equal(RR.runReport(spin, [], 30).still, 0);
+  assert.deepEqual(RR.runReport(null, null, 0), { dist: 0, top: 0, still: 0, lastMove: 0, hits: [], len: 0 });
+});

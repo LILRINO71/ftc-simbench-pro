@@ -1020,3 +1020,11 @@ button.rmbtn{color:var(--label-3);} button.rmbtn:hover{color:var(--fail);}
 /* the start picker beside Reset pose */
 .start-sel{font:inherit; font-family:var(--body, inherit); font-size:11.5px; color:var(--label-2); background:var(--fill-3); border:0; border-radius:7px; padding:3px 6px; pointer-events:auto; cursor:pointer;}
 @media (max-width:760px){ .start-sel{max-width:96px;} }
+
+/* the run report on the results card (src/results.js runReport) */
+.rs-rep{display:grid; grid-template-columns:repeat(auto-fit,minmax(80px,1fr)); gap:6px; margin-top:10px;}
+.rs-rep span{display:flex; flex-direction:column; padding:6px 8px; border-radius:8px; background:var(--card-2);}
+.rs-rep small{font-size:10.5px; color:var(--label-3);}
+.rs-rep b{font-size:14px; font-variant-numeric:tabular-nums;}
+.rs-hits{margin:6px 0 0; font-size:12px; color:var(--label-2);}
+.rs-hits.bad{color:var(--fail);}
