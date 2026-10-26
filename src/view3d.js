@@ -44,7 +44,25 @@ const REAL_MAT={
   belt:       {m:0.0,  r:0.92, e:0.25},
   clear:      {m:0.0,  r:0.08, e:1.0}
 };
+/* A solid's outline (EdgesGeometry, 30°) in its own CAD frame, kept for it: a rebuild
+   (a joint edit, a rig change, the turret slider) only copies it. Hashing every edge
+   again was most of a rebuild. Weak, so a saved workspace never carries it. */
+const SOLID_EDGES=new WeakMap();
+function solidEdges(s){
+  const t=s.tri, E=SOLID_EDGES.get(s);
+  if(E&&E.tri===t&&E.n===t.pos.length) return E.pos;
+  const g=new THREE.BufferGeometry(); g.setAttribute("position",new THREE.Float32BufferAttribute(t.pos,3));
+  const e=new THREE.EdgesGeometry(g,30), pos=e.getAttribute("position").array;
+  g.dispose(); e.dispose();
+  SOLID_EDGES.set(s,{tri:t, n:t.pos.length, pos});
+  return pos;
+}
+/* ambient occlusion is drawn at this fraction of the canvas each way (View.makePost) */
+const AO_SCALE=0.5;
+/* with nothing moving, one frame in this many is drawn (View.skipDraw) */
+const IDLE_EVERY=4;
 const View={
+  retired:[],                       // worlds a rebuild replaced, disposed after the next draw (load())
   init(el){
     this.el=el;
     this.scene=new THREE.Scene();
@@ -100,6 +118,12 @@ const View={
         const ao=new A.GTAOPass(this.scene,cam,1,1); ao.output=A.GTAOPass.OUTPUT.Default; ao.blendIntensity=1;
         ao.updateGtaoMaterial({radius:0.06, distanceExponent:1, thickness:0.02, scale:1, samples:12, distanceFallOff:1, screenSpaceRadius:false});
         ao.updatePdMaterial({lumaPhi:10, depthPhi:2, normalPhi:3, radius:4, radiusExponent:1, rings:2, samples:16});
+        // the occlusion at half the size each way: it is soft anyway, and its normal pass,
+        // its 12 samples and its denoise were 2/3 of the frame at full size (the blend
+        // scales it back up)
+        const aoSize=ao.setSize.bind(ao);
+        ao.setSize=(w,h)=>aoSize(Math.max(1,Math.round(w*AO_SCALE)),Math.max(1,Math.round(h*AO_SCALE)));
+        ao.setSize(ao.width,ao.height);
         c.addPass(ao);
         const smaa=new A.SMAAPass(); c.addPass(smaa);
         c.addPass(new A.OutputPass());
@@ -108,13 +132,32 @@ const View={
       return {mk, field:mk(this.cam), cad:null};
     }catch(e){ console.warn("bench: post-processing off",e); return null; }
   },
-  /* draw the scene through a camera: with the passes when they're on, plain when not */
+  /* draw the scene through a camera: with the passes when they're on, plain when not;
+     false when this frame is skipped (skipDraw), so nothing may be drawn over it */
   draw(cam){
+    if(this.skipDraw(cam)) return false;
     const P=this.post;
-    if(!P||!this.postOn||this.lowGfx){ this.ren.render(this.scene,cam); return; }
-    let S=cam===this.cam?P.field:P.cad;
-    if(!S||S.cam!==cam){ S=P.mk(cam); if(cam===this.cam) P.field=S; else P.cad=S; S.c.setSize(this.el.clientWidth||1,this.el.clientHeight||1); }
-    S.c.render();
+    if(!P||!this.postOn||this.lowGfx) this.ren.render(this.scene,cam);
+    else{
+      let S=cam===this.cam?P.field:P.cad;
+      if(!S||S.cam!==cam){ S=P.mk(cam); if(cam===this.cam) P.field=S; else P.cad=S; S.c.setSize(this.el.clientWidth||1,this.el.clientHeight||1); }
+      S.c.render();
+    }
+    while(this.retired.length) this.dispose(this.retired.pop());
+    return true;
+  },
+  /* While nothing moves (this.still, set by the main loop in src/app.js) and the
+     camera sits where it did, the canvas already shows this frame: draw one frame
+     in IDLE_EVERY, so the GPU rests and the page around it stays quick, and
+     anything that changes without a hand on the page shows within ~70 ms. */
+  skipDraw(cam){
+    cam.updateMatrixWorld();
+    const k=this.camKey||(this.camKey=new Float64Array(33)), w=cam.matrixWorld.elements, p=cam.projectionMatrix.elements;
+    let same=k[32]===cam.id;
+    for(let i=0;i<16;i++){ if(k[i]!==w[i]){ same=false; k[i]=w[i]; } if(k[16+i]!==p[i]){ same=false; k[16+i]=p[i]; } }
+    k[32]=cam.id;
+    if(!this.still||!same){ this.idleN=0; return false; }
+    return (this.idleN=(this.idleN||0)+1)%IDLE_EVERY!==0;
   },
   /* The machine, as the browser describes it: memory, cores, and the GPU's own
      name (asked of a throwaway WebGL context, so the real renderer can be built
@@ -180,6 +223,7 @@ const View={
   setCursor(k){ this.ren.domElement.style.cursor=k; },
   resize(){ const w=this.el.clientWidth,h=this.el.clientHeight; if(!w||!h) return;
     this.cam.aspect=w/h; this.cam.updateProjectionMatrix(); this.ren.setSize(w,h,false);
+    if(this.camKey) this.camKey[32]=-1;                 // a new size clears the canvas: draw the next frame
     const P=this.post; if(P) for(const S of [P.field,P.cad]) if(S) S.c.setSize(w,h); },
   ndc(e){ const r=this.ren.domElement.getBoundingClientRect();
     return new THREE.Vector2(((e.clientX-r.left)/r.width)*2-1, -((e.clientY-r.top)/r.height)*2+1); },
@@ -209,7 +253,10 @@ const View={
     // another robot: the last one's exact surfaces go, GPU buffers and all, or a
     // hide click would redraw the old robot over this one
     if(this.exact&&this.exact.cad!==cad){ this.exact=null; this.exactG=[]; this.dropShapes(); this.shapeRes=null; this.spinWheels=[]; this.instHolder=null; }
-    while(this.world.children.length){ const o=this.world.children[0]; this.world.remove(o); this.dispose(o); }
+    // the old world is let go once the new one has drawn (draw()): its materials keep their
+    // shader programs alive till then, so the new world's same materials reuse them instead
+    // of compiling all of them again, a stall of a second or more on every joint edit
+    while(this.world.children.length){ const o=this.world.children[0]; this.world.remove(o); this.retired.push(o); }
     if(this.cad&&this.cad!==cad) this.dropColourMats();
     const bb=cad.bbox;
     // A canonical CAD (src/frame.js) already has its origin at the drivetrain
@@ -730,13 +777,13 @@ const View={
       for(const s of list){
         if(!s.tri) s.tri=solidTriangles(s.pts)||{pos:[],nor:[]};
         const mk=s.color&&s.keepTri?"rgb:"+s.color.map(v=>Math.round(v*255)).join(","):(s.kind||"metal");
-        (byKind[mk]=byKind[mk]||[]).push(s.tri);
+        (byKind[mk]=byKind[mk]||[]).push(s);
       }
       const g=new THREE.Group();
       for(const k in byKind){
-        let n=0; for(const t of byKind[k]) n+=t.pos.length; if(!n) continue;
+        let n=0; for(const s of byKind[k]) n+=s.tri.pos.length; if(!n) continue;
         const pos=new Float32Array(n), nor=new Float32Array(n); let o=0;
-        for(const t of byKind[k]) for(let i=0;i<t.pos.length;i+=3){
+        for(const {tri:t} of byKind[k]) for(let i=0;i<t.pos.length;i+=3){
           pos[o]=t.pos[i]-this.c[0]; pos[o+1]=t.pos[i+2]-this.c[2]; pos[o+2]=-(t.pos[i+1]-this.c[1]);
           nor[o]=t.nor[i]; nor[o+1]=t.nor[i+2]; nor[o+2]=-t.nor[i+1]; o+=3;
         }
@@ -748,7 +795,12 @@ const View={
         // the edge lines are a look, not the robot: EdgesGeometry hashes every edge of the
         // group (hundreds of megabytes on a dense Onshape export), so a huge group goes without
         if(n/9<=VIEW_EDGE_TRIS){
-          const lines=new THREE.LineSegments(new THREE.EdgesGeometry(geo,30),this.edgeMat());
+          const es=byKind[k].map(solidEdges);
+          let m=0; for(const e of es) m+=e.length;
+          const ep=new Float32Array(m); o=0;
+          for(const e of es) for(let i=0;i<e.length;i+=3){ ep[o]=e[i]-this.c[0]; ep[o+1]=e[i+2]-this.c[2]; ep[o+2]=-(e[i+1]-this.c[1]); o+=3; }
+          const eg=new THREE.BufferGeometry(); eg.setAttribute("position",new THREE.BufferAttribute(ep,3));
+          const lines=new THREE.LineSegments(eg,this.edgeMat());
           lines.userData.edges=true; lines.visible=this.edgesOn!==false; g.add(lines);
         }
       }
@@ -948,8 +1000,14 @@ const View={
      foam's fine grain, and a soft dark seam where two tiles meet (drawn into the
      texture, so it doesn't shimmer the way a thin line does) */
   tileTexture(seams,H){
+    // the same tiles on every rebuild (a joint edit, a rig change, the turret slider all
+    // build a new world): made once, uploaded once, and dispose() leaves it be
+    const key=H+":"+seams.join(",");
+    if(this._tiles&&this._tiles.key===key) return this._tiles.t;
+    if(this._tiles) this._tiles.t.dispose();
     const N=2048, cv=document.createElement("canvas"); cv.width=cv.height=N;
-    const c=cv.getContext("2d"), k=N/(2*H), at=v=>(v+H)*k;
+    // read back once below: a canvas kept in memory does that without a trip to the GPU
+    const c=cv.getContext("2d",{willReadFrequently:true}), k=N/(2*H), at=v=>(v+H)*k;
     const cuts=[-H].concat(seams.slice().sort((a,b)=>a-b),[H]);
     let seed=7; const rnd=()=>((seed=(seed*16807)%2147483647)/2147483647);
     for(let i=0;i<cuts.length-1;i++) for(let j=0;j<cuts.length-1;j++){
@@ -963,6 +1021,7 @@ const View={
     for(const v of seams){ c.beginPath(); c.moveTo(at(v),0); c.lineTo(at(v),N); c.moveTo(0,at(v)); c.lineTo(N,at(v)); c.stroke(); }
     const t=srgbTex(new THREE.CanvasTexture(cv));
     t.anisotropy=this.ren?Math.min(8,this.ren.capabilities.getMaxAnisotropy()):1;
+    t.userData.shared=true; this._tiles={key,t};
     return t;
   },
   flat(c,op){ return new THREE.MeshBasicMaterial({color:c, transparent:op<1, opacity:op, depthWrite:op>=1,
@@ -1016,7 +1075,7 @@ const View={
     obj.traverse(o=>{
       if(o.geometry&&!o.geometry.userData.shared) o.geometry.dispose();
       const ms=Array.isArray(o.material)?o.material:(o.material?[o.material]:[]);
-      for(const m of ms) if(!m.userData.shared){ if(m.map) m.map.dispose(); m.dispose(); }
+      for(const m of ms) if(!m.userData.shared){ if(m.map&&!m.map.userData.shared) m.map.dispose(); m.dispose(); }
     });
   },
   label(g,text,x,y,rot,w,color){
@@ -1119,6 +1178,50 @@ const View={
       const geo=new THREE.BufferGeometry().setFromPoints([q[0],q[1],q[2],q[0],q[2],q[3]].map(p=>this.fv(p)));
       geo.computeVertexNormals();
       const m=new THREE.Mesh(geo,this.mat(FIELD_COL.logo,{side:THREE.DoubleSide,roughness:0.8})); m.castShadow=true; g.add(m);
+    }
+    this.mergeStatic(g);
+  },
+  /* The field's fixed parts, one mesh per material: the frame's rods, the posts, the
+     tape. ~100 meshes were ~100 draw calls in each pass (the shadow map, the picture,
+     the occlusion's normals); the same triangles in ~20 draw just as they did. What
+     moves or hides (the staged balls), what is see-through (sorted back to front)
+     and anything with children stays as it is. */
+  mergeStatic(g){
+    const groups=new Map();
+    for(const o of g.children){
+      const m=o.material, geo=o.geometry;
+      if(!o.isMesh||o.isInstancedMesh||o.children.length||!o.visible||o.userData.staged||!m||Array.isArray(m)||m.transparent) continue;
+      // (a box's or a cylinder's groups only matter with a list of materials)
+      if(!geo||!geo.attributes.position||!geo.attributes.normal||geo.morphAttributes.position) continue;
+      const names=Object.keys(geo.attributes).sort().join(",");
+      if(!/^(normal,position|normal,position,uv)$/.test(names)) continue;
+      const key=m.uuid+"|"+o.castShadow+"|"+o.receiveShadow+"|"+o.renderOrder+"|"+names;
+      (groups.get(key)||groups.set(key,[]).get(key)).push(o);
+    }
+    for(const list of groups.values()){
+      if(list.length<2) continue;
+      const uv=!!list[0].geometry.attributes.uv;
+      let n=0; for(const o of list){ const geo=o.geometry; n+=geo.index?geo.index.count:geo.attributes.position.count; }
+      const pos=new Float32Array(n*3), nor=new Float32Array(n*3), tex=uv?new Float32Array(n*2):null;
+      const v=new THREE.Vector3(), nm=new THREE.Matrix3(); let k=0;
+      for(const o of list){
+        o.updateMatrix(); nm.getNormalMatrix(o.matrix);
+        const geo=o.geometry, P=geo.attributes.position, N=geo.attributes.normal, T=geo.attributes.uv, I=geo.index;
+        const cnt=I?I.count:P.count;
+        for(let i=0;i<cnt;i++,k++){
+          const j=I?I.getX(i):i;
+          v.fromBufferAttribute(P,j).applyMatrix4(o.matrix); pos[k*3]=v.x; pos[k*3+1]=v.y; pos[k*3+2]=v.z;
+          v.fromBufferAttribute(N,j).applyMatrix3(nm).normalize(); nor[k*3]=v.x; nor[k*3+1]=v.y; nor[k*3+2]=v.z;
+          if(tex){ tex[k*2]=T.getX(j); tex[k*2+1]=T.getY(j); }
+        }
+        g.remove(o); if(!geo.userData.shared) geo.dispose();
+      }
+      const geo=new THREE.BufferGeometry();
+      geo.setAttribute("position",new THREE.BufferAttribute(pos,3)); geo.setAttribute("normal",new THREE.BufferAttribute(nor,3));
+      if(tex) geo.setAttribute("uv",new THREE.BufferAttribute(tex,2));
+      const m=new THREE.Mesh(geo,list[0].material);
+      m.castShadow=list[0].castShadow; m.receiveShadow=list[0].receiveShadow; m.renderOrder=list[0].renderOrder;
+      g.add(m);
     }
   },
 
