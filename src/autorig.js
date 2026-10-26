@@ -216,16 +216,62 @@ const {autoRig}=(function(){
       // what the flood couldn't give out (only reachable through a case) goes to a claimant that may have it
       for(let i=0;i<n;i++) if(comp(i)===c&&label[i]==null){ const j=js.find(x=>!bodyOf[x.id].has(i)); if(j) label[i]=j.id; }
     }
+    /* A slide's moving stage is never the frame. When its output's body is
+       the frame's, something drawn touching joined them (on 7832's robot the
+       intake carriage meets the frame through a beam 0.7 mm off a frame part
+       and a linkage rod drawn into one), and the slide carried only its own
+       rails. Cut that body where it holds together least, between the moving
+       stage and its fixed rails: a minimum cut over the contacts, each worth
+       how far its parts reach into each other (e.w). The stage's side rides
+       the slide, as long as the frame keeps most of the body. */
+    const capOf=new Map(); for(const e of G.edges) if(joins(e)) capOf.set(key(e.a,e.b),(capOf.get(key(e.a,e.b))||0)+e.w);
+    function stageSide(src,sink){
+      const flow=new Map(), res=(a,b)=>(capOf.get(key(a,b))||0)-(flow.get(a+">"+b)||0)+(flow.get(b+">"+a)||0);
+      const reach=()=>{ const prev=new Map(); src.forEach(i=>prev.set(i,-1)); const q=src.slice();
+        for(let h=0;h<q.length;h++){ const i=q[h]; if(sink.has(i)) return {prev,end:i};
+          for(const k of link[i]) if(!prev.has(k)&&res(i,k)>1e-9){ prev.set(k,i); q.push(k); } }
+        return {prev,end:-1}; };
+      for(let it=0;it<500;it++){
+        const {prev,end}=reach(); if(end<0) return new Set(prev.keys());
+        let f=Infinity; for(let v=end;prev.get(v)>=0;v=prev.get(v)) f=Math.min(f,res(prev.get(v),v));
+        for(let v=end;prev.get(v)>=0;v=prev.get(v)){ const u=prev.get(v), back=flow.get(v+">"+u)||0, t=Math.min(back,f);
+          if(t) flow.set(v+">"+u,back-t); if(f>t) flow.set(u+">"+v,(flow.get(u+">"+v)||0)+f-t); }
+      }
+      return null;
+    }
+    for(const j of joints){
+      if(j.kind!=="linear"||!seeds[j.id].length||+compOf(seeds[j.id])!==frame) continue;
+      const sink=new Set((extra[j.id].fixed||[]).concat(drv).filter(i=>comp(i)===frame&&!seeds[j.id].includes(i)));
+      if(!sink.size) continue;
+      const side=stageSide(seeds[j.id],sink); if(!side) continue;
+      const took=[...side].filter(i=>label[i]==null&&!seeds[j.id].includes(i));
+      if(!took.length||2*side.size>=size.get(frame)) continue;
+      for(const i of took) label[i]=j.id;
+      const at=new Set(); for(const i of side) for(const k of link[i]) if(!side.has(k)) at.add(S[k].name||"a part");
+      if(at.size) review.push("\""+extra[j.id].label+"\" was drawn touching the frame; it was cut free where it meets "+
+        [...at].slice(0,4).map(s=>"\""+s+"\"").join(", ")+(at.size>4?" and "+(at.size-4)+" more":"")+". Check what rides it in the CAD view.");
+    }
     if(shared.length) review.push("Joints sharing one rigid body were split by what's nearest each one's output: "+
       shared.map(g=>g.map(id=>"\""+extra[id].label+"\"").join(" / ")).join("; ")+". Check those in the CAD view.");
     for(const j of joints) for(const i of seeds[j.id]) label[i]=j.id;     // a joint's own output is always its
-    // parents: the joint most of a joint's own case (or fixed stage) rides
+    // parents: the joint a joint's own case and mounts (or fixed stage) ride.
+    // Any of them on a joint is enough: the rest are on the frame only because
+    // they were drawn touching it. On 7832's robot the outtake claw servo is
+    // mounted on the wrist's U-channel, and the intake pivot servo's case sits
+    // on the servo arm that swings it; by a majority both rode the frame
+    const caseOf=j=>{ const x=extra[j.id]; return x.body&&x.body.length?x.body:x.fixed&&x.fixed.length?x.fixed:[]; };
+    function parentOf(j){
+      const on=caseOf(j).filter(i=>label[i]&&label[i]!==j.id);
+      return on.length?majority(label,on):"chassis";
+    }
     for(const j of joints){
       const x=extra[j.id]; if(x.parentFixed){ j.parent=x.parentFixed; continue; }
-      const base=x.body&&x.body.length?x.body:x.fixed&&x.fixed.length?x.fixed:[];
-      const p=base.length?majority(label,base):"chassis";
+      const p=parentOf(j);
       j.parent=p&&p!==j.id&&p!=="chassis"?p:"chassis";
     }
+    // a gear or a pulley on the leader's case hangs where the leader does
+    for(const j of joints){ if(!j.couple||!j.couple.to||extra[j.id].parentFixed) continue;
+      const L=joints.find(k=>k.id===j.couple.to); if(L&&extra[j.id].body===extra[L.id].body) j.parent=L.parent; }
     for(const j of joints){ const seen=new Set([j.id]); let p=j.parent;
       while(p&&p!=="chassis"){ if(seen.has(p)){ j.parent="chassis"; break; } seen.add(p); p=(joints.find(k=>k.id===p)||{}).parent; } }
     const final={label, members:{}};
