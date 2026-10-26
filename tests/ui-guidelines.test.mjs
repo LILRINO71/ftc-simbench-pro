@@ -42,6 +42,12 @@ test('placeholders end with an ellipsis', () => {
 });
 
 test('the theme colour follows the colour scheme', () => {
-  assert.match(build, /theme-color" content="#F5F5F7" media="\(prefers-color-scheme: light\)"/);
-  assert.match(build, /theme-color" content="#000000" media="\(prefers-color-scheme: dark\)"/);
+  assert.match(build, /theme-color" content="#E9ECF1" media="\(prefers-color-scheme: light\)"/);
+  assert.match(build, /theme-color" content="#0B0D10" media="\(prefers-color-scheme: dark\)"/);
+});
+
+test('the brand opens the team intro, and the intro names team 7831 Titan', () => {
+  assert.match(html, /<button class="brand" type="button" popovertarget="aboutPop"/);
+  assert.match(html, /<div class="about" id="aboutPop" popover role="dialog" aria-labelledby="aboutTitle">/);
+  assert.match(html, /FTC team 7831, Titan/);
 });

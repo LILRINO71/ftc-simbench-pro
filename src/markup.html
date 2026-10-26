@@ -170,13 +170,33 @@
 
   <!-- ===================== the top bar: Driver Station ===================== -->
   <header class="topbar panel-glass">
-    <div class="brand">
+    <button class="brand" type="button" popovertarget="aboutPop" aria-haspopup="dialog" title="About the team behind SimBench">
       <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
         <path class="bm-hex" d="M16 2.6 27.6 9.3v13.4L16 29.4 4.4 22.7V9.3Z"/>
         <path class="bm-arc" d="M9.3 21c2-6.4 8.2-9.8 14-8"/>
         <circle class="bm-dot" cx="23.4" cy="13" r="2.2"/>
       </svg>
-      <div class="brand-text" translate="no"><b>SimBench</b><span>BIOBUZZ 2026–27</span></div>
+      <span class="brand-text" translate="no"><b>SimBench</b><span>by <em>7831 Titan</em> · BIOBUZZ 2026–27</span></span>
+    </button>
+    <div class="about" id="aboutPop" popover role="dialog" aria-labelledby="aboutTitle">
+      <button class="about-close" type="button" popovertarget="aboutPop" popovertargetaction="hide" aria-label="Close">×</button>
+      <div class="about-hero">
+        <span class="about-num" translate="no">7831</span>
+        <div><h2 id="aboutTitle" translate="no">Team Titan</h2><p>FIRST Tech Challenge · Romoland, California</p></div>
+      </div>
+      <div class="about-body">
+        <p>We’re FTC team 7831, Titan, from Heritage High School in Romoland, California. We’ve competed since our rookie season in 2013, and we play in the SoCal League F2.</p>
+        <p>We built SimBench so any team can drive its own CAD and its own Java on the field before the robot is even finished: real physics, the real field, and the math behind every number.</p>
+        <ul class="about-facts">
+          <li><b>2013</b><small>Rookie year</small></li>
+          <li><b>F2</b><small>SoCal League</small></li>
+          <li><b>2nd</b><small>Motivate Award, SoCal ILT4 2024–25</small></li>
+        </ul>
+      </div>
+      <div class="about-links">
+        <a href="https://ftc-events.firstinspires.org/2025/team/7831" target="_blank" rel="noopener">FIRST team page ↗</a>
+        <a href="https://ftcscout.org/teams/7831" target="_blank" rel="noopener">FTCScout ↗</a>
+      </div>
     </div>
 
     <!-- the Driver Station proper, centred: the OpMode, INIT / START / STOP, the clock -->
