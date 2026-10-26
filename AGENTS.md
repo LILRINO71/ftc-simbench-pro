@@ -37,6 +37,7 @@ Read this file before you start, and again before you push.
 | --- | --- | --- |
 | Claude | `src/match.js` (new), `src/field.js`, `src/shots.js`, `src/sim.js` (the match), `src/onshapelink.js` (new), `src/robotcheck.js` (new), `src/markup.html` + `src/styles.css` (Robot check section), `src/jointspec.js`, `src/autorig.js`, `src/cadview.js` (joint editor), `src/app.js` (joints panel), `src/view3d.js` (joint preview), `src/roadrunner.js`, `src/net.js` (new), `src/robotlite.js` (new), `src/drivetrain.js` + `src/frame.js` + `src/step.js` (wheels built from many parts), `tools/build.mjs` (module order, link preview), `src/view3d.js` (match robots, light copy), `src/app.js` + `src/markup.html` + `src/styles.css` (online panel) | the joint finder and editor; online matches (players on different computers in one match) |
 | Claude | `src/meshfiles.js` (mesh thinning, glTF reading), `src/urdf.js` (shape reading), `src/view3d.js` + `src/app.js` (frame cost), `tests/meshfiles-speed.test.mjs` (new) | faster and exact robot import from an export zip, less lag drawing big robots |
+| Claude | `src/view3d.js` (post passes, shadow map), `src/app.js` (main loop, idle frames), `tests/frame-cost.test.mjs` (new) | a smoother view: cheaper ambient occlusion, no full-rate redraws while nothing moves (branch `claude/upbeat-ride-o1ic7x`) |
 
 Done and released: drive direction, the 25f54d3 sim and parser fixes,
 `autoMap`, Onshape mates (`src/mates.js`) and the pasted Onshape link (`src/onshapelink.js`,
