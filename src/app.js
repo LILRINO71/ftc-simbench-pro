@@ -2578,13 +2578,29 @@ const Perf={ema:16.7, t:0, pr:Math.min(devicePixelRatio||1,2), downAt:-1e9, quie
   },
   set(){ if(View.ren){ View.ren.setPixelRatio(this.pr); View.resize(); } }
 };
+/* Still: the sim isn't running, no hand on the mouse, the keys or a controller for
+   1.5 s, no match online, no clip recording, and the robot where it was. The view then
+   draws one frame in four (View.skipDraw), and the watchdog above isn't told about
+   those frames: an idle second says nothing about how fast a moving one draws. */
+const Still={at:-1e9, key:"",
+  poke(){ this.at=performance.now(); },
+  init(){ for(const ev of ["pointerdown","pointermove","wheel","keydown","keyup","touchstart","resize"])
+    addEventListener(ev,()=>this.poke(),{capture:true,passive:true}); },
+  now(now){
+    const c=Sim.chassis, key=(c?c.x+","+c.y+","+c.h:"")+"|"+View.loadN+"|"+(Field.ok?Field.version:"");
+    if(key!==this.key){ this.key=key; this.at=now; }
+    return now-this.at>1500&&Sim.phase!=="running"&&Online.state==="off"&&!Recorder.on&&!/:[12]/.test(Pads.sig);
+  }
+};
 /* innerHTML only when the markup differs: an identical string still costs a layout */
 function setIfChanged(el,html){ if(el&&el.__html!==html){ el.__html=html; el.innerHTML=html; } }
 /* on screen: in the page, not hidden, and laid out (a folded section or a closed tab has no box) */
 function shown(sel){ const el=typeof sel==="string"?document.querySelector(sel):sel; return !!(el&&el.getClientRects().length); }
 function guarded(fn){ try{ fn(); }catch(e){ if(!loopErr){ loopErr=e; console.error("bench:",e); } } }
 function frame(now){
-  Perf.frame(now-frameAt,now); frameAt=performance.now();
+  const still=Still.now(now);
+  if(!still&&!View.still) Perf.frame(now-frameAt,now);
+  frameAt=performance.now();
   const dt=Math.min(0.1,(now-last)/1000); last=now;
   guarded(()=>{
     Pads.poll();
@@ -2592,7 +2608,7 @@ function frame(now){
     stepFixed(8);
     NetUI.tick();
     View.setGhost(WATCH.ghost&&Sim.phase==="running"?ghostAt(WATCH.ghost,Sim.t):null, Sim.footprint);
-    View.update(); View.render(); Recorder.frame(REC_HUD); Pads.mirror();
+    View.still=still; View.update(); View.render(); Recorder.frame(REC_HUD); Pads.mirror();
   });
   slowAcc+=dt;
   if(slowAcc>=0.05){ slowAcc=0; guarded(()=>{
@@ -3056,7 +3072,7 @@ function boot(){
   OPTS.substeps=View.tier.budget.substeps;          // the solver's substeps per 20 ms tick, by tier
   View.setView("iso");
   initTabs(); initCollapsibles(); initRails();
-  Editor.init(); Pads.init();
+  Editor.init(); Pads.init(); Still.init();
   initLibrary();
   // drag the robot anywhere on the field; it still can't pass through the HIVE or the walls
   View.onRobotDrag=p=>{
