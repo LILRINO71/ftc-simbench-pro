@@ -102,7 +102,8 @@ const favicon = 'data:image/svg+xml,' + encodeURIComponent(
 const page = `<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n` +
   `<meta name="viewport" content="width=device-width, initial-scale=1">\n` +
   `<meta name="color-scheme" content="dark light">\n` +
-  `<meta name="theme-color" content="#0F1012">\n` +
+  `<meta name="theme-color" content="#F5F5F7" media="(prefers-color-scheme: light)">\n` +
+  `<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">\n` +
   `<meta property="og:type" content="website">\n` +
   `<meta property="og:site_name" content="FTC SimBench Pro">\n` +
   `<meta property="og:title" content="FTC SimBench Pro: drive your real robot before it's built">\n` +
