@@ -4,6 +4,44 @@ The handoffs live here, the newest first. The two older ones below mention `rese
 `research/realcad`, `research_notes/` and `reports/`: those folders were removed on 2026-10-04 as
 unused (nothing in the build or the tests read them); the measurements they held stay in the text.
 
+## 2026-10-26: the joint finder's tree, scored against 7832's hand joints
+
+Branch `claude/laughing-johnson-xatdki`. The owner: importing a real robot without mates "doesn't
+work well". The default robot has both a STEP and the team's hand-made joints, so the finder
+(`autoRig`) can be scored on real CAD: each found joint is named after the hand joint whose parts it
+carries, then checked for its parent and for the parts it moves (its own and everything below it).
+
+### What was wrong, and what changed (`src/autorig.js`)
+
+- **Parents.** A joint hung from whatever most of its case and mounts rode, and a case drawn
+  touching the frame voted "frame". The outtake claw servo (mounted on the wrist's U-channel, its
+  case and frame just grazing a frame part) and the intake pivot servo (its case half on the servo arm
+  that swings it) both hung from the chassis: the claw stayed behind when the arm swung. Any part of
+  the case on a joint now decides; a gear or pulley on the leader's case hangs where the leader does.
+- **A slide stage inside the frame's body.** The intake carriage met the frame through a beam
+  0.7 mm off a frame part and a linkage rod drawn into one, so the slide's output was "the frame"
+  and the slide carried only its 18 rails and screws. A slide's moving stage is never the frame: the
+  body is now cut by a minimum cut over the contacts (worth `e.w`, how far parts reach into each
+  other) between the moving stage and its fixed rails. The stage's side rides the slide while the
+  frame keeps most of the body, and the review names the parts it was cut from.
+
+### Measured here
+
+- 7832: parents right 11/15 → 15/15; mean reach overlap with the hand joints 0.68 → 0.76; the
+  intake slide's reach 0.38 → 0.96. `tests/autorig-tree.test.mjs` (fails before).
+- `research/autorig/zoo/eval.mjs`: unchanged, 39/40 joints, 86/88 parts.
+- `research/realcad/run.mjs` (the 8 public STEPs): unchanged except FTC 8375's 2016 robot, whose
+  cap-ball lift now carries 60 parts, not 17: its fold-out forks and their servos, and probably
+  the hopper the forks rest on, which may belong to the frame. Its review line says to check it.
+- `npm test`: 797 green; `robotcheck-mutations` runs out of the default 2 GB heap in this
+  container before and after the change, and passes 14/14 with `--max-old-space-size=8192`.
+
+### Still open
+
+- The hand joints have two rods (`rod R`, `rod L`) and two-finger claws the finder doesn't make:
+  the rods ride the slide whole, and each claw's second finger is a one-part gear follower.
+- A STEP has no mates, so this stays a guess; the Onshape link and the URDF export zip are exact.
+
 ## 2026-10-09: review fixes, and what the Onshape link costs
 
 On main. A review of the 2026-10-08 online and tier commits, plus a look at the link route
