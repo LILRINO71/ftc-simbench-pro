@@ -1,40 +1,43 @@
 /* ============================================================
-   SimBench — one quiet system over a full-bleed field.
-   Light by default, dark when the system (or the switch) says so. Chrome is
-   glass (the top bar, the two side panels, the dock); content is quiet solid
-   cards. One accent colour (system blue) points at the next thing; green,
-   orange and red say how the robot is; the alliance reds and blues stay. Type
-   and whitespace carry the hierarchy, not boxes, borders or glow.
+   SimBench, made by FTC Team 7831 Titan — one quiet instrument over a full-bleed field.
+   Light by default, dark when the system (or the switch) says so. Chrome is solid
+   graphite or paper with a hairline edge (the top bar, the two side panels, the
+   dock); content is flat cards. One accent (Titan amber, from the hex in the logo)
+   points at the next thing; green, orange and red say how the robot is; the
+   alliance reds and blues stay. Type and whitespace carry the hierarchy.
    ============================================================ */
 :root{
   color-scheme:light;
   /* labels (one base colour at falling alpha, so they sit on anything) */
-  --label:#1D1D1F; --label-2:rgba(60,60,67,.62); --label-3:rgba(60,60,67,.36); --label-4:rgba(60,60,67,.18);
+  --label:#15171C; --label-2:rgba(21,23,28,.68); --label-3:rgba(21,23,28,.52); --label-4:rgba(21,23,28,.20);
   /* fills and separators */
-  --fill:rgba(120,120,128,.20); --fill-2:rgba(120,120,128,.16); --fill-3:rgba(118,118,128,.12); --fill-4:rgba(116,116,128,.08);
-  --sep:rgba(60,60,67,.22); --sep-2:rgba(60,60,67,.12);
+  --fill:rgba(21,23,28,.14); --fill-2:rgba(21,23,28,.10); --fill-3:rgba(21,23,28,.07); --fill-4:rgba(21,23,28,.045);
+  --sep:rgba(21,23,28,.16); --sep-2:rgba(21,23,28,.09);
   /* surfaces */
-  --bg:#F5F5F7; --card:#FFFFFF; --card-2:#F2F2F7; --card-3:#E9E9EE;
-  --glass:rgba(248,248,250,.74); --glass-edge:rgba(255,255,255,.65); --glass-rim:rgba(0,0,0,.07);
-  --viewport:#E2E5EA; --viewport-2:#FAFAFB;
-  /* the one accent, and the three states */
-  --accent:#007AFF; --accent-tx:#0066D6; --accent-ink:#FFFFFF; --accent-soft:rgba(0,122,255,.10); --accent-line:rgba(0,122,255,.35);
-  --pass:#1F9D45; --pass-soft:rgba(52,199,89,.14);
-  --warn:#C76A00; --warn-soft:rgba(255,149,0,.14);
-  --fail:#D93025; --fail-soft:rgba(255,59,48,.12);
-  --red:#FF3B30; --blue:#007AFF;
+  --bg:#E9ECF1; --card:#FFFFFF; --card-2:#F3F5F8; --card-3:#E6E9EE;
+  --glass:rgba(251,252,254,.86); --glass-edge:rgba(255,255,255,.9); --glass-rim:rgba(21,23,28,.10);
+  --viewport:#D9DEE5; --viewport-2:#F5F7FA;
+  /* the one accent, and the three states. Amber is a fill with dark ink on it;
+     --accent-tx and --focus are the darker amber that reads on paper. */
+  --accent:#F0A020; --accent-tx:#8F5300; --accent-ink:#1A1204; --accent-soft:rgba(240,160,32,.16); --accent-line:rgba(240,160,32,.55);
+  --focus:#8F5300;
+  --pass:#17803A; --pass-soft:rgba(23,128,58,.12);
+  --warn:#B25E00; --warn-soft:rgba(240,140,0,.14);
+  --fail:#C9271C; --fail-soft:rgba(201,39,28,.10);
+  --red:#E5352B; --blue:#1F6FEB;
   /* code */
-  --code-bg:#FFFFFF; --code-gutter:#F2F2F7;
+  --code-bg:#FFFFFF; --code-gutter:#F3F5F8;
   --syn-k:#AD3DA4; --syn-t:#3F6E74; --syn-s:#C41A16; --syn-n:#1C00CF; --syn-c:#5D6C79; --syn-a:#643820; --syn-g:#0F68A0;
   /* charts */
-  --s1:#007AFF; --s2:#FF9500; --s3:#34C759; --s4:#AF52DE; --s5:#FF2D55; --s6:#5AC8FA; --s7:#5856D6; --s8:#A2845E;
-  --grid:rgba(60,60,67,.08); --axis:rgba(60,60,67,.3);
-  /* depth */
-  --shadow:0 1px 2px rgba(0,0,0,.04), 0 12px 32px rgba(0,0,0,.10);
-  --shadow-pop:0 2px 6px rgba(0,0,0,.08), 0 16px 48px rgba(0,0,0,.16);
-  --shadow-card:0 1px 2px rgba(0,0,0,.04), 0 2px 10px rgba(0,0,0,.04);
+  --s1:#1F6FEB; --s2:#F0A020; --s3:#2DA44E; --s4:#8250DF; --s5:#E5356B; --s6:#1AA3C9; --s7:#5856D6; --s8:#A2845E;
+  --grid:rgba(21,23,28,.07); --axis:rgba(21,23,28,.3);
+  /* depth: a hairline and a soft drop, no glow */
+  --shadow:0 0 0 1px rgba(21,23,28,.04), 0 8px 24px rgba(21,23,28,.08);
+  --shadow-pop:0 0 0 1px rgba(21,23,28,.06), 0 18px 48px rgba(21,23,28,.18);
+  --shadow-card:none;
   /* type */
   --body:Inter, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  --display:"Space Grotesk", var(--body);
   --cond:var(--body);
   --mono:"JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   /* motion: springs, as linear() curves */
@@ -45,50 +48,51 @@
   --tx:var(--label); --tx-2:var(--label-2); --tx-3:var(--label-3);
   --panel:var(--card); --panel-2:var(--card-2); --line:var(--sep); --line-2:var(--sep-2);
 }
-:root:not([data-theme="light"]) { }
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
     color-scheme:dark;
-    --label:#F5F5F7; --label-2:rgba(235,235,245,.62); --label-3:rgba(235,235,245,.36); --label-4:rgba(235,235,245,.18);
-    --fill:rgba(120,120,128,.36); --fill-2:rgba(120,120,128,.32); --fill-3:rgba(118,118,128,.24); --fill-4:rgba(118,118,128,.18);
-    --sep:rgba(84,84,88,.65); --sep-2:rgba(84,84,88,.38);
-    --bg:#000000; --card:#1C1C1E; --card-2:#2C2C2E; --card-3:#3A3A3C;
-    --glass:rgba(28,28,30,.74); --glass-edge:rgba(255,255,255,.10); --glass-rim:rgba(0,0,0,.5);
-    --viewport:#0A0A0C; --viewport-2:#1E1F23;
-    --accent:#0A84FF; --accent-tx:#4DA3FF; --accent-ink:#FFFFFF; --accent-soft:rgba(10,132,255,.16); --accent-line:rgba(10,132,255,.45);
-    --pass:#30D158; --pass-soft:rgba(48,209,88,.16);
-    --warn:#FF9F0A; --warn-soft:rgba(255,159,10,.16);
-    --fail:#FF453A; --fail-soft:rgba(255,69,58,.16);
-    --red:#FF453A; --blue:#0A84FF;
-    --code-bg:#1C1C1E; --code-gutter:#232326;
+    --label:#EDEFF3; --label-2:rgba(237,239,243,.70); --label-3:rgba(237,239,243,.50); --label-4:rgba(237,239,243,.18);
+    --fill:rgba(237,239,243,.16); --fill-2:rgba(237,239,243,.12); --fill-3:rgba(237,239,243,.08); --fill-4:rgba(237,239,243,.05);
+    --sep:rgba(237,239,243,.16); --sep-2:rgba(237,239,243,.08);
+    --bg:#0B0D10; --card:#15181D; --card-2:#1D2128; --card-3:#272C34;
+    --glass:rgba(17,20,25,.88); --glass-edge:rgba(255,255,255,.05); --glass-rim:rgba(237,239,243,.09);
+    --viewport:#07080A; --viewport-2:#1A1E24;
+    --accent:#FFB43A; --accent-tx:#FFC266; --accent-ink:#1A1204; --accent-soft:rgba(255,180,58,.15); --accent-line:rgba(255,180,58,.5);
+    --focus:#FFC266;
+    --pass:#3DD66B; --pass-soft:rgba(61,214,107,.15);
+    --warn:#FFA94D; --warn-soft:rgba(255,169,77,.15);
+    --fail:#FF5A4E; --fail-soft:rgba(255,90,78,.15);
+    --red:#FF5A4E; --blue:#4C8DFF;
+    --code-bg:#15181D; --code-gutter:#1A1E24;
     --syn-k:#FF7AB2; --syn-t:#DABAFF; --syn-s:#FF8170; --syn-n:#D9C97C; --syn-c:#7F8C98; --syn-a:#FFA14F; --syn-g:#6BDFFF;
-    --s1:#0A84FF; --s2:#FF9F0A; --s3:#30D158; --s4:#BF5AF2; --s5:#FF375F; --s6:#64D2FF; --s7:#5E5CE6; --s8:#AC8E68;
-    --grid:rgba(235,235,245,.08); --axis:rgba(235,235,245,.3);
-    --shadow:0 1px 2px rgba(0,0,0,.4), 0 12px 32px rgba(0,0,0,.5);
-    --shadow-pop:0 2px 6px rgba(0,0,0,.4), 0 16px 48px rgba(0,0,0,.6);
-    --shadow-card:0 1px 2px rgba(0,0,0,.3);
+    --s1:#4C8DFF; --s2:#FFB43A; --s3:#3DD66B; --s4:#BF5AF2; --s5:#FF5A8A; --s6:#64D2FF; --s7:#7D7AFF; --s8:#AC8E68;
+    --grid:rgba(237,239,243,.07); --axis:rgba(237,239,243,.3);
+    --shadow:0 0 0 1px rgba(0,0,0,.4), 0 12px 32px rgba(0,0,0,.45);
+    --shadow-pop:0 0 0 1px rgba(0,0,0,.5), 0 18px 48px rgba(0,0,0,.6);
+    --shadow-card:none;
   }
 }
 :root[data-theme="dark"]{
   color-scheme:dark;
-  --label:#F5F5F7; --label-2:rgba(235,235,245,.62); --label-3:rgba(235,235,245,.36); --label-4:rgba(235,235,245,.18);
-  --fill:rgba(120,120,128,.36); --fill-2:rgba(120,120,128,.32); --fill-3:rgba(118,118,128,.24); --fill-4:rgba(118,118,128,.18);
-  --sep:rgba(84,84,88,.65); --sep-2:rgba(84,84,88,.38);
-  --bg:#000000; --card:#1C1C1E; --card-2:#2C2C2E; --card-3:#3A3A3C;
-  --glass:rgba(28,28,30,.74); --glass-edge:rgba(255,255,255,.10); --glass-rim:rgba(0,0,0,.5);
-  --viewport:#0A0A0C; --viewport-2:#1E1F23;
-  --accent:#0A84FF; --accent-tx:#4DA3FF; --accent-ink:#FFFFFF; --accent-soft:rgba(10,132,255,.16); --accent-line:rgba(10,132,255,.45);
-  --pass:#30D158; --pass-soft:rgba(48,209,88,.16);
-  --warn:#FF9F0A; --warn-soft:rgba(255,159,10,.16);
-  --fail:#FF453A; --fail-soft:rgba(255,69,58,.16);
-  --red:#FF453A; --blue:#0A84FF;
-  --code-bg:#1C1C1E; --code-gutter:#232326;
+  --label:#EDEFF3; --label-2:rgba(237,239,243,.70); --label-3:rgba(237,239,243,.50); --label-4:rgba(237,239,243,.18);
+  --fill:rgba(237,239,243,.16); --fill-2:rgba(237,239,243,.12); --fill-3:rgba(237,239,243,.08); --fill-4:rgba(237,239,243,.05);
+  --sep:rgba(237,239,243,.16); --sep-2:rgba(237,239,243,.08);
+  --bg:#0B0D10; --card:#15181D; --card-2:#1D2128; --card-3:#272C34;
+  --glass:rgba(17,20,25,.88); --glass-edge:rgba(255,255,255,.05); --glass-rim:rgba(237,239,243,.09);
+  --viewport:#07080A; --viewport-2:#1A1E24;
+  --accent:#FFB43A; --accent-tx:#FFC266; --accent-ink:#1A1204; --accent-soft:rgba(255,180,58,.15); --accent-line:rgba(255,180,58,.5);
+  --focus:#FFC266;
+  --pass:#3DD66B; --pass-soft:rgba(61,214,107,.15);
+  --warn:#FFA94D; --warn-soft:rgba(255,169,77,.15);
+  --fail:#FF5A4E; --fail-soft:rgba(255,90,78,.15);
+  --red:#FF5A4E; --blue:#4C8DFF;
+  --code-bg:#15181D; --code-gutter:#1A1E24;
   --syn-k:#FF7AB2; --syn-t:#DABAFF; --syn-s:#FF8170; --syn-n:#D9C97C; --syn-c:#7F8C98; --syn-a:#FFA14F; --syn-g:#6BDFFF;
-  --s1:#0A84FF; --s2:#FF9F0A; --s3:#30D158; --s4:#BF5AF2; --s5:#FF375F; --s6:#64D2FF; --s7:#5E5CE6; --s8:#AC8E68;
-  --grid:rgba(235,235,245,.08); --axis:rgba(235,235,245,.3);
-  --shadow:0 1px 2px rgba(0,0,0,.4), 0 12px 32px rgba(0,0,0,.5);
-  --shadow-pop:0 2px 6px rgba(0,0,0,.4), 0 16px 48px rgba(0,0,0,.6);
-  --shadow-card:0 1px 2px rgba(0,0,0,.3);
+  --s1:#4C8DFF; --s2:#FFB43A; --s3:#3DD66B; --s4:#BF5AF2; --s5:#FF5A8A; --s6:#64D2FF; --s7:#7D7AFF; --s8:#AC8E68;
+  --grid:rgba(237,239,243,.07); --axis:rgba(237,239,243,.3);
+  --shadow:0 0 0 1px rgba(0,0,0,.4), 0 12px 32px rgba(0,0,0,.45);
+  --shadow-pop:0 0 0 1px rgba(0,0,0,.5), 0 18px 48px rgba(0,0,0,.6);
+  --shadow-card:none;
 }
 
 /* ================= base ================= */
@@ -1046,3 +1050,133 @@ button.rmbtn{color:var(--label-3);} button.rmbtn:hover{color:var(--fail);}
   .op-pick select{width:100%; min-width:0;}
   .ds-btn{padding:0 9px;}
 }
+
+/* ================= the Web Interface Guidelines pass =================
+   Kept as one block at the end so it sits clear of the sections other work
+   is changing. Each rule names what it is for. */
+/* a keyboard user can jump past the bar and the panels straight to the field */
+.sr-only{position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0;}
+.skip-link{position:absolute; left:12px; top:-60px; z-index:100; padding:8px 14px; border-radius:10px; background:var(--accent); color:var(--accent-ink); font-weight:600; box-shadow:var(--shadow-pop);}
+.skip-link:focus-visible{top:12px; text-decoration:none;}
+.stage:focus{outline:none;}
+/* the code editor draws its own text, so the focus ring goes round the whole editor */
+.editor:focus-within{box-shadow:inset 0 0 0 2px var(--accent);}
+/* taps act at once (no double-tap zoom wait) and show the control's own pressed state, not a grey flash */
+html{-webkit-tap-highlight-color:transparent;}
+button,a,label,select,summary,input[type=checkbox],input[type=range],[role=button],[role=tab]{touch-action:manipulation;}
+/* a mouse or trackpad never rubber-bands the whole app; touch keeps its defaults */
+@media (pointer:fine){ html{overscroll-behavior:none;} }
+/* sheets and pop-overs keep their scroll to themselves */
+.sheet,.menu,.status-panel,.ctrl-panel,.online-panel,.path-panel,.cad-tree-body,.onp-chat{overscroll-behavior:contain;}
+/* native selects get explicit colours, so Windows' dark mode can't paint them white on white */
+select{background-color:var(--card-2); color:var(--label);}
+select option{background-color:var(--card); color:var(--label);}
+/* headings don't leave one word on a line; paragraphs avoid a lonely last word */
+h1,h2,h3,h4{text-wrap:balance;}
+.hint,.pe-fine,.onp-fine,.onp-lede,.tour-body p{text-wrap:pretty;}
+
+/* ================= the redesign: Titan ================= */
+/* focus and selection use the darker amber that reads on paper and on graphite */
+:focus-visible{outline-color:var(--focus);}
+::selection{background:var(--accent-soft);}
+.editor:focus-within{box-shadow:inset 0 0 0 2px var(--focus);}
+/* white text never sits on the amber: it takes the dark ink */
+.ic-step .n,.ic-q .acts .btn-sm.primary,.bindrow.active .bk,.cad-hint.ask{color:var(--accent-ink);}
+.padsvg .btn.down + .lbl{fill:var(--accent-ink);}
+
+/* chrome: solid, with a hairline edge, and a little less round */
+.panel-glass{-webkit-backdrop-filter:blur(18px) saturate(140%); backdrop-filter:blur(18px) saturate(140%);}
+.topbar{border-radius:14px;}
+.rail,.dock{border-radius:16px;}
+.panel-pop{border-radius:12px; border-color:var(--sep);}
+.vp-readout,.vp-tour,.vp-tip,.vp-hint,.pip,.match-hud{border-radius:10px;}
+
+/* the brand: a button that opens the team's intro */
+.brand{all:unset; display:flex; align-items:center; gap:10px; flex:none; justify-self:start; cursor:pointer; padding:4px 8px 4px 4px; margin-left:-4px; border-radius:10px;
+  transition:background var(--t-snappy) var(--spring-snappy);}
+.brand:hover{background:var(--fill-3);}
+.brand:focus-visible{outline:2px solid var(--focus); outline-offset:2px;}
+.brand-mark{width:28px; height:28px;}
+.brand-text b{font-family:var(--display); font-size:16px; font-weight:700; letter-spacing:-.02em;}
+.brand-text span{font-size:10.5px; color:var(--label-3); margin-top:3px; letter-spacing:.01em;}
+.brand-text span em{font-style:normal; color:var(--accent-tx); font-weight:600;}
+
+/* the Driver Station: the OpMode in the body face, START in amber */
+.op-select-wrap select{font-family:var(--body); font-weight:600; background-color:var(--fill-3);}
+.ds-controls{background:var(--fill-3); border-radius:10px;}
+.ds-btn{border-radius:8px; font-family:var(--display); letter-spacing:.06em;}
+.ds-btn.next{background:var(--accent); color:var(--accent-ink); box-shadow:0 1px 0 rgba(255,255,255,.25) inset, 0 4px 14px color-mix(in srgb, var(--accent) 35%, transparent);}
+.ds-btn.next:hover:not(:disabled){background:var(--accent); color:var(--accent-ink);}
+.ds-clock{font-size:19px;}
+.ds-clock-bar i{background:var(--accent);}
+.pill.phase{max-width:150px; white-space:nowrap;}
+.kind{font-family:var(--mono); letter-spacing:.02em;}
+.kind.auto{color:var(--warn);}
+
+/* the bar never runs off the right edge: labels fold away earlier and stay as names for screen readers */
+.ds-status{min-width:0; gap:2px;}
+.hdr-btn{padding:0 10px;}
+@media (max-width:1520px){ .op-pick{flex-basis:220px; width:220px;} }
+@media (max-width:1360px){
+  .hdr-btn span:not(.on-badge),.status-chip span:not(.dot){position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap;}
+  .status-chip{padding:0 10px;}
+}
+@media (max-width:1180px){
+  .hdr-btn span:not(.on-badge),.status-chip span:not(.dot){display:inline; position:absolute;}
+}
+
+/* panels: tabs with an amber underline, flat cards with a hairline */
+.tabs{padding:8px 8px 4px; border-bottom:1px solid var(--sep-2); gap:0;}
+.tabs button[role=tab]{border-radius:8px 8px 0 0; padding:8px 10px 9px; position:relative;}
+.tabs button[aria-selected="true"]{background:none;}
+.tabs button[aria-selected="true"]::after{content:""; position:absolute; left:10px; right:10px; bottom:-5px; height:2px; border-radius:2px; background:var(--accent);}
+.sec.card{border:1px solid var(--sep-2); border-radius:12px; box-shadow:none;}
+.sec-head h3,.cell-head h3{font-family:var(--display); font-weight:600; letter-spacing:-.005em;}
+.sec-head h3{font-size:13.5px;}
+.rail-strip{font-family:var(--display); letter-spacing:.04em;}
+
+/* controls */
+.btn-sm{border-radius:8px; font-weight:600;}
+.btn-sm.primary{background:var(--accent); color:var(--accent-ink);}
+.btn-sm.primary:hover:not(:disabled){background:var(--accent); filter:brightness(1.05);}
+.btn-sm kbd{background:rgba(0,0,0,.12);}
+.btn-ghost{border-radius:7px;}
+.seg{border-radius:9px;}
+.seg button.on{background:var(--card); box-shadow:0 0 0 1px var(--sep-2), 0 1px 2px rgba(0,0,0,.08);}
+.drop{border-radius:12px;}
+.drop:hover,.drop:focus-visible,.drop.armed{border-color:var(--accent); background:var(--accent-soft);}
+input[type=range],input[type=checkbox],input[type=radio]{accent-color:var(--accent);}
+.count{border-radius:6px;}
+
+/* the field overlays: the chips under the field shrink before they hide behind the readout */
+.vp-bottom{gap:10px;}
+.vp-chips{flex:0 1 auto; flex-wrap:nowrap; overflow:hidden; padding:2px;}
+.vp-tour{min-width:0; flex:0 1 auto; overflow:hidden; text-overflow:ellipsis; border-radius:999px;}
+.vp-tour i{flex:none; background:var(--accent); box-shadow:0 0 0 3px var(--accent-soft);}
+.vp-readout{flex:none;}
+
+/* the dock */
+.cell-head{min-height:46px;}
+
+/* ================= about the team ================= */
+.about{position:fixed; inset:auto; top:calc(var(--bar) + 2*var(--gap) + 6px); left:var(--gap); margin:0; width:min(420px, calc(100vw - 2*var(--gap)));
+  max-height:calc(100dvh - var(--bar) - 4*var(--gap)); overflow:auto; overscroll-behavior:contain;
+  padding:0; color:var(--label); background:var(--card); border:1px solid var(--sep); border-radius:14px; box-shadow:var(--shadow-pop);}
+.about:popover-open{animation:popIn var(--t-snappy) var(--spring-snappy) both; transform-origin:top left;}
+.about::backdrop{background:transparent;}
+.about-hero{display:flex; align-items:center; gap:14px; padding:18px 20px 14px; border-bottom:1px solid var(--sep-2);
+  background:linear-gradient(135deg, var(--accent-soft), transparent 70%);}
+.about-num{font-family:var(--display); font-size:34px; font-weight:700; line-height:1; letter-spacing:-.03em; color:var(--accent-tx); font-variant-numeric:tabular-nums;}
+.about-hero h2{font-family:var(--display); font-size:18px; font-weight:700; margin:0; letter-spacing:-.01em;}
+.about-hero p{margin:2px 0 0; font-size:12px; color:var(--label-3);}
+.about-body{padding:14px 20px 4px; font-size:13px; line-height:1.55; color:var(--label-2);}
+.about-body p{margin:0 0 10px; text-wrap:pretty;}
+.about-facts{display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:8px; margin:4px 0 12px; padding:0; list-style:none;}
+.about-facts li{background:var(--card-2); border-radius:10px; padding:8px 10px; min-width:0;}
+.about-facts b{display:block; font-family:var(--display); font-size:15px; color:var(--label); font-variant-numeric:tabular-nums;}
+.about-facts small{display:block; font-size:10.5px; color:var(--label-3); line-height:1.3;}
+.about-links{display:flex; flex-wrap:wrap; gap:8px; padding:4px 20px 18px;}
+.about-links a{display:inline-flex; align-items:center; gap:6px; font-size:12.5px; font-weight:600; padding:6px 11px; border-radius:8px; background:var(--fill-3); color:var(--label);}
+.about-links a:hover{background:var(--fill-2); text-decoration:none;}
+.about-close{position:absolute; top:12px; right:12px; width:28px; height:28px; border-radius:50%; border:0; background:var(--fill-3); color:var(--label-2); cursor:pointer; font-size:16px; line-height:1;}
+.about-close:hover{background:var(--fill-2); color:var(--label);}

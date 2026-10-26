@@ -76,7 +76,7 @@ const fragment = [
   `<meta name="description" content="${DESC}">`,
   '<link rel="preconnect" href="https://fonts.googleapis.com">',
   '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>',
-  '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">',
+  '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">',
   // the saved theme before anything paints, so there's no flash; light is the default
   `<script>try{var t=localStorage.getItem("ftcbench.theme");document.documentElement.setAttribute("data-theme",t==="dark"?"dark":t==="light"?"light":(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"))}catch(e){document.documentElement.setAttribute("data-theme","light")}</script>`,
   // three.js and the add-ons the view uses, with a second CDN (tools/threeloader.mjs); the app boots on "three-ready"
@@ -102,7 +102,8 @@ const favicon = 'data:image/svg+xml,' + encodeURIComponent(
 const page = `<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n` +
   `<meta name="viewport" content="width=device-width, initial-scale=1">\n` +
   `<meta name="color-scheme" content="dark light">\n` +
-  `<meta name="theme-color" content="#0F1012">\n` +
+  `<meta name="theme-color" content="#E9ECF1" media="(prefers-color-scheme: light)">\n` +
+  `<meta name="theme-color" content="#0B0D10" media="(prefers-color-scheme: dark)">\n` +
   `<meta property="og:type" content="website">\n` +
   `<meta property="og:site_name" content="FTC SimBench Pro">\n` +
   `<meta property="og:title" content="FTC SimBench Pro: drive your real robot before it's built">\n` +

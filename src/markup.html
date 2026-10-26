@@ -1,7 +1,9 @@
+<a class="skip-link" href="#stage">Skip to the field</a>
 <div class="app" id="app">
 
   <!-- ===================== the field, full bleed ===================== -->
-  <main class="stage" id="stage">
+  <main class="stage" id="stage" tabindex="-1">
+    <h1 class="sr-only">FTC SimBench Pro</h1>
     <div class="viewport" id="viewport">
       <div class="vp-top">
         <div class="vp-title" id="vpTitle">—</div>
@@ -17,17 +19,17 @@
 
       <!-- the path editor: draw an auto, get its Pedro Pathing code (src/pathedit.js, src/pedrogen.js) -->
       <section class="path-panel panel-glass" id="pathPanel" hidden aria-label="Path editor">
-        <div class="pe-head"><b>Paths</b><input id="peName" class="pe-name" maxlength="40" aria-label="The auto's name" spellcheck="false"><span class="pe-info" id="peInfo"></span><span class="spacer"></span>
+        <div class="pe-head"><b>Paths</b><input id="peName" name="autoName" class="pe-name" maxlength="40" autocomplete="off" aria-label="The auto's name" spellcheck="false"><span class="pe-info" id="peInfo"></span><span class="spacer"></span>
           <button class="btn-sm" id="peNew" type="button" title="Start again from where the robot stands">New</button><button class="btn-sm" id="peClose" type="button">Close</button></div>
         <div class="pe-body">
           <div class="pe-left">
-            <canvas id="peField" class="pe-field" aria-label="The field from above: click to add a leg, drag a point to move it"></canvas>
+            <canvas id="peField" class="pe-field" role="img" aria-label="The field from above: click to add a leg, drag a point to move it"></canvas>
             <p class="pe-fine">Click the field to add a leg. Drag a pose, a purple control point, or the dot on a pose's nose to turn it. Pedro coordinates: inches, (0, 0) bottom left, red wall on the left. The code imports <code>pedroPathing.Constants</code> as Pedro's quickstart has it; if yours is elsewhere, change that one line.</p>
           </div>
           <div class="pe-right">
             <div class="pe-legs" id="peLegs"></div>
             <div class="pe-acts"><button class="btn-sm primary" id="peRun" type="button">Run on the bench</button><button class="btn-sm" id="peCopy" type="button">Copy Java</button><button class="btn-sm" id="peSave" type="button">Save .java</button><button class="btn-sm" id="peFile" type="button" title="The path itself, for a teammate to open here">Save path</button><button class="btn-sm" id="peLink" type="button" title="A link with the path in it, to post for your team">Share link</button></div>
-            <p class="pe-msg" id="peMsg" hidden></p>
+            <p class="pe-msg" id="peMsg" hidden aria-live="polite"></p>
             <pre class="pe-code" id="peCode"></pre>
           </div>
         </div>
@@ -53,16 +55,16 @@
       <aside class="online-panel panel-glass" id="onlinePanel" hidden aria-label="Online match">
         <div class="onp-head"><b id="onpTitle">Play online</b><span class="onp-sub" id="onpSub"></span><span class="spacer"></span>
           <button class="btn-sm" id="onpClose" type="button" title="Hide this panel; the match goes on">Hide</button></div>
-        <p class="onp-msg" id="onpMsg" hidden></p>
+        <p class="onp-msg" id="onpMsg" hidden aria-live="polite"></p>
 
         <section id="onpStart">
           <p class="onp-lede">One match with other teams, each driving their own robot and code on their own computer. Empty places get AI robots.</p>
-          <label class="onp-field"><span>Your team</span><input id="onpName" maxlength="24" placeholder="Team number or name" autocomplete="off" spellcheck="false"></label>
+          <label class="onp-field"><span>Your team</span><input id="onpName" name="team" maxlength="24" placeholder="Team number or name…" autocomplete="off" spellcheck="false"></label>
           <div class="onp-actions">
             <button class="btn-sm primary" id="onpQuick" type="button">Quick match</button>
             <button class="btn-sm" id="onpHost" type="button">Host a match</button>
           </div>
-          <form class="onp-join" id="onpJoinForm"><input id="onpCode" maxlength="5" placeholder="Code" aria-label="Match code" autocomplete="off" spellcheck="false"><button class="btn-sm" type="submit">Join</button></form>
+          <form class="onp-join" id="onpJoinForm"><input id="onpCode" name="code" maxlength="5" placeholder="Code…" autocapitalize="characters" aria-label="Match code" autocomplete="off" spellcheck="false"><button class="btn-sm" type="submit">Join</button></form>
           <h4>Open matches</h4>
           <ul class="onp-list" id="onpList"></ul>
           <p class="onp-fine">Browsers connect straight to each other (WebRTC), found through public relays; the match itself never goes through a server. Like any peer-to-peer game, the other players' browsers can see your IP address. Some school networks block these connections.</p>
@@ -74,7 +76,7 @@
           <p class="onp-watch" id="onpWatch"></p>
           <div class="onp-ready" id="onpReady"></div>
           <div class="onp-hostctl" id="onpHostCtl" hidden>
-            <div class="onp-row"><span>Period</span><div class="seg" id="onpPeriod"><button type="button" data-p="TeleOp">TeleOp 2:00</button><button type="button" data-p="Autonomous">Auto 0:30</button></div></div>
+            <div class="onp-row"><span>Period</span><div class="seg" id="onpPeriod" role="group" aria-label="Period"><button type="button" data-p="TeleOp">TeleOp 2:00</button><button type="button" data-p="Autonomous">Auto 0:30</button></div></div>
             <div class="onp-row"><span>AI robots</span><select class="match-skill" id="onpSkill" aria-label="AI skill"><option value="rookie">Rookie</option><option value="typical">Typical</option><option value="elite">Elite</option></select></div>
             <label class="onp-row"><span>Listed under Open matches</span><input type="checkbox" id="onpPub"></label>
             <button class="btn-sm primary onp-go" id="onpGo" type="button">Start the match</button>
@@ -84,8 +86,8 @@
 
         <section id="onpPlay" hidden>
           <div class="onp-live" id="onpLive"></div>
-          <canvas class="onp-map" id="onpMap" aria-label="The field from above. Click to mark a spot for your alliance."></canvas>
-          <div class="seg onp-markseg" id="onpMarkSeg" title="Click the field to show your alliance"><button type="button" data-m="go" class="on">Go here</button><button type="button" data-m="shoot">Shoot from here</button><button type="button" data-m="defend">Defend here</button></div>
+          <canvas class="onp-map" id="onpMap" role="img" aria-label="The field from above. Click to mark a spot for your alliance."></canvas>
+          <div class="seg onp-markseg" id="onpMarkSeg" role="group" aria-label="Mark on the field" title="Click the field to show your alliance"><button type="button" data-m="go" class="on">Go here</button><button type="button" data-m="shoot">Shoot from here</button><button type="button" data-m="defend">Defend here</button></div>
         </section>
 
         <section id="onpEnd" hidden>
@@ -94,19 +96,19 @@
         </section>
 
         <section class="onp-talk" id="onpTalk" hidden>
-          <ol class="onp-chat" id="onpChat"></ol>
-          <form class="onp-say" id="onpSay"><select id="onpTo" aria-label="Send to"><option value="team">Alliance</option><option value="all">Everyone</option></select><input id="onpText" maxlength="200" placeholder="Message" aria-label="Message" autocomplete="off"><button class="btn-sm" type="submit">Send</button></form>
+          <ol class="onp-chat" id="onpChat" aria-live="polite" aria-label="Chat"></ol>
+          <form class="onp-say" id="onpSay"><select id="onpTo" aria-label="Send to"><option value="team">Alliance</option><option value="all">Everyone</option></select><input id="onpText" name="message" maxlength="200" placeholder="Message…" aria-label="Message" autocomplete="off"><button class="btn-sm" type="submit">Send</button></form>
         </section>
 
         <div class="onp-foot" id="onpFoot" hidden><button class="btn-sm" id="onpLeave" type="button">Leave the match</button><span class="onp-ping" id="onpPing"></span></div>
       </aside>
 
-      <div class="match-hud panel-glass" id="matchHud" hidden>
+      <div class="match-hud panel-glass" id="matchHud" hidden role="status" aria-label="Match score">
         <div class="mh-row"><span class="mh-al red"><b id="mhRed">0</b><small>RED</small></span><span class="mh-mid" id="mhMid">TELEOP</span><span class="mh-al blue"><b id="mhBlue">0</b><small>BLUE</small></span></div>
         <div class="mh-parts" id="mhParts"></div>
         <ol class="mh-events" id="mhEvents"></ol>
       </div>
-      <div class="vp-tip" id="vpTip" hidden>Drag to move · shift-drag to turn</div>
+      <div class="vp-tip" id="vpTip" hidden aria-hidden="true">Drag to move · shift-drag to turn</div>
 
       <div class="cad-ui" id="cadUI" hidden>
         <aside class="cad-tree panel-glass" aria-label="Instances">
@@ -114,14 +116,14 @@
           <div class="cad-tree-body" id="cadTreeBody"></div>
         </aside>
         <div class="cad-info panel-glass" id="cadInfo" hidden></div>
-        <div class="cad-bar seg seg-glass" id="cadBar">
+        <div class="cad-bar seg seg-glass" id="cadBar" role="group" aria-label="CAD view">
           <button type="button" class="cad-btn" data-cv="iso">Iso</button><button type="button" class="cad-btn" data-cv="front">Front</button><button type="button" class="cad-btn" data-cv="top">Top</button><button type="button" class="cad-btn" data-cv="right">Right</button><button type="button" class="cad-btn" id="cadFit" title="Zoom to fit (F)">Fit</button>
           <label class="cad-check"><input type="checkbox" id="cadEdges" checked> Edges</label>
         </div>
         <div class="cad-hint">Right-drag rotate · middle-drag pan · scroll zoom · click a part</div>
       </div>
 
-      <canvas class="minimap" id="minimap" hidden aria-label="Minimap: the field from above"></canvas>
+      <canvas class="minimap" id="minimap" hidden role="img" aria-label="Minimap: the field from above"></canvas>
       <div class="vp-bottom">
         <div class="pip panel-glass" id="pip" hidden>
           <button class="pip-head" id="pipHead" type="button" aria-expanded="true"><span>Arm torque</span><span id="pipDeg">—</span></button>
@@ -153,7 +155,7 @@
           <button class="dock-btn" id="dockToggle" type="button" aria-expanded="true" title="Fold the dock away" aria-label="Fold the dock away">
             <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
           <h3>Gamepad</h3><span class="live-dot" id="padLive" hidden title="A real controller is driving this gamepad"></span><span class="spacer"></span>
-          <div class="seg" id="padSeg"><button data-pad="1">gamepad1</button><button data-pad="2" class="on">gamepad2</button></div></div>
+          <div class="seg" id="padSeg" role="group" aria-label="Which gamepad" translate="no"><button data-pad="1">gamepad1</button><button data-pad="2" class="on">gamepad2</button></div></div>
         <div class="cell-body">
           <div class="padwrap" id="padwrap"></div>
           <div class="bindlist" id="bindlist"></div>
@@ -168,13 +170,33 @@
 
   <!-- ===================== the top bar: Driver Station ===================== -->
   <header class="topbar panel-glass">
-    <div class="brand">
+    <button class="brand" type="button" popovertarget="aboutPop" aria-haspopup="dialog" title="About the team behind SimBench">
       <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
         <path class="bm-hex" d="M16 2.6 27.6 9.3v13.4L16 29.4 4.4 22.7V9.3Z"/>
         <path class="bm-arc" d="M9.3 21c2-6.4 8.2-9.8 14-8"/>
         <circle class="bm-dot" cx="23.4" cy="13" r="2.2"/>
       </svg>
-      <div class="brand-text"><b>SimBench</b><span>BIOBUZZ 2026–27</span></div>
+      <span class="brand-text" translate="no"><b>SimBench</b><span>by <em>7831 Titan</em> · BIOBUZZ 2026–27</span></span>
+    </button>
+    <div class="about" id="aboutPop" popover role="dialog" aria-labelledby="aboutTitle">
+      <button class="about-close" type="button" popovertarget="aboutPop" popovertargetaction="hide" aria-label="Close">×</button>
+      <div class="about-hero">
+        <span class="about-num" translate="no">7831</span>
+        <div><h2 id="aboutTitle" translate="no">Team Titan</h2><p>FIRST Tech Challenge · Romoland, California</p></div>
+      </div>
+      <div class="about-body">
+        <p>We’re FTC team 7831, Titan, from Heritage High School in Romoland, California. We’ve competed since our rookie season in 2013, and we play in the SoCal League F2.</p>
+        <p>We built SimBench so any team can drive its own CAD and its own Java on the field before the robot is even finished: real physics, the real field, and the math behind every number.</p>
+        <ul class="about-facts">
+          <li><b>2013</b><small>Rookie year</small></li>
+          <li><b>F2</b><small>SoCal League</small></li>
+          <li><b>2nd</b><small>Motivate Award, SoCal ILT4 2024–25</small></li>
+        </ul>
+      </div>
+      <div class="about-links">
+        <a href="https://ftc-events.firstinspires.org/2025/team/7831" target="_blank" rel="noopener">FIRST team page ↗</a>
+        <a href="https://ftcscout.org/teams/7831" target="_blank" rel="noopener">FTCScout ↗</a>
+      </div>
     </div>
 
     <!-- the Driver Station proper, centred: the OpMode, INIT / START / STOP, the clock -->
@@ -186,15 +208,15 @@
         </div>
       </div>
 
-      <div class="ds-controls" role="group" aria-label="Driver Station controls">
-        <button class="ds-btn" id="btnInit">INIT</button>
-        <button class="ds-btn go" id="btnStart"><svg viewBox="0 0 10 10" aria-hidden="true"><path d="M2 1l7 4-7 4z"/></svg>START</button>
-        <button class="ds-btn stop" id="btnStop"><svg viewBox="0 0 10 10" aria-hidden="true"><rect x="1.5" y="1.5" width="7" height="7" rx="1"/></svg>STOP</button>
+      <div class="ds-controls" role="group" aria-label="Driver Station controls" translate="no">
+        <button class="ds-btn" id="btnInit" type="button">INIT</button>
+        <button class="ds-btn go" id="btnStart" type="button"><svg viewBox="0 0 10 10" aria-hidden="true"><path d="M2 1l7 4-7 4z"/></svg>START</button>
+        <button class="ds-btn stop" id="btnStop" type="button"><svg viewBox="0 0 10 10" aria-hidden="true"><rect x="1.5" y="1.5" width="7" height="7" rx="1"/></svg>STOP</button>
       </div>
 
       <div class="ds-clock-wrap">
         <div class="ds-clock" id="dsClock" aria-live="off">2:00</div>
-        <div class="ds-clock-bar"><i id="dsBar"></i></div>
+        <div class="ds-clock-bar" aria-hidden="true"><i id="dsBar"></i></div>
       </div>
       <span class="pill phase" id="phasePill">—</span>
     </div>
@@ -239,7 +261,7 @@
           <div class="ctrl-head"><b>Controllers</b><span class="spacer"></span><button class="btn-sm" id="ctrlClose" type="button">Done</button></div>
           <div id="ctrlList"></div>
           <div class="slide"><label for="deadzone">Stick deadzone</label>
-            <input type="range" id="deadzone" min="0" max="0.3" step="0.01" value="0.08">
+            <input type="range" id="deadzone" name="deadzone" min="0" max="0.3" step="0.01" value="0.08">
             <span class="v" id="deadzoneVal">0.08</span></div>
           <p class="hint" id="ctrlNote">Plug in an Xbox, PlayStation or Logitech controller and press any button on it. Browsers only report a controller after a button press.</p>
           <div class="kb-head"><b>Keyboard</b><span class="spacer"></span>
@@ -343,22 +365,22 @@
           <div class="sec-head"><h3>Drawn parts</h3></div>
           <div class="form2">
             <span>Up</span>
-            <div class="seg" id="upSeg" title="Which CAD axis points up; auto reads it from the wheels"><button data-up="">auto</button><button data-up="+z">Z</button><button data-up="+y">Y</button><button data-up="-y">−Y</button><button data-up="+x">X</button><button data-up="-x">−X</button></div>
+            <div class="seg" id="upSeg" role="group" aria-label="Up" title="Which CAD axis points up; auto reads it from the wheels"><button data-up="">auto</button><button data-up="+z">Z</button><button data-up="+y">Y</button><button data-up="-y">−Y</button><button data-up="+x">X</button><button data-up="-x">−X</button></div>
             <span>CAD front</span>
-            <div class="seg" id="frontSeg" aria-label="Which way the CAD's front faces"><button data-front="+x">+x</button><button data-front="+y">+y</button><button data-front="-x">−x</button><button data-front="-y">−y</button></div>
+            <div class="seg" id="frontSeg" role="group" aria-label="Which way the CAD's front faces"><button data-front="+x">+x</button><button data-front="+y">+y</button><button data-front="-x">−x</button><button data-front="-y">−y</button></div>
             <span>Drive base</span>
-            <div class="seg" id="baseSeg"><button data-mode="auto">auto</button><button data-mode="show">show</button><button data-mode="hide">hide</button></div>
+            <div class="seg" id="baseSeg" role="group" aria-label="Drive base"><button data-mode="auto">auto</button><button data-mode="show">show</button><button data-mode="hide">hide</button></div>
             <span>Shooter</span>
-            <div class="seg" id="shooterSeg"><button data-mode="auto">auto</button><button data-mode="show">show</button><button data-mode="hide">hide</button></div>
+            <div class="seg" id="shooterSeg" role="group" aria-label="Shooter"><button data-mode="auto">auto</button><button data-mode="show">show</button><button data-mode="hide">hide</button></div>
             <span>Field</span>
-            <div class="seg" id="obstacleSeg" title="What the robot bumps into: the BIOBUZZ HIVEs and FLOWERs, or only the walls (for an auto written for another season's field)"><button data-obst="all">HIVE &amp; walls</button><button data-obst="walls">walls only</button></div>
+            <div class="seg" id="obstacleSeg" role="group" aria-label="Field" title="What the robot bumps into: the BIOBUZZ HIVEs and FLOWERs, or only the walls (for an auto written for another season's field)"><button data-obst="all">HIVE &amp; walls</button><button data-obst="walls">walls only</button></div>
           </div>
           <p class="hint">When the code drives but the CAD has no wheels, the bench draws a mecanum base under it; when the code shoots and the CAD has no flywheel, it draws one. The outline on the floor is what bumps into the field.</p>
         </div>
 
         <div class="sec" data-sec="hwmap">
           <div class="sec-head"><h3>Hardware map</h3><span class="pill" id="mapPill">—</span><span class="spacer"></span>
-            <div class="seg" id="trustSeg" title="Where servo and motor types come from"><button data-trust="code" class="on">code</button><button data-trust="cad">CAD</button></div></div>
+            <div class="seg" id="trustSeg" role="group" aria-label="Where types come from" title="Where servo and motor types come from"><button data-trust="code" class="on">code</button><button data-trust="cad">CAD</button></div></div>
           <div class="scrollx"><table class="grid" id="mapTable"></table></div>
           <p class="hint" id="trustNote">Servo and motor types come from your declarations and comments. The CAD is used for geometry only.</p>
         </div>
@@ -416,14 +438,14 @@
     </section>
 
     <section class="pane pane-java" data-pane="java" hidden>
-      <div class="java-bar"><span class="mono" id="srcName"></span><span class="spacer"></span>
+      <div class="java-bar"><span class="mono" id="srcName" translate="no"></span><span class="spacer"></span>
         <span class="pill" id="covPill">—</span>
         <button class="btn-sm primary" id="reparse" type="button">Re-analyze</button></div>
       <div class="editor" id="editor">
         <div class="ed-gutter" id="edGutter" aria-hidden="true"></div>
         <div class="ed-main">
           <pre class="ed-hl" id="edHl" aria-hidden="true"></pre>
-          <textarea class="ed-ta" id="srcbox" spellcheck="false" wrap="off" autocomplete="off" autocapitalize="off" aria-label="Java source"></textarea>
+          <textarea class="ed-ta" id="srcbox" name="source" translate="no" spellcheck="false" wrap="off" autocomplete="off" autocapitalize="off" aria-label="Java source"></textarea>
         </div>
       </div>
       <div class="sec" data-sec="coverage" data-collapsed="1">
@@ -437,9 +459,9 @@
         <div class="sec-head"><h3>Physics</h3><span class="pill" id="physPill">—</span></div>
         <div class="form2">
           <span>Chassis</span>
-          <div class="seg" id="physSeg" title="How the drive base moves"><button data-phys="rigid">rigid body</button><button data-phys="kinematic">kinematic</button></div>
+          <div class="seg" id="physSeg" role="group" aria-label="Chassis" title="How the drive base moves"><button data-phys="rigid">rigid body</button><button data-phys="kinematic">kinematic</button></div>
           <span>Mechanisms</span>
-          <div class="seg" id="mechSeg" title="How arms, slides and claws move"><button data-mech="posed">posed</button><button data-mech="jolt">solved (Jolt)</button></div>
+          <div class="seg" id="mechSeg" role="group" aria-label="Mechanisms" title="How arms, slides and claws move"><button data-mech="posed">posed</button><button data-mech="jolt">solved (Jolt)</button></div>
           <label for="muSlider">Tile grip μ</label>
           <div class="slide"><input type="range" id="muSlider" min="0.2" max="1.4" step="0.05" value="0.9"><span class="v" id="muVal">0.90</span></div>
         </div>
@@ -499,18 +521,18 @@
         <div class="sec-head"><h3>Setup</h3><span class="spacer"></span>
           <label class="practice"><input type="checkbox" id="arcToggle" checked> show arc</label></div>
         <div class="form2">
-          <span>Alliance</span><div class="seg" id="allySeg"><button data-al="red">red</button><button data-al="blue">blue</button></div>
-          <span>Ball</span><div class="seg" id="ballSeg"><button data-ball="pollen">POLLEN</button><button data-ball="nectar">NECTAR</button></div>
-          <span>Shooter</span><div class="seg" id="typeSeg"><button data-type="single">hood</button><button data-type="dual">two wheels</button></div>
-          <span>Shoots</span><div class="seg" id="mountSeg"><button data-mount="0">forward</button><button data-mount="180">backward</button></div>
-          <span>Precision</span><div class="seg" id="precSeg"><button data-prec="dialed">dialed-in</button><button data-prec="typical">typical</button><button data-prec="rough">rough</button></div>
+          <span>Alliance</span><div class="seg" id="allySeg" role="group" aria-label="Alliance"><button data-al="red">red</button><button data-al="blue">blue</button></div>
+          <span>Ball</span><div class="seg" id="ballSeg" role="group" aria-label="Ball"><button data-ball="pollen">POLLEN</button><button data-ball="nectar">NECTAR</button></div>
+          <span>Shooter</span><div class="seg" id="typeSeg" role="group" aria-label="Shooter type"><button data-type="single">hood</button><button data-type="dual">two wheels</button></div>
+          <span>Shoots</span><div class="seg" id="mountSeg" role="group" aria-label="Shoots"><button data-mount="0">forward</button><button data-mount="180">backward</button></div>
+          <span>Precision</span><div class="seg" id="precSeg" role="group" aria-label="Precision"><button data-prec="dialed">dialed-in</button><button data-prec="typical">typical</button><button data-prec="rough">rough</button></div>
           <label for="hoodSlider">Launch angle</label>
           <div class="slide"><input type="range" id="hoodSlider" min="40" max="88" step="1"><span class="v" id="hoodVal"></span></div>
           <label for="h0Slider">Exit height</label>
           <div class="slide"><input type="range" id="h0Slider" min="4" max="29" step="0.5"><span class="v" id="h0Val"></span></div>
           <label for="motorSel">Motor</label><select id="motorSel"></select>
           <label for="wheelSel">Wheel</label><select id="wheelSel"></select>
-          <label for="gearIn">Motor : wheel</label><div><input class="mini" id="gearIn" type="number" step="0.05" min="0.25" max="4"> <span class="dim">wheel turns per motor turn</span></div>
+          <label for="gearIn">Motor : wheel</label><div><input class="mini" id="gearIn" name="gear" type="number" inputmode="decimal" step="0.05" min="0.25" max="4"> <span class="dim">wheel turns per motor turn</span></div>
         </div>
         <p class="hint">Ball flight, drag, spin, the CELL lip and the frame come from the <a href="https://github.com/LILRINO71/biobuzz-shot-sim" target="_blank" rel="noopener">BIOBUZZ Shot Sim</a>. The setup saves with this robot's rig.</p>
       </div>
@@ -537,7 +559,7 @@
 
     <section class="pane" data-pane="graph" hidden>
       <div class="graph-bar">
-        <div class="seg" id="winSeg"><button data-w="10">10 s</button><button data-w="30" class="on">30 s</button><button data-w="60">60 s</button></div>
+        <div class="seg" id="winSeg" role="group" aria-label="Time window"><button data-w="10">10 s</button><button data-w="30" class="on">30 s</button><button data-w="60">60 s</button></div>
         <span class="spacer"></span>
         <button class="btn-sm" id="graphPause" type="button">Pause</button>
         <button class="btn-sm" id="graphClear" type="button">Clear</button>
@@ -563,7 +585,7 @@
       <div class="tour-body" id="tourBody"></div>
       <p class="tour-tip" id="tourTip"></p>
       <div class="tour-foot">
-        <label class="practice"><input type="checkbox" id="tourSkip"> don't show this again</label>
+        <label class="practice"><input type="checkbox" id="tourSkip"> don’t show this again</label>
         <span class="spacer"></span>
         <button class="btn-sm" id="tourBack" type="button">Back</button>
         <button class="btn-sm primary" id="tourNext" type="button">Next</button>
@@ -579,10 +601,10 @@
       <p class="hint">Paste your team's repository, a folder inside it, or one <code>.java</code> file. Public repositories
         only; nothing is sent anywhere except GitHub.</p>
       <div class="gh-row">
-        <input type="text" id="ghUrl" spellcheck="false" autocomplete="off" placeholder="owner/repo  ·  github.com/owner/repo/tree/main/TeamCode">
+        <input type="text" id="ghUrl" name="repo" aria-label="GitHub repository, folder or file" inputmode="url" spellcheck="false" autocomplete="off" autocapitalize="off" placeholder="owner/repo  ·  github.com/owner/repo/tree/main/TeamCode…">
         <button class="btn-sm primary" id="ghGo" type="button">Find OpModes</button>
       </div>
-      <div class="gh-status" id="ghStatus"></div>
+      <div class="gh-status" id="ghStatus" aria-live="polite"></div>
       <div class="gh-list" id="ghList"></div>
     </div>
   </div>
