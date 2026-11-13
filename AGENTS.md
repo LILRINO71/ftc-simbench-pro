@@ -37,6 +37,7 @@ Read this file before you start, and again before you push.
 | --- | --- | --- |
 | Claude | `src/match.js` (new), `src/field.js`, `src/shots.js`, `src/sim.js` (the match), `src/onshapelink.js` (new), `src/robotcheck.js` (new), `src/markup.html` + `src/styles.css` (Robot check section), `src/jointspec.js`, `src/autorig.js`, `src/cadview.js` (joint editor), `src/app.js` (joints panel), `src/view3d.js` (joint preview), `src/roadrunner.js`, `src/net.js` (new), `src/robotlite.js` (new), `src/drivetrain.js` + `src/frame.js` + `src/step.js` (wheels built from many parts), `tools/build.mjs` (module order, link preview), `src/view3d.js` (match robots, light copy), `src/app.js` + `src/markup.html` + `src/styles.css` (online panel) | the joint finder and editor; online matches (players on different computers in one match) |
 | Claude | `src/meshfiles.js` (mesh thinning, glTF reading), `src/urdf.js` (shape reading), `src/view3d.js` + `src/app.js` (frame cost), `tests/meshfiles-speed.test.mjs` (new) | faster and exact robot import from an export zip, less lag drawing big robots |
+| Claude (session `laughing-johnson`, PR #14) | `src/autorig.js` (parents, a slide drawn into the frame), `src/mates.js` (a body with no joint rides its carrier; `dir` from one-sided limits), `src/bind.js` (twins on one axis follow; limited joints; hints before only-one), `src/urdf.js` (the cascade hint's sign only, no shape reading), `src/sim.js` (a servo's starting position only), `tests/exportrobot.mjs` + `tests/export-kinematics.test.mjs` (new) | the export zip's joints checked against the file's own kinematics |
 
 Done and released: drive direction, the 25f54d3 sim and parser fixes,
 `autoMap`, Onshape mates (`src/mates.js`) and the pasted Onshape link (`src/onshapelink.js`,
@@ -76,6 +77,15 @@ Those files are free again; read the conventions below before changing them.
   mate joint. While `isExact(cad)`, `classifyJoints` holds every undeclared joint and
   `bindDevices` binds only what a declaration names. A sheet is undone by `applyJointSheet` itself
   (it keeps what it changed in `sheetWas`), so apply it again rather than editing those fields.
+- **Twins on one axis** (`src/bind.js`): joints off one part on one axis line are one motion.
+  `classifyJoints` gives the followers `coaxialWith` and `couple:{to, ratio:±1, via:"coaxial"}`
+  (never `internal`), and `bindDevices` re-points them at whichever one the code drives. Both
+  work it out afresh on every call, so don't store anything on a `via:"coaxial"` couple.
+- **A mate joint's `dir`** (`src/mates.js`): 1, or -1 when its limits lie wholly below the drawn
+  pose (the code's positive goes the way the joint can go). A follower's ratio is in each
+  joint's own axis, so it carries the sign between the two axes.
+- **A servo's starting position** (`src/sim.js`): its `restPos` (the joint spec's, else the
+  code's), so a joint starts as drawn. `cmd === 0.5` no longer means "never commanded".
 - **Joint kinds**: compare through `normJointKind(k)`; `prismatic` and
   `linear-slide` are aliases of `linear`. Slide travel per tick is
   `slideMmPerTick(mech, tpr)`, shared by the sim and the view.

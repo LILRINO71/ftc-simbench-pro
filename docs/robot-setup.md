@@ -109,7 +109,16 @@ export; the link route has none of them, because it reads the assembly itself):
   leader and nothing drives the follower;
 - every part of a rigid body is one link; each part is read as its own solid, named after its mesh;
 - parts never mated to anything hang off the root; one sitting clear of the robot is left off;
-- parts with no material weigh their volume (the exporter writes them at a density of 1).
+- parts with no material weigh their volume (the exporter writes them at a density of 1);
+- several joints off one part on one axis (a spindexer's plates each mated to the frame, a hub and
+  the shaft through it) are one motion: the others follow the one the code drives;
+- a wheel with its own joint (a flywheel on a turret, a compliant wheel on an intake arm) gets no
+  joint of its own and rides whatever carries it;
+- a mate's axis can point either way, so a joint drawn at the top of its travel (limits wholly
+  below zero) takes the code's positive the way it can go. The ± in the kinematic rig still flips it.
+
+A joint with travel limits is always taken as a mechanism, however small, so **set limits on the
+mates that are mechanisms**: it is the one thing in an export that says "this moves on purpose".
 
 ## Under Advanced
 
