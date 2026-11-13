@@ -4,6 +4,77 @@ The handoffs live here, the newest first. The two older ones below mention `rese
 `research/realcad`, `research_notes/` and `reports/`: those folders were removed on 2026-10-04 as
 unused (nothing in the build or the tests read them); the measurements they held stay in the text.
 
+## 2026-11-13: the export zip's joints, checked against the file itself
+
+Branch `claude/laughing-johnson-xatdki`, PR #14 (draft, on top of the 2026-10-26 work below).
+The owner: "we do this robot and then another robot and then another; I want a solution, not
+each robot redone", and the route that goes wrong for them is **Onshape's URDF export zip**
+(REVIVER). The zip itself never reached this session (see "Still open"), so nothing here was
+tuned on it.
+
+### The idea
+
+A URDF says exactly how its parts move. So the reader has an answer key for any export, with no
+robot needed: drive a joint, and every part must end up where the file's own joint tree puts it.
+`tests/exportrobot.mjs` builds a robot the way Onshape exports one, from boxes and cylinders
+(no mesh files), with `urdfFk` (the file's kinematics) and `misplaced` (the parts that are not
+where the file says, moved the way the view and the sim move them: `solid.mech`, parents,
+`jointValues`, internal joints held). `tests/export-kinematics.test.mjs` runs it. Every bug below
+is a way any export is written, and came out of that check, not out of one team's CAD.
+
+### What was wrong, and what changed
+
+| | Before | Now | Where |
+|---|---|---|---|
+| A wheel with its own joint on a moving part (a flywheel on a turret, a compliant wheel on an intake arm) | got no joint and no carrier: it stayed on the frame when the turret or arm moved | rides the joint that carries the body it hangs from (`rides`, `carrierOf`) | `src/mates.js` |
+| Joints off one part on one axis (a spindexer's three plates) | "one motion", so all but one were held as drawn: they never turned | the others follow (`couple … via:"coaxial"`); the one the code drives leads; two the code both drives stay separate | `src/bind.js` |
+| A bearing's race, shaft and arm on one axis | race and arm both stayed; the arm's servo landed on the race (no limits) | the fold looks past turns already folded on that axis; the limited one is the mechanism | `src/bind.js` |
+| A joint with limits, under 45 mm (a small claw) | set aside as a bearing race; its servo had no joint | limits always make a mechanism | `src/bind.js` |
+| A lift's second stage (a hinted follower) | "the only joint left" for a motor that had no joint | hints are applied before that rule | `src/bind.js` |
+| A slider mate pointing down (limits wholly below zero) | positive ticks ran into the stop at zero: the lift never moved | `dir = -1`: the code's positive goes the way the joint can go | `src/mates.js` |
+| A cascade stage whose mate points the other way from its leader's | followed along its own axis: down as the leader went up | the hint's ratio carries the sign between the two axes | `src/urdf.js` |
+| A servo before its first command, on any robot with no joint spec | started at 0.5 while its joint is drawn from `restPos` (the code's lowest, say 0.1): 120° off as drawn | starts at `restPos` | `src/sim.js` |
+| `npm test` where Node's heap is ~2 GB | `robotcheck-mutations` died out of memory | `tools/test.mjs` gives test processes 4 GB | `tools/test.mjs` |
+
+Conventions these add are in AGENTS.md ("Twins on one axis", "A mate joint's `dir`", "A servo's
+starting position").
+
+### Measured here
+
+- `npm test`: 820 pass, 0 fail (9 new in `export-kinematics`; 8 fail before their fix).
+  `npm run build:ship` clean.
+- The joint finder (2026-10-26 below) is untouched by this; its numbers stand.
+- Not measured: REVIVER itself, and the page in a browser. The fixes are in the engine and are
+  covered by Node tests only; nobody has watched the robot move in the view after them.
+
+### Still open
+
+- **The owner's zip.** Their Drive folder (`1nSeUoHng6ytJsNRpy-lSmdru4Uu9Aeve`) is private and
+  the Drive connector lacks the permission to read it: it needs "Anyone with the link", or the
+  `.urdf` alone uploaded (it is small text and holds every joint). First thing to do with it:
+  `urdfRobot` on it, then for each mechanism `misplaced(E, R, cad, lead, Q)` with `R` built from
+  the file (`exportrobot.mjs` takes `{links, joints}` in the shape its generator returns; a
+  30-line reader of the real `.urdf` into that shape is all that's missing).
+- **Loop closures and four-bars in an export** aren't in the generated robot: how Onshape writes
+  them (`loop_closure` links) is known only from REVIVER's notes, and the bench drives a loop
+  through its first joint.
+- **`only-one` can still be wrong** when a motor with no joint (a shooter) is the last motor and
+  one unrelated joint is the last joint. It's the rule's design; naming the mates
+  (docs/exact-joints.md) is what removes the guess.
+- **A flywheel has no joint** (it is "a wheel on its axle"), so its motor is a gauge and the
+  import card asks about it with no candidates. Harmless, but the question could be dropped.
+- **Servo travel** is still 300° of joint per unit of position, clamped by the mate's limits.
+  With limits on both ends the span could map onto the code's own range instead.
+- `jointTakes` in `src/bind.js` returns null from both arms of its last test (dead code).
+
+### For the next session
+
+1. Get the zip (above) and run the answer-key check on it before changing anything.
+2. If the owner reports a part moving wrong, add that pattern to `exportRobot` first, watch
+   `misplaced` name it, then fix the reader. That keeps every fix general.
+3. PR #14 is a draft with green CI; merging it is the owner's call. `main` has not moved since
+   2026-10-21, and the other session's claim (mesh reading, frame cost) is still in AGENTS.md.
+
 ## 2026-10-26: the joint finder's tree, scored against 7832's hand joints
 
 Branch `claude/laughing-johnson-xatdki`. The owner: importing a real robot without mates "doesn't

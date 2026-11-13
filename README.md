@@ -174,6 +174,12 @@ check the live build by comparing its `SIMBENCH_BUILD` hash with a local ship bu
 - **The physics is a model, not a measurement.** Mass comes from CAD shapes and material density,
   or from a vendor figure when a part is recognised. Every number in the Math tab says where it
   came from. Check a real robot on a real field before you bet a match on it.
+- **An export's joints are read, not guessed, and checked against the file.** A URDF says how its
+  parts move, so `tests/export-kinematics.test.mjs` drives each joint of a generated export and
+  requires every part to land where the file's own joint tree puts it. What the file can't say is
+  still worked out: which of its joints are mechanisms (a library bearing has a joint too), and
+  which device drives each. Name the mates in Onshape (`motor arm`, `servo claw`:
+  [docs/exact-joints.md](docs/exact-joints.md)) and none of that is worked out either.
 - **Guessed joints need a person.** On real teams' CAD the finder alone makes mistakes, which is
   why the robot check asks about anything it can't confirm. Onshape mates skip the guessing.
 - **Automatic joints are a first draft.** The finder is measured on one real robot so far (see
