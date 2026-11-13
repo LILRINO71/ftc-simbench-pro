@@ -132,3 +132,16 @@ test('mates: a slider mate that points down still lifts, and a stage follows the
     assert.ok(up(s1) > 0.2 && up(s2) > 0.2, JSON.stringify(opt) + ': stage 1 ' + up(s1) + ' m, stage 2 ' + up(s2) + ' m');
   }
 });
+
+test('sim: a servo nothing has commanded yet sits where its joint was drawn', async () => {
+  // the code sends the arm between 0.1 and 0.9 and the claw between 0.2 and 0.7; neither is 0.5
+  const X = await read({});
+  E.Sim.reset(X.code, X.cad, X.B.map, { payloadKg: 0, duty: 1, trust: 'code', startPose: { x: 0, y: 0, h: 0 } });
+  const own = new Map(); for (const n in E.Sim.dev) { const s = E.Sim.dev[n]; if (s.mech && !own.has(s.mech.id)) own.set(s.mech.id, s); }
+  const q = (mate) => E.jointValues(X.cad.mechs, (m) => { const s = own.get(m.id); return s ? E.mateJointQ(m, s, 0.5) : (m.couple ? null : 0); }).get(joint(X.cad, mate).id);
+  E.Sim.pad = { 1: {}, 2: {} }; run(E, 1);
+  assert.equal(q('revolute_arm'), 0, 'the arm, a second after START with nothing pressed');
+  assert.equal(q('revolute_claw_left'), 0); assert.equal(q('revolute_hood'), 0);
+  E.Sim.pad = { 1: {}, 2: { y: true } }; run(E, 1.5);
+  assert.ok(q('revolute_arm') > 1, 'and it moves when the code sends it: ' + q('revolute_arm'));
+});

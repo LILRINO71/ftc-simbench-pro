@@ -164,7 +164,9 @@ test('switch: stacked labels share a body, fall-through runs on, default can sit
   E.Sim.dev.arm.cmd = 0.5;
   at({ step: 1 }); assert.equal(cmd('arm'), 0.5, 'case 1 alone'); assert.equal(cmd('rotate'), 0.8);
   at({ step: 5 }); assert.equal(cmd('rotate'), 0.1);
-  assert.equal(cmd('lift'), 0.5, 'case 0: break does nothing');
+  // (a servo nothing has commanded rests at the position its joint was drawn at, 0.3 here, so 0.5 is set to tell)
+  E.Sim.dev.lift.cmd = 0.5;
+  at({ step: 6 }); assert.equal(cmd('lift'), 0.5, 'case 0: break does nothing');
   at({ gear: 1 }); assert.equal(cmd('lift'), 0.3);
   assert.equal(cmd('catcher'), 0.3, 'default first'); assert.equal(cmd('slide'), 0.6, 'default fell into case 7');
   E.Sim.dev.catcher.cmd = 0.5;
