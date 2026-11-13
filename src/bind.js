@@ -86,6 +86,8 @@ const {classifyJoints, bindDevices}=(function(){
     const subtree=(m,depth)=>{ if(carried.has(m.id)) return carried.get(m.id); const idx=members(cad,m);
       if(depth<40) for(const k of kids.get(m.id)||[]) idx.push(...subtree(k,depth+1)); carried.set(m.id,idx); return idx; };
     const spec=!!(cad.mates&&cad.mates.source==="spec");
+    // the followings an earlier run worked out here (twins on one axis) are worked out again
+    for(const m of mechs){ if(m.couple&&m.couple.via==="coaxial") delete m.couple; delete m.coaxialWith; }
     // the team declared its joints: those are the mechanisms, and nothing else is
     if(typeof isExact==="function"&&isExact(cad)){
       let held=0;
@@ -97,13 +99,21 @@ const {classifyJoints, bindDevices}=(function(){
       return {internal:held, mechanisms:n, exact:true, why:[n+" declared joint"+(n===1?" is the mechanism":"s are the mechanisms")+"; the other "+held+" "+(held===1?"is":"are")+" held as drawn."]};
     }
     let internal=0, why=[];
-    const reasons={small:0, hardware:0, coaxial:0};
+    const reasons={small:0, hardware:0, coaxial:0, twin:0};
+    const lim=x=>!!(x.limits&&Number.isFinite(x.limits[0])&&Number.isFinite(x.limits[1]));
+    // two turns about one line: axes within 3 degrees, b's pivot within tol of a's axis
+    const oneLine=(a,b,tol)=>{ if(Math.abs(dot(a.axis,b.axis))<Math.cos(3*DEG)) return false;
+      const d=sub(b.pivot,a.pivot), t=dot(d,a.axis); return Math.hypot(d[0]-a.axis[0]*t,d[1]-a.axis[1]*t,d[2]-a.axis[2]*t)<=tol; };
     for(const m of mechs){
       if(m.declaredFixed){ m.internal=true; m.internalWhy="declared fixed"; internal++; continue; }
       if(m.keep||m.manual||spec||m.declared){ m.internal=false; continue; }
       if(m.couple){ m.internal=false; continue; }                           // it follows another joint: a mechanism
       const idx=subtree(m,0), box=boxOf(cad,idx);
       if(!idx.length||!box){ m.internal=false; continue; }                 // empty joints are the robot check's business
+      // travel limits are the team's own word that it moves: no library bearing or motor shaft
+      // has them. Set aside for its size, a 35 mm claw finger was a "bearing race" and the
+      // claw servo had no joint to drive
+      if(lim(m)){ m.internal=false; continue; }
       const names=idx.map(i=>String(cad.solids[i].name||""));
       const allHw=names.every(n=>BIND_RULES.hardwareWords.test(n));
       if(box.extent<BIND_RULES.internalExtent){ m.internal=true; m.internalWhy="small"; reasons.small++; }
@@ -124,29 +134,31 @@ const {classifyJoints, bindDevices}=(function(){
     // a turn on the same axis as the turn it hangs from (the gear on the gear a servo turns,
     // a bearing's two races, a shaft in its bearing) is one motion, not two joints: the one
     // with limits stays, else the one nearer the chassis, and the other turns with it
-    const lim=x=>!!(x.limits&&Number.isFinite(x.limits[0])&&Number.isFinite(x.limits[1]));
+    // (a library bearing writes three: the race, the shaft in it, the arm on the shaft. The turn
+    // it hangs from is looked for past the ones already folded on this axis, or the race and the
+    // arm both stayed, and the arm's servo landed on the race, which has no limits)
+    const turns=x=>!!x&&kindOf(x)!=="linear"&&!!x.axis&&!!x.pivot;
     for(const m of mechs){
-      if(m.internal||m.keep||m.manual||m.declared||spec||m.couple) continue;
-      const p=byId.get(m.parent); if(!p||p.internal||p.couple||p.keep||p.manual||p.declared) continue;
-      if(kindOf(m)==="linear"||kindOf(p)==="linear"||!m.axis||!p.axis||!m.pivot||!p.pivot) continue;
-      if(Math.abs(dot(m.axis,p.axis))<Math.cos(3*DEG)) continue;
-      const d=sub(m.pivot,p.pivot), t=dot(d,p.axis);
-      if(Math.hypot(d[0]-p.axis[0]*t,d[1]-p.axis[1]*t,d[2]-p.axis[2]*t)>0.006) continue;
+      if(m.internal||m.keep||m.manual||m.declared||spec||m.couple||!turns(m)) continue;
+      let p=byId.get(m.parent);
+      for(let n=0;n<40&&p&&p.internal&&p.internalWhy==="coaxial"&&turns(p)&&oneLine(p,m,0.006);n++) p=byId.get(p.parent);
+      if(!p||p.internal||p.couple||p.keep||p.manual||p.declared||!turns(p)||!oneLine(p,m,0.006)) continue;
       const drop=lim(m)&&!lim(p)?p:m;
       drop.internal=true; drop.internalWhy="coaxial"; reasons.coaxial++; internal++;
     }
-    // two joints off the same parent on one axis line (a spindexer plate mated twice, two servos
-    // turning one turret, a hub and the shaft through it) are one motion too: the one with limits,
-    // then with an actuator, then carrying more, stays; the code's second device pairs onto it
+    // two joints off the same parent on one axis line (a spindexer's plates each mated to the
+    // frame, two servos turning one turret, a hub and the shaft through it) are one motion too:
+    // the one with limits, then with an actuator, then carrying more, leads, and the other
+    // follows it turn for turn. (Held as drawn instead, two of a spindexer's three plates stood
+    // still while the third turned.) bindDevices lets whichever one the code drives lead, and
+    // leaves both free when the code drives both
     const live=mechs.filter(m=>!m.internal&&!m.keep&&!m.manual&&!m.declared&&!spec&&!m.couple&&kindOf(m)!=="linear"&&m.axis&&m.pivot);
     const score=m=>(lim(m)?4:0)+(m.hasActuator?2:0)+Math.min(1,subtree(m,0).length/1000);
     for(let i=0;i<live.length;i++) for(let j=i+1;j<live.length;j++){
-      const a=live[i], c=live[j]; if(a.internal||c.internal||a.parent!==c.parent) continue;
-      if(Math.abs(dot(a.axis,c.axis))<Math.cos(3*DEG)) continue;
-      const d=sub(c.pivot,a.pivot), t=dot(d,a.axis);
-      if(Math.hypot(d[0]-a.axis[0]*t,d[1]-a.axis[1]*t,d[2]-a.axis[2]*t)>0.012) continue;
-      const drop=score(c)>score(a)?a:c;
-      drop.internal=true; drop.internalWhy="coaxial"; drop.coaxialWith=(drop===a?c:a).id; reasons.coaxial++; internal++;
+      const a=live[i], c=live[j]; if(a.internal||c.internal||a.couple||c.couple||a.parent!==c.parent) continue;
+      if(!oneLine(a,c,0.012)) continue;
+      const drop=score(c)>score(a)?a:c, lead=drop===a?c:a;
+      drop.coaxialWith=lead.id; drop.couple={to:lead.id, ratio:dot(drop.axis,lead.axis)<0?-1:1, via:"coaxial"}; reasons.twin++;
     }
     // an odometry pod: a dead wheel with its encoder, swinging and spinning on its own joints
     for(const m of mechs){
@@ -159,6 +171,7 @@ const {classifyJoints, bindDevices}=(function(){
     if(reasons.odometry) why.push(reasons.odometry+" odometry pod joint"+(reasons.odometry===1?"":"s")+" (a dead wheel and its encoder) left to themselves.");
     if(reasons.axle) why.push(reasons.axle+" turn"+(reasons.axle===1?"":"s")+" on the drive wheels' axles (shafts, hubs, bearings) left to the drive.");
     if(reasons.coaxial) why.push(reasons.coaxial+" turn"+(reasons.coaxial===1?"":"s")+" on the same axis as the turn "+(reasons.coaxial===1?"it hangs":"they hang")+" from (a gear on a gear, a shaft in its bearing) folded into "+(reasons.coaxial===1?"it":"them")+".");
+    if(reasons.twin) why.push(reasons.twin+" turn"+(reasons.twin===1?"":"s")+" on the same axis as another off the same part (plates on one shaft, a hub and its shaft) "+(reasons.twin===1?"turns":"turn")+" with it.");
     return {internal, mechanisms:mechs.length-internal, why};
   }
 
@@ -215,6 +228,28 @@ const {classifyJoints, bindDevices}=(function(){
       if(d&&!map[d.name]&&byId.has(b.joint)) take(d,byId.get(b.joint),b.from==="tag"?"mate name":"sheet",100,b.from==="tag"?"its mate's name in Onshape says so":"the joint sheet says so");
     }
     const free=()=>mechs.filter(m=>!m.couple&&!used().has(m.id));
+    // twins on one axis (classifyJoints): the one the code drives leads the others; with two of
+    // them driven (a turret and a spindexer on one centre line) each is its own mechanism
+    const twins=()=>{
+      const U=used(), groups=new Map();
+      const rootOf=m=>{ let r=m; for(let n=0;n<40&&r.coaxialWith&&byId.has(r.coaxialWith);n++) r=byId.get(r.coaxialWith); return r; };
+      for(const m of mechs) if(m.coaxialWith){ const r=rootOf(m); if(!groups.has(r.id)) groups.set(r.id,[r]); groups.get(r.id).push(m); }
+      for(const g of groups.values()){
+        const lead=g.find(m=>U.has(m.id))||g[0];
+        for(const m of g){
+          if(m.couple&&m.couple.via==="coaxial") delete m.couple;
+          if(m!==lead&&!U.has(m.id)&&!m.couple) m.couple={to:lead.id, ratio:dot(m.axis,lead.axis)<0?-1:1, via:"coaxial"};
+        }
+      }
+    };
+    twins();
+    // couplings the import could only hint at (src/urdf.js): a hinted joint follows its leader
+    // when the code drives the leader and nothing drives it. Before "only one" below: left for
+    // after it, a lift's second stage was "the only joint left" for a motor that had none
+    const applied=[];
+    const hints=()=>{ for(const m of mechs){ const h=m.coupleHint; if(exact||!h||m.couple||used().has(m.id)) continue;
+      const L=byId.get(h.to); if(!L||!used().has(L.id)) continue;
+      m.couple={to:L.id, ratio:h.ratio, via:h.via}; applied.push({joint:m.id, to:L.id, via:h.via, ratio:h.ratio}); } };
     // without a declaration: names, pairs and the code's travel (none of it runs once the team has declared)
     if(!exact){
       // names: the same scoring as the hardware table, kind-aware
@@ -243,6 +278,7 @@ const {classifyJoints, bindDevices}=(function(){
         if(hits.length===1) take(d,hits[0].m,"travel",70,"the positions it is sent to reach the slide's "+Math.round(Math.max(Math.abs(hits[0].m.limits[0]||0),Math.abs(hits[0].m.limits[1]||0))*1000)+" mm");
       }
     }
+    twins(); hints();
     // only one: the last device of a kind and the last joint that takes it
     for(let pass=0;pass<3;pass++){
       const left=devs.filter(d=>!map[d.name]&&moved(d.name));
@@ -253,16 +289,12 @@ const {classifyJoints, bindDevices}=(function(){
         if(stems.size!==1) continue;
         const js=free().filter(m=>fits(cad,ds[0],m)&&!(exact&&m.sheetDevices&&m.sheetDevices.length));
         if(js.length!==1) continue;
-        for(const d of ds) take(d,js[0],"only-one","the only "+K+" left, and the only "+(kindOf(js[0])==="linear"?"slide":"joint")+" that takes one");
+        for(const d of ds) take(d,js[0],"only-one",60,"the only "+K+" left, and the only "+(kindOf(js[0])==="linear"?"slide":"joint")+" that takes one");
       }
+      hints();
     }
-    // couplings the import could only hint at (src/urdf.js): a hinted joint follows its
-    // leader when the code drives the leader and nothing drives it
-    const applied=[];
-    for(const m of mechs){ const h=m.coupleHint; if(exact||!h||m.couple||used().has(m.id)) continue;
-      const L=byId.get(h.to); if(!L||!used().has(L.id)) continue;
-      m.couple={to:L.id, ratio:h.ratio, via:h.via}; applied.push({joint:m.id, to:L.id, via:h.via, ratio:h.ratio}); }
 
+    for(const m of mechs) if(m.couple&&m.couple.via==="coaxial") applied.push({joint:m.id, to:m.couple.to, via:"coaxial", ratio:m.couple.ratio});
     // the questions: a device the code moves with no joint, and its likely answers
     const open=[];
     for(const d of devs){
