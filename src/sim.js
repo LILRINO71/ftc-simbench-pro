@@ -62,14 +62,16 @@ const Sim={
     let kind = spec.kind;
     if (kind === "crservo") kind = "motor";
     const isMotor=kind==="motor";
+    // the servo position the CAD was drawn at: a joint spec says; else the code's own
+    const restPos=(mech&&Number.isFinite(mech.restPos))?mech.restPos:(this.code&&!this.code.vm?restPosOf(this.code,d.name):0.5);
     return (this.dev[d.name]={kind, mech, spec,
-      // a servo nothing has commanded yet is unpowered: it sits where the CAD drew it
-      cmd:isMotor?0:(mech&&Number.isFinite(mech.restPos)?mech.restPos:0.5),
-      act:isMotor?0:(mech&&Number.isFinite(mech.restPos)?mech.restPos:0.5), revs:0, ticks:0, stalled:false,
+      // a servo nothing has commanded yet is unpowered: it sits where the CAD drew it, which is
+      // at that position. (Started at 0.5 whatever the drawn position was, a servo the code
+      // sends between 0.1 and 0.9 began 120 degrees from where its joint was drawn.)
+      cmd:isMotor?0:restPos, act:isMotor?0:restPos, revs:0, ticks:0, stalled:false,
       reversed:false, mode:"run", target:0,
       tpr: ticksPerRev(spec),            // counts per output turn (src/hardware.js)
-      // the servo position the CAD was drawn at: a joint spec says; else the code's own
-      restPos:(mech&&Number.isFinite(mech.restPos))?mech.restPos:(this.code&&!this.code.vm?restPosOf(this.code,d.name):0.5),
+      restPos,
       sec60:spec.sec60||0.18, travelDeg:travelDegOf(spec)});
   },
   /* What the Java VM asks of the robot: devices, sticks, time, sensors. */
