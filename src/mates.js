@@ -433,11 +433,17 @@ function applyOnshapeMates(cad,json,opts){
   };
   const mechOf=new Map();
   const mechs=[];
+  // a body with no joint of its own (a wheel on its axle, a mate that couldn't be placed) still
+  // rides the joint that carries the body it hangs from. Left to the frame, the flywheel on a
+  // turret and the compliant wheel on an intake arm stayed behind when the turret or arm moved.
+  const rides=new Map();
+  const carrierOf=b=>mechOf.get(b)||rides.get(b)||null;
+  const ride=j=>{ const pm=carrierOf(j.parent); if(!pm) return; rides.set(j.child,pm); for(const si of bodySolids(j.child)) solids[si].mech=pm.id; };
   for(const j of joints){
-    if(wheelBody.has(j.child)&&(j.m.type==="REVOLUTE"||j.m.type==="CYLINDRICAL")) continue;
+    if(wheelBody.has(j.child)&&(j.m.type==="REVOLUTE"||j.m.type==="CYLINDRICAL")){ ride(j); continue; }
     // the mate frame in world: the end's occurrence placement, then its connector
     const e=j.m.ends[j.parentEnd], endOcc=A.occ.get(pathKey(e.path));
-    if(!endOcc){ why.push("mate \""+j.m.name+"\" names an occurrence with no placement; skipped."); continue; }
+    if(!endOcc){ why.push("mate \""+j.m.name+"\" names an occurrence with no placement; skipped."); ride(j); continue; }
     const W=mMul(G,mMul(endOcc.T,e.cs));
     const pivot=raw2c(W.t);
     let axis=dir2c(W.r[2]);
@@ -484,6 +490,11 @@ function applyOnshapeMates(cad,json,opts){
       // an axis turned round (onshape-to-robot's _inv) runs the same travel the other way
       if(inv&&m.limits){ const [a,b]=m.limits; m.limits=[b==null?null:-b, a==null?null:-a]; }
     }
+    // a joint drawn at the top of its travel can only go back down its axis, and which way a
+    // mate's axis points is whoever made the mate's choice. The code's positive (ticks counting
+    // up, a servo leaving the position it rests at) goes the way the joint can go: with the
+    // axis taken as written, a lift whose slider mate points down never left the floor
+    if(m.limits&&Number.isFinite(m.limits[0])&&Number.isFinite(m.limits[1])&&m.limits[0]<0&&m.limits[1]<=0.02*(m.limits[1]-m.limits[0])) m.dir=-1;
     if(t==="CYLINDRICAL") why.push("\""+j.m.name+"\" is cylindrical (turns and slides); it's simulated as the turn.");
     if(t==="PIN_SLOT") why.push("\""+j.m.name+"\" is a pin-slot; it's simulated as the pin's turn.");
     if(kind==="fixed"){
@@ -497,7 +508,7 @@ function applyOnshapeMates(cad,json,opts){
     mechs.push(m);
   }
   // parents: the joint whose child body this joint hangs from
-  for(const j of joints){ const m=mechOf.get(j.child); if(!m) continue; const pm=mechOf.get(j.parent); if(pm) m.parent=pm.id; }
+  for(const j of joints){ const m=mechOf.get(j.child); if(!m) continue; const pm=carrierOf(j.parent); if(pm) m.parent=pm.id; }
 
   // relations: one joint driven through another (a cascade slide, a gear pair, a rack)
   const byKey=new Map(); for(const [b,m] of mechOf) byKey.set(m.fromMate.key,m);
@@ -523,7 +534,7 @@ function applyOnshapeMates(cad,json,opts){
   // the mates that close a loop: where the two bodies are pinned, so a solver
   // that can close loops (src/joltmech.js) pins them there; the kinematic bench
   // keeps driving each loop through its first joint
-  const jointOfBody=b=>{ const m=mechOf.get(b); return m?m.id:"chassis"; };
+  const jointOfBody=b=>{ const m=carrierOf(b); return m?m.id:"chassis"; };
   const loopRecs=[];
   for(const e of loops){
     const end=e.m.ends[0], occ=A.occ.get(pathKey(end.path)); if(!occ) continue;
