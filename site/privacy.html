@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Privacy · FTC SimBench Pro</title><meta name="description" content="What FTC SimBench Pro reads, what it keeps, and where.">
+<link rel="stylesheet" href="/_page.css"></head>
+<body><main>
+<header><a class="home" href="/">FTC SimBench Pro</a>
+<nav><a href="/support">Support</a><a href="/privacy" aria-current="page">Privacy</a><a href="/terms">Terms of use</a></nav></header>
+<article>
+<h1>Privacy</h1>
+<p class="updated">Last updated 14 November 2026</p>
+<p>Short version: SimBench has no accounts, no ads, no analytics and no tracking. Your robot and your code stay on your computer. On the server side, only two things are kept: your Onshape sign-in, encrypted in a cookie in your own browser, and a cache of part shapes read from Onshape (below).</p>
+
+<h2>What stays on your computer</h2>
+<p>Your robot files, your OpModes (Java code), your settings and the joints you fix by hand are read and kept in your own browser (its local storage and IndexedDB). They are not uploaded. You can remove your robot with <b>⋮ → Forget my robot</b>, or everything by clearing this site's data in your browser.</p>
+
+<h2>Reading your robot from Onshape</h2>
+<p>If you paste an Onshape link, you sign in with Onshape's own page. We never see your Onshape password.</p>
+<ul>
+<li><b>Permission:</b> SimBench asks only to <b>read</b> your documents. It cannot edit, delete or share anything in Onshape.</li>
+<li><b>What it reads:</b> the assembly you paste: its parts, their shapes, mates, mass properties, and the document's name.</li>
+<li><b>The sign-in cookie:</b> Onshape gives SimBench an access token. It is kept in an encrypted, HttpOnly cookie in your browser for up to 30 days, sent only to <code>/onshape/</code> on this site, and never readable by the page itself. Signing out deletes it.</li>
+<li><b>The relay:</b> your browser can't talk to Onshape directly, so the requests pass through a small function on this site, hosted by Cloudflare. It forwards read-only requests to <code>cad.onshape.com</code>. The assembly you paste (its parts list and mates) is never stored. Part shapes and mass properties pinned to a fixed version of a Part Studio are kept in Cloudflare's cache for up to 30 days (7 days for an unnamed microversion), so the next import of the same part doesn't use up an API call. A kept copy is only ever given to someone whose own Onshape account can open that document: Onshape is asked first, every time, unless Onshape has said the document is public.</li>
+<li>You can revoke access in Onshape at any time: <b>My account → Applications</b>.</li>
+</ul>
+
+<h2>Online matches</h2>
+<p>If you join an online match, the other players receive your robot's position, the name you type, your chat messages and your score. A match room relays these while it is open and keeps nothing after it closes. Public WebRTC relays are used only to find the other players in a room.</p>
+
+<h2>Other services the page loads from</h2>
+<table>
+<tr><th>Service</th><th>Why</th></tr>
+<tr><td>Cloudflare Pages</td><td>Hosts the site. Like any web host, it sees your IP address when you load the page.</td></tr>
+<tr><td>jsDelivr and esm.sh</td><td>Serve the 3D library (three.js) and the CAD reader (OpenCascade).</td></tr>
+<tr><td>GitHub</td><td>Only if you import OpModes from a public GitHub repository.</td></tr>
+<tr><td>Onshape (PTC)</td><td>Only if you paste an Onshape link. Onshape's own <a href="https://www.ptc.com/en/documents/policies/privacy">privacy policy</a> applies to your Onshape account.</td></tr>
+</table>
+
+<h2>Students</h2>
+<p>SimBench is made for FIRST Tech Challenge teams, many of whose members are under 18. We don't ask for your age, email, name or any other personal information, and we don't sell or share data with anyone.</p>
+
+<h2>Changes and questions</h2>
+<p>If this page changes, the date at the top changes too. Questions: see <a href="/support">Support</a>.</p>
+</article>
+<footer>FTC SimBench Pro is an independent student project. It is not made, endorsed or supported by FIRST®, PTC or Onshape. FIRST® Tech Challenge is a registered trademark of FIRST. Onshape is a trademark of PTC Inc.</footer>
+</main></body></html>

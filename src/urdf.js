@@ -382,7 +382,9 @@ function urdfHintsFromRecords(J,W){
     if(j.type!=="prismatic"||j.mimic) continue;
     let root=j, up=byChild.get(j.parent), n=0;
     while(up&&n++<12){ if(up.type==="prismatic"&&par(up.axis,j.axis)) root=up; else if(up.type!=="fixed") break; up=byChild.get(up.parent); }
-    if(root!==j) out.push({leader:root.id, follower:j.id, ratio:1, via:"cascade"});
+    // each stage's travel runs along its own axis, and two slider mates on one lift can point
+    // opposite ways: the follower goes the way the leader goes, not the way its own axis points
+    if(root!==j) out.push({leader:root.id, follower:j.id, ratio:root.axis[0]*j.axis[0]+root.axis[1]*j.axis[1]+root.axis[2]*j.axis[2]<0?-1:1, via:"cascade"});
   }
   const rev=R.filter(j=>(j.type==="revolute"||j.type==="continuous")&&!j.mimic);
   for(let a=0;a<rev.length;a++) for(let b=a+1;b<rev.length;b++){

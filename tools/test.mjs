@@ -20,5 +20,9 @@ if (!files.length) { console.error('no test files matched'); process.exit(1); }
 // a test that never finishes fails by name after 3 minutes instead of stalling the run
 const args = ['--test', '--test-timeout=180000'];
 if (process.env.CI) args.push('--test-reporter=spec', '--test-concurrency=2');
-const r = spawnSync(process.execPath, [...args, ...files], { cwd: ROOT, stdio: 'inherit' });
+// each test file runs in its own process, and the ones that parse the default robot several
+// times over need more than the 2 GB heap Node gives itself on a small machine
+const env = { ...process.env };
+if (!/max-old-space-size/.test(env.NODE_OPTIONS || '')) env.NODE_OPTIONS = ((env.NODE_OPTIONS || '') + ' --max-old-space-size=4096').trim();
+const r = spawnSync(process.execPath, [...args, ...files], { cwd: ROOT, stdio: 'inherit', env });
 process.exit(r.status == null ? 1 : r.status);

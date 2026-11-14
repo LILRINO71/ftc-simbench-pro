@@ -172,7 +172,7 @@ const ImportFlow={
         o.candidates.map(c=>`<button class="btn-sm" type="button" data-rc="show" data-a="${esc(c.joint)}" title="${esc(c.why||"")}">${esc(c.label)}</button><button class="btn-sm primary" type="button" data-rc="pair" data-a="${esc(o.device+"|"+c.joint)}">this one</button>`).join("")+
         `<button class="btn-sm" type="button" data-rc="click" data-a="${esc(o.device)}">Click it in the CAD view</button><button class="btn-sm" type="button" data-rc="gauge" data-a="${esc(o.device)}">It moves nothing drawn</button></div></div>`);
     const notes=[];
-    if(B&&B.couplings.length) notes.push(B.couplings.map(c=>`<li class="note"><i>↔</i><span class="t">"${esc(c.joint)}" follows "${esc(c.to)}"<small>${c.via==="cascade"?"a cascade slide: the stages extend together":"a gear pair: it turns the other way"}</small></span></li>`).join(""));
+    if(B&&B.couplings.length) notes.push(B.couplings.map(c=>`<li class="note"><i>↔</i><span class="t">"${esc(c.joint)}" follows "${esc(c.to)}"<small>${c.via==="cascade"?"a cascade slide: the stages extend together":c.via==="coaxial"?"on the same axis: they turn together":"a gear pair: it turns the other way"}</small></span></li>`).join(""));
     if(internal&&declared) notes.push(`<li class="note"><i>·</i><span class="t">${internal} joints nobody declared, held as drawn<small>bearings, rollers and motor shafts: ${CAD.sheet.from==="sheet"?"your joint sheet says":"your mates' names say"} which joints move</small></span></li>`);
     else if(internal) notes.push(`<li class="note"><i>·</i><span class="t">${internal} small turns left fixed<small>bearing races and motor shafts the library draws as mates, set aside by their size and names. <button class="ic-textbtn" type="button" data-ic="sheet">Declare the joints</button> and nothing is worked out.</small></span></li>`);
     if(B&&B.idle.length) notes.push(`<li class="note"><i>·</i><span class="t">${B.idle.length} joint${B.idle.length===1?"":"s"} nothing in this OpMode drives<small>${esc(B.idle.slice(0,4).map(i=>i.label).join(", "))}${B.idle.length>4?" …":""}: they stay where they're drawn</small></span></li>`);
@@ -264,8 +264,11 @@ const ImportFlow={
     this.robotIn(cad,"Onshape");
   },
   /* a robot that arrived whole (the link, the export zip, a re-read with a new up or centre): onto the field */
-  robotIn(cad,from){
+  robotIn(cad,from,o){
     this.progress("Placing it on the field …",1,1);
+    // kept in this browser for the next visit (src/app.js RobotStore), as it arrived: IndexedDB
+    // copies it here, before the view hangs its own objects on the joints
+    if(!(o&&o.kept)) RobotStore.keep({kind:"whole", from, name:cad.name, label:LAST_STEP&&LAST_STEP.label||cad.name, cad});
     MATES.name=cad.name; MATES.url=cad.onshape&&cad.onshape.url||null; MATES.report=cad.onshape&&cad.onshape.report||null;
     // the team's own joint sheet for this robot, over what the mates' names declare (src/jointsheet.js)
     const sheet=this.savedSheet(cad.name);
