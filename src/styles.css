@@ -464,12 +464,14 @@ kbd{display:inline-block; min-width:15px; padding:0 4px; border:1px solid var(--
 .viewport:has(> .match-hud:not([hidden])) .vp-hint{left:calc(var(--left) + 2*var(--gap)); transform:none;}
 .vp-tip{position:absolute; left:50%; bottom:calc(var(--dock) + 2*var(--gap) + 44px); transform:translateX(-50%); font-size:12px; color:var(--label); background:var(--glass); -webkit-backdrop-filter:blur(16px); backdrop-filter:blur(16px);
   border:1px solid var(--glass-rim); border-radius:14px; padding:4px 12px; pointer-events:none; white-space:nowrap; z-index:5;}
-.vp-bottom{position:absolute; left:calc(var(--left) + 2*var(--gap)); right:calc(var(--right) + 2*var(--gap)); bottom:calc(var(--dock) + 2*var(--gap)); display:flex; align-items:flex-end; gap:12px; pointer-events:none; z-index:5;
+.vp-bottom{position:absolute; left:calc(var(--left) + 2*var(--gap)); right:calc(var(--right) + 2*var(--gap)); bottom:calc(var(--dock) + 2*var(--gap)); display:flex; flex-wrap:wrap; align-items:flex-end; gap:8px 12px; pointer-events:none; z-index:5;
   transition:bottom var(--t-smooth) var(--spring-smooth);}
 .stage:has(.dock.closed) .vp-bottom,.stage:has(.dock.closed) .vp-tip{bottom:calc(44px + 2*var(--gap));}
 .vp-readout{margin-left:auto; display:flex; align-items:center; gap:10px; font-family:var(--mono); font-size:10.5px; color:var(--label-2); font-variant-numeric:tabular-nums; pointer-events:auto; white-space:nowrap;
   background:var(--glass); -webkit-backdrop-filter:blur(16px); backdrop-filter:blur(16px); border:1px solid var(--glass-rim); border-radius:10px; padding:4px 5px 4px 11px;}
-.vp-chips{display:flex; flex-wrap:wrap; gap:8px; align-items:flex-end; min-width:0;}
+/* (the chips and the readout each keep their own width and take a second row when the field is
+   narrow: squeezed onto one, a chip ran underneath the readout and was cut off mid-word) */
+.vp-chips{display:flex; flex-wrap:wrap; gap:8px; align-items:flex-end; flex:none; max-width:100%;}
 .vp-tour{display:inline-flex; align-items:center; gap:8px; padding:8px 14px; border-radius:20px; pointer-events:auto; white-space:nowrap;
   background:var(--glass); -webkit-backdrop-filter:blur(20px) saturate(180%); backdrop-filter:blur(20px) saturate(180%); color:var(--label); border:1px solid var(--glass-rim); font:500 12.5px var(--body); cursor:pointer;
   box-shadow:var(--shadow-card); animation:tourIn .5s .8s both; transition:transform var(--t-snappy) var(--spring-snappy);}
