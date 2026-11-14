@@ -171,7 +171,8 @@ function gltfRead(bytes,files){
     }
   }
   let best=null, bestA=-1; for(let ci=0;ci<palette.length;ci++) if(palette[ci]&&area[ci]>bestA){ bestA=area[ci]; best=palette[ci]; }
-  return {tri:nt*9===tris.length?tris:tris.slice(0,nt*9), color:best, colors:nt===tc.length?tc:tc.slice(0,nt), palette};
+  // linear: a glTF base colour factor is linear light by the format's own definition, where an OBJ's Kd and a URDF's rgba are as seen
+  return {tri:nt*9===tris.length?tris:tris.slice(0,nt*9), color:best, linear:true, colors:nt===tc.length?tc:tc.slice(0,nt), palette};
 }
 
 /* ---- OBJ (with its MTL's Kd for colour) ---- */
