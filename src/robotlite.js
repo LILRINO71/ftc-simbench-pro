@@ -5,8 +5,8 @@
    keeps one vertex (the average of what fell in it), and the triangles
    that collapse go. Done once per distinct shape in its own frame, then
    placed wherever the robot has a copy of it, so a 773-part robot with 99
-   shapes costs 99 clusterings. The cube grows until the whole robot fits
-   the triangle budget.
+   shapes costs 99 clusterings. Only the shapes too heavy for their share
+   of the triangle budget are clustered at all (liteBuild).
 
    The robot stays in segments: the chassis, and one per mechanism, each
    in its own frame. A light copy therefore still moves like the real one
@@ -56,18 +56,86 @@ function liteCluster(pos,idx,tc,cell){
 
 /* The light robot. input: {shapes:[{pos, idx, tc}], parts:[{seg, shape, m}], pal:[[r,g,b]...]}
    where m is a 4x4 column-major matrix (three.js `elements`) from the shape's frame
-   into its segment's, or null. opts: {budget: triangles, cell: first cube size (m)}.
-   Returns {segs:[{id, v, t, tc}], pal, cell, tris}. */
+   into its segment's, or null. opts: {budget: triangles}.
+   Returns {segs:[{id, v, t, tc}], pal, cell, tris, rate, left, boxed}.
+
+   Every shape is allowed triangles in proportion to its size (so many a metre of its
+   box's diagonal): the highest rate that fits the whole robot in the budget. A shape
+   under its allowance is kept as it is; only a shape over it is clustered, on a grid
+   of its own, just coarse enough to come under. One grid for the whole robot (as this
+   was) spent the budget on screws and gears and took it out of the plates: a flat side
+   panel, twelve triangles, came back dented. A shape that would need a grid coarser
+   than a fifth of itself has nothing left to cluster (a screw, a bearing): it is drawn
+   as its box. When the rate would fall under LITE_MIN_RATE the smallest parts are left
+   out first (screws, nuts, washers: nobody sees them at this size) and the rest share
+   what they would have had. */
+const LITE_MIN_RATE=1500, LITE_LEAVE_OUT=[0.010,0.016,0.025,0.040];   // triangles per metre of a part; part sizes (m) left out, smallest first
 function liteBuild(input,opts){
   opts=opts||{};
-  const budget=opts.budget||60000;
-  let cell=opts.cell||0.004;
-  for(let tries=0;;tries++){
-    const red=input.shapes.map(s=>liteCluster(s.pos,s.idx||null,s.tc==null?0:s.tc,cell));
-    let tris=0; for(const p of input.parts) tris+=red[p.shape].t.length/3;
-    if(tris<=budget||tries>=10) return liteAssemble(input,red,cell);
-    cell*=Math.max(1.15,Math.sqrt(tris/budget)*1.05);
+  const budget=opts.budget||60000, S=input.shapes, n=S.length;
+  const full=new Float64Array(n), size=new Float64Array(n), box=[];
+  for(let k=0;k<n;k++){
+    const P=S[k].pos; full[k]=(S[k].idx?S[k].idx.length:P.length/3)/3;
+    let ax=Infinity,ay=Infinity,az=Infinity,bx=-Infinity,by=-Infinity,bz=-Infinity;
+    for(let i=0;i<P.length;i+=3){ const x=P[i],y=P[i+1],z=P[i+2]; if(x<ax) ax=x; if(x>bx) bx=x; if(y<ay) ay=y; if(y>by) by=y; if(z<az) az=z; if(z>bz) bz=z; }
+    size[k]=P.length?Math.hypot(bx-ax,by-ay,bz-az):0; box.push([ax,ay,az,bx,by,bz]);
   }
+  // what a shape is allowed at a rate: never less than a box, never more than it has
+  const share=(k,rate)=>Math.min(full[k],Math.max(12,Math.floor(rate*size[k])));
+  // the highest rate with sum(copies x share) inside the budget, over the parts at least `least` big
+  const rateFor=least=>{
+    const copies=new Float64Array(n); for(const p of input.parts) if(size[p.shape]>=least) copies[p.shape]++;
+    const cost=r=>{ let t=0; for(let k=0;k<n;k++) if(copies[k]) t+=copies[k]*share(k,r); return t; };
+    let hi=1; for(let k=0;k<n;k++) if(copies[k]&&size[k]>0) hi=Math.max(hi,full[k]/size[k]+1);
+    if(cost(hi)<=budget) return hi;
+    let lo=0; for(let i=0;i<40&&hi-lo>1;i++){ const mid=(lo+hi)/2; if(cost(mid)<=budget) lo=mid; else hi=mid; }
+    return lo;
+  };
+  let least=0, rate=rateFor(0);
+  for(const cut of LITE_LEAVE_OUT){ if(rate>=LITE_MIN_RATE) break; least=cut; rate=rateFor(cut); }
+  const used=new Uint8Array(n); let left=0, boxed=0;
+  const parts=input.parts.filter(p=>{ if(size[p.shape]>=least){ used[p.shape]=1; return true; } left++; return false; });
+  let worst=0;
+  const red=S.map((s,k)=>{
+    if(!used[k]) return null;
+    const tc=s.tc==null?0:s.tc, cap=share(k,rate);
+    // under its allowance: as it is, its coincident vertices welded (a twentieth of a millimetre)
+    if(full[k]<=cap) return liteCluster(s.pos,s.idx||null,tc,0.00005);
+    // over it: a grid of cell c leaves about 2A/c^2 triangles on a surface of area A
+    let A=0; const P=s.pos, I=s.idx||null, nt=full[k], limit=size[k]/5;
+    for(let f=0;f<nt;f++){ const a=3*(I?I[3*f]:3*f), b=3*(I?I[3*f+1]:3*f+1), c=3*(I?I[3*f+2]:3*f+2);
+      const ux=P[b]-P[a],uy=P[b+1]-P[a+1],uz=P[b+2]-P[a+2],wx=P[c]-P[a],wy=P[c+1]-P[a+1],wz=P[c+2]-P[a+2];
+      A+=0.5*Math.hypot(uy*wz-uz*wy,uz*wx-ux*wz,ux*wy-uy*wx); }
+    // coarser until it is under, then back between the last grid that was over and the first
+    // that was under, so the shape keeps most of what it is allowed (a grid twice too coarse
+    // leaves a quarter of the triangles)
+    let cell=Math.min(limit,Math.max(0.0002,Math.sqrt(2*A/cap)*0.7)), over=0, r=null, fits=false;
+    for(let tries=0;tries<14;tries++){
+      r=liteCluster(P,I,tc,cell);
+      if(r.t.length/3<=cap){ fits=true; break; }
+      if(cell>=limit) break;
+      over=cell; cell=Math.min(limit,cell*Math.max(1.12,Math.min(2.5,Math.sqrt(r.t.length/3/cap)*1.05)));
+    }
+    if(!fits||r.t.length<3){ boxed++; return liteBox(box[k],tc); }
+    for(let i=0;i<5&&over>0&&r.t.length/3<cap*0.8;i++){
+      const mid=Math.sqrt(over*cell), m=liteCluster(P,I,tc,mid);
+      if(m.t.length/3<=cap){ r=m; cell=mid; } else over=mid;
+    }
+    if(cell>worst) worst=cell;
+    return r;
+  });
+  const L=liteAssemble({parts, pal:input.pal},red,worst);
+  L.rate=rate; L.left=left; L.boxed=boxed;
+  return L;
+}
+/* A shape as its box [x0,y0,z0,x1,y1,z1], in the colour most of it has. */
+function liteBox(b,tc){
+  let c=0;
+  if(typeof tc==="number") c=tc;
+  else if(tc&&tc.length){ const n=new Map(); let best=-1; for(let i=0;i<tc.length;i++){ const k=(n.get(tc[i])||0)+1; n.set(tc[i],k); if(k>best){ best=k; c=tc[i]; } } }
+  const v=new Float32Array(24);
+  for(let i=0;i<8;i++){ v[3*i]=i&1?b[3]:b[0]; v[3*i+1]=i&2?b[4]:b[1]; v[3*i+2]=i&4?b[5]:b[2]; }
+  return {v, t:Uint32Array.from([0,2,3,0,3,1, 4,5,7,4,7,6, 0,1,5,0,5,4, 2,6,7,2,7,3, 0,4,6,0,6,2, 1,3,7,1,7,5]), tc:new Uint8Array(12).fill(c)};
 }
 function liteAssemble(input,red,cell){
   const bySeg=new Map();

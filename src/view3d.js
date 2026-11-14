@@ -290,7 +290,7 @@ const View={
       else if(Object.getPrototypeOf(x)===Object.prototype) Object.values(x).forEach(visit);
     };
     // what is drawn, and what the caches hold for the next robot
-    visit(this.scene); visit(this.shapeCache); visit(this.liteMeshes);
+    visit(this.scene); visit(this.shapeCache); visit(this.liteMeshes); visit(this.showMeshes);
     for(const k of Object.keys(this)) if(k[0]==="_") visit(this[k]);
     if(old){
       this._env=undefined; const env=this.envMap();
@@ -584,51 +584,81 @@ const View={
   },
   buildLite(){
     if(!this.cad||!this.chassisG||typeof liteBuild!=="function") return;
-    let L=null;
+    let L=null, Lshow=null;
     this.applyQuality(true);                             // read the robot as it really is, not its light copy
-    try{ const t0=performance.now(); L=liteBuild(this.liteInput(),{budget:70000}); this.liteMs=Math.round(performance.now()-t0); }
+    // Two copies. The small one (70,000 triangles) is the robot's shadow, what the driver's
+    // view draws, and what an online match sends. The fuller one is what a computer that
+    // can't draw the whole robot draws up close: as many triangles as its tier affords
+    // (src/tier.js ownTris). It was the 70,000 one there too, and a robot seen from a metre
+    // away in 70,000 triangles is the "rendering" a 4 GB Chromebook got. A robot that fits
+    // the tier's budget whole needs no fuller copy: it is drawn as it is.
+    const own=this.tier&&this.tier.budget&&this.tier.budget.ownTris;
+    this.showBudget=Math.min(600000,Number.isFinite(own)?own:600000);
+    try{ const t0=performance.now(), inp=this.liteInput();
+      let exact=0; for(const p of inp.parts){ const sh=inp.shapes[p.shape]; exact+=(sh.idx?sh.idx.length:sh.pos.length/3)/3; }
+      this.exactTris=exact;
+      L=liteBuild(inp,{budget:70000});
+      if(exact>this.showBudget) Lshow=liteBuild(inp,{budget:this.showBudget});
+      this.liteMs=Math.round(performance.now()-t0); }
     catch(e){ console.warn("bench: light copy",e); return; }
-    for(const m of this.liteMeshes||[]){ if(m.parent) m.parent.remove(m); m.geometry.dispose(); }
-    this.liteMeshes=[]; this.lite=L;
+    for(const m of (this.liteMeshes||[]).concat(this.showMeshes||[])){ if(m.parent) m.parent.remove(m); m.geometry.dispose(); }
+    this.liteMeshes=[]; this.showMeshes=[]; this.lite=L; this.liteShow=Lshow;
     for(const s of L.segs){
       const root=s.id==="chassis"?this.chassisG:this.groupAt[s.id]; if(!root) continue;
       const m=new THREE.Mesh(this.liteGeo(s,L.pal),this.shadowMat()); m.userData.lite=true; m.castShadow=true; m.frustumCulled=false;
       root.add(m); this.liteMeshes.push(m);
     }
+    for(const s of Lshow?Lshow.segs:[]){
+      const root=s.id==="chassis"?this.chassisG:this.groupAt[s.id]; if(!root) continue;
+      const m=new THREE.Mesh(this.liteGeo(s,Lshow.pal,true),this.showMat()); m.userData.lite=true; m.castShadow=false; m.receiveShadow=true; m.frustumCulled=false; m.visible=false;
+      root.add(m); this.showMeshes.push(m);
+    }
     this.applyQuality();
     if(this.onLite) this.onLite(L);
   },
-  /* A light copy's segment as flat-shaded triangles in its palette colours. */
-  liteGeo(s,pal){
-    const nt=s.t.length/3, pos=new Float32Array(nt*9), col=new Float32Array(nt*9);
+  /* A light copy's segment as triangles in its palette colours: flat-shaded, or (smooth) with
+     each corner's normal averaged over the faces that lean less than 40 degrees from its own,
+     so a cylinder is round and a plate's edge stays an edge (src/tessellate.js creaseNormals). */
+  liteGeo(s,pal,smooth){
+    const nt=s.t.length/3, col=new Float32Array(nt*9);
+    let pos, nor=null;
+    if(smooth&&typeof creaseNormals==="function"){ const C=creaseNormals(s.v,s.t,40); pos=C.pos; nor=C.nor; }
+    else { pos=new Float32Array(nt*9);
+      for(let f=0;f<nt;f++) for(let k=0;k<3;k++){ const v=s.t[3*f+k], o=9*f+3*k; pos[o]=s.v[3*v]; pos[o+1]=s.v[3*v+1]; pos[o+2]=s.v[3*v+2]; } }
     // vertex colours are linear light; the palette is as seen (sRGB)
-    for(let f=0;f<nt;f++){ const c=pal[s.tc[f]]||pal[0];
-      for(let k=0;k<3;k++){ const v=s.t[3*f+k], o=9*f+3*k;
-        pos[o]=s.v[3*v]; pos[o+1]=s.v[3*v+1]; pos[o+2]=s.v[3*v+2];
-        col[o]=toLin(c[0]/255); col[o+1]=toLin(c[1]/255); col[o+2]=toLin(c[2]/255); } }
+    for(let f=0;f<nt;f++){ const c=pal[s.tc[f]]||pal[0], r=toLin(c[0]/255), g=toLin(c[1]/255), b=toLin(c[2]/255);
+      for(let k=0;k<3;k++){ const o=9*f+3*k; col[o]=r; col[o+1]=g; col[o+2]=b; } }
     const g=new THREE.BufferGeometry();
     g.setAttribute("position",new THREE.BufferAttribute(pos,3)); g.setAttribute("color",new THREE.BufferAttribute(col,3));
-    g.computeVertexNormals(); g.computeBoundingBox(); g.computeBoundingSphere();
+    if(nor) g.setAttribute("normal",new THREE.BufferAttribute(nor,3)); else g.computeVertexNormals();
+    g.computeBoundingBox(); g.computeBoundingSphere();
     return g;
   },
   /* lit like the full robot's own materials (robotMat), so switching copies doesn't change how it looks */
   liteMat(){ if(!this._liteMat){ const env=this.envMap(); this._liteMat=new THREE.MeshStandardMaterial({vertexColors:true, flatShading:true,
       metalness:env?0.75:0.2, roughness:env?0.38:0.5, envMap:env||null, envMapIntensity:1.0}); this._liteMat.userData.shared=true; } return this._liteMat; },
+  /* the fuller copy's: the same, with its own normals instead of one per face */
+  showMat(){ if(!this._showMat){ const env=this.envMap(); this._showMat=new THREE.MeshStandardMaterial({vertexColors:true,
+      metalness:env?0.75:0.2, roughness:env?0.38:0.5, envMap:env||null, envMapIntensity:1.0}); this._showMat.userData.shared=true; } return this._showMat; },
   /* drawn into the shadow map only */
   shadowMat(){ if(!this._shadowMat){ this._shadowMat=new THREE.MeshBasicMaterial({colorWrite:false, depthWrite:false}); this._shadowMat.userData.shared=true; } return this._shadowMat; },
-  /* Which copy draws: the exact one up close, the light one in the driver's view
-     (where the robot is small on screen) or on a computer that can't keep up.
-     With a light copy, it casts the shadow either way. */
+  /* Which copy draws: the exact one up close; the small light one in the driver's view,
+     where the robot is small on screen; and on a computer that can't keep up, the fuller
+     light copy up close, or the exact robot still when it fits what that computer affords.
+     With a light copy, the small one casts the shadow either way. */
   applyQuality(exactOnly){
     const has=!!(this.liteMeshes&&this.liteMeshes.length);
     const cad=typeof CadView!=="undefined"&&CadView.on;
-    const lite=has&&!exactOnly&&!cad&&(this.mode==="field"||this.lowGfx);
+    const far=this.mode==="field", fits=this.exactTris!=null&&this.exactTris<=this.showBudget;
+    const lite=has&&!exactOnly&&!cad&&(far||(this.lowGfx&&!fits));
+    const fuller=lite&&!far&&!!(this.showMeshes&&this.showMeshes.length);
     for(const g in this.hullOf||{}) this.hullOf[g].visible=(!this.hullBase||this.hullBase[g]!==false)&&!lite;
     for(const o of this.exactG||[]){
       if(o.userData&&o.userData.edges){ o.visible=!lite&&this.edgesOn!==false; continue; }
       if(o.isMesh){ o.visible=!lite; o.castShadow=!has; o.receiveShadow=!has; }
     }
-    for(const m of this.liteMeshes||[]){ m.material=lite?this.liteMat():this.shadowMat(); m.receiveShadow=lite; }
+    for(const m of this.liteMeshes||[]){ m.material=lite&&!fuller?this.liteMat():this.shadowMat(); m.receiveShadow=lite&&!fuller; }
+    for(const m of this.showMeshes||[]) m.visible=fuller;
     this.useLite=lite;
   },
   /* Where each mechanism is right now, relative to the chassis, in the light
@@ -808,7 +838,7 @@ const View={
     for(const r of rigRoots(M)) buildLink(r,this.liftG);
 
     this.groupCounts={chassis:groups.chassis.length};
-    this.exactG=[]; this.liteMeshes=[]; this.lite=null; this.hullBase=null; this.useLite=false;
+    this.exactG=[]; this.liteMeshes=[]; this.showMeshes=[]; this.lite=null; this.exactTris=null; this.hullBase=null; this.useLite=false;
     if(this.exact&&this.exact.cad===cad) this.applyExact(); else this.scheduleLite();
     M.forEach(m=>this.groupCounts[m.id]=(groups[m.id]||[]).length);
   },
