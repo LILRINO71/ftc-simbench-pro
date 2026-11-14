@@ -186,6 +186,8 @@ function partMass(solid, opts){
   // a game element drawn in the robot (an artifact in the hopper) is not the robot's mass;
   // what it carries is the payload setting
   if(kind === "game") return {kg:0, how:"game", density:0, fill:0, volume:vol, why:"a game element, not part of the robot"};
+  // a surface (Onshape gave it no mass and no volume, src/onshapecad.js): nothing to weigh
+  if(solid && solid.massless) return {kg:0, how:"surface", density:0, fill:0, volume:0, why:"a surface, not a solid: it has no volume"};
   // the CAD's own mass with a real material (Onshape's materials, a URDF <inertial>): a
   // measurement of this part, cut to its length, so it beats a catalogue figure for the stock part
   const cadD = (opts.cad !== false && solid && Number.isFinite(solid.kg) && solid.kg > 0 && vol > 0) ? solid.kg/vol : NaN;

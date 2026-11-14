@@ -254,6 +254,8 @@ const ImportFlow={
       const m=String(e&&e.message||e);
       if(/sign in|aren't allowed|can't read it/i.test(m)){ this.signin.signedIn=false; this.busy=null; this.render(true); this.say(m+".",true); return; }
       if(/yearly allowance/.test(m)){ this.fail("SimBench couldn't read your assembly: "+m+". Trying again won't help until it renews. Export the robot instead (in Onshape, right-click the Assembly tab → Export → URDF) and drop the zip here: that needs no allowance."); return; }
+      // an empty assembly, or one with no solid parts: nothing a second try or an export would change
+      if(/has no parts in it|a solid shape/.test(m)){ this.fail("SimBench couldn't build a robot: "+m+"."); return; }
       this.fail("SimBench couldn't read your assembly: "+m+". "+(/isn't an assembly/.test(m)?"The address has to come from the Assembly tab, not a Part Studio or a drawing.":"Try again; if it keeps failing, export it (Export → URDF) and drop the zip."));
       return;
     }
