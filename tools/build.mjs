@@ -131,6 +131,8 @@ const copyDir = (from, to) => {
   }
 };
 if (fs.existsSync(path.join(ROOT, 'assets', 'robots'))) copyDir(path.join(ROOT, 'assets', 'robots'), path.join(DIST, 'robots'));
+// the support, privacy and terms pages (an Onshape App Store listing links to them), served at /support, /privacy, /terms
+if (fs.existsSync(path.join(ROOT, 'site'))) copyDir(path.join(ROOT, 'site'), DIST);
 
 // Cloudflare Pages / Netlify read this. The page is one file that changes every
 // deploy, so it must never be cached hard; everything else here is immutable.
