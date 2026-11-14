@@ -116,7 +116,8 @@ function parseEntry(e){
 let USER_HELPERS=[], BUILTIN_HELPERS=[];
 function helperFiles(){
   const mine=new Set(USER_HELPERS.map(h=>h.file));
-  return USER_HELPERS.concat(BUILTIN_HELPERS.filter(h=>!mine.has(h.file)));
+  // the demo robot's classes go when the team's own robot comes in: they were written for another robot
+  return USER_HELPERS.concat(ownRobot()?[]:BUILTIN_HELPERS.filter(h=>!mine.has(h.file)));
 }
 function saveHelpers(){ store.set("ftcbench.helpers",JSON.stringify(USER_HELPERS.map(h=>({file:h.file, src:h.src})))); }
 function loadHelpers(){
@@ -148,6 +149,23 @@ function saveLibrary(){
 const opName=e=> e.code&&e.code.opmode ? e.code.opmode : e.file.replace(/\.java$/,"");
 const opKind=e=> e.code&&e.code.kind==="Autonomous" ? "Auto" : "TeleOp";
 
+/* What the lists show: the team's own OpModes, the demo robot's while the demo robot is on the
+   field, and the one that is selected. The built-in samples and the demo team's OpModes were
+   written for robots the team doesn't have; listed beside the team's code they were in the way. */
+function listedOps(){
+  const own=ownRobot();
+  return LIBRARY.filter(e=>!e.builtin||e.id===CURRENT_ID||(!!e.team&&!own&&!!LAST_STEP));
+}
+/* The robot on the field changed hands (the demo's, or the team's own): the lists follow, the
+   helper classes with them, and the team's own OpMode comes back in place of a sample. */
+let OWN_SHOWN=null;
+function robotChangedHands(){
+  const own=ownRobot(); if(own===OWN_SHOWN) return; OWN_SHOWN=own;
+  if(Sim.phase==="running"||Online.playing()){ renderOpList(); renderOpSelect(); return; }
+  const cur=entry(CURRENT_ID), mine=LIBRARY.filter(e=>!e.builtin), last=entry(store.get("ftcbench.current.own",null));
+  if(own&&cur&&cur.builtin&&mine.length) CURRENT_ID=(last&&!last.builtin?last:mine[0]).id;
+  reparseAll();
+}
 /* TeleOp and Autonomous OpModes in their own lists. */
 function renderOpList(){
   const row=e=>`
@@ -155,7 +173,7 @@ function renderOpList(){
       <div><div class="on-name">${esc(opName(e))}</div><div class="on-file">${esc(e.file)}${e.builtin?" · "+esc(e.team||"sample"):""}</div></div>
       ${e.builtin?"<span></span>":`<button class="rm" data-oprm="${esc(e.id)}" title="Remove ${esc(e.file)}" aria-label="Remove ${esc(e.file)}">×</button>`}
     </div>`;
-  const tele=LIBRARY.filter(e=>opKind(e)==="TeleOp"), auto=LIBRARY.filter(e=>opKind(e)==="Auto");
+  const L=listedOps(), tele=L.filter(e=>opKind(e)==="TeleOp"), auto=L.filter(e=>opKind(e)==="Auto");
   $("#opListTele").innerHTML=tele.map(row).join("")||`<div class="op-empty">No TeleOp yet — drop a <code>@TeleOp</code> .java here.</div>`;
   $("#opListAuto").innerHTML=auto.map(row).join("")||`<div class="op-empty">No autonomous yet — an <code>@Autonomous</code> .java lands here.</div>`;
   $("#teleCount").textContent=tele.length||""; $("#autoCount").textContent=auto.length||"";
@@ -182,7 +200,7 @@ function renderOpList(){
 }
 function renderOpSelect(){
   const group=(k,label)=>{
-    const items=LIBRARY.filter(e=>opKind(e)===k);
+    const items=listedOps().filter(e=>opKind(e)===k);
     return items.length?`<optgroup label="${label}">`+items.map(e=>
       `<option value="${esc(e.id)}"${e.id===CURRENT_ID?" selected":""}>${esc(opName(e))}</option>`).join("")+`</optgroup>`:"";
   };
@@ -196,7 +214,7 @@ function selectOpMode(id){
   // online, mid-match: the robot could never START again, and the field isn't this bench's to reset
   if(Online.playing()&&CODE){ NetUI.say("The OpMode can't change during an online match. Leave the match first.","warn"); renderOpSelect(); return; }
   if(Sim.phase==="running") Sim.stop();
-  CURRENT_ID=id; store.set("ftcbench.current",id);
+  CURRENT_ID=id; store.set("ftcbench.current",id); if(!e.builtin) store.set("ftcbench.current.own",id);
   Editor.set(e.source); $("#srcName").textContent=e.file;
   CONFIG_OVR={};
   if(!e.code){
@@ -1378,6 +1396,7 @@ function loadCAD(cad,label,cls){
   canonicalizeCAD(cad,{up:OPTS.up, shift:OPTS.shift});
   EXACT={state:"none", msg:null};            // a STEP's exactGeometry() sets it loading right after
   CAD=cad;
+  if(View.chassisG) View.chassisG.visible=true;   // boot() hides its stand-in until a robot is in
   $("#cadStatus").textContent=label; $("#cadDrop").className="drop "+(cls||"ok");
   const parts=cad.solids&&cad.solids.length?cad.solids.length+" parts":(cad.points?cad.points.length.toLocaleString():"0")+" pts";
   const nm=cad.mechs.filter(m=>!m.internal&&m.kind!=="fixed").length;
@@ -1396,6 +1415,7 @@ function loadCAD(cad,label,cls){
   if(restored) $("#cadStatus").textContent=label+" · rig restored";
   syncOptionControls();
   DRIVE_CACHE={key:null,val:null}; Physics.sync(); MathTab.invalidate();
+  robotChangedHands();
   ImportFlow.render();
 }
 
@@ -1442,7 +1462,7 @@ async function loadOnshapeRobot(p,reparse){
 function parseAndLoad(done){
   if(!LAST_STEP) return;
   if(LAST_STEP.onshape){ loadOnshapeRobot(LAST_STEP.onshape,true).then(()=>{ if(done&&CAD) done(CAD); }); return; }
-  if(LAST_STEP.urdfZip) return;                  // the zip's bytes went to the worker; it is placed once
+  if(LAST_STEP.urdfZip||LAST_STEP.kept) return;  // the zip's bytes went to the worker (or it came back from last time): placed once
   // a workspace keeps the robot it was saved with, not its CAD: there's nothing to read again
   if(LAST_STEP.session){ $("#cadStatus").textContent=LAST_STEP.name+" came from a workspace, so it can't be re-read. Drop its STEP to change how it's read."; if(done&&CAD) done(CAD); return; }
   const {name,text}=LAST_STEP, mb=(text.length/1048576).toFixed(1);
@@ -1470,6 +1490,7 @@ function parseAndLoad(done){
       if(JOINTS.spec) applyJoints();
       else findJoints(cad,true);                  // no mates, no spec: the joints the worker found from the geometry
       exactGeometry(cad,text,PARSED.units);
+      if(own) RobotStore.keep({kind:"step", name, text, label:LAST_STEP.label||null});
       if(done) done(cad);
     }catch(e){ $("#cadStatus").textContent="couldn't read this STEP file: "+e.message; $("#cadDrop").className="drop bad"; if(own) ImportFlow.fail("Couldn't read "+name+": "+e.message); return; }
     renderFrameNote();
@@ -1477,6 +1498,70 @@ function parseAndLoad(done){
   }).catch(e=>{ $("#cadStatus").textContent="couldn't parse this STEP file: "+(e&&e.message||e); $("#cadDrop").className="drop bad"; if(own) ImportFlow.fail("Couldn't read "+name+": "+(e&&e.message||e)); });
 }
 let PARSED={rig:null, units:null};               // what the engine worker found alongside the parse
+
+/* ============================================================
+   THE TEAM'S ROBOT, KEPT IN THIS BROWSER
+   A robot the team brought in is here again on the next visit, with no
+   file to find and nothing to read from Onshape a second time. It is kept
+   in IndexedDB (a robot is tens of megabytes; localStorage holds five):
+     whole    the robot as the engine built it from the link or the export
+              zip, its thinned shapes included, so it is placed at once
+     step     the STEP file's text, read again the way a drop reads it
+     session  a .ftcsim workspace's text
+   One robot, the last one brought in. The OpModes, the helper classes,
+   the joints fixed by hand and the hardware map were already kept
+   (localStorage, by the robot's name). Nothing leaves the computer.
+   "Forget my robot" in the menu clears it.
+   ============================================================ */
+const RobotStore={
+  sig:null,
+  db(){ return this._db||(this._db=new Promise((ok,no)=>{
+    if(typeof indexedDB==="undefined"){ no(new Error("no IndexedDB")); return; }
+    const r=indexedDB.open("simbench-robot",1);
+    r.onupgradeneeded=()=>{ if(!r.result.objectStoreNames.contains("robot")) r.result.createObjectStore("robot"); };
+    r.onsuccess=()=>ok(r.result); r.onerror=()=>no(r.error||new Error("IndexedDB wouldn't open")); })); },
+  tx(mode,fn){ return this.db().then(db=>new Promise((ok,no)=>{ const t=db.transaction("robot",mode), q=fn(t.objectStore("robot"));
+    t.oncomplete=()=>ok(q&&q.result); t.onerror=t.onabort=()=>no(t.error||new Error("IndexedDB write failed")); })); },
+  /* keep this robot; the same one twice is written once. Never throws: a private window or a
+     full disk only means the robot isn't here next time */
+  keep(rec){
+    const sig=[rec.kind,rec.name,rec.text?rec.text.length:(rec.cad&&rec.cad.solids?rec.cad.solids.length:0)].join("|");
+    if(sig===this.sig&&rec.kind!=="whole") return Promise.resolve(false);
+    this.sig=sig;
+    // copied now: the write happens later, and by then the view has hung its own objects on the robot
+    let copy; try{ copy=structuredClone(Object.assign({savedISO:new Date().toISOString()},rec)); }catch(e){ return Promise.resolve(false); }
+    return this.tx("readwrite",s=>s.put(copy,"last")).then(()=>true).catch(()=>false);
+  },
+  get(){ return this.tx("readonly",s=>s.get("last")).catch(()=>null); },
+  clear(){ this.sig=null; return this.tx("readwrite",s=>s.delete("last")).catch(()=>null); },
+};
+/* The robot from last time, back on the field. False when there is none or it won't load. */
+async function restoreRobot(){
+  const rec=await RobotStore.get(); if(!rec||LAST_STEP) return false;
+  const when=rec.savedISO?" · kept "+String(rec.savedISO).slice(0,10):"";
+  try{
+    if(rec.kind==="whole"&&rec.cad&&rec.cad.solids){
+      RobotStore.sig=["whole",rec.name,rec.cad.solids.length].join("|");
+      LAST_STEP={name:rec.name, text:"", kept:true, label:(rec.label||rec.name)+when};
+      JOINTS.spec=JOINTS.report=JOINTS.devices=null; JOINTS.name=JOINTS.step=null;
+      ImportFlow.robotIn(rec.cad,rec.from||"URDF",{kept:true});
+      return true;
+    }
+    if(rec.kind==="step"&&rec.text){
+      RobotStore.sig=["step",rec.name,rec.text.length].join("|");
+      LAST_STEP={name:rec.name, text:rec.text, label:rec.label||undefined};
+      parseAndLoad();
+      return true;
+    }
+    if(rec.kind==="session"&&rec.text){
+      const r=unpackSession(rec.text); if(!r.ok) return false;
+      RobotStore.sig=["session",rec.name,rec.text.length].join("|");
+      Session.apply(r.session,rec.name);
+      return true;
+    }
+  }catch(e){ LAST_STEP=null; }
+  return false;
+}
 
 /* ============================================================
    THE DEFAULT ROBOT
@@ -1523,7 +1608,7 @@ async function loadDefaultRobot(){
       selectOpMode(mine&&(!mine.builtin||mine.team)?saved:R.opmodes[0].id);
     });
   }catch(e){
-    if(!LAST_STEP) st.textContent="couldn't load the default robot ("+e.message+") — this is the built-in sample";
+    if(!LAST_STEP){ st.textContent="couldn't load the default robot ("+e.message+") — this is the built-in sample"; if(View.chassisG) View.chassisG.visible=true; }
   }
 }
 /* The real surfaces, the way Onshape draws them. OpenCascade loads from the
@@ -2789,6 +2874,7 @@ const Session={
       const r=unpackSession(text);
       if(!r.ok){ this.toast("that .ftcsim wouldn't open — "+r.error); return; }
       this.apply(r.session,file.name);
+      if(r.session.cad) RobotStore.keep({kind:"session", name:file.name, text});
     },m=>this.toast(m));
   },
   apply(s,fileName){
@@ -3023,6 +3109,7 @@ function proBoot(){
   $("#sessionBtn").addEventListener("click",()=>Menu.open());
   $("#saveSession").addEventListener("click",()=>{ Menu.open(false); Session.save(); });
   $("#openSession").addEventListener("click",()=>{ Menu.open(false); $("#sessionFile").click(); });
+  $("#forgetRobot").addEventListener("click",()=>{ Menu.open(false); RobotStore.clear().then(()=>location.reload()); });
   $("#sessionFile").addEventListener("change",e=>{ const f=e.target.files[0]; if(f) Session.take(f); e.target.value=""; });
   addEventListener("keydown",e=>{
     if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="s"){ e.preventDefault(); Session.save(); }
@@ -3074,6 +3161,10 @@ function boot(){
   sample.solids=sampleSolids();
   classifyMechs(sample.mechs);
   loadCAD(sample,"sample: fulll.step (measured)","ok");
+  // the sample is only what the bench runs on until a robot is in: the team's own from last
+  // time, else the demo. Drawn meanwhile, it was a robot nobody asked for (?robot=sample asks)
+  const wantSample=new URLSearchParams(location.search).get("robot")==="sample";
+  if(!wantSample){ if(View.chassisG) View.chassisG.visible=false; $("#cadStatus").textContent="getting your robot …"; $("#vpTitle").textContent="getting your robot …"; }
 
   const saved=store.get("ftcbench.current",null);
   selectOpMode(entry(saved)?saved:"sample-claw");
@@ -3194,7 +3285,9 @@ function boot(){
     // back from signing in to Onshape in this tab (no pop-up allowed): the card carries on with the pasted address
     const back=/^#onshape-(signed-in|signin-failed)/.exec(location.hash);
     if(back){ try{ history.replaceState(null,"",location.pathname+location.search); }catch(e){} ImportFlow.signedIn(back[1]==="signed-in",""); }
-    if(new URLSearchParams(location.search).get("robot")!=="sample") loadDefaultRobot();
+    // the team's own robot from last time; else the demo (?robot=demo asks for the demo anyway)
+    const which=new URLSearchParams(location.search).get("robot");
+    if(which!=="sample") (which==="demo"?Promise.resolve(false):restoreRobot().catch(()=>false)).then(back=>{ if(!back&&!LAST_STEP) loadDefaultRobot(); });
   }catch(e){}
 }
 // three.js arrives as an ES module (tools/build.mjs): boot once it has
