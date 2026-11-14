@@ -71,7 +71,22 @@ From Onshape's [launch checklist](https://onshape-public.github.io/docs/app-stor
    > it? (3) Can beta testers' API calls get a temporary allowance? (4) Do the testing rules about
    > browsing 20+ documents apply to an app that reads one pasted assembly?
 
-3. **The store entry** (the testing guidelines' Addendum B):
+3. **The store entry** (the testing guidelines' Addendum B), in the developer portal at
+   <https://dev-portal.onshape.com>, signed in as the account that registered the OAuth app:
+   **OAuth applications → FTC SimBench → Store entries → Create store entry**. Ready to paste:
+
+   | Field | Value |
+   |---|---|
+   | Name | FTC SimBench |
+   | Summary | Simulate your FTC robot from its Onshape assembly and run your team's real Java OpModes. |
+   | Description | Paste your robot's Assembly address and FTC SimBench reads its mates, parts and mass properties (read-only), builds the robot on a FIRST Tech Challenge field in your browser, and runs your team's TeleOp and Road Runner autonomous code on it. Free, no install, nothing written back to Onshape. |
+   | Price | Free |
+   | Support URL | https://ftc-simbench-pro.pages.dev/support |
+   | EULA / terms URL | https://ftc-simbench-pro.pages.dev/terms |
+   | Privacy URL | https://ftc-simbench-pro.pages.dev/privacy |
+   | Launch URL | https://ftc-simbench-pro.pages.dev/ |
+
+   Its checklist:
    - name, summary and description that say what it does;
    - category, and the price **Free**;
    - permission: **Application can read your documents** only (already so);
@@ -91,7 +106,7 @@ From Onshape's [launch checklist](https://onshape-public.github.io/docs/app-stor
    | Empty assembly, wire-only Part Studio | ❌ fails with "none of its parts' shapes" and "try again"; should say the assembly has no parts |
    | Surface-only Part Studio | ❌ a surface is weighed (24 g in the probe); it should weigh nothing |
    | No avoidable console errors | ? not checked yet |
-   | EULA, privacy page, support link | ❌ not on the site yet |
+   | EULA, privacy page, support link | ✅ `/terms`, `/privacy`, `/support` (`site/`, 2026-11-14); have a mentor read them |
 
 5. **Beta test with at least 5 active testers.** Make an Onshape team, add a private store entry
    visible to it, and have the testers add the app and import their robots. Their calls count
