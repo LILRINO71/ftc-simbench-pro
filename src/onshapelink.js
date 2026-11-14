@@ -198,7 +198,9 @@ function checkOnshapePayload(p){
         parts[id]={name:str(b.name), tri:t, color:b.color==null?null:(typeof b.color==="object"||typeof b.color==="string"?b.color:null)};
       }
       if(g.mass&&typeof g.mass==="object") for(const id of Object.keys(g.mass).slice(0,2000)){
-        const m=g.mass[id]; if(!m||typeof m!=="object"||!(num(m.kg)>0)) continue;
+        const m=g.mass[id]; if(!m||typeof m!=="object") continue;
+        if(m.surface===true){ mass[id]={kg:0, surface:true}; continue; }       // a surface: no mass, no volume
+        if(!(num(m.kg)>0)) continue;
         mass[id]={kg:num(m.kg), com:vec(m.com,3), I:vec(m.I,9), vol:num(m.vol)};
       }
       geom[k]={parts, mass};

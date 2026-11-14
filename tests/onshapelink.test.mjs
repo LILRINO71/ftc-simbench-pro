@@ -152,3 +152,28 @@ test('link: a dropped or relayed payload is checked: only the documents, the sha
   assert.deepEqual(Object.keys(p.geom.k.parts), ['a']);
   assert.deepEqual(p.geom.k.mass, { a: { kg: 2, com: [1, 2, 3], I: [1, 0, 0, 0, 1, 0, 0, 0, 1], vol: 1e-3 } });
 });
+
+test('link: an empty assembly, and one with no solid part, are said as what they are', () => {
+  const root = (instances, occurrences) => ({ format: E.ONSHAPE_FORMAT, name: 'x', url: LINK, geom: {},
+    asm: { rootAssembly: { documentId: D, elementId: EL, instances, occurrences, features: [] }, subAssemblies: [], parts: [] } });
+  assert.throws(() => E.cadFromOnshape(root([], [])), /this assembly has no parts in it/);
+  // one part instance whose Part Studio sent no faces for it (a sketch, a curve)
+  const inst = { id: 'i1', name: 'Sketch 1 <1>', type: 'Part', partId: 'JHD', documentId: D, documentMicroversion: 'f'.repeat(24), elementId: 'e'.repeat(24), configuration: 'default' };
+  const P = root([inst], [{ path: ['i1'], transform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] }]);
+  P.geom[E.onshapeGeomKey(inst)] = { parts: {}, mass: {} };
+  assert.throws(() => E.cadFromOnshape(P), /none of this assembly's 1 part has a solid shape.*Sketch 1/);
+});
+
+test('link: a surface (no mass and no volume from Onshape) weighs nothing, through the payload check too', async () => {
+  // the first part of the first Part Studio answers as a surface body does: hasMass false, volume 0
+  const os = onshape(); const base = os.fetch; let hit = null;
+  os.fetch = async (u, init) => { const r = await base(u, init);
+    if (!/massproperties/.test(u) || hit) return r;
+    return { ...r, json: async () => { const b = await r.json(), id = Object.keys(b.bodies)[0]; hit = id; b.bodies[id] = { hasMass: false, mass: [0, 0, 0], volume: [0, 0, 0], centroid: [0, 0, 0], inertia: new Array(27).fill(0) }; return b; } }; };
+  const P = E.checkOnshapePayload(Object.assign({ format: E.ONSHAPE_FORMAT }, await read(os)));
+  const cad = E.cadFromOnshape(P), flat = cad.solids.filter((s) => s.massless);
+  assert.ok(hit && flat.length >= 1, 'the surface is marked');
+  for (const s of flat) { const pm = E.partMass(s); assert.equal(pm.kg, 0); assert.equal(pm.how, 'surface'); }
+  const solid = cad.solids.find((s) => !s.massless);
+  assert.ok(E.partMass(solid).kg > 0, 'a solid part still has its mass');
+});

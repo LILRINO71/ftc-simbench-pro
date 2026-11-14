@@ -90,7 +90,9 @@ function osCompactMass(mp){
     const m=Array.isArray(b.mass)?+b.mass[0]:+b.mass, vol=Array.isArray(b.volume)?+b.volume[0]:+b.volume;
     const has=b.hasMass!==false&&Number.isFinite(m)&&m>0;
     const kg=has?m:(Number.isFinite(vol)&&vol>0?vol:NaN);
-    if(!(kg>0)) continue;
+    // Onshape answered for this body, and it has neither mass nor volume: a surface or a sketch
+    // curve, not a solid. It weighs nothing (left unsaid, its hull was weighed as metal)
+    if(!(kg>0)){ if(Number.isFinite(vol)&&vol<=0&&!(m>0)) out[id]={kg:0, surface:true}; continue; }
     // the tensor only when it is one: Onshape writes zeros for a body with no material
     const I=first(b.inertia,9), real=I&&I.some(v=>v!==0)?I:null;
     out[id]={kg, com:first(b.centroid,3), I:real, vol:Number.isFinite(vol)&&vol>0?vol:null};
@@ -168,6 +170,7 @@ function cadFromOnshape(p,opts){
       occT:occOf(T), osPath:o.path.join("/"), shapes:[k], color:S.color?S.color.map(toSrgb):null, tri:{pos:[],nor:[]}, keepTri:true};
     // the part's mass, centre of mass and inertia tensor, placed in the world (the robot frame below)
     const m=G.mass&&G.mass[inst.partId];
+    if(m&&m.surface) sd.massless=true;
     if(m&&m.kg>0){
       sd.kg=m.kg; kgSum+=m.kg; kgParts++;
       const Rm=[T[0],T[1],T[2],T[4],T[5],T[6],T[8],T[9],T[10]];
@@ -178,7 +181,9 @@ function cadFromOnshape(p,opts){
     for(const q of thin) P.push(q);
     solids.push(sd);
   }
-  if(!solids.length) throw new Error("Onshape sent the assembly but none of its parts' shapes"+(missing.size?" (missing: "+[...missing].slice(0,4).join(", ")+")":""));
+  // nothing to build: said as what it is, so nobody is told to "try again" on an empty tab
+  if(!solids.length&&!nOcc) throw new Error("this assembly has no parts in it. Open the Assembly tab that holds your robot and paste that address");
+  if(!solids.length) throw new Error("none of this assembly's "+nOcc+" part"+(nOcc===1?" has":"s have")+" a solid shape (sketches, curves or empty parts"+(missing.size?": "+[...missing].slice(0,4).join(", "):"")+"). A robot needs solid parts");
   if(missing.size) why.push(missing.size+" part(s) came without a shape and are left out: "+[...missing].slice(0,6).join(", ")+(missing.size>6?" …":""));
   solids.sort((a,b)=>b.size-a.size);
   // ---- the robot frame, exactly as parseSTEP and urdfRobot do it (src/frame.js) ----
