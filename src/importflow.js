@@ -264,8 +264,11 @@ const ImportFlow={
     this.robotIn(cad,"Onshape");
   },
   /* a robot that arrived whole (the link, the export zip, a re-read with a new up or centre): onto the field */
-  robotIn(cad,from){
+  robotIn(cad,from,o){
     this.progress("Placing it on the field …",1,1);
+    // kept in this browser for the next visit (src/app.js RobotStore), as it arrived: IndexedDB
+    // copies it here, before the view hangs its own objects on the joints
+    if(!(o&&o.kept)) RobotStore.keep({kind:"whole", from, name:cad.name, label:LAST_STEP&&LAST_STEP.label||cad.name, cad});
     MATES.name=cad.name; MATES.url=cad.onshape&&cad.onshape.url||null; MATES.report=cad.onshape&&cad.onshape.report||null;
     // the team's own joint sheet for this robot, over what the mates' names declare (src/jointsheet.js)
     const sheet=this.savedSheet(cad.name);
