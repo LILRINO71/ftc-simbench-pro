@@ -199,12 +199,15 @@ async function urdfRobot(text,files,name,opts){
     const key=shape.tag==="mesh"?["m",shape.attrs.filename,sc.join(","),O.t.join(","),O.r.flat().map(x=>x.toFixed(5)).join(",")].join("|"):["p",JSON.stringify(shape.attrs),O.t.join(","),O.r.flat().join(",")].join("|");
     const mat=urdfKid(v,"material"), mc=mat?(urdfKid(mat,"color")?urdfNums(urdfKid(mat,"color").attrs.rgba,3,null):(materials[mat.attrs.name]||null)):null;
     if(shapeOf.has(key)){ const s=shapes[shapeOf.get(key)]; if(!s.color&&mc) s.color=lin(mc); return shapeOf.get(key); }
-    let tri, color=mc;
+    let tri, color=mc, linear=false;
     if(shape.tag==="mesh"){
       const f=findMesh(shape.attrs.filename); if(!f){ missing.add(base(shape.attrs.filename)); return null; }
       const qi=meshQueue.indexOf(f,qAt); if(qi>=0){ qAt=qi; prefetch(meshQueue.slice(qi+1,qi+4)); }
       let M; try{ M=meshRead(shape.attrs.filename,await bytesOf(f),sidecars); }catch(e){ missing.add(base(shape.attrs.filename)+" ("+e.message+")"); return null; }
-      tri=M.tri; if(!color&&M.color) color=M.color;
+      // the mesh's own colour: a GLB's is linear light already (src/meshfiles.js). Put through the
+      // screen's curve a second time, every part of an Onshape export drew darker and more
+      // saturated than it is in Onshape (a pale blue polycarbonate plate came out royal blue)
+      tri=M.tri; if(!color&&M.color){ color=M.color; linear=!!M.linear; }
       if(sc[0]!==1||sc[1]!==1||sc[2]!==1){ tri=Float32Array.from(tri); for(let k=0;k<tri.length;k+=3){ tri[k]*=sc[0]; tri[k+1]*=sc[1]; tri[k+2]*=sc[2]; } }
     } else tri=Float32Array.from(urdfPrim(shape));
     if(!tri||tri.length<9) return null;
@@ -219,7 +222,7 @@ async function urdfRobot(text,files,name,opts){
     }
     const R=meshReduce(tri,opts.reduce||{}); triBefore+=R.before; triAfter+=R.after;
     const idx=shapes.length;
-    shapes.push({pos:R.pos, idx:R.idx, box:R.box, color:lin(color), name:shape.tag==="mesh"?base(shape.attrs.filename):shape.tag, file:shape.tag==="mesh"?String(shape.attrs.filename).replace(/^.*[\/]/,""):null});
+    shapes.push({pos:R.pos, idx:R.idx, box:R.box, color:linear?color.map(v=>Math.max(0,Math.min(1,+v||0))):lin(color), name:shape.tag==="mesh"?base(shape.attrs.filename):shape.tag, file:shape.tag==="mesh"?String(shape.attrs.filename).replace(/^.*[\/]/,""):null});
     shapeOf.set(key,idx); nShape++;
     if(nShape%20===0) say("reading part shapes: "+nShape+" …");
     return idx;

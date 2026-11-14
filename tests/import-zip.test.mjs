@@ -88,7 +88,12 @@ test('urdf zip: the whole robot from the export, meshes found by any path the fi
   assert.equal(cad.solids.length, 6);
   assert.equal(cad.mechs.filter((m) => m.fromMate).length, 5, 'every joint became a mechanism');
   const frame = cad.solids.find((s) => /Frame/.test(s.name));
-  assert.deepEqual(frame.color.map((v) => +v.toFixed(2)), [0.7, 0.7, 0.72], 'the GLB material is the part colour');
+  // a glTF base colour is linear light (the format says so): the shape keeps it as it is, and
+  // the part's colour as seen is that through the screen's curve. Read as if it were already
+  // "as seen", every part of an export drew darker than it is in Onshape
+  const seen = (v) => (v <= 0.0031308 ? 12.92 * v : 1.055 * Math.pow(v, 1 / 2.4) - 0.055);
+  assert.deepEqual(cad.shapes[frame.shapes[0]].color.map((v) => +v.toFixed(2)), [0.7, 0.7, 0.72], 'the GLB material is the shape colour, in linear light');
+  assert.deepEqual(frame.color.map((v) => +v.toFixed(3)), [0.7, 0.7, 0.72].map((v) => +seen(v).toFixed(3)), 'and the part colour as seen (0.85, not 0.7)');
   assert.ok(frame.kg > 5.9 && frame.kg < 6.1, 'the inertial mass');
 });
 
