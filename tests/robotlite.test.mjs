@@ -76,3 +76,47 @@ test('lite: malformed or hostile packs come back null, never throw', () => {
   new Uint16Array(bad, o, 1)[0] = 65535;
   assert.equal(E.liteDecode(bad), null, 'an index past the vertices');
 });
+
+/* A box as 12 triangles, and a sphere of n x n quads (dense, like a screw head or a bearing). */
+function boxShape(w, h, d) {
+  const v = []; for (let i = 0; i < 8; i++) v.push(i & 1 ? w : 0, i & 2 ? h : 0, i & 4 ? d : 0);
+  return { pos: Float32Array.from(v), idx: Uint32Array.from([0, 2, 3, 0, 3, 1, 4, 5, 7, 4, 7, 6, 0, 1, 5, 0, 5, 4, 2, 6, 7, 2, 7, 3, 0, 4, 6, 0, 6, 2, 1, 3, 7, 1, 7, 5]) };
+}
+function ball(r, n = 40) {
+  const pos = [], idx = [];
+  for (let j = 0; j <= n; j++) for (let i = 0; i <= n; i++) { const t = Math.PI * j / n, f = 2 * Math.PI * i / n; pos.push(r * Math.sin(t) * Math.cos(f), r * Math.sin(t) * Math.sin(f), r * Math.cos(t)); }
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) { const a = j * (n + 1) + i; idx.push(a, a + n + 1, a + 1, a + 1, a + n + 1, a + n + 2); }
+  return { pos: Float32Array.from(pos), idx: Uint32Array.from(idx) };
+}
+
+test('lite: the budget is taken from the heavy shapes; a flat panel of twelve triangles comes through as it is', () => {
+  // a 400 mm side panel, and 200 screws of 3,200 triangles each: 640,000 triangles into 20,000
+  const panel = boxShape(0.4, 0.3, 0.004), screw = ball(0.004);
+  const parts = [{ seg: 'chassis', shape: 0, m: null }];
+  for (let k = 0; k < 200; k++) parts.push({ seg: 'chassis', shape: 1, m: translate(0.002 * k, 0.5, 0) });
+  const L = E.liteBuild({ pal: [[200, 200, 200], [40, 40, 40]], shapes: [{ pos: panel.pos, idx: panel.idx, tc: 0 }, { pos: screw.pos, idx: screw.idx, tc: 1 }], parts }, { budget: 20000 });
+  assert.ok(L.tris <= 20000, L.tris + ' triangles');
+  // the panel: its 12 triangles and its 8 corners exactly (one grid for the whole robot moved them: a dented panel)
+  const seg = L.segs[0], corners = new Set();
+  let panelTris = 0;
+  for (let f = 0; f < seg.t.length / 3; f++) if (seg.tc[f] === 0) { panelTris++; for (let k = 0; k < 3; k++) { const v = seg.t[3 * f + k]; corners.add([0, 1, 2].map((a) => seg.v[3 * v + a].toFixed(5)).join()); } }
+  assert.equal(panelTris, 12);
+  for (const c of corners) { const [x, y, z] = c.split(',').map(Number); assert.ok([0, 0.4].some((w) => Math.abs(x - w) < 1e-6) && [0, 0.3].some((w) => Math.abs(y - w) < 1e-6) && [0, 0.004].some((w) => Math.abs(z - w) < 1e-6), 'a panel corner at ' + c); }
+});
+
+test('lite: a part with nothing left to cluster is drawn as its box, and the smallest parts go first when there is no room', () => {
+  const screw = ball(0.004), plate2 = plate(60, 30);
+  const mk = (n) => { const parts = [{ seg: 'chassis', shape: 0, m: null }]; for (let k = 0; k < n; k++) parts.push({ seg: 'chassis', shape: 1, m: translate(0.01 * k, 0.5, 0) });
+    return { pal: [[200, 200, 200], [40, 40, 40]], shapes: [{ pos: plate2.pos, idx: plate2.idx, tc: 0 }, { pos: screw.pos, idx: screw.idx, tc: 1 }], parts }; };
+  // room for every part, but not for 3,200 triangles a screw: each screw is its box, where it was
+  const A = E.liteBuild(mk(50), { budget: 3000 });
+  assert.ok(A.tris <= 3000 && A.left === 0 && A.boxed === 1, JSON.stringify({ tris: A.tris, left: A.left, boxed: A.boxed }));
+  const dark = []; for (let f = 0; f < A.segs[0].t.length / 3; f++) if (A.segs[0].tc[f] === 1) dark.push(f);
+  assert.equal(dark.length, 50 * 12, 'twelve triangles a screw');
+  // 4,000 of them into 3,000 triangles: there is no room even for boxes, so the screws are left out and the plate keeps the budget
+  const B = E.liteBuild(mk(4000), { budget: 3000 });
+  assert.equal(B.left, 4000);
+  assert.ok(B.tris > 1500 && B.tris <= 3000, B.tris + ' triangles, all the plate\'s');
+  const b = bounds(B.segs[0].v);
+  assert.ok(b.mx[0] - b.mn[0] > 0.19 && b.mx[1] - b.mn[1] > 0.09, 'the plate is still 0.2 x 0.1 m');
+});
