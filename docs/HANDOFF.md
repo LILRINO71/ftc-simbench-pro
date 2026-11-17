@@ -4,6 +4,43 @@ The handoffs live here, the newest first. The two older ones below mention `rese
 `research/realcad`, `research_notes/` and `reports/`: those folders were removed on 2026-10-04 as
 unused (nothing in the build or the tests read them); the measurements they held stay in the text.
 
+## 2026-11-16: a team's STEP with its code, and PR #14 on main
+
+On main. The owner's robot arrived as a 122 MB Onshape STEP (1,426 parts, no mates) with no
+code for it; the code was written from the CAD and both were run here.
+
+### What changed
+
+| | Before | Now | Where |
+|---|---|---|---|
+| An OpMode that extends another OpMode (a "+ encoders" variant, a blue auto on the red one) | read alone: "No hardware devices found" | read with its parent (`jvSiblings`); a parent that is missing ends INIT with `MissingClass` | `src/jvmrun.js`, `src/app.js`, `src/analyze.js` |
+| Other repos' CI ran OpModes through `tests/load.mjs` | a test helper nobody promised to keep | `tools/run-opmode.mjs` (`runOpMode`, `readJava`, `libsFor`, `engine`) and a command line | `tools/`, `docs/code-support.md` |
+| A base whose left wheels are sub-assemblies and whose right wheels are loose mirrored parts | "drivetrain unknown" | loose wheel parts are always packed, beside the wheels an assembly gave | `src/drivetrain.js` |
+| A drive motor belted across to its wheel | the standard build was assumed and reported as "mounting from the CAD"; code tuned on the real robot spun it | an assumed mount gives way to the code's own forward, and the verdict says so | `src/sim.js` `buildRig` |
+
+PR #14 (below) was rebased onto these and pushed to main; its two doc conflicts were the test
+count and the claims table.
+
+### Measured here
+
+- `npm test`: 852 pass, 0 fail. `npm run build:ship` clean. The built page was opened: the
+  default robot, its OpModes and the import card load; the only failed request is
+  `/onshape/status`, which a static server doesn't have.
+- The team's file: mecanum, confidence 0.94, track 359 mm, wheelbase 240 mm, 9.5 kg; its TeleOp
+  read with 11 devices; the drive verdict passes with mounting "from your code's own forward".
+
+### Still open
+
+- **The joint finder on that STEP**: the gate (a servo pinion on a rack) comes out a hinge that
+  swings the rack; the two intakes' parallel roller shafts are read as two slide stacks; the
+  four belted drive motors become four joints turning their pulleys; six parts are read as
+  actuators that aren't (encoder caps of the mirrored motors, the odometry pods, two channels).
+- **The model's balance**: 9.5 kg with motors weighed part by part and no battery or hubs in the
+  CAD; the centre of mass comes out 160 mm up on a 240 mm wheelbase and the robot yaws 37 degrees
+  in two seconds of full stick. Nothing here says whether the real one does.
+- PR #14's own open list (below) stands: nothing was tried on the owner's REVIVER zip.
+- Draft PRs #15 (a smoother view), #13 (the redesign) and #12 (superseded) are still open.
+
 ## 2026-11-13: the export zip's joints, checked against the file itself
 
 Branch `claude/laughing-johnson-xatdki`, PR #14 (draft, on top of the 2026-10-26 work below).
