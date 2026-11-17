@@ -41,6 +41,12 @@ Road Runner autos lean on classes in other files, so the bench keeps **helper cl
 `.java` without `@TeleOp` or `@Autonomous` that you drop in (a `MecanumDrive`, an `Arm` with its
 actions, a PID class) is available to every OpMode.
 
+**An OpMode that extends another OpMode** (a "Main TeleOp + encoders" on top of the main TeleOp,
+a blue auto on top of the red one) is read together with its parent, and with any other OpMode
+whose constants it names (`jvSiblings` in `src/jvmrun.js`). Drop the files in any order. If the
+parent isn't there, Checks says which file is missing instead of "no hardware found"; a parent
+from a library the bench doesn't have (Pedro's `SelectableOpMode` behind `Tuning`) is named as that.
+
 **From the OpMode:**
 - `Pose2d` / `Vector2d` values and `new MecanumDrive(hardwareMap, pose)`, which sets the start pose (the robot is placed there at INIT)
 - `new <HelperClass>(hardwareMap)` objects

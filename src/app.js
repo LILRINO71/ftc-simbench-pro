@@ -105,8 +105,14 @@ function initRails(){
    OPMODE LIBRARY
    ============================================================ */
 function entry(id){ return LIBRARY.filter(e=>e.id===id)[0]||null; }
+/* What an OpMode is read with: the helper classes, and the team's other OpModes it extends or
+   names (jvSiblings): "Main TeleOp + encoders" is ten lines on top of the main TeleOp. */
+function libsFor(e){
+  const others=LIBRARY.filter(o=>o!==e&&typeof o.source==="string").map(o=>({file:o.file, src:o.source}));
+  return helperFiles().concat(jvSiblings(e.source,others));
+}
 function parseEntry(e){
-  try{ e.code=parseJava(e.source,{libs:helperFiles()}); e.error=null; }
+  try{ e.code=parseJava(e.source,{libs:libsFor(e)}); e.error=null; }
   catch(err){ e.code=null; e.error=err.message; }
   return e;
 }
@@ -232,6 +238,9 @@ function addOpModeFromText(file,text){
   const e=existing||{id:"u"+Date.now().toString(36)+Math.random().toString(36).slice(2,6), file, builtin:false};
   e.source=text; parseEntry(e);
   if(!existing) LIBRARY.push(e);
+  // an OpMode that extends this one may have come in first: read it again now its parent is here
+  const me=[{file:e.file, src:text}];
+  for(const o of LIBRARY) if(o!==e&&typeof o.source==="string"&&jvSiblings(o.source,me).length) parseEntry(o);
   USER_CHOSE=true; saveLibrary(); selectOpMode(e.id);
 }
 

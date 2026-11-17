@@ -48,6 +48,35 @@ function jvCompile(raw,libs){
   const fqn=(main.pkg?main.pkg+".":"")+t.name;
   return {ok:true,units,main:fqn,mainDecl:t,bad,srcs};
 }
+/* The team's other OpModes an OpMode leans on. A variant of the main TeleOp ("the same, with
+   encoders") or the blue side of a red auto extends another OpMode, or reads its constants; that
+   file isn't a helper class, so it has to be found and handed over with the helpers.
+   pool: [{file, src}], the team's other OpModes. Returns the ones `raw` names, and the ones
+   those name in turn. */
+function jvSiblings(raw,pool){
+  const left=[], out=[], seen=new Set();
+  for(const p of pool||[]){
+    if(!p||typeof p.src!=="string"||p.src===raw) continue;
+    const u=jvParseCached(p.src,p.file||"OpMode.java");
+    const names=u.error?[]:(u.types||[]).map(t=>t.name).filter(n=>n&&!seen.has(n));
+    if(!names.length) continue;                              // the first file to declare a class keeps it
+    names.forEach(n=>seen.add(n));
+    left.push({p,re:new RegExp("(?:^|[^\\w$])(?:"+names.map(n=>n.replace(/\$/g,"\\$")).join("|")+")(?![\\w$])")});
+  }
+  const queue=[raw];
+  while(queue.length&&left.length){
+    const text=stripComments(queue.shift());
+    for(let i=0;i<left.length;i++) if(left[i].re.test(text)){ out.push(left[i].p); queue.push(left[i].p.src); left.splice(i--,1); }
+  }
+  return out;
+}
+/* A class the OpMode extends that the bench was never given: {cls, base} for the first one up
+   the chain, or null. A missing parent is stood in for by an empty class (as every unknown
+   library class is), so nothing it would have done happens. */
+function jvLostBase(vm,cls){
+  for(let k=cls,n=0;k&&n<40;n++){ const s=vm.supOf(k); if(s&&s.opaque) return {cls:k,base:s}; k=s; }
+  return null;
+}
 function jvNewVM(comp){
   const vm=new JVM(comp.units.concat(jvPrelude()),jvNativeTable());
   vm.builders=new Set(JV_BUILDERS);
@@ -110,6 +139,21 @@ JvProgram.prototype.drain=function(g){
 JvProgram.prototype.init=function(){
   const vm=this.vm;
   if(!this.cls){ this.error={cls:"error",msg:"the OpMode class wasn't found"}; this.done=true; return; }
+  // its parent class is missing and it has no runOpMode(), init() or loop() of its own: all of
+  // the OpMode was in the parent. Say which file is wanted, rather than run nothing.
+  const lost=jvLostBase(vm,this.cls);
+  if(lost){
+    let own=false;
+    for(let k=this.cls;k&&!k.opaque&&!own;k=vm.supOf(k)) own=["runOpMode","init","loop"].some(m=>k.methods&&k.methods.has(m));
+    if(!own){
+      const b=lost.base, pkg=/\./.test(b.fqn)?b.fqn.replace(/\.[^.]*$/,""):"";
+      this.error={cls:"MissingClass",file:"OpMode.java",line:null,in:lost.cls.name,
+        msg:lost.cls.name+" extends "+b.name+(pkg
+          ?", a class from "+pkg+" that the bench doesn't have, so nothing in it runs here"
+          :", and "+b.name+".java isn't loaded: add "+b.name+".java with the team's other files")};
+      this.done=true; return;
+    }
+  }
   try{
     this.self=this.drain(vm.construct(this.cls,[]));
   }catch(e){ this.fail(e); }

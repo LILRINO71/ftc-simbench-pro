@@ -23,6 +23,9 @@ function analyze(code,cad,map,opts){
     "Nothing marked <code>@TeleOp</code> or <code>@Autonomous</code>, so this class won't appear on the Driver Station list.",null,
     "Add <code>@TeleOp(name = \"…\")</code> above the class.");
   const hasAuto = code.auto && code.auto.length>0;
+  // the class this OpMode extends was never loaded (src/jvmrun.js, MissingClass): that is why
+  // nothing was found in it, so it is the one thing said about its structure
+  const lostBase=code.vmTried&&/^MissingClass: /.test(code.vmTried.err||"")?code.vmTried.err.replace(/^MissingClass: /,""):null;
   if(code.rr){
     const S=code.rr.summary||{}, esc2=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"})[c]);
     add("rr:plan","info","Road Runner: "+(S.trajectories||0)+" trajector"+(S.trajectories===1?"y":"ies")+", "+(S.actions||0)+" action"+(S.actions===1?"":"s"),
@@ -31,6 +34,10 @@ function analyze(code,cad,map,opts){
       " with a feedforward from the CAD's motors and wheels, and knows exactly where the robot is."+
       (code.rr.notes.length?"<br>"+code.rr.notes.map(esc2).join("<br>"):""),null,null);
   }
+  else if(lostBase) add("struct:parent","fail","A class this OpMode extends is missing",
+    lostBase.replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"})[c])+".",null,
+    /isn't loaded/.test(lostBase)?"Drop the missing <code>.java</code> file in with this one; the bench reads the two together."
+      :"This OpMode is built on a library the bench doesn't run. The team's other OpModes are not affected.");
   else if(!code.hasLoop && !hasAuto) add("struct:loop","fail","Nothing to run after START",
     "The bench couldn't find a <code>while (opModeIsActive())</code> loop, a <code>loop()</code> method, or any statements after <code>waitForStart()</code>.",null,
     "Check the class structure — everything below is based on whatever it could read.");
@@ -43,7 +50,7 @@ function analyze(code,cad,map,opts){
     "Your code sets power on "+held.map(n=>"<code>"+n+"</code>").join(", ")+" while "+(held.length===1?"it is":"they are")+" still in <code>STOP_AND_RESET_ENCODER</code>. "+
     "In that mode the SDK removes power from the motor, so it stays still, here and on your robot.",
     null,"After resetting, switch the mode back: <code>setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER)</code> (or <code>RUN_USING_ENCODER</code>).");
-  if(!code.devices.length) add("struct:dev","warn","No hardware devices found",
+  if(!code.devices.length&&!lostBase) add("struct:dev","warn","No hardware devices found",
     "No <code>hardwareMap</code> lookups were recognized, so there is nothing to simulate.",null,
     "The parser understands <code>hardwareMap.get(Type.class, \"name\")</code> and <code>hardwareMap.servo.get(\"name\")</code>.");
 
