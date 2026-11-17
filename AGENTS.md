@@ -56,6 +56,9 @@ Those files are free again; read the conventions below before changing them.
   `jvSiblings(source, the other OpModes)`, the OpModes it extends or names. A headless run
   (`jvCompile(main, libs)`) must pass the same; a parent that is missing ends INIT with
   `error.cls === "MissingClass"` rather than running nothing.
+- **The headless entry** is `tools/run-opmode.mjs` (`runOpMode`, `readJava`, `libsFor`, and the
+  command line). Other repos' CI imports it, so its options and the fields of its result only
+  grow; `tests/run-opmode.test.mjs` holds them. `tests/load.mjs` stays a test helper.
 - **Onshape mates** (`src/mates.js`): a mate joint has `fromMate`, true
   `axis`/`pivot` (canonical frame), `limits` (m for a slide, rad for a turn,
   right-handed about the mate axis), and maybe `couple:{to, ratio}` (a

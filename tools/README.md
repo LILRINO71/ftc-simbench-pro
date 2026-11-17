@@ -12,6 +12,7 @@ Node scripts for building, testing and generating test robots. None of them ship
 | `gen-autorig.mjs` | Regenerates `src/autorig-lib.js` from the joint-finder prototypes in `research/autorig`. Change a prototype, re-run its eval, then run this. |
 | `fusion/ExportToSimBench` | A Fusion **script** (not an add-in): writes the open design as robot.urdf with one OBJ per rigid body, joints and limits from the design's joints, motion links as mimics, masses and colours, zipped to drop on SimBench. [fusion/README.md](fusion/README.md). |
 | `sync-shot-sim.mjs` | Copies the BIOBUZZ Shot Sim engine and field data into `vendor/`, so the bench and the shot sim can't disagree about the field. |
+| `run-opmode.mjs` | The **headless entry** for other repos and their CI: runs one of a team's OpModes on the Java VM (`--opmode`, `--seconds`, `--gamepad`) and prints what it did as JSON. Also a module (`runOpMode`). This one does ship as an interface: [docs/code-support.md](../docs/code-support.md#running-an-opmode-without-the-page-toolsrun-opmodemjs). |
 
 ```bash
 npm run build            # node tools/build.mjs

@@ -95,6 +95,53 @@ from a library the bench doesn't have (Pedro's `SelectableOpMode` behind `Tuning
 - devices the auto never commands (GearGurus 7832's auto never starts its slides' PID)
 - a configuration name with a stray space (`" bR"`)
 
+## Running an OpMode without the page (`tools/run-opmode.mjs`)
+
+Another repo, or its CI, runs a team's OpMode on the bench's Java VM through one file. It needs
+Node and a checkout of this repo, nothing installed. Import this file and not `tests/load.mjs`,
+which is a test helper and can change.
+
+```bash
+node tools/run-opmode.mjs TeamCode/src/main/java --opmode MainTeleOp.java --seconds 5 --gamepad sticks.json
+```
+
+```js
+import { runOpMode } from '../ftc-simbench-pro/tools/run-opmode.mjs';
+const r = runOpMode({ code: 'TeamCode/src/main/java', opmode: 'MainTeleOp.java', seconds: 5,
+  gamepad: [{ t: 0, gamepad1: { left_stick_y: -1 } }, { t: 2, gamepad1: { a: true } }] });
+```
+
+- **Code:** a folder (read to the bottom), a list of files, or `{file, src}` entries. The OpMode is
+  read as the app reads it: the files that aren't OpModes are its helper classes, and the OpModes
+  it extends or names come with it.
+- **Gamepad script:** each step holds from its time, in seconds after START, until the next one. A
+  negative time is during INIT (picking the alliance in `init_loop()`). A function
+  `(t, run) => ({ gamepad1, gamepad2 })` works too.
+- **The run:** INIT, a 0.4 s wait, START, then one pass every 20 ms.
+- **The result** is plain data; the command prints it as JSON and exits 0, 1 (not clean) or 2 (bad command):
+  - `ok`: it compiled, every file was read, and the OpMode didn't stop on an error
+  - `compile`: `ok`, `error`, `line`, and `parseErrors` for helper files that couldn't be read
+  - `error`: what stopped the OpMode (`cls`, `msg`, `file`, `line`, `phase`, `at`); `cls` is
+    `MissingClass` when the parent it extends wasn't among the files
+  - `devices`: what it asked `hardwareMap` for (`name`, `type`, `kind`)
+  - `peaks`: per commanded device, the largest command (`peak`), `min`, `max`, `last`, and
+    `target` for `setTargetPosition`. A device that is missing here was never commanded.
+  - `telemetry`: the last lines sent; `stubs`: library calls the VM absorbed without running
+  - `helpers`, `siblings`, `class`, `style`, `ran`, `ended`, `prints`
+
+**The robot it runs on is a stand-in,** not CAD and not physics: motors turn at the speed they are
+told to, `RUN_TO_POSITION` reaches its target, servos are where they were sent, and the robot
+stands still on the field. That checks that code compiles, runs and commands what it should. It
+doesn't follow a Road Runner trajectory (the builder calls land in `stubs`; the page follows them
+on the CAD robot) and a Pedro follower never arrives, because the pose never changes.
+
+**A caller with its own robot** passes `host`, an object with any of the methods the VM asks of a
+robot (`pose`, `heading`, `omega`, `vel`, `touch`, `color`, `colorDist`, `ray`, `volts`, `rumble`,
+`dev`); the stand-in answers the rest. `beforeTick(run)` and `afterTick(run)` run around every
+pass and `onStart(run)` just before START; `run` carries `t`, `tick`, `phase`, `dt`, `pads`,
+`telemetry` and `devices`. [biobuzz-robot-2026](https://github.com/LILRINO71/biobuzz-robot-2026/blob/main/sim/run-opmode.mjs)
+models a whole robot this way and checks its auto and TeleOp in CI.
+
 ## Seeing what was understood
 
 - **Java tab:** the parsed statements, and coverage. Each skipped line gives its reason.
