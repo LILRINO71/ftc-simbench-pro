@@ -139,8 +139,7 @@ const CadView={
     c.position.copy(pW); c.up.copy(u.clone().applyQuaternion(q)); c.lookAt(tW);
     this.head.position.copy(pW); this.head.target.position.copy(tW);
     V.ren.autoClear=true;
-    V.draw(c);
-    this.renderCube(w,h);
+    if(V.draw(c)) this.renderCube(w,h);      // a skipped frame keeps the last picture, cube and all
   },
 
   /* ---------------- the view cube ---------------- */
