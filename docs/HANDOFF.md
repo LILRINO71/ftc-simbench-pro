@@ -29,9 +29,13 @@ Then the intakes' two false slides: each is an 8 mm REX roller shaft with spacer
 read as a rail with carriage blocks. A slide whose fixed rail lies on the axis of something an
 actuator turns (its output, a gear it meshes, a pulley at the far end of its belt) is now dropped
 before any joint is made; a rail named as a lead screw stays. The team's STEP has no slides now.
-Zoo robot `intake-spacers` (belt-driven, as the team's are) shows the next problem: the pulley at
-the far end of a belt turns alone, and the roller shaft it sits on joins it to the frame (15 frame
-parts moved). It is on the zoo test's known list; `npm test` 856 pass, 0 fail.
+Zoo robot `intake-spacers` (belt-driven, as the team's are) showed the next problem: the pulley
+at the far end of a belt turned alone, and the roller shaft it sits on joined it to the frame (15
+frame parts moved). A gear or pulley at the far end of a mesh or belt now carries its shaft, the
+hubs and wheels centred on it and what is bolted to those alone, as an actuator's own output
+does. The team's STEP goes from 77 moving parts to 208: both intakes' roller shafts turn with
+their belts, with 5 of each one's 6 flap wheels. Zoo 47 of 48 joints, 110 of 112 moving parts,
+0 frame parts moved; `npm test` 858 pass, 0 fail.
 
 Still open from the list below: the belted drive motors read as joints, and the six parts read
 as actuators.

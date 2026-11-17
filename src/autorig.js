@@ -135,14 +135,14 @@ const {autoRig}=(function(){
         if(followed.has(M.with)) continue; followed.add(M.with);
         const gid=uid(id+" gear"), ax=dot(M.withAxis,A.axis)<0?M.withAxis.map(v=>-v):M.withAxis;
         joints.push({id:gid, kind:"revolute-lift", axis:ax, pivot:M.withCentre.map(v=>v/1000), parent:"chassis", couple:{to:id, ratio:M.ratio}});
-        seeds[gid]=[M.with]; extra[gid]={label:extra[id].label+", geared", body:extra[id].body};
+        seeds[gid]=[M.with]; extra[gid]={label:extra[id].label+", geared", body:extra[id].body, follower:true};
       }
       for(const B of A.belts||[]){
         belts.add(B.belt);
         if(followed.has(B.with)) continue; followed.add(B.with);
         const bid=uid(id+" belt"), ax=dot(B.withAxis,A.axis)<0?B.withAxis.map(v=>-v):B.withAxis;
         joints.push({id:bid, kind:"revolute-lift", axis:ax, pivot:B.withCentre.map(v=>v/1000), parent:"chassis", couple:{to:id, ratio:B.ratio}});
-        seeds[bid]=[B.with]; extra[bid]={label:extra[id].label+", belt", body:extra[id].body};
+        seeds[bid]=[B.with]; extra[bid]={label:extra[id].label+", belt", body:extra[id].body, follower:true};
         if(!B.named) review.push("\""+extra[bid].label+"\": a belt or chain was found from its shape alone. Check its ratio ("+B.ratio+").");
       }
     }
@@ -157,6 +157,43 @@ const {autoRig}=(function(){
     // a slide stage's hardware bolted to the fixed stage too (a bottom block the
     // retracted stage rests on) stays with the frame: only the moving rail says so
     const allRails=new Set(); for(const m of SL.mechanisms||[]) for(const g of m.stages) for(const i of g.rails) allRails.add(i);
+    /* What a gear or pulley at the far end of a mesh or belt sits on turns with it, as an
+       actuator's own output does: the shaft through it (long, thin, on its axis), the hubs and
+       wheels centred on that shaft, and what is bolted to those alone (a spacer clamped on).
+       Without the shaft, the far side plate it runs through joins it to the frame. */
+    {
+      const taken=new Set(); for(const j of joints) for(const i of seeds[j.id]) taken.add(i);
+      const geo=new Map(), info=i=>{ if(!geo.has(i)){ const P=S[i]&&S[i].pts; geo.set(i,P&&P.length>=4?{P,c:dtCentroid(P),u:dtPrincipal(P).vec[0]}:null); } return geo.get(i); };
+      const nb=i=>G.adj[i].map(k=>{ const e=G.edges[k]; return e.a===i?e.b:e.a; });
+      const free=(i,own)=>!own.has(i)&&!taken.has(i)&&!allRails.has(i)&&!belts.has(i)&&!!info(i);
+      for(const j of joints){
+        if(!extra[j.id].follower||!seeds[j.id].length) continue;
+        const a=j.axis, p=j.pivot, own=new Set(seeds[j.id]);
+        const radial=q=>{ const d=[q[0]-p[0],q[1]-p[1],q[2]-p[2]], t=dot(d,a); return [t, Math.hypot(d[0]-a[0]*t,d[1]-a[1]*t,d[2]-a[2]*t)]; };
+        const extent=i=>{ let t0=Infinity, t1=-Infinity, r=0; for(const q of info(i).P){ const [t,d]=radial(q); if(t<t0) t0=t; if(t>t1) t1=t; if(d>r) r=d; } return {t0,t1,r}; };
+        const shafts=[];
+        for(const s of seeds[j.id]) for(const i of nb(s)){
+          if(!free(i,own)||Math.abs(dot(info(i).u,a))<0.97||radial(info(i).c)[1]>0.003) continue;
+          const e=extent(i); if(e.r>0.008||e.t1-e.t0<4*e.r) continue;
+          shafts.push(i); own.add(i); }
+        if(!shafts.length) continue;
+        let lo=Infinity, hi=-Infinity; for(const s of shafts){ const e=extent(s); lo=Math.min(lo,e.t0); hi=Math.max(hi,e.t1); }
+        // (a hub up to 120 mm across, or a round part up to 200: an intake's flap wheel; a plate
+        // centred on the shaft is square or long, its corners further out than its sides)
+        const e1=Math.abs(a[0])<0.9?[0,-a[2],a[1]]:[-a[2],0,a[0]], l1=Math.hypot(...e1), u1=e1.map(v=>v/l1);
+        const u2=[a[1]*u1[2]-a[2]*u1[1], a[2]*u1[0]-a[0]*u1[2], a[0]*u1[1]-a[1]*u1[0]];
+        const round=i=>{ const w=[u1,u2].map(u=>{ let x0=Infinity, x1=-Infinity; for(const q of info(i).P){ const t=dot(q,u); if(t<x0) x0=t; if(t>x1) x1=t; } return x1-x0; });
+          return Math.min(...w)>=0.85*Math.max(...w)&&extent(i).r<=0.6*Math.max(...w); };
+        for(const s of shafts) for(const i of nb(s)){
+          if(!free(i,own)) continue;
+          const B=G.box[i], [t,d]=radial(B.mn.map((v,k)=>(v+B.mx[k])/2)), r=extent(i).r;
+          if(d>0.004||t<lo-0.002||t>hi+0.002||r>0.1||(r>0.06&&!round(i))) continue;
+          own.add(i); }
+        for(let grew=true; grew;){ grew=false;
+          for(const i of [...own]) for(const k of nb(i)) if(free(k,own)&&nb(k).every(m=>own.has(m))){ own.add(k); grew=true; } }
+        seeds[j.id]=[...own]; for(const i of own) taken.add(i);
+      }
+    }
     const onFixed=new Map(), allStaged=new Set(), allSeeds=new Set(); for(const j of joints) for(const i of seeds[j.id]) allSeeds.add(i);
     for(const m of SL.mechanisms||[]) for(const g of m.stages) for(const i of g.rails.concat(g.blocks||[],g.hw||[])) allStaged.add(i);
     for(const j of joints){ if(j.kind!=="linear") continue; const fx=new Set(extra[j.id].fixed||[]); if(!fx.size) continue;

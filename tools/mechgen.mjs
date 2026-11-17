@@ -176,8 +176,10 @@ export const MECHS = {
       tag(inst(hub('GT2 Pulley 40T', rs, 0.010), along([0.110, -0.126, zs], out)), 'roller'),
       tag(inst(hexShaft('2106-4008-3120', 0.260), along([0.110, -0.136, zs], Y)), 'roller'),
       inst(part('GT2 Timing Belt', [run(1), run(-1)], COL.black, 0.01), frame([0, 0, 0]))];
-    for (const y of [-0.070, 0, 0.070]) kids.push(tag(inst(hub('Compliant Wheel 60A', 0.024, 0.020), along([0.110, y - 0.010, zs], Y)), 'roller'));
-    for (const y of [-0.035, 0.035]) kids.push(tag(post('Spacer Top', [0.110, y, zs + 0.004], [0.012, 0.016, 0.010]), 'roller'));
+    for (const y of [-0.070, 0.070]) kids.push(tag(inst(hub('Compliant Wheel 60A', 0.024, 0.020), along([0.110, y - 0.010, zs], Y)), 'roller'));
+    kids.push(tag(inst(hub('Flap Wheel 124mm', 0.062, 0.014), along([0.110, -0.007, zs], Y)), 'roller'));   // bigger than any hub
+    // spacers between the wheels, one against the flap wheel's face
+    for (const y of [-0.035, 0.015]) kids.push(tag(post('Spacer Top', [0.110, y, zs + 0.004], [0.012, 0.016, 0.010]), 'roller'));
     return { kids, ignore: ['GT2 Timing Belt'], joints: [
       { id: 'motor', kind: 'revolute', axis: out, pivot: [0.110, -0.117, zm], actuator: 'motor' },
       { id: 'roller', kind: 'revolute', axis: out, pivot: [0.110, -0.126, zs], follows: 'motor', ratio: rm / rs }] };

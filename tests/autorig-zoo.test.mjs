@@ -12,10 +12,7 @@ import { score } from '../research/autorig/zoo/eval.mjs';
 const E = loadEngine();
 // what shape alone can't tell yet: an unnamed through-bore motor is a box with a shaft through it,
 // like any bearing block on an axle
-const KNOWN = new Set(['arm-corehex (no names)',
-  // a pulley at the far end of a belt turns alone: the roller shaft it sits on, run through both
-  // side plates, joins it to the frame
-  'intake-spacers', 'intake-spacers (no names)']);
+const KNOWN = new Set(['arm-corehex (no names)']);
 
 for (const name of Object.keys(MECHS)) for (const strip of [false, true]) {
   const label = name + (strip ? ' (no names)' : '');

@@ -124,7 +124,7 @@ with every part renamed "Part N".
 | `viper-slide` | three side-by-side stages on a mount block |
 | `rail-carriage` | one linear rail with a carriage block straddling it (MGN12H) |
 | `intake-roller` | a motor, a coupler and a long roller shaft through two side plates |
-| `intake-spacers` | a belt from a motor to a pulley on a goBILDA REX roller shaft with wheels, and clamp spacers drawn cut into the shaft |
+| `intake-spacers` | a belt from a motor to a pulley on a goBILDA REX roller shaft through two side plates, with wheels, a 124 mm flap wheel, and clamp spacers drawn cut into the shaft |
 | `four-bar` | a parallel four-bar arm: the motor turns the lower link, the upper link swings on a pin in the tower, the coupler carries the payload |
 | `rack-servo` | a servo's 24T gear on a 108 mm rack lying in a holder, a gate bar on its end (a ball gate) |
 | `wrist-on-arm` | a servo wrist riding the end of a gearmotor arm (a joint on a joint: its parent has to be the arm) |
@@ -187,9 +187,19 @@ carriage took the whole frame with it.
   4 mm, square to within 5 degrees, reaching what turns) is dropped before any joint is made. A
   rail named as a lead screw, ball screw or threaded rod turns and drives a slide, and stays.
 
-Still missed there: the pulley at the far end of the belt turns alone. The shaft it sits on runs
-through both side plates and joins it to the frame, so the zoo copy moves 15 frame parts with it
-(`intake-spacers` is on the test's known list).
+- **A gear or pulley at the far end of a mesh or belt carries what it sits on**, as an
+  actuator's own output does: the shaft through it (long, thin, on its axis), the hubs and wheels
+  centred on that shaft (up to 120 mm across, or up to 200 mm when round: an intake's flap wheel),
+  and what is bolted to those alone (a spacer clamped on). The shaft takes the on-axis window
+  with it, so the far side plate it runs through is a turning point. Before, the pulley turned
+  alone and the shaft joined it to the frame: 15 frame parts moved on the zoo copy.
+
+That brings it to **47 of 48 joints, 110 of 112 moving parts, 0 frame parts moved**.
+
+On the team's STEP that makes 208 moving parts where there were 77: each intake's two roller
+shafts turn with their motor's belts, with 5 of the 6 flap wheels, the hubs, the spacers and the
+rubber rollers. The flap wheels' size limit shows only there; on the zoo copy the flap wheel is
+found either way.
 
 Still missed: an unnamed Core Hex. With no name it's a box with a shaft through it, which is
 also what every bearing block on an axle looks like. `tests/autorig-zoo.test.mjs` runs the
