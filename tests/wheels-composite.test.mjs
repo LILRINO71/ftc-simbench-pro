@@ -112,6 +112,55 @@ test('composite wheels: a wheel in an assembly is not found a second time from i
   assert.equal(comps.filter((c) => c.packed).length, 0);
 });
 
+/* A mecanum TeleOp with the standard stick mix; `rev` lists the motors it reverses. */
+const TELEOP = (rev) => `package org.firstinspires.ftc.teamcode;
+import com.qualcomm.robotcore.eventloop.opmode.*;
+import com.qualcomm.robotcore.hardware.*;
+@TeleOp(name="Mix") public class Mix extends LinearOpMode { public void runOpMode() {
+  DcMotor fl = hardwareMap.get(DcMotor.class, "frontLeft"), bl = hardwareMap.get(DcMotor.class, "backLeft");
+  DcMotor fr = hardwareMap.get(DcMotor.class, "frontRight"), br = hardwareMap.get(DcMotor.class, "backRight");
+  ${rev.map((n) => n + '.setDirection(DcMotorSimple.Direction.REVERSE);').join(' ')}
+  waitForStart();
+  while (opModeIsActive()) { double y = -gamepad1.left_stick_y, x = gamepad1.left_stick_x, r = gamepad1.right_stick_x;
+    fl.setPower(y + x + r); bl.setPower(y - x + r); fr.setPower(y - x - r); br.setPower(y + x - r); } } }`;
+function verdict(cad, rev) {
+  const code = E.parseJava(TELEOP(rev));
+  assert.equal(code.engine, 'vm');
+  const pr = E.driveProbe(code, cad, {}, { front: '+x' });
+  assert.ok(pr, 'the probe ran');
+  let out = null; E.driveVerdict(pr, (k, sev, title, how) => { out = { sev, title, how, from: pr.mounts.map((m) => m.from) }; });
+  return out;
+}
+
+test('motor mounting: a base with no motor on its wheels\' axles takes the code\'s own forward, not the standard build', () => {
+  // a team's real robot drives straight with all four wheels reversed (its right side is wired or
+  // mounted the other way from the textbook). The CAD had its drive motors belted to the wheels,
+  // so nothing was measured, yet the standard build was used and reported as "from the CAD":
+  // the working code spun the robot here.
+  const cad = robot();
+  const all = verdict(cad, ['fl', 'bl', 'fr', 'br']);
+  assert.deepEqual(all.from, ['code', 'code', 'code', 'code']);
+  assert.equal(all.sev, 'pass', all.title);
+  assert.match(all.how, /your code's own forward/);
+  assert.doesNotMatch(all.how, /mounting from the CAD/);
+  // the textbook code on the same CAD is right too: either may be how the robot is built
+  assert.equal(verdict(robot(), ['fl', 'bl']).sev, 'pass');
+  assert.equal(verdict(robot(), []).sev, 'pass');
+});
+
+test('motor mounting: motors drawn inboard and belted across to the wheels are not a measurement either', () => {
+  const cad = robot();
+  // one motor per wheel, its shaft parallel to the axle but 90 mm off it: a belt drive
+  for (const [x, y] of Object.values(CORNERS)) cad.solids.push({ name: '5203-2402-0019 Yellow Jacket motor', kind: 'motor',
+    pts: cyl([x - Math.sign(x) * 0.09, y - Math.sign(y) * 0.07, 0.048], [0, 1, 0], 0.018, 0.1, 10, 4) });
+  const d = E.driveFromCAD(cad, { front: '+x' });
+  assert.ok(d.wheels.every((w) => w.mountHow === 'assumed'), d.wheels.map((w) => w.mountHow).join(' '));
+  assert.ok(d.why.some((s) => /motors aren't on the wheels' axles/.test(s)), d.why.join(' | '));
+  const all = verdict(cad, ['fl', 'bl', 'fr', 'br']);
+  assert.deepEqual(all.from, ['code', 'code', 'code', 'code']);
+  assert.equal(all.sev, 'pass', all.title);
+});
+
 test('composite wheels: one wheel drawn, the other three mirrored through the middle, in the X pattern', () => {
   const cad = robot({ corners: ['FR'] });
   // the rest of the robot, so its middle is where a real one's would be

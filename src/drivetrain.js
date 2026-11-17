@@ -840,7 +840,8 @@ function dtMounts(ws,solids,F,kind,why){
   const where=list=>list.map(w=>w.corner||((w.x>=0?"front ":"back ")+(w.y>=0?"left":"right"))).join(", ");
   const side=list=>list.length&&list.every(w=>w.y>0)?"the left side":list.length&&list.every(w=>w.y<0)?"the right side":where(list);
   let s="Motor direction: ";
-  if(assumed===ws.length) s+="no drive motor is in the CAD, so each wheel is assumed driven the standard way, by a motor inboard of it with the shaft pointing out.";
+  if(assumed===ws.length) s+=(motors.length?"the CAD's motors aren't on the wheels' axles (belted or geared across to them, or not drive motors at all)":"no drive motor is in the CAD")+
+    ", so each wheel is assumed driven the standard way, by a motor inboard of it with the shaft pointing out; the code's own forward is trusted over that.";
   else s+=direct+" wheel"+(direct===1?"":"s")+" have a motor on the axle"+(chain?", "+chain+" more are chained or belted to one on the same side":"")+
           (assumed?", and "+assumed+" have no motor found and are assumed standard":"")+".";
   s+=" The FTC SDK turns a shaft clockwise, seen from its end, for positive power, so ";

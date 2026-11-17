@@ -49,6 +49,10 @@ Those files are free again; read the conventions below before changing them.
   and `getCurrentPosition()` flips with it, so encoder ticks always count up
   under positive commanded power. The sim keeps every motor in this commanded
   frame and turns it into physical motion only at the joint or wheel.
+- **Wheel mounting** (`buildRig` in `src/sim.js`): which way positive power rolls a wheel comes
+  from the CAD when `dtMounts` measured it (`mountHow` `direct` or `chain`), else from the
+  code's own forward (`sense`, src/jvmrun.js), else the standard build. An `assumed` mount is
+  never reported as "from the CAD"; each wheel's `mountFrom` says which it was.
 - **Robot frame** (`src/frame.js`): +z up, origin at the drivetrain centre on
   the floor, placement only through `robotToWorld`.
 - **What an OpMode is read with** (`libsFor` in `src/app.js`): the helper classes plus

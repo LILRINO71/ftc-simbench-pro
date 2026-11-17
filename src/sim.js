@@ -693,7 +693,7 @@ function driveVerdict(pr,add){
   if(s&&!(s.left<-0.05&&Math.abs(s.turn)<0.6)) bad.push(s.left>0.05?"left stick right strafes it <b>left</b>":Math.abs(s.turn)>=0.6?"left stick right makes it <b>spin</b>":"left stick right <b>doesn't strafe</b> it");
   const rows=pr.mounts.map(m=>(m.dev+"                ").slice(0,17)+((m.corner||"")+"  ").slice(0,3)+
     " positive power "+(m.mount<0?"backward":"forward ")+"   code: "+(pr.reversed.indexOf(m.dev)>=0?"REVERSE":"forward")).join("\n");
-  const src=pr.mounts.some(m=>m.from==="cad")?"from the CAD":pr.mounts.some(m=>m.from==="code")?"from your code's own forward (the CAD has no drive motors to measure)":"assumed (the standard build)";
+  const src=pr.mounts.some(m=>m.from==="cad")?"from the CAD":pr.mounts.some(m=>m.from==="code")?"from your code's own forward (no drive motor in the CAD sits on a wheel's axle to measure, so a wrong setDirection can't show here)":"assumed (the standard build)";
   const how="Measured on a private copy of the sim: this OpMode's own INIT and loop, this robot's motor mounting "+src+", "+
     "and every <code>setDirection</code> call, half a second per push, front <b>"+pr.front+"</b>.";
   if(!bad.length){
@@ -838,15 +838,18 @@ function buildRig(cad,dtn,base,dev,opts){
     // wheels point round the circle, an X-drive's at 45 degrees)
     const alpha=(kind!=="mecanum"&&g&&Number.isFinite(g.alpha))?g.alpha:0;
     // which way positive power turns this wheel (src/drivetrain.js dtMounts):
-    // measured from the motor in the CAD, so the drive check can still catch a
-    // wrong setDirection. With no motor in the CAD to measure (a drawn base),
-    // the team's own code says best how their robot is built: whatever sign its
-    // "stick up" gives a wheel (src/jvmrun.js) rolls that wheel forward. Else
+    // measured from the motor in the CAD (on the wheel's axle, or chained to one that
+    // is), so the drive check can still catch a wrong setDirection. A mount dtMounts
+    // could only assume (mountHow "assumed": a drawn base with no motors, or a motor
+    // belted to its wheel from off the axle) is not a measurement. There the team's
+    // own code says best how their robot is built: whatever sign its "stick up" gives
+    // a wheel (src/jvmrun.js) rolls that wheel forward. Else the assumption itself,
     // the standard inboard build.
-    const mount=(g&&(g.mount===1||g.mount===-1))?g.mount
-      :(w.sense===1||w.sense===-1)?w.sense:(kind==="swerve"?1:(w.left?-1:1));
+    const pm=v=>v===1||v===-1;
+    const measured=!!g&&pm(g.mount)&&g.mountHow!=="assumed";
+    const mount=measured?g.mount:pm(w.sense)?w.sense:(g&&pm(g.mount))?g.mount:(kind==="swerve"?1:(w.left?-1:1));
     // c: the CAD wheel's centre in the canonical frame, for the view to turn its parts
-    const mountFrom=(g&&(g.mount===1||g.mount===-1))?"cad":(w.sense===1||w.sense===-1)?"code":"assumed";
+    const mountFrom=measured?"cad":pm(w.sense)?"code":"assumed";
     wheels.push({x, y, z:0, r, roller, alpha, mount, mountFrom, corner:corner.length===2?corner:null, c:g&&g.c?g.c.slice():null});
     devs.push(w.dev);
     const sd=dev&&dev[w.dev];
