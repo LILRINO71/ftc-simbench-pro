@@ -37,8 +37,6 @@ Read this file before you start, and again before you push.
 | --- | --- | --- |
 | Claude | `src/match.js` (new), `src/field.js`, `src/shots.js`, `src/sim.js` (the match), `src/onshapelink.js` (new), `src/robotcheck.js` (new), `src/markup.html` + `src/styles.css` (Robot check section), `src/jointspec.js`, `src/autorig.js`, `src/cadview.js` (joint editor), `src/app.js` (joints panel), `src/view3d.js` (joint preview), `src/roadrunner.js`, `src/net.js` (new), `src/robotlite.js` (new), `src/drivetrain.js` + `src/frame.js` + `src/step.js` (wheels built from many parts), `tools/build.mjs` (module order, link preview), `src/view3d.js` (match robots, light copy), `src/app.js` + `src/markup.html` + `src/styles.css` (online panel) | the joint finder and editor; online matches (players on different computers in one match) |
 | Claude | `src/meshfiles.js` (mesh thinning, glTF reading), `src/urdf.js` (shape reading), `src/view3d.js` + `src/app.js` (frame cost), `tests/meshfiles-speed.test.mjs` (new) | faster and exact robot import from an export zip, less lag drawing big robots |
-| Claude | `src/jvmrun.js` (`jvSiblings`, a missing parent class), `src/app.js` (`parseEntry`, `addOpModeFromText`), `src/analyze.js` (the structure findings), `tests/opmode-parents.test.mjs` (new) | an OpMode that extends another OpMode is read with its parent |
-
 Done and released: drive direction, the 25f54d3 sim and parser fixes,
 `autoMap`, Onshape mates (`src/mates.js`) and the pasted Onshape link (`src/onshapelink.js`,
 `src/onshapecad.js`).
@@ -53,6 +51,10 @@ Those files are free again; read the conventions below before changing them.
   frame and turns it into physical motion only at the joint or wheel.
 - **Robot frame** (`src/frame.js`): +z up, origin at the drivetrain centre on
   the floor, placement only through `robotToWorld`.
+- **What an OpMode is read with** (`libsFor` in `src/app.js`): the helper classes plus
+  `jvSiblings(source, the other OpModes)`, the OpModes it extends or names. A headless run
+  (`jvCompile(main, libs)`) must pass the same; a parent that is missing ends INIT with
+  `error.cls === "MissingClass"` rather than running nothing.
 - **Onshape mates** (`src/mates.js`): a mate joint has `fromMate`, true
   `axis`/`pivot` (canonical frame), `limits` (m for a slide, rad for a turn,
   right-handed about the mate axis), and maybe `couple:{to, ratio}` (a
