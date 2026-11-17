@@ -103,6 +103,9 @@ Open **https://ftc-simbench-pro.pages.dev**. It loads GearGurus 7832's Into The 
   (**Export → URDF**), a `.step` or a saved `.ftcsim` workspace drop in the same way. The
   Sim-ready CAD standard is in [docs/robot-setup.md](docs/robot-setup.md).
 - `?robot=sample` opens the small built-in sample instead.
+- **Without a browser:** `node tools/run-opmode.mjs <TeamCode folder> --opmode MainTeleOp.java --seconds 5`
+  compiles and runs one OpMode on a stand-in robot and prints what every device was told, as JSON
+  ([docs/code-support.md](docs/code-support.md)). It needs only Node and this checkout.
 - **Paths** (under the field) draws an auto and writes its Pedro Pathing code; **Run on the bench** drives it.
 - **Clip** records the field with the score on it; turn on **AI robots** in **Match** for a full match, the results card and your personal best. **Map**, **Chase** and **Robot cam** help when the field is hard to see.
 - No controller? The keyboard is one: pick **WASD** or move any control to any key under the controller button at the top.
@@ -145,8 +148,8 @@ the page runs in a Web Worker to read CAD without freezing. The module map is in
 | Path | What's there |
 |---|---|
 | [`src/`](src/README.md) | The app: engine modules, the 3D and CAD views, the UI. |
-| [`tests/`](tests/README.md) | 628 `node:test` tests: the robot corpus, physics, parser, Road Runner, the real robot end to end, the match, online play, the Onshape link and the export zip, exact joints and the device binding. |
-| [`tools/`](tools/README.md) | The build, the minifier, the test runner, the robot corpus generator, and the Fusion **Export to SimBench** script. |
+| [`tests/`](tests/README.md) | 832 `node:test` tests: the robot corpus, physics, parser, Road Runner, the real robot end to end, the match, online play, the Onshape link and the export zip, exact joints and the device binding. |
+| [`tools/`](tools/README.md) | The build, the minifier, the test runner, the robot corpus generator, the Fusion **Export to SimBench** script, and `run-opmode.mjs`, the headless entry other repos' CI uses. |
 | [`assets/robots/`](assets/robots/into-the-deep/README.md) | The default robot: GearGurus 7832's STEP (gzipped), its joint spec, and the team's OpModes. |
 | [`research/autorig/`](research/autorig/README.md) | The automatic joint finder study: three prototypes, measured against the real robot. |
 | [`docs/`](docs/README.md) | Guides ([joints](docs/joints.md), [code support](docs/code-support.md)) and the screenshots. |
@@ -159,7 +162,7 @@ the page runs in a Web Worker to read CAD without freezing. The module map is in
 ```bash
 npm install            # dev dependency only: occt-import-js, for the geometry tests
 npm run build          # dev build  -> dist/index.html (open it, or serve dist/)
-npm test               # the whole suite: 628 tests
+npm test               # the whole suite: 832 tests
 npm run build:ship     # what Cloudflare Pages builds: comments and layout stripped
 ```
 
@@ -185,8 +188,27 @@ check the live build by comparing its `SIMBENCH_BUILD` hash with a local ship bu
   every read counts against its owner's 2,500 API calls a year, and a big robot's first read is a
   couple of hundred. When it runs out, the card says so and the export zip (no API at all) takes
   over. See [DEPLOY.md](DEPLOY.md), "Quota".
+- **A STEP file has no mates.** Its joints are found by shape, and some aren't: a servo pinion on
+  a rack (a gate) is not found yet, and an odometry pod can be read as a motor. An Onshape link or
+  export zip carries the real joints.
+- **Which way a drive motor turns its wheel is measured only when the motor sits on the wheel's
+  axle.** A motor belted to its wheel is assumed to be the standard build (inboard, shaft out),
+  and the drive check then judges the code against that assumption. A robot wired or mounted
+  the other way drives straight on the field and spins here.
+- **Team code runs on the bench's own Java VM, not a JDK.** FTC SDK, FTCLib, Road Runner and
+  Pedro Pathing calls it knows are run; a library it doesn't know is absorbed as a no-op and
+  listed, and an OpMode built on one (Pedro's `Tuning` menu) doesn't run.
 - **Shipped code can be read.** The ship build strips comments, which is not encryption. Nothing
   secret belongs in a browser bundle.
+
+## Related repositories
+
+| Repository | What it is to this one |
+|---|---|
+| [biobuzz-shot-sim](https://github.com/LILRINO71/biobuzz-shot-sim) | The BIOBUZZ field and shot physics, vendored into `vendor/`. |
+| [biobuzz-robot-2026](https://github.com/LILRINO71/biobuzz-robot-2026) | A robot's code checked in CI by cloning this repo and calling `tools/run-opmode.mjs`. |
+| [IDK-WHAT-TEAM-IM-ON](https://github.com/LILRINO71/IDK-WHAT-TEAM-IM-ON) | A team's real TeamCode (FTC SDK + Pedro Pathing); its OpModes are the code this bench is checked against. |
+| [ftc-sim-bench](https://github.com/LILRINO71/ftc-sim-bench) | The free MIT bench this one grew from. |
 
 ## License and credits
 
