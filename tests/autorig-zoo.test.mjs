@@ -44,3 +44,20 @@ test('zoo: every found spec loads, with each joint named once (a pinion driving 
     assert.doesNotThrow(() => E.applyJointSpec(E.parseSTEP(text), R.spec), name);
   }
 });
+
+test('zoo: a rack on a servo gear slides with it, the way the gear pushes it, while the gear is on it', () => {
+  for (const strip of [false, true]) {
+    const { text } = buildMech('rack-servo', { strip });
+    const J = E.autoRig(E.parseSTEP(text), {}).spec.joints;
+    const rack = J.find((j) => j.kind === 'slider'), gear = J.find((j) => rack && j.id === rack.follows.joint);
+    assert.ok(rack && gear && gear.kind === 'revolute', 'a slider following a turning joint: ' + J.map((j) => j.id + ' ' + j.kind).join(', '));
+    // the gear (radius 10.5 mm, teeth 1.6 mm deep into the rack's) moves the rack its pitch radius for each radian
+    assert.ok(Math.abs(rack.follows.ratio - 0.0097) < 0.0005, 'ratio ' + rack.follows.ratio);
+    // a turn about the gear's axis carries its bottom tooth along axis x down; the rack goes that way
+    const a = gear.axis, push = [-a[1], a[0], 0];                       // axis x [0,0,-1]
+    assert.ok(push[0] * rack.axis[0] + push[1] * rack.axis[1] + push[2] * rack.axis[2] > 0.99, 'rack axis ' + rack.axis + ', gear axis ' + a);
+    // drawn from x 86 to 194 mm under a gear at x 110: it can go 84 mm toward -x and 24 toward +x
+    const dx = rack.limits.map((v) => v * rack.axis[0]).sort((p, q) => p - q);
+    assert.ok(Math.abs(dx[0] + 84) <= 2 && Math.abs(dx[1] - 24) <= 2, 'limits ' + rack.limits + ' along ' + rack.axis);
+  }
+});

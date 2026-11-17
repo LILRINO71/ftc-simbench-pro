@@ -23,6 +23,53 @@ const {autoRig}=(function(){
     let best="chassis", bn=0; for(const k in n) if(n[k]>bn){ best=k; bn=n[k]; }
     return best;
   }
+  /* A rack on an actuator's pinion: among the parts on its output, one that is long and
+     straight, square to the shaft, lying in the plane of a round output part (the pinion) with
+     its near face inside that part's rim, the way teeth mesh. Such a part doesn't turn with the
+     output: it slides along its own length, one pitch radius for each radian. The pitch line
+     is halfway between the gear's rim and the rack's near face (standard teeth are one module
+     either side of it). Returns {i, axis, pivot, r, limits} in metres, axis the way positive
+     rotation pushes it, or null. */
+  function rackOn(A,S){
+    const a=A.axis, p=A.pivot.map(v=>v/1000), out=A.output||[];
+    const rel=q=>[q[0]-p[0],q[1]-p[1],q[2]-p[2]];
+    const span=(P,u,o)=>{ let lo=Infinity, hi=-Infinity; for(const q of P){ const t=dot(o?[q[0]-o[0],q[1]-o[1],q[2]-o[2]]:q,u); if(t<lo) lo=t; if(t>hi) hi=t; } return [lo,hi]; };
+    for(const i of new Set((A.attached||[]).concat(out))){
+      const P=S[i]&&S[i].pts; if(!P||P.length<8) continue;
+      let u=dtPrincipal(P).vec[0];
+      if(Math.abs(dot(u,a))>0.2) continue;                               // square to the shaft
+      const s0=dot(u,a); u=[u[0]-a[0]*s0,u[1]-a[1]*s0,u[2]-a[2]*s0]; const ul=Math.hypot(u[0],u[1],u[2]); u=u.map(v=>v/ul);
+      // a rack's points crowd its toothed side, which leans that axis a few degrees toward the
+      // teeth (2.3 on team 7831's gate, enough to read its teeth 3 mm too close to the gear):
+      // turn it, square to the shaft, to where the bar is thinnest, which is along its length
+      { const across=v=>[a[1]*v[2]-a[2]*v[1], a[2]*v[0]-a[0]*v[2], a[0]*v[1]-a[1]*v[0]];
+        const thick=v=>{ const [x,y]=span(P,across(v),p); return y-x; }, m=across(u);
+        let bu=u, bt=thick(u);
+        for(let k=-40;k<=40;k++){ if(!k) continue; const th=k*Math.PI/720, c=Math.cos(th), s=Math.sin(th);
+          const v=[u[0]*c+m[0]*s, u[1]*c+m[1]*s, u[2]*c+m[2]*s], t=thick(v); if(t<bt-1e-9){ bt=t; bu=v; } }
+        u=bu; }
+      let n=[a[1]*u[2]-a[2]*u[1], a[2]*u[0]-a[0]*u[2], a[0]*u[1]-a[1]*u[0]];     // square to both: from the shaft to the rack
+      let [n0,n1]=span(P,n,p); if(n0+n1<0){ n=n.map(v=>-v); [n0,n1]=[-n1,-n0]; }
+      const [t0,t1]=span(P,u,p), [a0,a1]=span(P,a,p), L=t1-t0, h=n1-n0;
+      if(!(n0>0.003&&L>=0.03&&L>=2.5*h&&L>=2.5*(a1-a0))) continue;       // off the shaft, long and thin
+      if(t0>0.002||t1<-0.002) continue;                                  // the shaft is somewhere along it
+      // the pinion: a round part on the output, in the rack's plane, its rim just past the rack's near face
+      let rim=0;
+      for(const k of out){ if(k===i) continue; const Q=S[k]&&S[k].pts; if(!Q||Q.length<6) continue;
+        const [b0,b1]=span(Q,a,p); if(Math.min(a1,b1)-Math.max(a0,b0)<0.001) continue;
+        let r=0; for(const q of Q){ const d=rel(q), t=dot(d,a); r=Math.max(r,Math.hypot(d[0]-a[0]*t,d[1]-a[1]*t,d[2]-a[2]*t)); }
+        if(r-n0>=-0.0005&&r-n0<=0.0045&&r>rim) rim=r; }
+      if(!rim) continue;
+      // positive rotation carries the gear's rim, at the rack, along axis x n
+      let dir=[a[1]*n[2]-a[2]*n[1], a[2]*n[0]-a[0]*n[2], a[0]*n[1]-a[1]*n[0]], lo=t0, hi=t1;
+      if(dot(dir,u)<0){ u=u.map(v=>-v); [lo,hi]=[-t1,-t0]; }
+      const c=dtCentroid(P);
+      // it can slide until the gear reaches either end: as drawn it spans lo..hi past the
+      // gear, so moving s along u it spans lo+s..hi+s, and the gear stays on it for -hi..-lo
+      return {i, axis:u, pivot:c, r:(rim+n0)/2, limits:[-hi,-lo]};
+    }
+    return null;
+  }
   function autoRig(cad,opts){
     opts=opts||{};
     const S=(cad&&cad.solids)||[], review=[];
@@ -54,6 +101,16 @@ const {autoRig}=(function(){
       // a gear it meshes with turns the other way, and a pulley at the far end of a belt or
       // chain the same way, at the ratio of their sizes; each driven part once, each name its own
       const followed=new Set(), uid=base=>{ let k=base, n=2; while(joints.some(j=>j.id===k)) k=base+" "+(n++); return k; };
+      const rk=rackOn(A,S);
+      if(rk){
+        seeds[id]=seeds[id].filter(i=>i!==rk.i);
+        const rid=uid(id+" rack");
+        joints.push({id:rid, kind:"linear", axis:rk.axis, pivot:rk.pivot, parent:"chassis", couple:{to:id, ratio:+rk.r.toFixed(5)}});
+        seeds[rid]=[rk.i];
+        // the rack is held by whatever holds the actuator: that side stays, the rack's side slides
+        extra[rid]={label:extra[id].label+", rack", limits:rk.limits.map(v=>+(v*1000).toFixed(0)), fixed:(A.body||[]).concat(A.mounts||[]), pinion:seeds[id].slice()};
+        review.push("\""+extra[rid].label+"\": a rack on a pinion, sliding "+(rk.r*2000*Math.PI).toFixed(0)+" mm for each turn. Check which way it goes in the CAD view.");
+      }
       for(const M of A.meshes||[]){
         if(followed.has(M.with)) continue; followed.add(M.with);
         const gid=uid(id+" gear"), ax=dot(M.withAxis,A.axis)<0?M.withAxis.map(v=>-v):M.withAxis;
@@ -91,7 +148,19 @@ const {autoRig}=(function(){
       const keep=seeds[j.id].filter(i=>!held.has(i)); if(keep.length<seeds[j.id].length&&keep.length){ seeds[j.id].filter(i=>held.has(i)).forEach(i=>onFixed.set(i,j.mech)); seeds[j.id]=keep; } }
     const par=[...Array(n).keys()], find=i=>{ while(par[i]!==i){ par[i]=par[par[i]]; i=par[i]; } return i; };
     const cut=new Set(), key=(a,b)=>a<b?a+","+b:b+","+a;
-    for(const j of joints){ const x=extra[j.id]; if(!x.body) continue;
+    for(const j of joints){ const x=extra[j.id];
+      // a rack meets its pinion tooth to tooth: they touch, and move apart. It also lies in a
+      // guide it only rests against: a contact with nothing reaching into anything, beside the
+      // rack, is where it slides. A part past either end of it (a gate on its tip) it pushes.
+      if(x.pinion){ const own=new Set(seeds[j.id]), u=j.axis;
+        const along=I=>{ let lo=Infinity, hi=-Infinity; for(const i of I) for(const q of S[i].pts){ const t=dot(q,u); if(t<lo) lo=t; if(t>hi) hi=t; } return [lo,hi]; };
+        const [r0,r1]=along(own);
+        for(const a of own) for(const b of x.pinion) cut.add(key(a,b));
+        for(const e of G.edges) if(!e.strong&&own.has(e.a)!==own.has(e.b)){
+          const [k0,k1]=along([own.has(e.a)?e.b:e.a]);
+          if(k0>=r1-0.002||k1<=r0+0.002) continue;
+          cut.add(key(e.a,e.b)); } }
+      if(!x.body) continue;
       for(const a of seeds[j.id]) for(const b of x.body) cut.add(key(a,b)); }
     // a belt or chain loop moves with neither pulley: it stays off every body
     for(const e of G.edges) if(belts.has(e.a)||belts.has(e.b)) cut.add(key(e.a,e.b));
@@ -202,8 +271,11 @@ const {autoRig}=(function(){
     // (a linkage closing a loop, an output drawn touching its own case) is
     // shared out by growing from each joint's output at once; a joint never
     // takes its own actuator's case, which rides the joint below it
-    const label=new Array(n).fill(null), claim=new Map();
+    const label=new Array(n).fill(null), claim=new Map(), heldRack=new Map();
     for(const j of joints){ const c=+compOf(seeds[j.id].length?seeds[j.id]:[0]); if(c===frame) continue;
+      // a rack still joined to what holds its actuator (drawn into its guide) doesn't own that
+      // whole body: it is cut free below, like a slide drawn touching the frame
+      if(extra[j.id].pinion&&(extra[j.id].fixed||[]).some(i=>comp(i)===c&&!seeds[j.id].includes(i))){ heldRack.set(j.id,c); continue; }
       if(!claim.has(c)) claim.set(c,[]); claim.get(c).push(j); }
     const bodyOf={}; for(const j of joints) bodyOf[j.id]=new Set(extra[j.id].body||[]);
     const shared=[];
@@ -240,12 +312,14 @@ const {autoRig}=(function(){
       return null;
     }
     for(const j of joints){
-      if(j.kind!=="linear"||!seeds[j.id].length||+compOf(seeds[j.id])!==frame) continue;
-      const sink=new Set((extra[j.id].fixed||[]).concat(drv).filter(i=>comp(i)===frame&&!seeds[j.id].includes(i)));
+      if(j.kind!=="linear"||!seeds[j.id].length) continue;
+      const body=+compOf(seeds[j.id]);
+      if(body!==frame&&!heldRack.has(j.id)) continue;
+      const sink=new Set((extra[j.id].fixed||[]).concat(body===frame?drv:[]).filter(i=>comp(i)===body&&!seeds[j.id].includes(i)));
       if(!sink.size) continue;
       const side=stageSide(seeds[j.id],sink); if(!side) continue;
       const took=[...side].filter(i=>label[i]==null&&!seeds[j.id].includes(i));
-      if(!took.length||2*side.size>=size.get(frame)) continue;
+      if(!took.length||2*side.size>=size.get(body)) continue;
       for(const i of took) label[i]=j.id;
       const at=new Set(); for(const i of side) for(const k of link[i]) if(!side.has(k)) at.add(S[k].name||"a part");
       if(at.size) review.push("\""+extra[j.id].label+"\" was drawn touching the frame; it was cut free where it meets "+

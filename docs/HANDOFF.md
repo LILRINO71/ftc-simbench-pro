@@ -4,6 +4,30 @@ The handoffs live here, the newest first. The two older ones below mention `rese
 `research/realcad`, `research_notes/` and `reports/`: those folders were removed on 2026-10-04 as
 unused (nothing in the build or the tests read them); the measurements they held stay in the text.
 
+## 2026-11-17: a rack on a gear is a slider
+
+On main. The team's gate (a goBILDA servo's 24T gear on a 35-tooth rack) came out a hinge that
+swung the rack round the servo. `src/autorig.js` `rackOn` now finds a rack among the parts on an
+actuator's output: long and straight, square to the shaft, its teeth inside a round output
+part's rim. It becomes a slider that `follows` the gear at the pitch radius per radian, the way
+the gear's tooth at the rack moves, limited to the travel that keeps the gear on it. It is cut
+free of its gear and of the guide it lies in, but keeps a part past its end (a gate on its tip).
+
+The direction comes from the rack's points, which crowd its teeth and holes: on the team's rack
+that leaned the axis 2.3 degrees and read the teeth 3 mm too close (8.3 mm per radian for a
+9.6 mm pitch radius). The axis is now turned, square to the shaft, to where the bar is thinnest.
+
+| | Before | Now |
+|---|---|---|
+| The team's gate | a hinge turning the rack | `servo 9 rack`: slider along x, 9.68 mm per radian (24T module 0.8: 9.6), travel -81..27 mm |
+| Zoo | 39 of 40 joints, 86 of 88 moving parts | `rack-servo` added (a toothed rack with a boss under one end): 43 of 44, 94 of 96, 0 frame parts moved |
+
+`npm test`: 855 pass, 0 fail (the zoo's two `rack-servo` runs and a test of its direction,
+ratio and travel, which fails with the axis left as the points lean it).
+
+Still open from the list below: the parallel roller shafts read as slide stacks, the belted
+drive motors as joints, and the six parts read as actuators.
+
 ## 2026-11-16: a team's STEP with its code, and PR #14 on main
 
 On main. The owner's robot arrived as a 122 MB Onshape STEP (1,426 parts, no mates) with no
