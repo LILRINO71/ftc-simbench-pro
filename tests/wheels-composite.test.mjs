@@ -41,13 +41,15 @@ function mecanumWheel(c, hand, { roll = 45, names = ['OR', 'IR', 'RollerCore'] }
 const CORNERS = { FL: [0.17, 0.19], FR: [0.17, -0.19], BL: [-0.17, 0.19], BR: [-0.17, -0.19] };
 /* A robot: a chassis plate and mecanum wheels at the corners given, each its own sub-assembly
    (or flattened: no assembly paths at all). */
-function robot({ corners = Object.keys(CORNERS), hands = XPAT, flat = false, roll = 45 } = {}) {
+function robot({ corners = Object.keys(CORNERS), hands = XPAT, flat = false, roll = 45, loose = [] } = {}) {
   // a chassis plate, and a tower on it: like any robot, most of it above the axles
   const solids = [{ name: 'Chassis Plate', kind: 'metal', pts: cyl([0, 0, 0.09], [0, 0, 1], 0.2, 0.004, 24, 2) },
     { name: 'Lift Tower', kind: 'metal', pts: cyl([0, 0, 0.25], [0, 0, 1], 0.05, 0.3, 8, 6) }];
   corners.forEach((k, i) => {
     const [x, y] = CORNERS[k];
-    for (const p of mecanumWheel([x, y, 0.048], hands[k], { roll })) solids.push(flat ? p : Object.assign(p, { asm: [{ k: 'base', n: 'Drive Base' }, { k: 'w' + i, n: 'Wheel Assembly' }] }));
+    // loose: this wheel's parts lie straight in the drive base's assembly, with no assembly of their own
+    const asm = loose.includes(k) ? [{ k: 'base', n: 'Drive Base' }] : [{ k: 'base', n: 'Drive Base' }, { k: 'w' + i, n: 'Wheel Assembly' }];
+    for (const p of mecanumWheel([x, y, 0.048], hands[k], { roll })) solids.push(flat ? p : Object.assign(p, { asm }));
   });
   return { solids, parts: [], mechs: [] };
 }
@@ -87,6 +89,27 @@ test('composite wheels: a flattened file (no sub-assemblies) still has its four 
   const d = E.driveFromCAD(robot({ flat: true }), { front: '+x' });
   assert.equal(d.kind, 'mecanum'); assert.equal(d.wheels.length, 4);
   assert.ok(d.why.some((s) => /packed round one centre/.test(s)));
+});
+
+test('composite wheels: two wheels in assemblies of their own and two lying loose among the chassis parts: all four are found', () => {
+  // a team mirrors the left side of its base to make the right: the left wheels stay sub-assemblies,
+  // the right ones arrive as loose rollers and plates in the chassis assembly. With two wheels
+  // already found the loose ones were never looked for, and the robot loaded with no drivetrain.
+  const cad = robot({ loose: ['FR', 'BR'] });
+  const comps = E.dtCompositeWheels(cad.solids);
+  assert.equal(comps.length, 4, 'four wheels, not the two that have assemblies');
+  assert.equal(comps.filter((c) => c.packed).length, 2, 'two of them packed from loose parts');
+  const d = E.driveFromCAD(cad, { front: '+x' });
+  assert.equal(d.kind, 'mecanum', d.why.join(' | '));
+  assert.equal(d.wheels.length, 4);
+  for (const w of d.wheels) assert.equal(w.roller, XPAT[w.corner], `${w.corner} hand ${w.roller}`);
+  assert.ok(d.why.some((s) => /wheel assemblies \(2\) and wheel parts packed round one centre \(2\)/.test(s)), d.why.join(' | '));
+});
+
+test('composite wheels: a wheel in an assembly is not found a second time from its own parts', () => {
+  const comps = E.dtCompositeWheels(robot().solids);
+  assert.equal(comps.length, 4);
+  assert.equal(comps.filter((c) => c.packed).length, 0);
 });
 
 test('composite wheels: one wheel drawn, the other three mirrored through the middle, in the X pattern', () => {

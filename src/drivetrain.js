@@ -192,14 +192,18 @@ function dtCompositeWheels(solids){
     for(const p of s.asm){ key+="/"+p.k; let G=groups.get(key); if(!G){ G={name:p.n, parts:[]}; groups.set(key,G); } G.parts.push(s); }
   }
   for(const G of groups.values()){ const w=dtWheelOfParts(G.parts,G.name); if(w) out.push(w); }
-  if(out.length<2){
-    // flattened: wheel parts whose centres sit within a wheel's reach of each other, joined up
-    const bits=(solids||[]).filter(s=>s&&s.pts&&s.pts.length>=4&&(s.kind==="wheel"||DT_WHEELPART.test(String(s.name||"")))&&!DT_NOT_A_WHEEL.test(String(s.name||"")));
+  {
+    // the wheels no assembly gave: a file with the assemblies flattened away, or a mix (a base
+    // whose left wheels are sub-assemblies and whose right wheels, mirrored copies, lie loose
+    // among a thousand chassis parts). Wheel parts not already in a wheel, whose centres sit
+    // within a wheel's reach of each other, joined up.
+    const taken=dtCompositeParts(out);
+    const bits=(solids||[]).filter(s=>s&&!taken.has(s)&&s.pts&&s.pts.length>=4&&(s.kind==="wheel"||DT_WHEELPART.test(String(s.name||"")))&&!DT_NOT_A_WHEEL.test(String(s.name||"")));
     const cs=bits.map(s=>dtCentroid(s.pts)), par=bits.map((_,i)=>i), find=i=>{ while(par[i]!==i) i=par[i]=par[par[i]]; return i; };
     for(let i=0;i<bits.length;i++) for(let j=i+1;j<bits.length;j++)
       if(Math.hypot(cs[i][0]-cs[j][0],cs[i][1]-cs[j][1],cs[i][2]-cs[j][2])<0.05) par[find(i)]=find(j);
     const cl=new Map(); bits.forEach((s,i)=>{ const r=find(i); if(!cl.has(r)) cl.set(r,[]); cl.get(r).push(s); });
-    for(const parts of cl.values()){ const w=dtWheelOfParts(parts,null); if(w) out.push(w); }
+    for(const parts of cl.values()){ const w=dtWheelOfParts(parts,null); if(w){ w.packed=true; out.push(w); } }
   }
   // a wheel found at two levels (the wheel, and a sub-assembly holding just it): keep one
   return dtUniqueWheels(out,w=>w.g);
@@ -629,8 +633,10 @@ function driveFromCAD(cad,opts){
     // 45-degree axis, a mecanum roller read as a 170 mm wheel at the wrong height and took the floor with it
     const owned=dtCompositeParts(DC.wheels);
     ws=comp.concat(ws.filter(w=>!owned.has(w.solid)&&!comp.some(c=>same(c,w))));
+    const packed=DC.wheels.filter(c=>c.packed).length, inAsm=DC.wheels.length-packed;
     why.push(comp.length+" wheel"+(comp.length===1?" is":"s are")+" made of several parts together (a hub with rollers, a tread round a hub), found as "+
-      (solids.some(s=>s.asm)?"the CAD's own wheel assemblies":"wheel parts packed round one centre")+".");
+      (packed&&inAsm?"the CAD's own wheel assemblies ("+inAsm+") and wheel parts packed round one centre ("+packed+")"
+        :packed?"wheel parts packed round one centre":"the CAD's own wheel assemblies")+".");
   }
   ws=dtUniqueWheels(ws,w=>w);
   const grown=ws.filter(w=>w.grown&&!w.composite);
