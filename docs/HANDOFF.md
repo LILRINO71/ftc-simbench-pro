@@ -25,8 +25,16 @@ that leaned the axis 2.3 degrees and read the teeth 3 mm too close (8.3 mm per r
 `npm test`: 855 pass, 0 fail (the zoo's two `rack-servo` runs and a test of its direction,
 ratio and travel, which fails with the axis left as the points lean it).
 
-Still open from the list below: the parallel roller shafts read as slide stacks, the belted
-drive motors as joints, and the six parts read as actuators.
+Then the intakes' two false slides: each is an 8 mm REX roller shaft with spacers clamped on it,
+read as a rail with carriage blocks. A slide whose fixed rail lies on the axis of something an
+actuator turns (its output, a gear it meshes, a pulley at the far end of its belt) is now dropped
+before any joint is made; a rail named as a lead screw stays. The team's STEP has no slides now.
+Zoo robot `intake-spacers` (belt-driven, as the team's are) shows the next problem: the pulley at
+the far end of a belt turns alone, and the roller shaft it sits on joins it to the frame (15 frame
+parts moved). It is on the zoo test's known list; `npm test` 856 pass, 0 fail.
+
+Still open from the list below: the belted drive motors read as joints, and the six parts read
+as actuators.
 
 ## 2026-11-16: a team's STEP with its code, and PR #14 on main
 

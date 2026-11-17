@@ -81,6 +81,26 @@ const {autoRig}=(function(){
     let AC={actuators:[]};
     try{ AC=ARActuators.findActuators(cad,{driveFromCAD:c=>driveFromCAD(c,{front:opts.front}), hwFromPart}); }
     catch(e){ review.push("The actuator finder stopped: "+e.message); }
+    // a "rail" on the axis of something an actuator turns (its own shaft, a gear it meshes, a
+    // pulley at the far end of its belt) is a shaft that turns with it: an intake's roller axle
+    // with spacers clamped on it is not a rail with carriage blocks. A lead screw turns and
+    // drives a slide, so a rail named as one stays.
+    const turning=[];
+    for(const A of AC.actuators||[]){ if(A.role!=="joint") continue;
+      turning.push([A.axis,A.pivot]);
+      for(const M of (A.meshes||[]).concat(A.belts||[])) turning.push([M.withAxis,M.withCentre]); }
+    const onTurning=i=>{
+      const P=S[i]&&S[i].pts; if(!P||P.length<4||/lead ?screw|ball ?screw|acme|threaded rod/i.test((S[i].name||"")+" "+(S[i].part||""))) return false;
+      const c=dtCentroid(P), u=dtPrincipal(P).vec[0];
+      return turning.some(([ax,pv])=>{
+        if(Math.abs(dot(u,ax))<Math.cos(5*Math.PI/180)) return false;
+        const p=pv.map(v=>v/1000), d=[c[0]-p[0],c[1]-p[1],c[2]-p[2]], t=dot(d,ax);
+        if(Math.hypot(d[0]-ax[0]*t,d[1]-ax[1]*t,d[2]-ax[2]*t)>0.004) return false;   // on that axis
+        let lo=Infinity, hi=-Infinity; for(const q of P){ const s=(q[0]-p[0])*ax[0]+(q[1]-p[1])*ax[1]+(q[2]-p[2])*ax[2]; if(s<lo) lo=s; if(s>hi) hi=s; }
+        return lo<=0.03&&hi>=-0.03; }); };                                           // and reaching what turns
+    const shafts=(SL.mechanisms||[]).filter(m=>m.stages[0].rails.some(onTurning));
+    if(shafts.length){ const gone=new Set(shafts.flatMap(m=>m.jointIds));
+      SL={...SL, mechanisms:SL.mechanisms.filter(m=>!shafts.includes(m)), joints:(SL.joints||[]).filter(j=>!gone.has(j.id))}; }
     const joints=[], seeds={}, extra={}, belts=new Set();
     for(const j of SL.joints||[]){
       joints.push({id:j.id, kind:"linear", axis:j.axis, pivot:j.pivot, parent:"chassis", couple:j.couple, mech:(SL.mechanisms||[]).findIndex(m=>m.jointIds.includes(j.id))});

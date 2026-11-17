@@ -124,6 +124,7 @@ with every part renamed "Part N".
 | `viper-slide` | three side-by-side stages on a mount block |
 | `rail-carriage` | one linear rail with a carriage block straddling it (MGN12H) |
 | `intake-roller` | a motor, a coupler and a long roller shaft through two side plates |
+| `intake-spacers` | a belt from a motor to a pulley on a goBILDA REX roller shaft with wheels, and clamp spacers drawn cut into the shaft |
 | `four-bar` | a parallel four-bar arm: the motor turns the lower link, the upper link swings on a pin in the tower, the coupler carries the payload |
 | `rack-servo` | a servo's 24T gear on a 108 mm rack lying in a holder, a gate bar on its end (a ball gate) |
 | `wrist-on-arm` | a servo wrist riding the end of a gearmotor arm (a joint on a joint: its parent has to be the arm) |
@@ -177,6 +178,18 @@ hinge that swung round the servo's axis):
   servo's bracket through its holder is cut there like a slide drawn touching the frame.
 
 That brings it to **43 of 44 joints, 94 of 96 moving parts, 0 frame parts moved**.
+
+Then the team's intakes: an 8 mm REX roller shaft with spacers clamped on it between its wheels
+came out a single rail with carriage blocks (step 10), twice, and on the zoo copy that false
+carriage took the whole frame with it.
+- **A rail on the axis of something an actuator turns is a shaft.** Its own output, a gear it
+  meshes or a pulley at the far end of its belt: a slide whose fixed rail lies on that line (within
+  4 mm, square to within 5 degrees, reaching what turns) is dropped before any joint is made. A
+  rail named as a lead screw, ball screw or threaded rod turns and drives a slide, and stays.
+
+Still missed there: the pulley at the far end of the belt turns alone. The shaft it sits on runs
+through both side plates and joins it to the frame, so the zoo copy moves 15 frame parts with it
+(`intake-spacers` is on the test's known list).
 
 Still missed: an unnamed Core Hex. With no name it's a box with a shaft through it, which is
 also what every bearing block on an axle looks like. `tests/autorig-zoo.test.mjs` runs the

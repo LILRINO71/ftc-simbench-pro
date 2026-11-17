@@ -160,6 +160,28 @@ export const MECHS = {
     for (const y of [-0.070, 0, 0.070]) kids.push(tag(inst(hub('Compliant Wheel 60A', 0.024, 0.020), along([0.110, y - 0.010, TOP + 0.070], Y)), 'roller'));
     return { kids, joints: [{ id: 'roller', kind: 'revolute', axis: Y, pivot: [0.110, -0.123, TOP + 0.070], actuator: 'motor' }] };
   },
+  /* an intake roller on a goBILDA 8 mm REX shaft with clamp spacers drawn cut into it between the
+     wheels (team 7831's intakes): a long thin part with short blocks cut into it looks like a rail
+     with carriage blocks, but the shaft turns with its motor and nothing slides */
+  'intake-spacers': () => {
+    const zs = TOP + 0.110, zm = TOP + 0.040, yb = -0.131, rm = 0.008, rs = 0.016, out = [0, -1, 0];
+    // the belt's two straight runs, each riding both pulley rims, outside the right side plate
+    const run = (sg) => { const a = [0.110 + sg * rm, yb, zm], b = [0.110 + sg * rs, yb, zs];
+      const d = [b[0] - a[0], 0, b[2] - a[2]], L = Math.hypot(d[0], d[2]);
+      return prism(frame(a, [d[0] / L, 0, d[2] / L], Y), [[-0.003, -0.00075], [0.003, -0.00075], [0.003, 0.00075], [-0.003, 0.00075]], L); };
+    const kids = [post('Intake Side Plate L', [0.110, 0.120, TOP + 0.065], [0.080, 0.006, 0.130]),
+      post('Intake Side Plate R', [0.110, -0.120, TOP + 0.065], [0.080, 0.006, 0.130]),
+      inst(motor5203('goBILDA 5203 Intake Motor 5203-2402-0005'), along([0.110, -0.117, zm], out)),
+      tag(inst(hub('GT2 Pulley 20T', rm, 0.010), along([0.110, -0.126, zm], out)), 'motor'),
+      tag(inst(hub('GT2 Pulley 40T', rs, 0.010), along([0.110, -0.126, zs], out)), 'roller'),
+      tag(inst(hexShaft('2106-4008-3120', 0.260), along([0.110, -0.136, zs], Y)), 'roller'),
+      inst(part('GT2 Timing Belt', [run(1), run(-1)], COL.black, 0.01), frame([0, 0, 0]))];
+    for (const y of [-0.070, 0, 0.070]) kids.push(tag(inst(hub('Compliant Wheel 60A', 0.024, 0.020), along([0.110, y - 0.010, zs], Y)), 'roller'));
+    for (const y of [-0.035, 0.035]) kids.push(tag(post('Spacer Top', [0.110, y, zs + 0.004], [0.012, 0.016, 0.010]), 'roller'));
+    return { kids, ignore: ['GT2 Timing Belt'], joints: [
+      { id: 'motor', kind: 'revolute', axis: out, pivot: [0.110, -0.117, zm], actuator: 'motor' },
+      { id: 'roller', kind: 'revolute', axis: out, pivot: [0.110, -0.126, zs], follows: 'motor', ratio: rm / rs }] };
+  },
   /* a parallel four-bar: the motor turns the lower link; the upper link swings on a pin in the
      tower; the coupler joins their ends on two more pins and carries the payload */
   'four-bar': () => {

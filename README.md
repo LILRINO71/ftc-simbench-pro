@@ -148,7 +148,7 @@ the page runs in a Web Worker to read CAD without freezing. The module map is in
 | Path | What's there |
 |---|---|
 | [`src/`](src/README.md) | The app: engine modules, the 3D and CAD views, the UI. |
-| [`tests/`](tests/README.md) | 855 `node:test` tests: the robot corpus, physics, parser, Road Runner, the real robot end to end, the match, online play, the Onshape link and the export zip, exact joints and the device binding. |
+| [`tests/`](tests/README.md) | 856 `node:test` tests: the robot corpus, physics, parser, Road Runner, the real robot end to end, the match, online play, the Onshape link and the export zip, exact joints and the device binding. |
 | [`tools/`](tools/README.md) | The build, the minifier, the test runner, the robot corpus generator, the Fusion **Export to SimBench** script, and `run-opmode.mjs`, the headless entry other repos' CI uses. |
 | [`assets/robots/`](assets/robots/into-the-deep/README.md) | The default robot: GearGurus 7832's STEP (gzipped), its joint spec, and the team's OpModes. |
 | [`research/autorig/`](research/autorig/README.md) | The automatic joint finder study: three prototypes, measured against the real robot. |
@@ -162,7 +162,7 @@ the page runs in a Web Worker to read CAD without freezing. The module map is in
 ```bash
 npm install            # dev dependency only: occt-import-js, for the geometry tests
 npm run build          # dev build  -> dist/index.html (open it, or serve dist/)
-npm test               # the whole suite: 855 tests
+npm test               # the whole suite: 856 tests
 npm run build:ship     # what Cloudflare Pages builds: comments and layout stripped
 ```
 
@@ -194,8 +194,10 @@ check the live build by comparing its `SIMBENCH_BUILD` hash with a local ship bu
   every read counts against its owner's 2,500 API calls a year, and a big robot's first read is a
   couple of hundred. When it runs out, the card says so and the export zip (no API at all) takes
   over. See [DEPLOY.md](DEPLOY.md), "Quota".
-- **A STEP file has no mates.** Its joints are found by shape, and some come out wrong: a pair
-  of long parallel shafts can be read as a slide stack; an odometry pod can be read as a motor.
+- **A STEP file has no mates.** Its joints are found by shape, and some come out wrong: a roller
+  shaft at the far end of a belt turns alone, without the wheels on it; a long shaft nothing
+  found turning, with parts clamped on it, can be read as a rail with a carriage; an odometry
+  pod can be read as a motor.
   The panel lists what to check. An Onshape link or export zip carries the real joints.
 - **Which way a drive motor turns its wheel is measured only when the motor sits on the wheel's
   axle** (or is chained to one that does). For a motor belted across to its wheel, or a base

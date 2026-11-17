@@ -12,7 +12,10 @@ import { score } from '../research/autorig/zoo/eval.mjs';
 const E = loadEngine();
 // what shape alone can't tell yet: an unnamed through-bore motor is a box with a shaft through it,
 // like any bearing block on an axle
-const KNOWN = new Set(['arm-corehex (no names)']);
+const KNOWN = new Set(['arm-corehex (no names)',
+  // a pulley at the far end of a belt turns alone: the roller shaft it sits on, run through both
+  // side plates, joins it to the frame
+  'intake-spacers', 'intake-spacers (no names)']);
 
 for (const name of Object.keys(MECHS)) for (const strip of [false, true]) {
   const label = name + (strip ? ' (no names)' : '');
@@ -59,5 +62,15 @@ test('zoo: a rack on a servo gear slides with it, the way the gear pushes it, wh
     // drawn from x 86 to 194 mm under a gear at x 110: it can go 84 mm toward -x and 24 toward +x
     const dx = rack.limits.map((v) => v * rack.axis[0]).sort((p, q) => p - q);
     assert.ok(Math.abs(dx[0] + 84) <= 2 && Math.abs(dx[1] - 24) <= 2, 'limits ' + rack.limits + ' along ' + rack.axis);
+  }
+});
+
+test('zoo: a roller shaft with spacers clamped on it turns with its motor; it is not a rail with carriage blocks', () => {
+  for (const strip of [false, true]) {
+    const { text } = buildMech('intake-spacers', { strip });
+    const R = E.autoRig(E.parseSTEP(text), {});
+    assert.equal(R.slides, 0, 'no slide stack');
+    assert.deepEqual(R.spec.joints.filter((j) => j.kind === 'slider').map((j) => j.id), []);
+    assert.ok(R.spec.joints.some((j) => j.follows && j.kind === 'revolute'), 'the belt still turns the roller');
   }
 });
