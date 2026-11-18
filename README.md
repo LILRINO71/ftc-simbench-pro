@@ -6,6 +6,10 @@ every number.
 
 **Live:** https://ftc-simbench-pro.pages.dev · rebuilt from `main` on every push
 
+Made by **FTC Team 7831 Titan** from Heritage High School in Romoland, California: in the SoCal
+League F2 since our rookie season in 2013. Click the SimBench logo in the app to meet the team
+([FIRST team page](https://ftc-events.firstinspires.org/2025/team/7831) · [FTCScout](https://ftcscout.org/teams/7831)).
+
 ![GearGurus 7832's Into The Deep robot on the BIOBUZZ field: lift at the high basket, intake out the front, running the team's own TeleOp](docs/into-the-deep.png)
 
 *GearGurus 7832's 2024-25 robot, from the team's own Onshape export, running the team's own
