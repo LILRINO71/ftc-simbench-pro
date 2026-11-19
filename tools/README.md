@@ -12,6 +12,7 @@ Node scripts for building, testing and generating test robots. None of them ship
 | `gen-autorig.mjs` | Regenerates `src/autorig-lib.js` from the joint-finder prototypes in `research/autorig`. Change a prototype, re-run its eval, then run this. |
 | `fusion/ExportToSimBench` | A Fusion **script** (not an add-in): writes the open design as robot.urdf with one OBJ per rigid body, joints and limits from the design's joints, motion links as mimics, masses and colours, zipped to drop on SimBench. [fusion/README.md](fusion/README.md). |
 | `sync-shot-sim.mjs` | Copies the BIOBUZZ Shot Sim engine and field data into `vendor/`, so the bench and the shot sim can't disagree about the field. |
+| `onshape-dev.mjs` | The built site on this computer **with the Onshape link working**: serves `dist/` and answers `/onshape/*` with the real relay, signed with your own API key (`--env`, `--keep`, `--log`). For watching a real import end to end before a change ships: [docs/onshape-app-store.md](../docs/onshape-app-store.md#watching-a-real-import-on-your-own-computer). |
 | `run-opmode.mjs` | The **headless entry** for other repos and their CI: runs one of a team's OpModes on the Java VM (`--opmode`, `--seconds`, `--gamepad`) and prints what it did as JSON. Also a module (`runOpMode`). This one does ship as an interface: [docs/code-support.md](../docs/code-support.md#running-an-opmode-without-the-page-toolsrun-opmodemjs). |
 
 ```bash
