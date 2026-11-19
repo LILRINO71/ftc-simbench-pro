@@ -24,10 +24,10 @@ export const SITE = 'https://ftc-simbench-pro.pages.dev';
 // earlier ones define. The engine never touches the DOM; only view3d and app do.
 export const ORDER = ['hardware', 'samples', 'step', 'hull', 'inertia', 'expr', 'jvm', 'jvmlib', 'jvmprelude', 'jvmrun', 'java', 'roadrunner', 'mapping', 'robotconfig',
   'compare', 'analyze', 'drivetrain', 'frame', 'mates', 'onshapelink', 'onshapecad', 'meshfiles', 'urdf', 'jointspec', 'jointsheet', 'pedrogen', 'partsdb', 'grader', 'autorig-lib', 'autorig', 'robotcheck', 'bind', 'dynamics', 'joltmech', 'field', 'shots', 'match', 'robotlite', 'net', 'netrelay', 'controllers', 'session', 'mathdoc',
-  'gitimport', 'onboarding', 'sim', 'calibrate', 'montecarlo', 'tier', 'tessellate', 'view3d', 'cadview', 'engineworker', 'importflow', 'recorder', 'sounds', 'leaderboard', 'results', 'minimap', 'pathedit', 'keybinds', 'touch', 'mcui', 'app'];
+  'gitimport', 'onboarding', 'sim', 'calibrate', 'montecarlo', 'tier', 'tessellate', 'view3d', 'cadview', 'engineworker', 'importflow', 'recorder', 'sounds', 'leaderboard', 'results', 'minimap', 'pathedit', 'keybinds', 'challenges', 'touch', 'mcui', 'app'];
 // The browser-side files: everything before them is the engine, which also ships on
 // its own as dist/engine.js for the background worker (src/engineworker.js).
-export const BROWSER = ['tessellate', 'view3d', 'cadview', 'engineworker', 'importflow', 'recorder', 'sounds', 'leaderboard', 'results', 'minimap', 'pathedit', 'keybinds', 'touch', 'mcui', 'app'];
+export const BROWSER = ['tessellate', 'view3d', 'cadview', 'engineworker', 'importflow', 'recorder', 'sounds', 'leaderboard', 'results', 'minimap', 'pathedit', 'keybinds', 'challenges', 'touch', 'mcui', 'app'];
 // three.js, as ES modules from a CDN, with a second one (tools/threeloader.mjs). The
 // page puts it on window.THREE with the add-ons the view uses, and only then boots
 // the app (src/app.js waits for "three-ready").
@@ -62,7 +62,7 @@ const ENGINE_FILE = `engine-${build}.js`;
 const SHOT_FILE = `shotsim-${crypto.createHash('sha256').update(rd('vendor', 'biobuzz-shot-sim', 'engine.js')).update(rd('vendor', 'biobuzz-shot-sim', 'data', 'field.json')).digest('hex').slice(0, 8)}.js`;
 let js = '"use strict";\n' + `var SIMBENCH_ENGINE_URL=${JSON.stringify(ENGINE_FILE)};\nvar SIMBENCH_SHOT_URL=${JSON.stringify(SHOT_FILE)};\n` + engine + `\nvar SIMBENCH_BUILD=${JSON.stringify({ v: pkg.version, build })};\n`;
 let engineJs = '"use strict";\n' + engineOnly + `\nvar SIMBENCH_BUILD=${JSON.stringify({ v: pkg.version, build })};\n`;
-let css = rd('src', 'styles.css') + rd('src', 'touch.css');   // phone controls and the quick start
+let css = rd('src', 'styles.css') + rd('src', 'touch.css') + rd('src', 'challenges.css');   // phone controls, quick start, challenge cards
 let markup = rd('src', 'markup.html');
 if (MIN) { js = banner + minifyJS(js, { strings: STRINGS }); engineJs = banner + minifyJS(engineJs, { strings: STRINGS }); css = minifyCSS(css); markup = minifyHTML(markup); }
 else { js = banner + js; engineJs = banner + engineJs; }
