@@ -40,11 +40,80 @@ It is built to be more accurate than the export zip:
 | Parts with no material | weighed by kind (a guess) | weighed by kind (same guess) |
 | Staying current | paste the link again | export and drop 100+ MB again |
 
-**Not yet verified.** The link has only been tested against a stand-in built from Onshape's
-OpenAPI spec (`tests/onshapelink.test.mjs`, `tests/onshape-signin.test.mjs`). No real robot has
-gone through the live app yet. The first real import should be the owner's own robot (REVIVER),
-compared against its export zip (14.3 kg, 19 mechanisms, docs/HANDOFF.md): save the workspace
-(`.ftcsim`) after the import and compare joints, limits and mass.
+**Verified on a real robot, 2026-11-18.** The owner's BIOBUZZ Meet 0 redesign (1,375 parts in
+6 Part Studios) was read from cad.onshape.com by the page, the engine worker and the relay's own
+code, run on one computer with `tools/onshape-dev.mjs` (below). What it showed:
+
+| | Measured |
+|---|---|
+| Calls for the first read | 15 (3 + 2 per Part Studio), all answered 200 |
+| Time | about 70 s; one Part Studio of 258 parts took Onshape 36 s to tessellate |
+| Calls for the same robot again | 3 (the shapes are kept in the browser), about 20 s |
+| Parts, shapes, triangles | 1,375 parts from 292 shapes, 2.6 M triangles thinned to 0.64 M |
+| Mass | 9.7 kg: no part has a material, so each is weighed by its own volume |
+| Console errors during the import | none |
+
+It also found two things the OpenAPI spec doesn't say, both fixed and tested with Onshape's
+verbatim answers (`tests/onshape-whole.test.mjs`): a part's colour arrives as four bytes in
+base64 on the body (`"color":"nc/t/w=="`), and every robot had been drawn in one grey; and a part
+with no material has zeros for its centroid, which had put every such part's weight at its Part
+Studio's origin.
+
+**Still not verified:** the sign-in itself against the live OAuth app (the local run answers
+Onshape's Allow page itself and signs the calls with an API key), a robot with mate limits and
+gear relations, and an enterprise document. The first sign-in on the live site by the owner
+covers the first. For the second, compare REVIVER against its export zip (14.3 kg, 19
+mechanisms, docs/HANDOFF.md): save the workspace (`.ftcsim`) after the import and compare joints,
+limits and mass.
+
+### Watching a real import on your own computer
+
+```
+npm run build
+ONSHAPE_ACCESS_KEY=… ONSHAPE_SECRET_KEY=… node tools/onshape-dev.mjs 8790 --keep ../onshape-kept --log calls.log
+```
+
+It serves `dist/` with the real relay behind `/onshape/*`. Open `http://localhost:8790/` and
+paste an address, or `http://localhost:8790/?onshape=<address, encoded>`. Every real call is
+printed and counted (`/onshape-dev/stats`); `--keep` stores what never changes, so trying the
+same robot again costs 3 calls. The keys are your own API keys (Onshape → My account →
+Developer); they are read from the environment or `--env <file>` and never printed.
+
+## One click from Onshape
+
+A team shouldn't have to copy an address. Three ways in, all of which read the assembly with
+nothing pasted (`onshapeLaunch` in `src/onshapelink.js`; if the browser isn't signed in to
+SimBench's Onshape link yet, Onshape's Allow page takes the tab once and comes straight back):
+
+1. **A bookmark, today, with nothing to approve.** The "Bring your robot" card has a **Send to
+   SimBench** link: drag it to the bookmarks bar once. After that, one click on the Assembly tab
+   in Onshape opens SimBench with that robot being read. It works on any Onshape account,
+   school ones included, because nothing is installed in Onshape. Not yet tried on a real
+   Onshape tab, and a managed Chromebook that blocks `javascript:` bookmarks won't run it.
+2. **A link.** `https://ftc-simbench-pro.pages.dev/?onshape=<the assembly's address, encoded>`
+   opens the same way: good for a team's README or a pinned message.
+3. **A button inside Onshape** (an app extension). In the developer portal
+   (<https://dev-portal.onshape.com> → OAuth applications → FTC SimBench → **Extensions** → Add
+   extension):
+
+   | Field | Value |
+   |---|---|
+   | Name | Simulate in FTC SimBench |
+   | Location | Element context menu (the right-click menu of a tab) |
+   | Context | Assembly |
+   | Action type | Open in new window |
+   | Action URL | `https://ftc-simbench-pro.pages.dev/?documentId={$documentId}&workspaceOrVersion={$workspaceOrVersion}&workspaceOrVersionId={$workspaceOrVersionId}&elementId={$elementId}&configuration={$configuration}` |
+
+   Right-clicking the Assembly tab then offers **Simulate in FTC SimBench**. Onshape shows an
+   extension only to accounts that have added the app, so this needs the store entry (private is
+   enough for the owner's own team; step 3 of "Getting listed" below). The portal's field names
+   are from Onshape's [extensions guide](https://onshape-public.github.io/docs/app-dev/extensions/)
+   and may be worded a little differently; the address is what matters. A new window keeps
+   SimBench's sign-in cookie first-party, which a panel inside Onshape would not (school
+   Chromebooks block third-party cookies).
+
+When a robot came from the link, its review card has **Update from Onshape**: one click reads
+the assembly again as it is now.
 
 Either way, the biggest factor is the CAD itself: every mechanism mated, materials set, and the
 mates that are mechanisms named (`motor armMotor`), as in [robot-setup.md](robot-setup.md).
@@ -103,9 +172,9 @@ From Onshape's [launch checklist](https://onshape-public.github.io/docs/app-stor
    | Onshape OAuth, minimal grant | ✅ read-only |
    | A revoked grant handled | ✅ the relay answers signed-out and the card asks to sign in again |
    | Versions and workspaces | ✅ `w`, `v` and `m` addresses, configuration kept |
-   | Empty assembly, wire-only Part Studio | ❌ fails with "none of its parts' shapes" and "try again"; should say the assembly has no parts |
-   | Surface-only Part Studio | ❌ a surface is weighed (24 g in the probe); it should weigh nothing |
-   | No avoidable console errors | ? not checked yet |
+   | Empty assembly, wire-only Part Studio | ✅ says the assembly has no parts, or no solid ones (`e99a8ab`) |
+   | Surface-only Part Studio | ✅ a surface weighs nothing (`e99a8ab`) |
+   | No avoidable console errors | ✅ none during a real import (2026-11-18); other screens not swept |
    | EULA, privacy page, support link | ✅ `/terms`, `/privacy`, `/support` (`site/`, 2026-11-14); have a mentor read them |
 
 5. **Beta test with at least 5 active testers.** Make an Onshape team, add a private store entry
