@@ -2366,7 +2366,9 @@ const NetUI={
     $("#onpHost").addEventListener("click",()=>this.hostNow(false));
     $("#onpJoinForm").addEventListener("submit",e=>{ e.preventDefault(); this.joinCode($("#onpCode").value); });
     $("#onpCode").addEventListener("input",e=>{ e.target.value=e.target.value.toUpperCase().replace(/[^A-Z0-9]/g,""); });
-    $("#onpCopy").addEventListener("click",()=>this.copyInvite());
+    $("#onpCopy").addEventListener("click",()=>this.copyInvite(false));
+    $("#onpCopyWatch").addEventListener("click",()=>this.copyInvite(true));
+    $("#onpWatchBtn").addEventListener("click",()=>this.joinCode($("#onpCode").value,null,true));
     $("#onpGo").addEventListener("click",()=>{ if(!Online.start()) this.render(); });
     $("#onpAgain").addEventListener("click",()=>Online.again());
     $("#onpLeave").addEventListener("click",()=>{ Online.leave(); if(Online.lobby==null) Online.browse(); resetMatch(); this.say(""); this.render(); });
@@ -2378,13 +2380,13 @@ const NetUI={
     $("#onpSay").addEventListener("submit",e=>{ e.preventDefault(); const t=$("#onpText"); Online.say(t.value,$("#onpTo").value==="team"); t.value=""; });
     $("#onpSlots").addEventListener("click",e=>{ const b=e.target.closest("button[data-slot]"); if(b) Online.pick(b.dataset.slot==="none"?null:b.dataset.slot); });
     $("#onpReady").addEventListener("click",e=>{ const b=e.target.closest("button[data-ready]"); if(b) Online.setReady(b.dataset.ready==="1",this.kind()); });
-    $("#onpList").addEventListener("click",e=>{ const b=e.target.closest("button[data-code]"); if(b) this.joinCode(b.dataset.code,b.dataset.hid); });
+    $("#onpList").addEventListener("click",e=>{ const b=e.target.closest("button[data-code]"); if(b) this.joinCode(b.dataset.code,b.dataset.hid,b.dataset.watch==="1"); });
     Online.onChange((what,data)=>this.on(what,data));
     View.onLite=L=>this.modelReady(L); if(View.lite) this.modelReady(View.lite);
     Online.jointsOf=()=>View.lite&&View.lite===this.packed?View.segJoints():null;
     View.onLoad=()=>Perf.quiet();
     // an invite link opened in a tab that already has SimBench open only changes the fragment
-    addEventListener("hashchange",()=>{ if(/^#join=/i.test(location.hash)) this.invited(location.hash.slice(6)); });
+    addEventListener("hashchange",()=>{ const iv=Online.parseInvite(location.hash); if(iv) this.invited(iv.code,iv.watch); });
   },
   show(o){ $("#onlinePanel").hidden=!o; $("#onlineBtn").setAttribute("aria-expanded",String(!!o)); if(o) this.render(); },
   async toggle(){
@@ -2420,12 +2422,12 @@ const NetUI={
     this.say("");
     Online.host({name:n, pub, period:this.kind(), skill:$("#matchSkill").value});
   },
-  async joinCode(code,hid){
+  async joinCode(code,hid,watch){
     const n=this.needName(); if(!n||!await this.connect()) return;
     code=String(code||"").toUpperCase();
     if(!/^[A-HJ-NP-Z2-9]{5}$/.test(code)){ this.say("A match code is 5 letters and numbers, like K7QMX.","warn"); return; }
     this.say(""); this.joinT=performance.now();
-    Online.join(code,{name:n, hid:hid||null});
+    Online.join(code,{name:n, hid:hid||null, watch:!!watch});
   },
   /* Quick match: the fullest open match there is, or a new listed one if there's none. */
   async quick(){
@@ -2442,16 +2444,21 @@ const NetUI={
     };
     this.quickT=setInterval(look,400); look();
   },
-  invited(code){
+  /* An invite link opens straight into the join box: the code filled in, the cursor where the
+     next thing is (the team name, or Join/Watch when this browser already knows it). */
+  invited(code,watch){
     try{ history.replaceState(null,"",location.pathname+location.search); }catch(e){}
     code=String(code||"").toUpperCase().replace(/[^A-Z0-9]/g,"").slice(0,5);
+    if(Online.state!=="off") return;
     this.show(true); $("#onpCode").value=code;
-    this.say("You were invited to match "+code+". Put your team in and press Join.");
+    const known=!!netStr($("#onpName").value,24);
+    this.say("You were invited "+(watch?"to watch ":"to ")+"match "+code+". "+(known?"Press "+(watch?"Watch":"Join")+".":"Put your team name in first, then press "+(watch?"Watch":"Join")+"."));
+    const f=known?(watch?$("#onpWatchBtn"):$("#onpJoinForm button[type=submit]")):$("#onpName"); if(f) try{ f.focus(); }catch(e){}
     this.connect();
   },
-  copyInvite(){
-    const url=location.origin+location.pathname+"#join="+Online.code;
-    const done=()=>{ const b=$("#onpCopy"); b.textContent="Copied"; setTimeout(()=>{ b.textContent="Copy invite link"; },1500); };
+  copyInvite(watch){
+    const url=Online.inviteLink(location.origin+location.pathname,watch), b=$(watch?"#onpCopyWatch":"#onpCopy"), was=b.textContent;
+    const done=()=>{ b.textContent="Copied"; setTimeout(()=>{ b.textContent=was; },1500); };
     try{ navigator.clipboard.writeText(url).then(done,()=>prompt("The invite link:",url)); }catch(e){ prompt("The invite link:",url); }
   },
   /* This robot's light copy, packed for the other teams (they each fetch it once). */
@@ -2533,31 +2540,32 @@ const NetUI={
   renderList(){
     const L=Online.T?Online.openMatches():null;
     const html=!Online.T?`<li class="onp-empty">Opens when you go online</li>`:!L.length?`<li class="onp-empty">None right now. Host one, or use Quick match.</li>`:
-      L.map(a=>`<li><div><b>${esc(a.name)}</b><small>${a.period==="Autonomous"?"Auto 0:30":"TeleOp 2:00"} · ${a.n} in the room · ${a.open} place${a.open===1?"":"s"} free</small></div>`+
-        `<button class="btn-sm" type="button" data-code="${esc(a.code)}" data-hid="${esc(a.hid)}">Join</button></li>`).join("");
+      L.map(a=>`<li><div><b>${esc(a.name)}</b><small>${a.period==="Autonomous"?"Auto 0:30":"TeleOp 2:00"} · ${a.n} in the room · ${a.open} place${a.open===1?"":"s"} free${a.w?" · "+a.w+" watching":""}</small></div>`+
+        `<button class="btn-sm" type="button" data-code="${esc(a.code)}" data-hid="${esc(a.hid)}">Join</button>`+
+        `<button class="btn-sm" type="button" data-code="${esc(a.code)}" data-hid="${esc(a.hid)}" data-watch="1">Watch</button></li>`).join("");
     setHTML($("#onpList"),html);
   },
   renderRoom(){
     const st=Online.state, me=Online.me(), host=Online.role==="host";
     $("#onpCodeShow").textContent=Online.code||"—";
-    $("#onpCopy").hidden=st==="joining";
+    $("#onpCopy").hidden=st==="joining"; $("#onpCopyWatch").hidden=st==="joining"; $("#onpKeep").hidden=!(host&&st==="room");
     if(st==="joining"){ setHTML($("#onpSlots"),`<p class="onp-watch">Asking the host's browser to let you in…</p>`); $("#onpReady").innerHTML=""; $("#onpHostCtl").hidden=true; $("#onpWatch").textContent=""; return; }
     const cards=NET_SLOTS.map(s=>{
       const id=Online.holder(s), p=id&&Online.players[id], al=netAl(s), mine=id===Online.self;
       const bot=mine?(Online.model?"":" · packing robot…"):(Online.modelFor(id)?" · robot here":" · robot coming");
       const who=p?`<b>${esc(p.name)}${mine?" (you)":""}</b><span class="st${p.ready?" ok":""}">${p.ready?"ready":"getting ready"}${p.host?" · host":""}${bot}</span>`:
         `<b class="ai">AI robot</b>`;
-      const act=!p&&me?`<button class="btn-sm" type="button" data-slot="${s}">Take this place</button>`:mine?`<button class="btn-sm" type="button" data-slot="none">Just watch</button>`:"";
+      const act=me&&me.watch?"":!p&&me?`<button class="btn-sm" type="button" data-slot="${s}">Take this place</button>`:mine?`<button class="btn-sm" type="button" data-slot="none">Just watch</button>`:"";
       return `<div class="onp-slot ${al}${mine?" me":""}"><small>${al.toUpperCase()} ${s.slice(-1)}</small>${who}${act}</div>`;
     });
     // red on the left, blue on the right, place 1 above place 2
     setHTML($("#onpSlots"),[cards[0],cards[2],cards[1],cards[3]].join(""));
     const watch=Object.values(Online.players).filter(p=>!p.slot).map(p=>esc(p.name)+(p.id===Online.self?" (you)":""));
-    setHTML($("#onpWatch"),watch.length?"Watching: "+watch.join(", "):"");
+    setHTML($("#onpWatch"),(me&&me.watch?"You are watching: no robot, no controls. ":"")+(watch.length?"Watching: "+watch.join(", "):""));
     // this robot: the right kind of OpMode, then ready
     const want=Online.settings.period, have=CODE?this.kind():null;
     let r="";
-    if(me&&me.slot){
+    if(me&&me.slot&&!me.watch){
       if(!CODE||!CAD) r=`<span class="bad">Load a robot and an OpMode first.</span>`;
       else if(have!==want) r=`<span class="bad">This match is ${want==="Autonomous"?"an Auto":"a TeleOp"}: pick ${want==="Autonomous"?"an Autonomous":"a TeleOp"} OpMode in the OpMode menu.</span>`;
       else r=`<span>“${esc(CODE.opmode||"OpMode")}”</span>`+(me.ready?`<button class="btn-sm" type="button" data-ready="0">Not ready</button>`:`<button class="btn-sm primary" type="button" data-ready="1">I'm ready</button>`);
@@ -2574,8 +2582,9 @@ const NetUI={
   renderLive(){
     const slot=Online.mySlot(), cd=Online.countdown(), al=slot?netAl(slot):null, left=Math.max(0,Match.len-Match.t);
     const who=Object.values(Online.players).filter(p=>p.slot).map(p=>`<span class="${netAl(p.slot)}">${esc(p.name)}</span>`).join(" ");
+    const nw=Online.watchers().length;
     setHTML($("#onpLive"),(slot?`<b class="${al}">${al.toUpperCase()} ${slot.slice(-1)}</b>`:`<b>Watching</b>`)+
-      `<span>${cd>0?"starts in "+Math.ceil(cd):clockText(Math.ceil(left))+" left"}</span>`+who);
+      `<span>${cd>0?"starts in "+Math.ceil(cd):clockText(Math.ceil(left))+" left"}</span>`+who+(nw?`<span class="onp-nw">${nw} watching</span>`:""));
     $("#onpMarkSeg").hidden=!slot;
     $("#onpPing").textContent=Online.role==="guest"&&Online.rtt?Math.round(Online.rtt)+" ms to the host":"";
   },
@@ -3289,7 +3298,7 @@ function boot(){
   RAILS_READY=true;
   requestAnimationFrame(frame);
   try{
-    if(/^#join=/i.test(location.hash)) NetUI.invited(location.hash.slice(6));
+    { const iv=Online.parseInvite(location.hash); if(iv) NetUI.invited(iv.code,iv.watch); }
     if(/^#(p\d+|path)=/i.test(location.hash)&&PathEdit.fromHash) setTimeout(()=>PathEdit.fromHash(),800);   // a shared path, once the robot is in
     // back from signing in to Onshape in this tab (no pop-up allowed): the card carries on with the pasted address
     const back=/^#onshape-(signed-in|signin-failed)/.exec(location.hash);

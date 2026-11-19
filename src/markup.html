@@ -63,14 +63,15 @@
             <button class="btn-sm primary" id="onpQuick" type="button">Quick match</button>
             <button class="btn-sm" id="onpHost" type="button">Host a match</button>
           </div>
-          <form class="onp-join" id="onpJoinForm"><input id="onpCode" maxlength="5" placeholder="Code" aria-label="Match code" autocomplete="off" spellcheck="false"><button class="btn-sm" type="submit">Join</button></form>
+          <form class="onp-join" id="onpJoinForm"><input id="onpCode" maxlength="5" placeholder="Code" aria-label="Match code" autocomplete="off" spellcheck="false"><button class="btn-sm" type="submit">Join</button><button class="btn-sm" id="onpWatchBtn" type="button" title="See the match without a robot of your own">Watch</button></form>
           <h4>Open matches</h4>
           <ul class="onp-list" id="onpList"></ul>
           <p class="onp-fine">Browsers connect straight to each other (WebRTC), found through public relays; the match itself never goes through a server. Like any peer-to-peer game, the other players' browsers can see your IP address. Some school networks block these connections.</p>
         </section>
 
         <section id="onpRoom" hidden>
-          <div class="onp-code"><span>Match</span><b id="onpCodeShow">—</b><button class="btn-sm" id="onpCopy" type="button">Copy invite link</button></div>
+          <div class="onp-code"><span>Match</span><b id="onpCodeShow">—</b><button class="btn-sm" id="onpCopy" type="button">Copy link</button><button class="btn-sm" id="onpCopyWatch" type="button" title="A link that joins as a spectator">Copy watch link</button></div>
+          <p class="onp-keep" id="onpKeep" hidden>Keep this tab open: your computer runs the match.</p>
           <div class="onp-slots" id="onpSlots"></div>
           <p class="onp-watch" id="onpWatch"></p>
           <div class="onp-ready" id="onpReady"></div>
