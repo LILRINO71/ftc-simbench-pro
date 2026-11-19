@@ -59,10 +59,23 @@ base64 on the body (`"color":"nc/t/w=="`), and every robot had been drawn in one
 with no material has zeros for its centroid, which had put every such part's weight at its Part
 Studio's origin.
 
-**Still not verified:** the sign-in itself against the live OAuth app (the local run answers
-Onshape's Allow page itself and signs the calls with an API key), a robot with mate limits and
-gear relations, and an enterprise document. The first sign-in on the live site by the owner
-covers the first. For the second, compare REVIVER against its export zip (14.3 kg, 19
+**Then on the live site, the same day,** signed in with the owner's Onshape account through the
+real OAuth app, opened by the extension-style address: the same robot, whole (1,375 parts, 34
+colours, 9.7 kg, no console errors). Getting there found two more things, which only the live
+site could show:
+
+- Onshape answered the sign-in with `{"message":"Invalid request","status":400}`: the client ID
+  in the site's settings had been saved without its last `=`. The relay puts it back (`45b93e7`).
+  `/onshape/status` saying `ready:true` only means the two settings exist, not that Onshape
+  takes them.
+- The first read arrived with 93 parts: the largest Part Studio's shapes are 281 MB of JSON, and
+  the relay held each answer whole to keep it at the edge, which ended the function (Cloudflare
+  error 1101). Answers over 16 MB are now passed straight through (`57b9261`); that one takes
+  40 s. The local run never showed it, because Node has no 128 MB limit.
+
+**Still not verified:** a robot with mate limits and gear relations, an enterprise document, the
+bookmark on a real Onshape tab, and the right-click extension. For the first, compare REVIVER
+against its export zip (14.3 kg, 19
 mechanisms, docs/HANDOFF.md): save the workspace (`.ftcsim`) after the import and compare joints,
 limits and mass.
 
