@@ -88,8 +88,8 @@ function lbCardHtml(v){
   let h=`<div class="lb"><h4>Your best scores</h4>`;
   h+=`<ul class="lb-pb">`+(v.bests||[]).map(b=>`<li class="${b.now?"now":""}"><span>${lbEsc(b.robot||"robot")}<small>${lbEsc(b.opmode||"OpMode")} · ${lbModeName(b.mode)}</small></span><b>${b.score}</b>${b.now&&v.isNew?`<i>new</i>`:""}</li>`).join("")+`</ul>`;
   if(v.shared){
-    const rows=v.shared.rows, mine=v.shared.mine, top=rows.slice(0,8);
-    const shown=top.slice(); const extra=rows.find(r=>r.me&&r.rank>8);
+    const rows=v.shared.rows, mine=v.shared.mine, top=rows.slice(0,5);
+    const shown=top.slice(); const extra=rows.find(r=>r.me&&r.rank>5);
     h+=`<h4>Shared board · ${M}</h4>`;
     h+=rows.length?`<ol class="lb-rows">`+shown.map(r=>lbRowHtml(r)).join("")+(extra?`<li class="gap">…</li>`+lbRowHtml(extra):"")+`</ol>`:`<p class="lb-empty">Nobody has posted a ${M} score yet.</p>`;
     if(mine&&mine.posted) h+=`<p class="lb-note">You are #${mine.rank} on the board.</p>`;
@@ -146,7 +146,7 @@ const Board={
       shared=lbMerge(this.boards[mode],name&&best.score>0?{name, robot:r.run.robot, score:best.score}:null);
       if(shared.mine&&!shared.mine.posted&&best.score>0&&best.posted>=best.score) shared.mine.posted=true;
     }
-    const best=r.best, v={mode, runScore:best?best.score:0, isNew:r.isNew, prev:r.prev, bests:lbPbList(r.map,r.id,4), shared, name:this.name(), msg:this.msg, busy:this.busy};
+    const best=r.best, v={mode, runScore:best?best.score:0, isNew:r.isNew, prev:r.prev, bests:lbPbList(r.map,r.id,3), shared, name:this.name(), msg:this.msg, busy:this.busy};
     this.el.innerHTML=lbCardHtml(v);
   },
   async post(){
