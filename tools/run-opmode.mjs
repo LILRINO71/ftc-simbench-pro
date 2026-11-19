@@ -4,6 +4,7 @@
 //
 //   node tools/run-opmode.mjs <folder or .java files…> --opmode MainTeleOp.java [--seconds 5]
 //                             [--gamepad script.json] [--init 0.4] [--compact]
+//                             [--runs 10 --seed 1 [--cad robot.step.gz --joints joints.json] [--within 2 --deg 5] [--min-rate 0.7]]
 //
 //   import { runOpMode } from '<this checkout>/tools/run-opmode.mjs';
 //   const r = runOpMode({ code: 'TeamCode/src/main/java', opmode: 'MainTeleOp.java', seconds: 5,
@@ -19,7 +20,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { loadEngine } from '../tests/load.mjs';
+import zlib from 'node:zlib';
+import { loadEngine, loadWithField } from '../tests/load.mjs';
 
 /** One pass of the OpMode's loop: the app's fixed 50 Hz step, in seconds. */
 export const DT = 0.02;
@@ -158,6 +160,13 @@ function standIn(E, run, pose) {
  * and the OpMode ran to the end of the time (or to its own end) without stopping on an error.
  */
 export function runOpMode(opts = {}) {
+  // opts.runs asks for the same OpMode many times with a little variation each (see manyRuns below):
+  // the first run is the plain one, exactly as before, and the batch comes back in `monteCarlo`
+  if (opts.runs != null) {
+    const base = runOpMode(Object.assign({}, opts, { runs: null }));
+    base.monteCarlo = manyRuns(opts, base);
+    return base;
+  }
   const E = opts.engine || engine();
   const files = readJava(opts.code);
   const main = pickOpMode(files, opts.opmode);
@@ -273,10 +282,77 @@ export function runOpMode(opts = {}) {
   return out;
 }
 
+/* ---- Monte Carlo: opts.runs / opts.seed ----
+ * opts.runs      how many times (1 to 50)
+ * opts.seed      the master seed (default 1): run i uses its own seed, so a batch repeats exactly
+ * opts.cad       a robot's STEP file (.step, .step.gz): the runs are then the full rigid-body sim on that
+ *                robot, a Road Runner or other autonomous, each run with friction, mass, battery, control
+ *                latency, start pose and field spread varied (src/montecarlo.js), judged by where it ends
+ * opts.joints    that robot's joint spec (.json path or object), as the app has it
+ * opts.front     the CAD's front ("+x" …); else the joint spec's
+ * opts.within, opts.degrees   how close the end must be to the path's end (inches, degrees; default 2 and 5)
+ * opts.success   a whole success definition, {mode:"pose"|"points", posIn, degDeg, points, target}
+ * opts.vary      {friction:false, …} to hold a factor at nominal
+ * Without opts.cad the runs are on the stand-in robot, which has no mass or friction to vary: battery
+ * voltage and the start pose are, and a run works when the OpMode ran clean.
+ * Returns {mode, runs, seed, passed, failed, successRate, results:[…], …}. */
+function manyRuns(opts, base) {
+  const files = readJava(opts.code), main = pickOpMode(files, opts.opmode);
+  const wantField = !!opts.cad && opts.field !== false;
+  const E = opts.engine || (wantField ? fieldEngine() : engine());
+  const n = Math.max(1, Math.min(E.MC_MAX_RUNS, Math.round(+opts.runs) || E.MC_DEFAULT_RUNS));
+  const seed = Number.isFinite(+opts.seed) ? (+opts.seed >>> 0) : 1;
+  const IN = 0.0254, RAD = Math.PI / 180;
+  const out = { mode: opts.cad ? 'physics' : 'stand-in', runs: n, seed, passed: 0, failed: 0, successRate: 0, results: [] };
+  if (!opts.cad) {
+    const sp = Object.assign({ x: 0, y: 0, h: 0 }, opts.startPose || {});
+    out.variedBy = ['battery voltage', 'start pose'];
+    for (let i = 0; i < n; i++) {
+      const runSeed = E.mcSeedFor(seed, i), v = E.mcVariation(runSeed, E.MC_RANGES, 0, opts.vary);
+      const volts = v.volts == null ? 12.6 : v.volts;
+      const r = runOpMode(Object.assign({}, opts, { runs: null, engine: E,
+        startPose: { x: sp.x + v.dx * IN, y: sp.y + v.dy * IN, h: sp.h + v.dh * RAD },
+        host: (run) => Object.assign({}, typeof opts.host === 'function' ? opts.host(run) : (opts.host || {}), { volts() { return volts; } }) }));
+      out.results.push({ seed: runSeed, ok: r.ok, error: r.error, ran: r.ran, ended: r.ended,
+        variation: { volts: +volts.toFixed(2), startX: +v.dx.toFixed(2), startY: +v.dy.toFixed(2), startHeading: +v.dh.toFixed(2) } });
+    }
+  } else {
+    if (!base.compile.ok) { out.error = 'the OpMode did not compile: ' + base.compile.error; return out; }
+    let buf = fs.readFileSync(opts.cad);
+    if (buf[0] === 0x1f && buf[1] === 0x8b) buf = zlib.gunzipSync(buf);
+    const cad = E.parseSTEP(buf.toString('utf8'));
+    let R = null;
+    if (opts.joints) R = E.applyJointSpec(cad, typeof opts.joints === 'string' ? JSON.parse(fs.readFileSync(opts.joints, 'utf8')) : opts.joints);
+    const picked = libsFor(E, files, main);
+    const code = E.parseJava(main.src, { libs: picked.libs });
+    const map = E.autoMap(code.devices, cad.mechs);
+    if (R) for (const d of code.devices) { const j = R.devices[d.name] || R.devices[d.cfg]; if (j) map[d.name] = j; }
+    const success = Object.assign({ mode: 'pose', posIn: +opts.within > 0 ? +opts.within : 2, degDeg: +opts.degrees > 0 ? +opts.degrees : 5, target: 'auto' }, opts.success || {});
+    const job = E.mcPrepare({ code, cad: E.mcCadForWorker(cad), map, vary: opts.vary || null, success,
+      opts: { front: opts.front || (R && R.front) || undefined }, duration: Number.isFinite(+opts.seconds) && +opts.seconds > 0 ? +opts.seconds : 30 });
+    const mc = E.mcRun(job, n, seed);
+    const S = E.mcSummary(mc.results, job);
+    out.success = success.mode; out.within = success.posIn; out.degrees = success.degDeg;
+    out.target = mc.target; out.nominal = mc.nominal ? { pose: mc.nominal.pose, err: mc.nominal.err, ok: mc.nominal.ok } : null;
+    out.histogram = S.bins.map((b) => ({ from: b.lo, to: b.hi === Infinity ? null : b.hi, runs: b.n }));
+    out.results = mc.results.map((r) => ({ seed: r.seed, ok: r.ok, why: r.why, pose: r.pose, err: r.err, points: r.points, error: r.error, ended: r.ended,
+      extremes: (r.extremes || []).map((x) => x.text) }));
+    out.worst = S.worst.map((w) => w.seed);
+  }
+  out.passed = out.results.filter((r) => r.ok).length;
+  out.failed = out.results.length - out.passed;
+  out.successRate = out.results.length ? +(out.passed / out.results.length).toFixed(4) : 0;
+  return out;
+}
+let FIELD_ENGINE = null;
+/** The bench's engine with the BIOBUZZ field switched on, loaded once for the process. */
+export function fieldEngine() { return FIELD_ENGINE || (FIELD_ENGINE = loadWithField()); }
+
 /* ---- the command line ---- */
 function cli(argv) {
   const o = { code: [] };
-  const flags = { '--opmode': 'opmode', '--seconds': 'seconds', '--gamepad': 'gamepad', '--init': 'initSeconds' };
+  const flags = { '--opmode': 'opmode', '--seconds': 'seconds', '--gamepad': 'gamepad', '--init': 'initSeconds',
+    '--runs': 'runs', '--seed': 'seed', '--cad': 'cad', '--joints': 'joints', '--front': 'front', '--within': 'within', '--deg': 'degrees', '--min-rate': 'minRate' };
   let compact = false;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -288,12 +364,17 @@ function cli(argv) {
   }
   if (!o.code.length || !o.opmode) return usage(2, !o.code.length ? 'no folder or .java files given' : 'no --opmode given');
   for (const k of ['seconds', 'initSeconds']) if (o[k] != null) { o[k] = +o[k]; if (!Number.isFinite(o[k]) || o[k] < 0) return usage(2, 'a time must be a number of seconds'); }
+  for (const k of ['runs', 'seed', 'within', 'degrees', 'minRate']) if (o[k] != null) { o[k] = +o[k]; if (!Number.isFinite(o[k]) || o[k] < 0) return usage(2, '--' + (k === 'minRate' ? 'min-rate' : k === 'degrees' ? 'deg' : k) + ' must be a number'); }
+  if (o.runs != null && (o.runs < 1 || o.runs > 50 || o.runs !== Math.round(o.runs))) return usage(2, '--runs is a whole number from 1 to 50');
+  if (o.minRate != null && o.minRate > 1) return usage(2, '--min-rate is a share from 0 to 1');
+  if ((o.cad != null || o.joints != null) && o.runs == null) return usage(2, '--cad and --joints are for --runs');
   let r;
   try {
     if (o.gamepad != null) o.gamepad = JSON.parse(fs.readFileSync(o.gamepad, 'utf8'));
     r = runOpMode(o);
   } catch (e) { console.error('run-opmode: ' + (e && e.message || e)); return 2; }
   console.log(JSON.stringify(r, null, compact ? 0 : 2));
+  if (r.monteCarlo && o.minRate != null) return r.monteCarlo.successRate >= o.minRate ? 0 : 1;
   return r.ok ? 0 : 1;
 }
 function usage(code, why) {
@@ -301,12 +382,22 @@ function usage(code, why) {
   if (why) say('run-opmode: ' + why);
   say(`usage: node tools/run-opmode.mjs <folder or .java files…> --opmode <File.java> [--seconds 5]
                                 [--gamepad script.json] [--init 0.4] [--compact]
+                                [--runs N --seed S [--cad robot.step.gz --joints joints.json --front +x]
+                                 [--within 2 --deg 5] [--min-rate 0.7]]
   --opmode    the OpMode's file name, or the end of its path when two files share a name
   --seconds   seconds to run after START (default 5)
   --gamepad   a JSON file: [{"t": 0, "gamepad1": {"left_stick_y": -1}}, {"t": 2, "gamepad1": {"a": true}}]
               each step holds from its time (seconds after START) until the next
   --init      seconds the driver waits in INIT before START (default 0.4)
   --compact   the result on one line
+  --runs      run it N times (1 to 50), each with its own seed and a little variation; the batch comes back
+              in "monteCarlo": per-run results and the success rate. With --cad the runs are the full
+              rigid-body sim on that robot (friction, mass, battery, latency, start pose, field spread varied)
+              and a run works when it ends within --within inches and --deg degrees of the path's end.
+              Without --cad a run works when the OpMode ran clean (battery and start pose vary).
+  --seed      the batch's master seed (default 1): the same seed gives the same runs
+  --cad       the robot's STEP file (.step or .step.gz);  --joints its joint spec;  --front its front
+  --min-rate  exit 1 when the success rate is below this share (0 to 1), for CI
 Prints the result as JSON. Exit code 0: ran clean; 1: it didn't compile, a file couldn't be
 read, or the OpMode stopped on an error; 2: the command itself was wrong.`);
   return code;

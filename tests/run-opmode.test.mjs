@@ -338,3 +338,74 @@ test('the command line prints the result as JSON and says how it went in its exi
     assert.match(help.stdout, /usage: node tools\/run-opmode\.mjs/);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+/* ---- --runs / --seed: the OpMode many times, a little different each, and how often it worked ---- */
+test('runs: the same OpMode N times from seeds, per-run results and a success rate; nothing else in the result changes', () => {
+  const plain = runOpMode({ code: ITD, opmode: 'sample_teleop.java', seconds: 1 });
+  assert.equal('monteCarlo' in plain, false, 'asked for nothing extra, gets nothing extra');
+  const r = runOpMode({ code: ITD, opmode: 'sample_teleop.java', seconds: 1, runs: 4, seed: 3 });
+  // the run you always got is still there, field for field
+  for (const k of Object.keys(plain)) assert.deepEqual(r[k], plain[k], k);
+  const mc = r.monteCarlo;
+  assert.equal(mc.mode, 'stand-in'); assert.equal(mc.runs, 4); assert.equal(mc.seed, 3);
+  assert.equal(mc.results.length, 4);
+  assert.equal(mc.passed + mc.failed, 4); assert.equal(mc.successRate, 1);
+  assert.deepEqual(mc.results.map((x) => x.seed), [0, 1, 2, 3].map((i) => engine().mcSeedFor(3, i)));
+  for (const x of mc.results) {
+    assert.equal(x.ok, true); assert.ok(x.variation.volts >= 12 && x.variation.volts <= 13.5);
+    assert.ok(Math.abs(x.variation.startX) <= 1 && Math.abs(x.variation.startHeading) <= 2);
+  }
+  // the same seed, the same batch; another seed, another
+  assert.deepEqual(runOpMode({ code: ITD, opmode: 'sample_teleop.java', seconds: 1, runs: 4, seed: 3 }).monteCarlo, mc);
+  assert.notDeepEqual(runOpMode({ code: ITD, opmode: 'sample_teleop.java', seconds: 1, runs: 4, seed: 4 }).monteCarlo.results.map((x) => x.variation), mc.results.map((x) => x.variation));
+  // an OpMode that stops on an error works in none of them
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'run-opmode-runs-'));
+  try {
+    fs.writeFileSync(path.join(dir, 'MainTeleOpEncoders.java'), ENCODERS);
+    const bad = runOpMode({ code: dir, opmode: 'MainTeleOpEncoders.java', seconds: 1, runs: 3 });
+    assert.equal(bad.ok, false); assert.equal(bad.monteCarlo.successRate, 0); assert.equal(bad.monteCarlo.failed, 3);
+    assert.equal(bad.monteCarlo.results[0].error.cls, 'MissingClass');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  // 50 runs at most
+  assert.equal(runOpMode({ code: ITD, opmode: 'sample_teleop.java', seconds: 0.2, runs: 999 }).monteCarlo.runs, 50);
+});
+
+test('runs: with a robot (cad) the runs are the full sim: where the auto ends against the path\'s end, with the cause of each miss', () => {
+  const opts = { code: ITD, opmode: 'TheHolyGrail.java', seconds: 30, runs: 3, seed: 1, cad: path.join(ITD, 'robot.step.gz'), joints: path.join(ITD, 'joints.json') };
+  const r = runOpMode(opts);
+  const mc = r.monteCarlo;
+  assert.equal(mc.mode, 'physics'); assert.equal(mc.results.length, 3);
+  assert.equal(mc.success, 'pose'); assert.equal(mc.within, 2); assert.equal(mc.degrees, 5);
+  assert.deepEqual([mc.target.x, mc.target.y], [-18.95, 35]);
+  assert.ok(mc.nominal.err.pos < 2 && mc.nominal.ok);
+  for (const x of mc.results) {
+    assert.ok(Number.isFinite(x.err.pos) && Number.isFinite(x.err.deg) && x.pose && Array.isArray(x.extremes));
+    assert.equal(x.ok, x.err.pos <= 2 && x.err.deg <= 5);
+  }
+  assert.equal(mc.histogram.reduce((a, b) => a + b.runs, 0), 3);
+  assert.ok(mc.successRate >= 0 && mc.successRate <= 1 && mc.passed + mc.failed === 3);
+  // the same seed again, and a tighter threshold
+  assert.deepEqual(runOpMode(opts).monteCarlo.results, mc.results);
+  const tight = runOpMode(Object.assign({}, opts, { within: 0.01, degrees: 0.01 })).monteCarlo;
+  assert.equal(tight.passed, 0); assert.equal(tight.worst.length, 3);
+});
+
+test('runs: the command line takes --runs, --seed and --min-rate, and says what is wrong with them', () => {
+  const cli = (...args) => spawnSync(process.execPath, [TOOL, ...args], { encoding: 'utf8' });
+  const ok = cli(ITD, '--opmode', 'sample_teleop.java', '--seconds', '1', '--runs', '3', '--seed', '9', '--compact');
+  assert.equal(ok.status, 0, ok.stderr);
+  const r = JSON.parse(ok.stdout);
+  assert.equal(r.monteCarlo.runs, 3); assert.equal(r.monteCarlo.seed, 9); assert.equal(r.monteCarlo.successRate, 1);
+  assert.equal(cli(ITD, '--opmode', 'sample_teleop.java', '--seconds', '1', '--runs', '2', '--min-rate', '1').status, 0);
+  // the exit code follows the rate when it is asked to: a rate of 1 clears 0.5, an OpMode that stops on an error does not
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'run-opmode-runs-cli-'));
+  try {
+    fs.writeFileSync(path.join(dir, 'MainTeleOpEncoders.java'), ENCODERS);
+    assert.equal(cli(dir, '--opmode', 'MainTeleOpEncoders.java', '--runs', '2', '--min-rate', '0.5').status, 1);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  for (const bad of [['--runs', '0'], ['--runs', '51'], ['--runs', '2.5'], ['--runs', 'many'], ['--seed', 'x', '--runs', '2'], ['--runs', '2', '--min-rate', '2'], ['--cad', 'robot.step']]) {
+    const x = cli(ITD, '--opmode', 'sample_teleop.java', ...bad);
+    assert.equal(x.status, 2, bad.join(' '));
+  }
+  assert.match(cli('--help').stdout, /--runs/);
+});
