@@ -35,6 +35,10 @@ const Sim={
     this.footprint=footprintOf(cad,opts&&opts.front,this.base);
     // "walls": an auto written for another season's field only meets the walls
     this.obstacles=Field.ok&&!(opts&&opts.obstacles==="walls")?Field.obstacles(this.footprint.h):[];
+    // Monte Carlo (src/montecarlo.js): each element a little off its nominal place, in metres
+    if(opts&&Array.isArray(opts.obstacleOffsets)) this.obstacles=this.obstacles.map((o,i)=>{ const d=opts.obstacleOffsets[i];
+      return d?Object.assign({},o,{a:[o.a[0]+d[0],o.a[1]+d[1]], b:[o.b[0]+d[0],o.b[1]+d[1]]}):o; });
+    this.cmdQ=null;
     // the physical rig underneath: mass, wheels, motors. Null means we fall
     // back to the old kinematic glide, which is also what "kinematic" asks for.
     this.physics=(opts&&opts.physics)||"rigid";
@@ -90,7 +94,7 @@ const Sim={
       ray(){ return self.frontRay(); },
       color(){ let r=120,g=120,b=120; if(typeof Field!=="undefined"&&Field.ok&&Field.zoneAt){ const z=Field.zoneAt(self.chassis.x/0.0254,self.chassis.y/0.0254);
         if(z==="red LOADING ZONE"){ r=200; g=50; b=50; } else if(z==="blue LOADING ZONE"){ r=50; g=50; b=200; } else if(z==="red side") r=140; else if(z==="blue side") b=140; } return [r,g,b]; },
-      volts(){ return 12.6; },
+      volts(){ return self.opts&&self.opts.volts>0?self.opts.volts:12.6; },
       touch(name){ const s=self.dev[name]; if(!s||!s.mech) return self.frontRay()<0.015;
         const drv=Object.values(self.dev).find(o=>o!==s&&o.mech===s.mech&&(o.kind==="motor"||o.kind==="servo"));
         return drv?(drv.kind==="motor"?Math.abs(drv.ticks)<20:Math.abs(drv.act-drv.restPos)<0.02):false; },
@@ -582,7 +586,16 @@ const Sim={
   stepRigid(dt){
     this.steerModules();
     const W=this.rig.drive.wheels;
-    const cmd=this.rig.devs.map((n,i)=>this.wheelCmd(n,W[i]&&W[i].mount));
+    let cmd=this.rig.devs.map((n,i)=>this.wheelCmd(n,W[i]&&W[i].mount));
+    // control latency (opts.latencyMs, set by the Monte Carlo runner): the wheels act on what was
+    // commanded that long ago, blended between the two ticks it falls between
+    const lag=this.opts&&this.opts.latencyMs>0?this.opts.latencyMs/1000/dt:0;
+    if(lag>0){
+      const q=this.cmdQ||(this.cmdQ=[]); q.push(cmd);
+      const k=Math.ceil(lag); while(q.length>k+1) q.shift();
+      const a=q[Math.max(0,q.length-1-Math.floor(lag))], b=q[Math.max(0,q.length-1-k)], f=lag-Math.floor(lag);
+      cmd=a.map((v,i)=>v+(b[i]-v)*f);
+    }
     // setZeroPowerBehavior(FLOAT): at zero power that wheel coasts instead of braking
     const coast=this.rig.devs.map(n=>{ const s=this.dev[n]; return !!(s&&s.zpb==="FLOAT"); });
     const st=Dyn.step(this.dstate,cmd,this.rig,dt,coast);
@@ -782,6 +795,13 @@ function buildRig(cad,dtn,base,dev,opts){
     const c=toR([props.com.x,props.com.y,props.com.z]);
     props=Object.assign({},props,{com:{x:c[0],y:c[1],z:c[2]}, comHeight:c[2]});
   }
+  // a measured mass (src/calibrate.js) and Monte Carlo's mass spread: the same robot, heavier or lighter,
+  // its yaw inertia scaled with it
+  const cb=o.calib||{}, kgSet=cb.massKg>0?cb.massKg:0, kgMul=o.massScale>0?o.massScale:1;
+  if(kgSet||kgMul!==1){
+    const f=(kgSet||props.kg)*kgMul/props.kg, I=props.I||{};
+    props=Object.assign({},props,{kg:props.kg*f, Izz:props.Izz*f, I:Object.assign({},I,{xx:(I.xx||0)*f, yy:(I.yy||0)*f, zz:(I.zz||0)*f})});
+  }
   const geo=(typeof driveFromCAD==="function")?driveFromCAD(cad,{front:o.front}):null;
   const cadWheels=(geo&&geo.wheels)||[];
   const corners={};
@@ -872,9 +892,15 @@ function buildRig(cad,dtn,base,dev,opts){
     if(!steer.some(Boolean)) steer=null;
   }
   const sw=o.swerve||{};
-  return {props, drive:{kind, wheels, from:g0(geo)}, motors, devs, gear:(Number.isFinite(o.gear)&&o.gear>0)?o.gear:1, steer,
+  const rig={props, drive:{kind, wheels, from:g0(geo)}, motors, devs, gear:(Number.isFinite(cb.gear)&&cb.gear>0)?cb.gear:(Number.isFinite(o.gear)&&o.gear>0)?o.gear:1, steer,
           steerCfg:{zero:Number.isFinite(sw.zero)?sw.zero:0.5, travel:(Number.isFinite(sw.travelDeg)?sw.travelDeg:180)*Math.PI/180, sense:sw.sense===-1?-1:1},
           mu:(Number.isFinite(o.mu)&&o.mu>0)?o.mu:undefined};
+  // floor friction a share off the set value (Monte Carlo, src/montecarlo.js)
+  if(o.muScale>0&&o.muScale!==1) rig.mu=((Number.isFinite(o.mu)&&o.mu>0)?o.mu:Dyn.defaults.mu)*o.muScale;
+  // what a calibration fitted (src/calibrate.js): the drive's own drag and strafe loss; battery volts as a share of 12.6 V
+  for(const k of ["strafeEff","viscous","yawViscous"]) if(Number.isFinite(cb[k])&&cb[k]>0) rig[k]=cb[k];
+  if(o.volts>0&&Math.abs(o.volts-12.6)>1e-9) rig.vScale=o.volts/12.6;
+  return rig;
 }
 // where the wheel geometry came from, for the physics panel and the math sheet
 const g0=geo=>geo&&geo.wheels&&geo.wheels.length?"cad":"code";

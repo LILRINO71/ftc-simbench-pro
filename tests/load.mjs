@@ -10,9 +10,9 @@ import { fileURLToPath } from 'node:url';
 import { buildRobot } from '../tools/stepgen.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const ENGINE = ['hardware', 'samples', 'step', 'hull', 'inertia', 'expr', 'jvm', 'jvmlib', 'jvmprelude', 'jvmrun', 'java', 'roadrunner', 'mapping', 'robotconfig', 'compare', 'analyze', 'drivetrain', 'frame', 'mates', 'onshapelink', 'onshapecad', 'meshfiles', 'urdf', 'jointspec', 'jointsheet', 'pedrogen', 'partsdb', 'grader', 'autorig-lib', 'autorig', 'robotcheck', 'bind', 'dynamics', 'joltmech', 'field', 'shots', 'match', 'robotlite', 'net', 'netrelay', 'controllers', 'session', 'mathdoc', 'gitimport', 'onboarding', 'sim', 'tier'];
+const ENGINE = ['hardware', 'samples', 'step', 'hull', 'inertia', 'expr', 'jvm', 'jvmlib', 'jvmprelude', 'jvmrun', 'java', 'roadrunner', 'mapping', 'robotconfig', 'compare', 'analyze', 'drivetrain', 'frame', 'mates', 'onshapelink', 'onshapecad', 'meshfiles', 'urdf', 'jointspec', 'jointsheet', 'pedrogen', 'partsdb', 'grader', 'autorig-lib', 'autorig', 'robotcheck', 'bind', 'dynamics', 'joltmech', 'field', 'shots', 'match', 'robotlite', 'net', 'netrelay', 'controllers', 'session', 'mathdoc', 'gitimport', 'onboarding', 'sim', 'calibrate', 'montecarlo', 'tier'];
 const EXPORTS = [
-  'Field', 'Shots', 'IN', 'TIP_GRAMS', 'FRONTS', 'footprintOf', 'capsulePush', 'nearestMotorId', 'SHOOTER_JAVA',
+  'Field', 'Shots', 'IN', 'ELEMENT_G', 'TIP_GRAMS', 'FRONTS', 'footprintOf', 'capsulePush', 'nearestMotorId', 'SHOOTER_JAVA',
   'convexHull', 'boxCorners', 'solidTriangles', 'thinPoints', 'solidKind', 'sampleSolids', 'robotBase', 'makeRng',
   'padFromGamepad', 'padName', 'padFor', 'busiestPad', 'PAD_BUTTONS',
   'HW_PARTS', 'GENERIC', 'hwFromPart', 'specFor', 'ticksPerRev',
@@ -40,6 +40,9 @@ const EXPORTS = [
   'FTCSIM_MAGIC', 'packSession', 'unpackSession', 'sessionFromBench',
   'mathReport', 'mathText', 'mathMarkdown',
   'parseRepoRef', 'rawUrlsFor', 'pickOpModes', 'javaLooksLikeOpMode',
+  // calibration + Monte Carlo (src/calibrate.js, src/montecarlo.js)
+  'CAL_FORMAT', 'CAL_SECONDS', 'CAL_BOUNDS', 'calCmd', 'calApplyToRig', 'calRun', 'calMeasure', 'calTicksPerIn', 'calGearFor', 'calSanitize', 'calSolve', 'calFit', 'calOpts', 'calJava',
+  'MC_RANGES', 'MC_MAX_RUNS', 'mcRng', 'mcSeedFor', 'mcVariation', 'mcExtremes', 'mcPathEnd', 'mcRunOne', 'mcRun', 'mcSummary', 'mcCadForWorker', 'mcPlain', 'mcPrepare', 'mcHistogram', 'mcWorkerBody', 'mcSetup', 'mcJudge', 'mcNominal', 'mcTarget', 'mcSim', 'MC_KEYS', 'MC_AUTO_SECONDS', 'MC_DEFAULT_RUNS',
   'TOUR', 'statusOf', 'STATUS_RANK', 'deviceTier', 'tierMobile', 'TIER_BUDGETS',
 ];
 

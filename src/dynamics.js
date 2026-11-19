@@ -558,6 +558,7 @@ const Dyn = {
     const vEps = Math.max(1e-4, dynOpt(rig, "vEps"));
     const sweeps = Math.max(1, Math.min(32, Math.round(dynOpt(rig, "sweeps"))));
     const motors = Array.isArray(rig.motors) ? rig.motors : [];
+    const vScale = dynClamp(dynNum(rig.vScale, 1), 0.3, 2);
     const mOpts = { currentLimit: dynNum(rig.currentLimit, 0), stallAmps: rig.stallAmps, freeAmps: rig.freeAmps };
 
     const vx = st.v.x, vy = st.v.y, om = st.omega;
@@ -570,7 +571,9 @@ const Dyn = {
 
     for (let i = 0; i < n; i++) {
       const w = W[i], row = w.vel;
-      const spec = motors[i] || motors[0] || null;
+      let spec = motors[i] || motors[0] || null;
+      // a battery above or below the 12.6 V the specs are quoted at (rig.vScale): both stall torque and free speed go with it
+      if (vScale !== 1 && spec) spec = Object.assign({}, spec, { stallNm: dynNum(spec.stallNm, 0) * vScale, rpm: dynNum(spec.rpm, 0) * vScale });
       const c = dynClamp(dynNum(Array.isArray(cmd) ? cmd[i] : cmd, 0), -1, 1);
       // FLOAT at zero power: the windings are open, so no torque and no droop
       const open = c === 0 && Array.isArray(coast) && !!coast[i];
