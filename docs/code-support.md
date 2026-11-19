@@ -142,6 +142,33 @@ pass and `onStart(run)` just before START; `run` carries `t`, `tick`, `phase`, `
 `telemetry` and `devices`. [biobuzz-robot-2026](https://github.com/LILRINO71/biobuzz-robot-2026/blob/main/sim/run-opmode.mjs)
 models a whole robot this way and checks its auto and TeleOp in CI.
 
+### How often does the auto work? (`--runs`, `--seed`)
+
+```bash
+node tools/run-opmode.mjs TeamCode/src/main/java --opmode MyAuto.java --seconds 30 --runs 10 --seed 1 \
+  --cad Robot.step.gz --joints Robot.joints.json --within 2 --deg 5 --min-rate 0.7
+```
+
+`runs` (1 to 50) runs the same OpMode again and again, each run from its own seed so a batch comes
+out the same every time (`seed`, default 1). The plain run is exactly what it always was; the batch
+comes back as one more field, `monteCarlo`: `{mode, runs, seed, passed, failed, successRate, results}`.
+
+- **With `cad`** (a `.step` or `.step.gz`, and its joint spec in `joints`) every run is the full
+  rigid-body sim on that robot. Floor friction, mass, battery voltage, control latency, where the robot
+  is set down and where the field's elements sit are varied a little (the ranges are in `src/montecarlo.js`,
+  with the guessed ones marked as assumptions). A run works when the robot ends within `within` inches
+  and `degrees` degrees of the end of the Road Runner path. Each result has `seed`, `ok`, `pose`,
+  `err` (`pos` in inches, `deg`) and `extremes`, the variation that was far out in that run, so a miss
+  can be replayed (`seeds`) and explained. `histogram`, `target`, `nominal` (the run with no variation) and
+  `worst` (the three furthest-off seeds) come with it.
+- **Without `cad`** the runs are on the stand-in robot, which has no mass or friction to vary. Battery
+  voltage and the start pose are varied, and a run works when the OpMode ran clean.
+- `--min-rate 0.7` makes the exit code 1 when fewer than 70 % of the runs worked, for CI.
+
+In code: `runOpMode({ code, opmode, seconds: 30, runs: 10, seed: 1, cad, joints, within: 2, degrees: 5 })`;
+`success` takes a whole definition (`{mode: 'points', points: 10}` counts the alliance's AUTO points) and
+`vary` (`{ friction: false }`) holds a factor at its nominal.
+
 ## Seeing what was understood
 
 - **Java tab:** the parsed statements, and coverage. Each skipped line gives its reason.
