@@ -28,14 +28,14 @@ const PAGES_FILE_LIMIT = 25 * 1024 * 1024;   // Cloudflare Pages refuses a file 
 const OUT = fs.mkdtempSync(path.join(os.tmpdir(), 'simbench-size-'));
 const built = spawnSync(process.execPath, ['tools/build.mjs', '--min', '--out', OUT], { cwd: ROOT, encoding: 'utf8' });
 
-/* every file under dir as { 'posix/relative/path': bytes }; the worker's engine-<hash>.js is one entry, "engine-*.js" */
+/* every file under dir as { 'posix/relative/path': bytes }; each worker file with a hash in its name (engine-, shotsim-) is one entry, "engine-*.js" */
 function sizes(dir) {
   const out = {};
   const walk = (d) => {
     for (const e of fs.readdirSync(d, { withFileTypes: true })) {
       const f = path.join(d, e.name);
       if (e.isDirectory()) walk(f);
-      else out[path.relative(dir, f).split(path.sep).join('/').replace(/^engine-[0-9a-f]{8}\.js$/, 'engine-*.js')] = fs.statSync(f).size;
+      else out[path.relative(dir, f).split(path.sep).join('/').replace(/^(engine|shotsim)-[0-9a-f]{8}\.js$/, '$1-*.js')] = fs.statSync(f).size;
     }
   };
   walk(dir);
