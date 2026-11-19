@@ -213,8 +213,7 @@ fs.writeFileSync(path.join(DIST, '_headers'),
   `  Cache-Control: public, max-age=31536000, immutable\n` +
   // the folder names carry the version, so a file at one of these paths never changes
   `/vendor/*\n` +
-  `  Cache-Control: public, max-age=31536000, immutable
-` +
+  `  Cache-Control: public, max-age=31536000, immutable\n` +
   `/shotsim-*.js\n` +
   `  Cache-Control: public, max-age=31536000, immutable\n`, 'utf8');
 
