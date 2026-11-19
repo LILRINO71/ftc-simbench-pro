@@ -70,3 +70,21 @@ test('shot verdict: not computed while nothing shows it, computed once something
   idle.ctx.shotTick(4000);
   assert.deepEqual(idle.log, ['coarse']);
 });
+
+test('background step timer: a worker wakes the page 50 times a second only while an online match is on', () => {
+  const src = grab(/\nlet BG_TIMER=null;\nfunction bgSync\(\)\{[\s\S]*?\n\}\n/, 'bgSync');
+  const made = [];
+  class Worker { constructor() { this.dead = false; made.push(this); } terminate() { this.dead = true; } }
+  const ctx = { Online: { state: 'off' }, Worker, Blob: class {}, URL: { createObjectURL: () => 'blob:x' }, backgroundStep() {}, setInterval, clearInterval };
+  vm.createContext(ctx);
+  vm.runInContext(src + ';this.bgSync=bgSync;', ctx);
+  for (let i = 0; i < 5; i++) ctx.bgSync();
+  assert.equal(made.length, 0, 'offline: no timer at all');
+  ctx.Online.state = 'room';
+  for (let i = 0; i < 5; i++) ctx.bgSync();
+  assert.equal(made.length, 1, 'online: one worker, however often the loop checks');
+  ctx.Online.state = 'off'; ctx.bgSync();
+  assert.equal(made[0].dead, true, 'leaving the match stops it');
+  ctx.Online.state = 'playing'; ctx.bgSync();
+  assert.equal(made.length, 2, 'and the next match starts a new one');
+});

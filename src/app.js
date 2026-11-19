@@ -2707,7 +2707,7 @@ function frame(now){
   if(slowAcc>=0.05){ slowAcc=0; guarded(()=>{
     // measured before anything below writes the page: a layout read after a write flushes the layout
     const dsOn=shown("#dsPanel");
-    Pads.meters();
+    Pads.meters(); bgSync();
     // 20 times a second: only what's on screen, and only when it changed (each
     // innerHTML is a layout; a folded or hidden panel needs none)
     Graph.sample(); Graph.draw(); Graph.updateLegendValues();          // draw() skips itself off screen
@@ -2788,11 +2788,16 @@ function backgroundStep(){
     NetUI.tick();
   });
 }
-(()=>{
+/* The worker's 20 ms timer runs only while an online match is on (it wakes the page 50 times a second
+   to find nothing to do otherwise); the slow loop starts and stops it. */
+let BG_TIMER=null;
+function bgSync(){
+  const want=Online.state!=="off";
+  if(want===!!BG_TIMER) return;
+  if(!want){ if(BG_TIMER.terminate) BG_TIMER.terminate(); else clearInterval(BG_TIMER); BG_TIMER=null; return; }
   try{ const w=new Worker(URL.createObjectURL(new Blob(["setInterval(function(){postMessage(0)},20)"],{type:"text/javascript"})));
-    w.onmessage=backgroundStep; return; }catch(e){}
-  setInterval(backgroundStep,200);
-})();
+    w.onmessage=backgroundStep; BG_TIMER=w; }catch(e){ BG_TIMER=setInterval(backgroundStep,200); }
+}
 
 /* ============================================================
    PRO — one status light, the walkthrough, .ftcsim workspaces,
