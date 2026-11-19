@@ -9,12 +9,13 @@ Open **Online** in the top bar.
 | | |
 |---|---|
 | **Quick match** | Joins the fullest open match that has a free place. If there isn't one, it starts a new match that others can find. |
-| **Host a match** | Opens a room with a 5-letter code (like `K7QMX`). **Copy invite link** gives a link that opens SimBench with the code filled in. Tick **Listed under Open matches** to let anyone find it. |
+| **Host a match** | Opens a room with a 5-letter code (like `K7QMX`). **Copy link** gives a link that opens SimBench with the code filled in; **Copy watch link** gives one that joins as a spectator. Tick **Listed under Open matches** to let anyone find it. Keep that tab open: your computer runs the match. |
 | **Join** | Type a code, or pick one under **Open matches**. |
+| **Watch** | The same, as a spectator: no robot, no place, no controls. You see the match as it is played, and can chat with everyone. |
 
 ## In the room
 
-- **Places:** four, RED 1 and 2, BLUE 1 and 2. Take any free one, or **Just watch**. Up to eight people fit in a room; anyone without a place watches.
+- **Places:** four, RED 1 and 2, BLUE 1 and 2. Take any free one, or **Just watch**. Up to eight spectators can join beside the four drivers (twelve in a room), and the drivers see how many are watching. Someone who joins with **Watch** never takes a place, and a spectator can join while a match is running.
 - **Ready:** load your robot and pick an OpMode of the match's kind (a TeleOp for a TeleOp match), then press **I'm ready**.
 - **Host settings:** the host picks the period (TeleOp 2:00 or Auto 0:30) and how good the AI robots are, and presses **Start the match** once everyone with a place is ready.
 - **The start:** every robot goes to its place's start (G304) and INITs. After a 3-second countdown, every robot STARTs at the same moment.
