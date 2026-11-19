@@ -116,6 +116,11 @@ const page = `<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\
   `<meta name="viewport" content="width=device-width, initial-scale=1">\n` +
   `<meta name="color-scheme" content="dark light">\n` +
   `<meta name="theme-color" content="#0F1012">\n` +
+  // phone: add to home screen (site/manifest.webmanifest and the icons beside it)
+  `<link rel="manifest" href="/manifest.webmanifest">\n` +
+  `<link rel="apple-touch-icon" href="/apple-touch-icon.png">\n` +
+  `<meta name="mobile-web-app-capable" content="yes">\n<meta name="apple-mobile-web-app-capable" content="yes">\n` +
+  `<meta name="apple-mobile-web-app-title" content="SimBench">\n` +
   `<meta property="og:type" content="website">\n` +
   `<meta property="og:site_name" content="FTC SimBench Pro">\n` +
   `<meta property="og:title" content="FTC SimBench Pro: drive your real robot before it's built">\n` +
