@@ -2699,7 +2699,9 @@ function frame(now){
     stepFixed(8);
     NetUI.tick();
     View.setGhost(WATCH.ghost&&Sim.phase==="running"?ghostAt(WATCH.ghost,Sim.t):null, Sim.footprint);
-    View.update(); View.render(); Recorder.frame(REC_HUD); Pads.mirror();
+    Interp.apply(acc/0.02);
+    try{ View.update(); View.render(); Recorder.frame(REC_HUD); }finally{ Interp.restore(); }
+    Pads.mirror();
   });
   slowAcc+=dt;
   if(slowAcc>=0.05){ slowAcc=0; guarded(()=>{
@@ -2741,9 +2743,42 @@ const LoopTime={ms:0, add(v){ if(Number.isFinite(v)) this.ms=this.ms?this.ms+(v-
   text(){ return this.ms>=0.05?" · loop "+(this.ms<10?this.ms.toFixed(1):Math.round(this.ms))+" ms":""; }, slow(){ return this.ms>12; }};
 /* The sim and the online match in fixed 20 ms steps, as many as are due (at most max). */
 function stepFixed(max){
-  let n=0; while(acc>=0.02&&n++<max){ const t0=performance.now(); Sim.tick(0.02); LoopTime.add(performance.now()-t0); Online.step(0.02,Sim); acc-=0.02; }
+  let n=0; while(acc>=0.02&&n++<max){ Interp.snap(); const t0=performance.now(); Sim.tick(0.02); LoopTime.add(performance.now()-t0); Online.step(0.02,Sim); acc-=0.02; }
   if(acc>0.5) acc=0;
 }
+/* The picture between two steps. The sim moves in 20 ms steps and the screen shows 60, 120 or 144 frames a
+   second, so a frame with no step in it (and the next with two) made the robot judder. The robot and the AI
+   robots are drawn k of the way from where the last step began to where it ended, so every frame moves a
+   little, at the price of showing the robot up to one step (20 ms) late. Only while running, and never
+   across a jump. Sim state itself is only ever the real one: View.update reads the blended pose and it is
+   put back right after (restore). */
+const Interp={ ok:false, pc:{x:0,y:0,h:0}, sc:{x:0,y:0,h:0}, hit:false, bots:[], nb:0, sb:[],
+  snap(){
+    const c=Sim.chassis; this.ok=Sim.phase==="running"&&!!c;
+    if(!this.ok) return;
+    this.pc.x=c.x; this.pc.y=c.y; this.pc.h=c.h;
+    const B=Match.on?Match.bots:[]; this.nb=B.length;
+    while(this.bots.length<B.length) this.bots.push({o:null,x:0,y:0,h:0});
+    for(let i=0;i<B.length;i++){ const p=this.bots[i], b=B[i]; p.o=b; p.x=b.x; p.y=b.y; p.h=b.h; }
+  },
+  apply(k){
+    this.hit=false;
+    if(!this.ok||Sim.phase!=="running"||!(k>0)) return;
+    if(k>1) k=1;
+    const c=Sim.chassis, s=this.sc; s.x=c.x; s.y=c.y; s.h=c.h;
+    this.hit=lerpPose(c,this.pc,s,k);
+    const B=Match.on?Match.bots:[];
+    for(let i=0;i<B.length&&i<this.nb;i++){
+      const b=B[i], p=this.bots[i], q=this.sb[i]||(this.sb[i]={x:0,y:0,h:0,on:false});
+      q.on=false; if(p.o!==b) continue;
+      q.x=b.x; q.y=b.y; q.h=b.h; q.on=lerpPose(b,p,q,k);
+    }
+  },
+  restore(){
+    if(this.hit){ const c=Sim.chassis, s=this.sc; c.x=s.x; c.y=s.y; c.h=s.h; this.hit=false; }
+    const B=Match.on?Match.bots:[];
+    for(let i=0;i<B.length&&i<this.sb.length;i++){ const q=this.sb[i]; if(q&&q.on){ const b=B[i]; b.x=q.x; b.y=q.y; b.h=q.h; q.on=false; } }
+  } };
 function backgroundStep(){
   if(Online.state==="off"||performance.now()-frameAt<300) return;
   guarded(()=>{

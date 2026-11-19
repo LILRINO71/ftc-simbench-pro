@@ -905,5 +905,15 @@ function buildRig(cad,dtn,base,dev,opts){
 // where the wheel geometry came from, for the physics panel and the math sheet
 const g0=geo=>geo&&geo.wheels&&geo.wheels.length?"cad":"code";
 const clamp01=v=>Math.max(0,Math.min(1,v));
+/* The pose k of the way from a to b (heading the short way round), written into out. False, and out left
+   alone, for a jump (a reset, a drag, a robot put somewhere) that must be shown as it is, not smoothed. */
+function lerpPose(out,a,b,k){
+  const dx=b.x-a.x, dy=b.y-a.y;
+  if(!(dx*dx+dy*dy<0.25)) return false;           // over 0.5 m in one 20 ms step is not driving
+  const dh=Math.atan2(Math.sin(b.h-a.h),Math.cos(b.h-a.h));
+  if(!(Math.abs(dh)<1)) return false;
+  out.x=a.x+dx*k; out.y=a.y+dy*k; out.h=a.h+dh*k;
+  return true;
+}
 const SLEW=8;                                   // motor power change per second (power units / s)
 const RTP_LEAD=0.15;                              // s of travel RUN_TO_POSITION looks ahead
