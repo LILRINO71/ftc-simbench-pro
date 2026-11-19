@@ -105,23 +105,35 @@ SimBench's Onshape link yet, Onshape's Allow page takes the tab once and comes s
    Onshape tab, and a managed Chromebook that blocks `javascript:` bookmarks won't run it.
 2. **A link.** `https://ftc-simbench-pro.pages.dev/?onshape=<the assembly's address, encoded>`
    opens the same way: good for a team's README or a pinned message.
-3. **A button inside Onshape** (an app extension). In the developer portal
-   (<https://dev-portal.onshape.com> → OAuth applications → FTC SimBench → **Extensions** → Add
-   extension):
+3. **A menu entry inside Onshape** (an app extension). **Set up and working since 2026-11-18** on
+   the owner's account: right-click the **Assembly tab** at the bottom → **Applications → FTC
+   SimBench Launcher → Simulate in FTC SimBench**. A new tab opens and the robot is read (tried
+   on the Meet 0 redesign: 1,375 parts, nothing pasted). How it is built:
+
+   - The extension lives in its own OAuth app, **FTC SimBench Launcher** (Integrated Cloud App,
+     read-only), in the owner's Onshape account (My account → Developer → OAuth applications).
+     The app the site signs in with ("FTC SimBench", the one in Cloudflare) is in someone else's
+     Onshape account and could not be edited; an extension only opens an address, so it does not
+     have to belong to the same app. The Launcher's secret is not used by anything.
+   - It has a **private store entry** (category Simulation, plan FREE) and the owner is
+     subscribed to it: Onshape shows an extension only to accounts subscribed to its app. To give
+     it to teammates, set the entry's **Team visibility** to a team they are in; each then
+     subscribes once, free, in the App Store.
+   - Onshape appends `companyId`, `userId`, `clientId`, `locale` and `theme` to the address; the
+     page drops them with the rest.
+
+   The same fields, to add it to another app (My account → Developer → OAuth applications → the
+   app → **Extensions** → Add extension):
 
    | Field | Value |
    |---|---|
    | Name | Simulate in FTC SimBench |
    | Location | Element context menu (the right-click menu of a tab) |
-   | Context | Assembly |
+   | Context | Inside assembly |
    | Action type | Open in new window |
    | Action URL | `https://ftc-simbench-pro.pages.dev/?documentId={$documentId}&workspaceOrVersion={$workspaceOrVersion}&workspaceOrVersionId={$workspaceOrVersionId}&elementId={$elementId}&configuration={$configuration}` |
 
-   Right-clicking the Assembly tab then offers **Simulate in FTC SimBench**. Onshape shows an
-   extension only to accounts that have added the app, so this needs the store entry (private is
-   enough for the owner's own team; step 3 of "Getting listed" below). The portal's field names
-   are from Onshape's [extensions guide](https://onshape-public.github.io/docs/app-dev/extensions/)
-   and may be worded a little differently; the address is what matters. A new window keeps
+   A new window keeps
    SimBench's sign-in cookie first-party, which a panel inside Onshape would not (school
    Chromebooks block third-party cookies).
 
