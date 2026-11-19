@@ -1190,8 +1190,11 @@ function shotTick(now){
   const key=[(c.x/IN).toFixed(1),(c.y/IN).toFixed(1),Field.hive.red,Field.hive.blue,Shots.alliance,JSON.stringify(Shots.cfg)].join("|");
   if(key!==ShotUI.key){ ShotUI.key=key; ShotUI.still=now; ShotUI.dirty=true; ShotUI.full=false; }
   let fresh=false;
-  if(ShotUI.dirty&&now-ShotUI.t>=250){ shotEvaluate("coarse"); ShotUI.t=now; ShotUI.dirty=false; fresh=true; }
-  else if(!ShotUI.dirty&&!ShotUI.full&&now-ShotUI.still>=700&&(paneVisible("shot")||Shots.cfg.shooter)){ shotEvaluate("full"); ShotUI.full=true; fresh=true; }
+  // the verdict feeds the Shot tab, the arc and the flywheel's tick on the tab: with no flywheel in the
+  // code and the tab shut nobody reads it (~7 ms each time), so it waits (dirty stays set) until one does
+  const seen=!!Shots.cfg.shooter||paneVisible("shot");
+  if(ShotUI.dirty&&seen&&now-ShotUI.t>=250){ shotEvaluate("coarse"); ShotUI.t=now; ShotUI.dirty=false; fresh=true; }
+  else if(!ShotUI.dirty&&!ShotUI.full&&now-ShotUI.still>=700&&seen){ shotEvaluate("full"); ShotUI.full=true; fresh=true; }
   // what would happen if the robot fired right now: the shot on aim, and the
   // share of real, scattered shots that go in — with the robot's motion in both
   ShotUI.preview=null;
@@ -2237,7 +2240,7 @@ const Pads={
   },
   padOf(p){ return this.list().filter(g=>this.assign[g.index]===p)[0]||null; },
   poll(){
-    const gps=this.list();
+    const gps=this.cur=this.list();                  // mirror() reads this frame's list too, not a second one
     for(const g of gps){
       if(this.assign[g.index]==null) this.connect(g);        // some browsers skip the connect event
       const p=this.assign[g.index]; if(!p) continue;
@@ -2249,7 +2252,7 @@ const Pads={
   },
   /* The on-screen gamepad mirrors a real controller on the pad it shows. */
   mirror(){
-    if(!this.padOf(activePad)) return;
+    if(!this.cur||!this.cur.some(g=>this.assign[g.index]===activePad)) return;
     const st=Sim.pad[activePad];
     $$("#padwrap [data-btn]").forEach(el=>{ const v=st[el.dataset.btn]; el.classList.toggle("down",typeof v==="number"?v>0.2:!!v); });
     for(const k of STICKS){ const knob=$(`[data-knob="${k.id}"]`); if(!knob) continue;
@@ -2700,11 +2703,13 @@ function frame(now){
   });
   slowAcc+=dt;
   if(slowAcc>=0.05){ slowAcc=0; guarded(()=>{
+    // measured before anything below writes the page: a layout read after a write flushes the layout
+    const dsOn=shown("#dsPanel");
     Pads.meters();
     // 20 times a second: only what's on screen, and only when it changed (each
     // innerHTML is a layout; a folded or hidden panel needs none)
     Graph.sample(); Graph.draw(); Graph.updateLegendValues();          // draw() skips itself off screen
-    if(shown("#dsPanel")) setIfChanged($("#dsPanel"),renderDS());
+    if(dsOn) setIfChanged($("#dsPanel"),renderDS());
     updateClock(); updateConfigValues(); renderMatchHud();
     const pip=$("#pip");
     if(pip&&!pip.hidden&&!pip.classList.contains("closed")){ const m=renderMech();
@@ -2763,9 +2768,17 @@ function backgroundStep(){
 /* ---------- the one light -------------------------------- */
 const Status={
   cur:null,
+  /* whether the front is set across the wheels: measuring the wheels is ~10 ms, so once per robot and front, not 4 times a second */
+  across(){
+    if(!CAD) return false;
+    const n=(CAD.solids||[]).length, c=this.ac;
+    if(c&&c.cad===CAD&&c.front===OPTS.front&&c.n===n) return c.v;
+    const v=!!frontAcrossWheels(CAD,OPTS.front);
+    this.ac={cad:CAD,front:OPTS.front,n,v};
+    return v;
+  },
   compute(){
-    const rt={ stalled:[], missing:[], blocked:!!(Sim&&Sim.blocked), slipping:!!(Sim&&Sim.slipping),
-               frontAcross:!!(CAD&&frontAcrossWheels(CAD,OPTS.front)) };
+    const rt={ stalled:[], missing:[], blocked:!!(Sim&&Sim.blocked), slipping:!!(Sim&&Sim.slipping), frontAcross:this.across() };
     return statusOf(FINDINGS,rt);
   },
   render(){
