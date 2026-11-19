@@ -24,7 +24,7 @@ export const SITE = 'https://ftc-simbench-pro.pages.dev';
 // earlier ones define. The engine never touches the DOM; only view3d and app do.
 export const ORDER = ['hardware', 'samples', 'step', 'hull', 'inertia', 'expr', 'jvm', 'jvmlib', 'jvmprelude', 'jvmrun', 'java', 'roadrunner', 'mapping', 'robotconfig',
   'compare', 'analyze', 'drivetrain', 'frame', 'mates', 'onshapelink', 'onshapecad', 'meshfiles', 'urdf', 'jointspec', 'jointsheet', 'pedrogen', 'partsdb', 'grader', 'autorig-lib', 'autorig', 'robotcheck', 'bind', 'dynamics', 'joltmech', 'field', 'shots', 'match', 'robotlite', 'net', 'netrelay', 'controllers', 'session', 'mathdoc',
-  'gitimport', 'onboarding', 'sim', 'tier', 'tessellate', 'view3d', 'cadview', 'engineworker', 'importflow', 'recorder', 'sounds', 'leaderboard', 'results', 'minimap', 'pathedit', 'keybinds', 'app'];
+  'gitimport', 'onboarding', 'sim', 'calibrate', 'montecarlo', 'tier', 'tessellate', 'view3d', 'cadview', 'engineworker', 'importflow', 'recorder', 'sounds', 'leaderboard', 'results', 'minimap', 'pathedit', 'keybinds', 'app'];
 // The browser-side files: everything before them is the engine, which also ships on
 // its own as dist/engine.js for the background worker (src/engineworker.js).
 export const BROWSER = ['tessellate', 'view3d', 'cadview', 'engineworker', 'importflow', 'recorder', 'sounds', 'leaderboard', 'results', 'minimap', 'pathedit', 'keybinds', 'app'];
@@ -58,7 +58,9 @@ const banner = `/*! FTC SimBench Pro ${pkg.version} (${build}) — Copyright (c)
 // the engine alone, for the worker that parses CAD off the page's thread. Its name
 // carries the build hash so a new deploy never runs an old worker from the cache.
 const ENGINE_FILE = `engine-${build}.js`;
-let js = '"use strict";\n' + `var SIMBENCH_ENGINE_URL=${JSON.stringify(ENGINE_FILE)};\n` + engine + `\nvar SIMBENCH_BUILD=${JSON.stringify({ v: pkg.version, build })};\n`;
+// the Shot Sim and its field data once more, as a file a worker can load (the Monte Carlo runner, src/mcui.js)
+const SHOT_FILE = `shotsim-${crypto.createHash('sha256').update(rd('vendor', 'biobuzz-shot-sim', 'engine.js')).update(rd('vendor', 'biobuzz-shot-sim', 'data', 'field.json')).digest('hex').slice(0, 8)}.js`;
+let js = '"use strict";\n' + `var SIMBENCH_ENGINE_URL=${JSON.stringify(ENGINE_FILE)};\nvar SIMBENCH_SHOT_URL=${JSON.stringify(SHOT_FILE)};\n` + engine + `\nvar SIMBENCH_BUILD=${JSON.stringify({ v: pkg.version, build })};\n`;
 let engineJs = '"use strict";\n' + engineOnly + `\nvar SIMBENCH_BUILD=${JSON.stringify({ v: pkg.version, build })};\n`;
 let css = rd('src', 'styles.css');
 let markup = rd('src', 'markup.html');
@@ -71,6 +73,8 @@ const SHOT = path.join('vendor', 'biobuzz-shot-sim');
 const shotData = { field: JSON.parse(rd(SHOT, 'data', 'field.json')), motors: JSON.parse(rd(SHOT, 'data', 'motors.json')), shooter: JSON.parse(rd(SHOT, 'data', 'shooter.json')) };
 let shotJs = `window.SHOT_DATA = ${JSON.stringify(shotData)};\n${rd(SHOT, 'engine.js')}`;
 if (MIN) shotJs = minifyJS(shotJs);
+let shotWorkerJs = `self.SHOT_DATA = ${JSON.stringify(shotData)};\n${rd(SHOT, 'engine.js')}`;
+if (MIN) shotWorkerJs = minifyJS(shotWorkerJs);
 
 // what a shared link says under its title
 const SHARE = 'Load your team\'s CAD and Java OpModes and drive them on the 2026-27 BIOBUZZ field: real physics, AI alliance partners, and online matches with other teams. Free, in the browser.';
@@ -100,6 +104,8 @@ fs.writeFileSync(path.join(DIST, 'fragment.html'), fragment, 'utf8');
 // the engine for the worker; old hashes are left behind by each deploy's clean build
 for (const f of fs.readdirSync(DIST)) if (/^engine-[0-9a-f]{8}\.js$/.test(f) && f !== ENGINE_FILE) fs.unlinkSync(path.join(DIST, f));
 fs.writeFileSync(path.join(DIST, ENGINE_FILE), engineJs, 'utf8');
+for (const f of fs.readdirSync(DIST)) if (/^shotsim-[0-9a-f]{8}\.js$/.test(f) && f !== SHOT_FILE) fs.unlinkSync(path.join(DIST, f));
+fs.writeFileSync(path.join(DIST, SHOT_FILE), shotWorkerJs, 'utf8');
 
 const favicon = 'data:image/svg+xml,' + encodeURIComponent(
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">' +
@@ -207,6 +213,9 @@ fs.writeFileSync(path.join(DIST, '_headers'),
   `  Cache-Control: public, max-age=31536000, immutable\n` +
   // the folder names carry the version, so a file at one of these paths never changes
   `/vendor/*\n` +
+  `  Cache-Control: public, max-age=31536000, immutable
+` +
+  `/shotsim-*.js\n` +
   `  Cache-Control: public, max-age=31536000, immutable\n`, 'utf8');
 
 const kb = (s) => (s.length / 1024).toFixed(0) + ' KB';
