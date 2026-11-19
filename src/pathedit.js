@@ -60,8 +60,12 @@ const PathEdit={
     this.on=true; $("#pathPanel").hidden=false; $("#pathBtn").classList.add("on");
     $("#peName").value=this.P.name;
     this.render(); this.renderLegs(); this.renderCode(); this.show3d();
+    // the grade is for this robot's size: when the robot changes (the team's own comes in after the page opens), grade again
+    clearInterval(this.fpTimer); this.fpKey=this.fpSig();
+    this.fpTimer=setInterval(()=>{ const k=this.fpSig(); if(k!==this.fpKey){ this.fpKey=k; this.renderGrade(); } },500);
   },
-  close(){ this.on=false; $("#pathPanel").hidden=true; $("#pathBtn").classList.remove("on"); if(View.setPath) View.setPath(null); },
+  fpSig(){ const f=Sim.footprint; return f?[f.hx,f.hy,f.h,f.ox||0,f.oy||0].join("|"):""; },
+  close(){ clearInterval(this.fpTimer); this.on=false; $("#pathPanel").hidden=true; $("#pathBtn").classList.remove("on"); if(View.setPath) View.setPath(null); },
   store(){ try{ store.set("ftcbench.pedroPath",JSON.stringify(this.P)); }catch(e){} },
   changed(){ this.store(); this.render(); this.renderLegs(); this.renderCode(); this.show3d(); },
   show3d(){ if(View.setPath&&this.P) View.setPath(pedroPolyline(this.P,20).map(p=>{ const f=pedroToField({x:p[0],y:p[1]}); return [f.x,f.y]; })); },

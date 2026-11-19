@@ -1354,7 +1354,6 @@ function refitRobot(){
   Sim.footprint=footprintOf(CAD,OPTS.front,Sim.base);
   Sim.obstacles=Field.ok&&OPTS.obstacles!=="walls"?Field.obstacles(Sim.footprint.h):[];
   if(Field.ok) Field.collide(Sim.chassis,Sim.footprint,Sim.obstacles);
-  if(typeof PathEdit!=="undefined"&&PathEdit.on&&PathEdit.P) PathEdit.renderGrade();       // the path's grade is for this robot's size
   // the physics rig is built in the robot's own axes, so a new front (or a
   // drawn base) needs a new one — a stale rig kept the wheels placed for the
   // old front and the robot slid sideways when it turned
