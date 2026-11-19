@@ -245,6 +245,7 @@ function selectOpMode(id){
   Graph.reset(); renderConfigVars(); renderLegend3D();
   renderOpList(); renderOpSelect(); renderCompareSelects(); updateDS();
   NetUI.opChanged();
+  if(typeof McUI!=="undefined") McUI.sync();               // the Monte Carlo panel follows the selected OpMode (src/mcui.js)
 }
 function addOpModeFromText(file,text){
   if(!isOpModeSource(text)&&/\bclass\s+\w+/.test(text)){
@@ -266,7 +267,7 @@ function addOpModeFromText(file,text){
    DRIVER STATION
    ============================================================ */
 const PERIOD={TeleOp:120, Autonomous:30};
-function withPose(){ OPTS.startPose=Object.assign({x:0,y:0,h:0},Sim.chassis||{}); return OPTS; }
+function withPose(){ OPTS.startPose=Object.assign({x:0,y:0,h:0},Sim.chassis||{}); if(typeof CalUI!=="undefined") CalUI.apply(); return OPTS; }   // CalUI: the saved calibration goes in with the pose (src/mcui.js)
 function applyConfigOverrides(){ for(const k in CONFIG_OVR) Sim.vars[k]=CONFIG_OVR[k]; }
 /* The INIT button. Online, the match INITs and STARTs everyone together (NetUI). */
 function dsInit(){ if(Online.inMatch()) return; initNow(); }
@@ -3124,6 +3125,7 @@ function proBoot(){
   if(OPTS.mechanisms==="jolt") setTimeout(()=>Physics.mechanisms("jolt"),0);   // loads Jolt, then reloads the sim with it
   OPTS.mu=+store.get("ftcbench.mu","0.9")||0.9;
   Status.wire(); Tour.wire(); GH.wire(); Physics.wire(); MathTab.wire();
+  CalUI.wire(); McUI.wire();                                // calibration and Monte Carlo panels (src/mcui.js)
   $("#sessionBtn").addEventListener("click",()=>Menu.open());
   $("#saveSession").addEventListener("click",()=>{ Menu.open(false); Session.save(); });
   $("#openSession").addEventListener("click",()=>{ Menu.open(false); $("#sessionFile").click(); });

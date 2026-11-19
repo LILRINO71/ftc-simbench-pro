@@ -1080,3 +1080,30 @@ button.rmbtn{color:var(--label-3);} button.rmbtn:hover{color:var(--fail);}
   .op-pick select{width:100%; min-width:0;}
   .ds-btn{padding:0 9px;}
 }
+
+/* ---- calibration and Monte Carlo (src/mcui.js) ---- */
+.cal-btns{display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:12px;}
+.cal-on{font-size:12px; color:var(--label-2); display:inline-flex; align-items:center; gap:5px; margin-left:auto;}
+.cal-on input,.mc-vary input{accent-color:var(--accent);}
+.mc-status{font-size:12px; color:var(--label-2); min-height:16px; margin-top:8px;}
+.mc-status.bad{color:var(--fail);}
+#calResult{margin-top:6px;}
+table.cal-grid td,table.cal-grid th{padding:6px 4px;}
+table.cal-grid td.num small,table.cal-grid td small{display:block; font-size:10.5px; color:var(--label-3); font-family:var(--body); text-align:inherit;}
+table.cal-grid td:first-child{line-height:1.25;}
+.mc-bar-prog{flex:1; min-width:80px; height:6px; accent-color:var(--accent);}
+.mc-vary{display:flex; align-items:baseline; gap:6px; font-size:12px; padding:3px 0; flex-wrap:wrap;}
+.mc-head{font-size:13px; margin:10px 0 6px;}
+.mc-rate{font-size:20px; font-weight:650; letter-spacing:-.01em;}
+.mc-hist{display:grid; gap:4px; margin:6px 0 2px;}
+.mc-bin{display:grid; grid-template-columns:78px minmax(0,1fr) 22px; align-items:center; gap:8px; font-size:11.5px;}
+.mc-lab{font-family:var(--mono); color:var(--label-3); text-align:right; white-space:nowrap;}
+.mc-bar{display:block; height:10px; border-radius:5px; background:var(--fill-4); overflow:hidden;}
+.mc-bar i{display:block; height:100%; border-radius:5px; min-width:2px;}
+.mc-bar i.ok{background:var(--pass);} .mc-bar i.miss{background:var(--fail);}
+.mc-n{font-family:var(--mono); color:var(--label-2); text-align:right;}
+.mc-sub{font-size:12px; font-weight:600; color:var(--label-2); margin:14px 0 4px;}
+.mc-run{border-top:1px solid var(--sep-2); padding:8px 0; font-size:12px; display:grid; gap:3px;}
+.mc-miss{color:var(--fail);}
+.mc-acts{display:flex; gap:6px; margin-top:4px; flex-wrap:wrap;}
+

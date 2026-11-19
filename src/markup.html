@@ -455,6 +455,56 @@
         <p class="hint">Rigid body: the CAD's mass, centre of mass and wheel grip, so it accelerates and slips like the build. Kinematic: instant and perfect.</p>
         <p class="hint" id="mechNote">Posed: each joint goes where its motor's turns put it. Solved: Jolt Physics works out what the motors can actually do against gravity, the joints' limits, gears and linkages.</p>
       </div>
+      <!-- calibration and Monte Carlo (src/calibrate.js, src/montecarlo.js, src/mcui.js) -->
+      <div class="sec card" data-sec="calib">
+        <div class="sec-head"><h3>Calibrate to your robot</h3><span class="pill" id="calPill">not fitted</span></div>
+        <p class="hint">Run the real robot at full power for 2 seconds from a standstill and enter what you measured. Leave a box empty to skip it. Weigh it with its battery on.</p>
+        <div class="form2">
+          <span>Units</span>
+          <div class="seg" id="calUnit" title="Speeds in inches or metres per second"><button data-u="in">in/s</button><button data-u="m">m/s</button></div>
+          <label for="calFwd">Forward speed</label><div><input class="mini" id="calFwd" type="number" min="0" step="any"> <span class="dim" data-calunit>in/s</span></div>
+          <label for="calStrafe">Strafe speed</label><div><input class="mini" id="calStrafe" type="number" min="0" step="any"> <span class="dim" data-calunit>in/s</span></div>
+          <label for="calTurn">Turn rate</label><div><input class="mini" id="calTurn" type="number" min="0" step="any"> <span class="dim">deg/s</span></div>
+          <label for="calMass">Mass</label><div><input class="mini" id="calMass" type="number" min="0" step="any"> <span class="dim">kg</span></div>
+          <label for="calTicks">Encoder ticks</label><div><input class="mini" id="calTicks" type="number" min="0" step="any"> <span class="dim">per inch (optional)</span></div>
+        </div>
+        <div class="cal-btns">
+          <button class="btn-sm primary" id="calFit" type="button">Fit the sim</button>
+          <button class="btn-sm" id="calReset" type="button">Clear</button>
+          <button class="btn-sm" id="calJava" type="button">Download measuring OpMode</button>
+          <label class="cal-on"><input type="checkbox" id="calOn" checked> use it</label>
+        </div>
+        <div class="mc-status" id="calStatus" role="status"></div>
+        <div id="calResult"></div>
+        <div id="calNotes"></div>
+      </div>
+      <div class="sec card" data-sec="mc">
+        <div class="sec-head"><h3>Auto success rate</h3><span class="pill" id="mcPill">—</span></div>
+        <p class="hint" id="mcWhich"></p>
+        <div class="form2">
+          <label for="mcRuns">Runs</label><div><input class="mini" id="mcRuns" type="number" min="1" max="50" step="1" value="10"> <span class="dim">up to 50</span></div>
+          <label for="mcSeed">Seed</label><div><input class="mini" id="mcSeed" type="number" min="0" step="1" value="1"> <span class="dim">same seed, same runs</span></div>
+          <span>It works if</span>
+          <div class="seg" id="mcMode"><button data-mode="pose">it ends in place</button><button data-mode="points">it scores</button></div>
+          <span id="mcPoseRow0">Within</span>
+          <div id="mcPoseRow"><input class="mini" id="mcPos" type="number" min="0.1" step="0.1" value="2"> <span class="dim">in and</span> <input class="mini" id="mcDeg" type="number" min="0.5" step="0.5" value="5"> <span class="dim">deg of the target</span></div>
+          <span id="mcPtsRow0" hidden>At least</span>
+          <div id="mcPtsRow" hidden><input class="mini" id="mcPts" type="number" min="0" step="1" value="3"> <span class="dim">AUTO points</span></div>
+        </div>
+        <details class="fine"><summary>What changes from run to run</summary>
+          <div id="mcVaryList"></div>
+          <p class="hint">Ranges marked assumed are guesses, not measurements. The field itself is measured: elements move a little around where they are, never away from it.</p>
+        </details>
+        <div class="cal-btns">
+          <button class="btn-sm primary" id="mcRun" type="button">Run it</button>
+          <button class="btn-sm" id="mcCancel" type="button" hidden>Cancel</button>
+          <progress id="mcBar" class="mc-bar-prog" value="0" max="10" hidden></progress>
+        </div>
+        <div class="mc-status" id="mcStatus" role="status"></div>
+        <div class="hint" id="mcWatchNote" hidden>The sim is running a recorded run's variation. <button class="btn-sm" id="mcWatchOff" type="button">Back to normal</button></div>
+        <div id="mcResult"></div>
+        <div id="mcReplay"></div>
+      </div>
       <div class="sec card" data-sec="cfgvars">
         <div class="sec-head"><h3>Config variables</h3><span class="pill" id="cfgVarPill">—</span></div>
         <p class="hint" id="cfgVarNote"></p>
