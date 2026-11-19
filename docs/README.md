@@ -11,6 +11,7 @@
 | [robot-check.md](robot-check.md) | How every robot ends up right: exact Onshape mates, the robot check against the team's code, and the questions it asks. The real-team CAD test set. |
 | [code-support.md](code-support.md) | Which Java runs: TeleOps, plain autos, Road Runner 1.0 autos with helper classes, and what is simulated differently from the real robot. |
 | [onshape-app-store.md](onshape-app-store.md) | Making the Onshape link free for every team: why the App Store (the API allowance), whether the link is accurate, the steps to get listed, and what QA checks. |
+| [phone.md](phone.md) | SimBench on a phone: the one-tap quick start, the on-screen sticks and buttons and how they feed the same gamepad as the keyboard, fullscreen and the home screen, and the four guided challenges with their exact checks. |
 | [../DEPLOY.md](../DEPLOY.md) | Hosting the built page on Cloudflare Pages. |
 | [../AGENTS.md](../AGENTS.md) | How the coding agents on this repo share it: rules, file claims, conventions (motor direction, robot frame, joints). |
 
