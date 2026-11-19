@@ -208,6 +208,11 @@ test('launch: the address bar keeps everything but the assembly, so a reload rea
   assert.equal(E.onshapeLaunchStrip(`?alliance=red&documentId=${d}&workspaceId=${w}&elementId=${e}&view=cad`), '?alliance=red&view=cad');
   assert.equal(E.onshapeLaunchStrip('?onshape=' + encodeURIComponent('https://cad.onshape.com/documents/' + d) + '&tier=1'), '?tier=1');
   assert.equal(E.onshapeLaunch(E.onshapeLaunchStrip(`?documentId=${d}&workspaceId=${w}&elementId=${e}`)), null);
+  // what Onshape itself appends when its menu entry is clicked (the address as it arrived on 2026-11-18)
+  const real = `?documentId=${d}&workspaceOrVersion=w&workspaceOrVersionId=${w}&elementId=${e}&configuration=default&companyId=cad&sessionCompanyId=${d}&userId=${w}&clientId=ABC%3D&locale=en-US&theme=light`;
+  assert.equal(E.onshapeLaunchStrip(real), '', 'no account id is left in the address bar');
+  assert.equal(E.onshapeLaunch(real), `https://cad.onshape.com/documents/${d}/w/${w}/e/${e}?configuration=default`);
+  assert.equal(E.onshapeLaunchStrip(real + '&view=cad'), '?view=cad');
 });
 
 test('launch: the bookmark, clicked on an Assembly tab, opens SimBench with that tab\'s address to read', () => {

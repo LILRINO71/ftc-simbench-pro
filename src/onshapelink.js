@@ -76,11 +76,14 @@ function onshapeBookmark(site){
   // its pattern is written with [/] and [.]: a bookmark's address is no place for backslashes
   return "javascript:(function(){var u=location.href;if(!/^https:[/][/]([a-z0-9-]+[.])*onshape[.]com[/]documents[/][0-9a-f]{24}[/][wvm][/][0-9a-f]{24}[/]e[/][0-9a-f]{24}/i.test(u)){alert('Open your robot in Onshape and click its Assembly tab first, then click this bookmark.');return;}window.open("+JSON.stringify(to)+"+'?onshape='+encodeURIComponent(u),'_blank');})()";
 }
+/* what Onshape adds to an extension's address by itself (seen 2026-11-18): who clicked and from where.
+   None of it is read, and an account's id has no business staying in an address someone may copy */
+const ONSHAPE_ADDED_KEYS=["companyId","sessionCompanyId","userId","clientId","locale","theme"];
 /* The page's query without what onshapeLaunch read, so a reload or a shared
    address doesn't read the assembly again: "" or "?…". */
 function onshapeLaunchStrip(search){
   let q; try{ q=new URLSearchParams(String(search||"").replace(/^\?/,"")); }catch(e){ return ""; }
-  for(const k of ONSHAPE_LAUNCH_KEYS) q.delete(k);
+  for(const k of ONSHAPE_LAUNCH_KEYS.concat(ONSHAPE_ADDED_KEYS)) q.delete(k);
   const s=q.toString(); return s?"?"+s:"";
 }
 
