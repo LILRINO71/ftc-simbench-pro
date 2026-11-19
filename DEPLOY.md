@@ -21,8 +21,8 @@ That writes `dist/`:
 | `_headers` | cache and security headers, read by Cloudflare Pages |
 | `robots/`, `demo/`, `og.png` | the default robot, the demo STEP and the link-preview image |
 
-`functions/onshape/[[path]].js` is not in `dist/`: Cloudflare Pages picks up `functions/` by
-itself and serves it at `/onshape/*`.
+`functions/` (`onshape`, `room`, `leaderboard`) is not in `dist/`: Cloudflare Pages picks it up by
+itself and serves each folder at `/onshape/*`, `/room/*` and `/leaderboard/*`.
 
 Three external requests remain at runtime: Google Fonts, the three.js CDN (jsDelivr) and
 OpenCascade (jsDelivr, the first time a STEP is dropped). `dist/` is build output and is never
@@ -186,6 +186,45 @@ For sites without rooms, or as WebRTC's fallback: Cloudflare Realtime TURN relay
 TCP port 443 when UDP is blocked. Create a TURN key in **Realtime → TURN**, then add two secrets
 to the Pages project: `TURN_KEY_ID` and `TURN_KEY_API_TOKEN`. `/room/turn` hands browsers
 short-lived credentials; the key never reaches the page. 1,000 GB a month is free.
+
+## Shared leaderboard (optional, free)
+
+Every player's personal bests are kept in their own browser, and the results card shows
+them with nothing to set up. A board everyone shares needs one place to keep the scores:
+a Cloudflare **KV namespace**. Without it, `/leaderboard` answers `501 {"error":"not set up"}`
+and the page quietly shows personal bests only. Nothing else breaks.
+
+The one-time step, in the Cloudflare dashboard (no code, no card):
+
+1. **Workers & Pages → KV → Create a namespace.** Name it `simbench-leaderboard`.
+2. **Workers & Pages → ftc-simbench-pro → Settings → Bindings → Add → KV namespace.**
+   Variable name `LEADERBOARD` (exactly that), namespace `simbench-leaderboard`.
+   Add it for Production (and Preview if you test there).
+3. **Deployments → the latest one → Retry deployment**, so the function sees it.
+4. Check: `https://<site>/leaderboard` answers `{"boards":{"teleop":[],"auto":[]},...}`.
+   After a match, the results card now offers **Post my score**.
+
+How it behaves (`functions/leaderboard/[[path]].js`, `tests/leaderboard-function.test.mjs`):
+
+- Two boards, TeleOp and Auto, the top 50 each. An entry is a display name the player
+  chose, the score, the robot's and the OpMode's name, and the date. No account, no e-mail,
+  no address. A player posts on purpose, with a button; nothing is sent by itself.
+- One entry per name, robot and mode, keeping the best. A score is a whole number from 1
+  to 500 (TeleOp) or 150 (Auto), the most one alliance can score with room to spare
+  (`LIMITS` in that file; raise them if the game's points change in `src/match.js`).
+- A name is 1 to 24 letters and numbers, and is turned down if it is rude, a web address
+  or a phone number. It is a plain word filter, not a moderator: if something slips through,
+  delete the key `board:teleop` or `board:auto` in the KV dashboard, or edit its JSON.
+- Each address may post 8 times in 10 minutes. Only a SHA-256 hash of it is stored, in a key
+  that expires by itself (`rl:...`).
+- Only the site's own pages may call it (the `Origin` is checked).
+- A score comes from the player's browser and nothing can prove it was played. This is a
+  board for fun and for teams that trust each other, not for prizes.
+
+**Cost: free tier.** KV's free plan allows 100,000 reads and 1,000 writes a day. Each post
+is two writes (the address's counter and the board), so about 500 posts a day; a read is one
+per board shown (cached for 15 seconds). Past that, posts fail quietly and personal bests keep
+working. Workers Paid ($5 a month) lifts the limit, and only if you ever want it.
 
 ## About "protecting" the code
 
