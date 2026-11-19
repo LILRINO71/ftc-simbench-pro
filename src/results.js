@@ -103,7 +103,7 @@ const Results={
       :B.isNew?`<b>First score on the board: ${mine.total}</b>`:`Your best here: <b>${B.best.score}</b>${B.best.when?" ("+esc(B.best.when)+")":""}`;
     const rep=meta&&meta.trace?runReport(meta.trace,meta.hits,meta.period==="Autonomous"?30:120):null;
     $("#resultsReport").innerHTML=rep?this.reportHtml(rep,meta.period):"";
-    $("#resultsReplay").hidden=!Recorder.url;
+    $("#resultsReplay").hidden=!Recorder.url||Recorder.last==="video";
     p.hidden=false;
   },
 };

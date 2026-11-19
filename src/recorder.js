@@ -12,14 +12,23 @@
    from START to the final buzzer. Nothing is uploaded: the clip is made
    and kept on this computer until it is saved.
 
+   "Save video" is the plain version: the field exactly as drawn, nothing on top,
+   at the view's own size (up to 1920) and 60 frames a second, 8 Mbps, as MP4 where the
+   browser can write it, else WebM. It stops at the end of the run or on a click, and
+   the file goes straight to Downloads.
+
    The helpers above Recorder are pure, for the tests.
    ============================================================ */
 const REC_TYPES=["video/webm;codecs=vp9","video/webm;codecs=vp8","video/webm","video/mp4;codecs=avc1","video/mp4"];
 const REC_FPS=30, REC_MAX=1280, REC_SITE="ftc-simbench-pro.pages.dev";
 
+/* Save video: MP4 first (it plays everywhere, Discord and phones included), then WebM */
+const REC_VIDEO_TYPES=["video/mp4;codecs=avc1.42E01E","video/mp4;codecs=avc1","video/mp4","video/webm;codecs=vp9","video/webm;codecs=vp8","video/webm"];
+const REC_VIDEO_MAX=1920, REC_VIDEO_BPS=8e6;
+
 /* the first video type this browser can record, or null */
-function recPickType(isSupported){
-  for(const t of REC_TYPES){ try{ if(isSupported(t)) return t; }catch(e){} }
+function recPickType(isSupported,types){
+  for(const t of types||REC_TYPES){ try{ if(isSupported(t)) return t; }catch(e){} }
   return null;
 }
 /* the clip's size: the view's own, at most max on its long side, both even (encoders want that) */
@@ -30,7 +39,20 @@ function recSize(w,h,max){
 }
 /* the clip's long side for a drawing tier: 854 (480p) on tier 0, else 1280 (720p) */
 function recMaxFor(tier){ return tier===0?854:REC_MAX; }
-/* a file name a team can tell apart later: the robot, the date and time, the right extension */
+/* Save video: the first type from `types` (REC_VIDEO_TYPES) the browser records, or null */
+function recPickVideo(isSupported,types){ return recPickType(isSupported,types||REC_VIDEO_TYPES); }
+/* Save video: the view's own size, at most 1920 on its long side (1280 on a tier-0 machine), both even */
+function recVideoSize(w,h,tier){ return recSize(w,h,tier===0?1280:REC_VIDEO_MAX); }
+/* 30 frames a second on a tier-0 machine, else 60 */
+function recVideoFps(tier){ return tier===0?30:60; }
+/* simbench-2026-11-19-1430.mp4 */
+function recVideoName(when,type){
+  const d=when instanceof Date&&!isNaN(when)?when:new Date(0), p=n=>String(n).padStart(2,"0");
+  return "simbench-"+d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate())+"-"+p(d.getHours())+p(d.getMinutes())+(/mp4/.test(type||"")?".mp4":".webm");
+}
+/* the timer on the button: 0:07, 12:03 */
+function recClock(s){ s=Math.max(0,Math.floor(+s||0)); return Math.floor(s/60)+":"+String(s%60).padStart(2,"0"); }
+/* the first video type this browser can record, or null */
 function recFileName(robot,when,type){
   const slug=String(robot||"robot").replace(/\.(step|stp|zip|urdf)$/i,"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,40)||"robot";
   const d=when instanceof Date&&!isNaN(when)?when:new Date(0), p=n=>String(n).padStart(2,"0");
@@ -51,29 +73,34 @@ function recHud(s){
 
 const Recorder={
   on:false, rec:null, chunks:[], cv:null, ctx:null, type:null, t0:0, url:null, blob:null, auto:false, why:null,
+  mode:"clip",          // what is being recorded: "clip" (the score and names on top, a replay) or "video" (plain, saved at once)
+  last:null,            // what the last finished recording was
   /* whether this browser can make a clip at all */
   supported(){
     try{ return typeof MediaRecorder!=="undefined"&&typeof HTMLCanvasElement!=="undefined"&&!!HTMLCanvasElement.prototype.captureStream
       &&!!recPickType(t=>MediaRecorder.isTypeSupported(t)); }catch(e){ return false; }
   },
-  /* start recording the view; auto: started by START, stopped by the end of the run */
-  start(auto){
+  /* start recording the view; auto: started by START, stopped by the end of the run;
+     mode "video": Save video (no overlay, saved on stop) */
+  start(auto,mode){
     if(this.on) return true;
+    mode=mode==="video"?"video":"clip";
     if(!this.supported()){ this.why="This browser can't record video. Chrome, Edge and Firefox can."; return false; }
     const src=View.ren&&View.ren.domElement; if(!src){ this.why="The 3D view isn't ready yet."; return false; }
     // a tier-0 machine (src/tier.js: a school Chromebook) records at 480p, so the clip doesn't cost it frames
-    const S=recSize(src.width,src.height,recMaxFor(View.tier&&View.tier.tier));
+    const tier=View.tier&&View.tier.tier, vid=mode==="video";
+    const S=vid?recVideoSize(src.width,src.height,tier):recSize(src.width,src.height,recMaxFor(tier));
     this.cv=document.createElement("canvas"); this.cv.width=S.w; this.cv.height=S.h;
     this.ctx=this.cv.getContext("2d");
-    this.type=recPickType(t=>MediaRecorder.isTypeSupported(t));
+    this.type=vid?recPickVideo(t=>MediaRecorder.isTypeSupported(t)):recPickType(t=>MediaRecorder.isTypeSupported(t));
     this.chunks=[];
     try{
-      const stream=this.cv.captureStream(REC_FPS);
-      this.rec=new MediaRecorder(stream,{mimeType:this.type, videoBitsPerSecond:S.w>=1280?6e6:3.5e6});
+      const stream=this.cv.captureStream(vid?recVideoFps(tier):REC_FPS);
+      this.rec=new MediaRecorder(stream,{mimeType:this.type, videoBitsPerSecond:vid?REC_VIDEO_BPS:S.w>=1280?6e6:3.5e6});
     }catch(e){ this.why="Recording couldn't start: "+(e&&e.message||e); this.rec=null; return false; }
     this.rec.ondataavailable=e=>{ if(e.data&&e.data.size) this.chunks.push(e.data); };
     this.rec.start(1000);
-    this.on=true; this.auto=!!auto; this.t0=performance.now(); this.why=null;
+    this.on=true; this.auto=vid||!!auto; this.mode=mode; this.t0=performance.now(); this.why=null;
     this.bg=null;
     this.render();
     return true;
@@ -86,7 +113,12 @@ const Recorder={
     return new Promise(res=>{
       rec.onstop=()=>{
         const blob=this.chunks.length?new Blob(this.chunks,{type:(this.type||"video/webm").split(";")[0]}):null;
-        this.chunks=[];
+        this.chunks=[]; this.last=this.mode;
+        if(this.mode==="video"){
+          // Save video: straight to Downloads; the clip and its replay are left as they were
+          if(blob) this.download(blob,recVideoName(new Date(),this.type));
+          this.render(); res(blob); return;
+        }
         if(this.url) try{ URL.revokeObjectURL(this.url); }catch(e){}
         this.blob=blob; this.url=blob?URL.createObjectURL(blob):null;
         this.render();
@@ -107,6 +139,7 @@ const Recorder={
       if(!this.bg||/rgba\(0, 0, 0, 0\)|transparent/.test(this.bg)) this.bg=document.documentElement.getAttribute("data-theme")==="dark"?"#1c1c1e":"#dfe4ea"; }
     c.fillStyle=this.bg; c.fillRect(0,0,W,H);                // the view is transparent where the page shows through
     c.drawImage(src,0,0,W,H);
+    if(this.mode==="video") return;                          // Save video: the field as it is, nothing on top
     const h=recHud(hud), k=H/720;
     c.textBaseline="middle"; c.font="600 "+Math.round(24*k)+"px Inter, system-ui, sans-serif";
     // the score bar, top centre
@@ -130,6 +163,7 @@ const Recorder={
 
   /* ---------------- the page ---------------- */
   init(){
+    this.initVideo();
     const b=$("#recBtn"); if(!b) return;
     if(!this.supported()){ b.hidden=true; return; }
     b.hidden=false;
@@ -141,20 +175,45 @@ const Recorder={
   },
   wantsAuto(){ const a=$("#recAuto"); return !!(a&&a.checked); },
   async toggle(){
+    if(this.on&&this.mode==="video"){ this.say("Stop the video first."); return; }
     if(this.on){ const blob=await this.stop(); if(blob) this.show(); else this.say("Nothing was recorded."); }
     else if(!this.start(false)) this.say(this.why);
   },
+  /* Save video: a button next to Clip. A browser that can't record says why, once, and the button goes. */
+  initVideo(){
+    const v=$("#vidBtn"); if(!v) return;
+    v.hidden=false;
+    v.addEventListener("click",()=>this.toggleVideo());
+  },
+  async toggleVideo(){
+    const v=$("#vidBtn");
+    if(!this.supported()){
+      this.say("This browser can't save video from the page. Chrome, Edge and Firefox can; so can recent Safari.");
+      if(v) v.hidden=true;
+      return;
+    }
+    if(this.on&&this.mode==="clip"){ this.say("Stop the clip first."); return; }
+    if(this.on){ const blob=await this.stop(); this.say(blob?"Saved "+recVideoName(new Date(),this.type)+" ("+(blob.size/1048576).toFixed(1)+" MB) to Downloads.":"Nothing was recorded."); return; }
+    if(!this.start(true,"video")) this.say(this.why);
+  },
   say(t){ const s=$("#cadStatus"); if(s&&t) s.textContent=t; },
   render(){
-    const b=$("#recBtn"); if(!b) return;
-    b.classList.toggle("on",this.on);
-    b.querySelector("span").textContent=this.on?"Stop clip":"Clip";
-    b.title=this.on?"Stop recording and watch it back":"Record the field as a video clip, with the score on it";
+    const b=$("#recBtn"), v=$("#vidBtn"), clip=this.on&&this.mode==="clip", vid=this.on&&this.mode==="video";
+    if(b){
+      b.classList.toggle("on",clip); b.disabled=vid;
+      b.querySelector("span").textContent=clip?"Stop clip":"Clip";
+      b.title=clip?"Stop recording and watch it back":"Record the field as a video clip, with the score on it";
+    }
+    if(v){
+      v.classList.toggle("on",vid); v.disabled=clip;
+      v.querySelector("span").textContent=vid?"Stop video":"Save video";
+      v.title=vid?"Stop now and save the video (it also stops at the end of the run)":"Record the field as it is, with nothing on top, and save it as a video file";
+    }
   },
   /* each tick of the page's slow loop: the button shows how long it has run */
-  tick(){ if(this.on){ const b=$("#recBtn"); if(b){ const s=Math.floor(this.secs()); b.querySelector("span").textContent="Stop "+Math.floor(s/60)+":"+String(s%60).padStart(2,"0"); } } },
+  tick(){ if(this.on){ const b=$(this.mode==="video"?"#vidBtn":"#recBtn"); if(b) b.querySelector("span").textContent="Stop "+recClock(this.secs()); } },
   show(){
-    if(!this.url) return;
+    if(!this.url||this.last==="video") return;
     const p=$("#replayPanel"), v=$("#replayVideo"); if(!p||!v) return;
     v.src=this.url; p.hidden=false;
     const mb=this.blob?(this.blob.size/1048576).toFixed(1):"0";
@@ -168,6 +227,12 @@ const Recorder={
     if(!this.blob) return;
     const a=document.createElement("a"); a.href=this.url; a.download=this.name();
     document.body.appendChild(a); a.click(); a.remove();
+  },
+  /* a file to Downloads, from a Blob made here */
+  download(blob,name){
+    const u=URL.createObjectURL(blob), a=document.createElement("a"); a.href=u; a.download=name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>{ try{ URL.revokeObjectURL(u); }catch(e){} },60000);
   },
   async share(){
     if(!this.blob||!navigator.share) return;
