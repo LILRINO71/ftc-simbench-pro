@@ -2719,6 +2719,7 @@ function frame(now){
     $$(".bindrow").forEach(r=>r.classList.toggle("active",!!Sim.pad[activePad][r.dataset.btn]));
     MathTab.tick(); if(slowN++%5===0) Status.render(); NetUI.slow();
     matchWatch(); Recorder.tick(); Minimap.tick();
+    TouchUI.tick(); QuickStart.tick();
   }); }
   requestAnimationFrame(frame);
 }
@@ -3208,6 +3209,8 @@ function boot(){
   $("#matchSkill").addEventListener("change",e=>{ store.set("ftcbench.matchSkill",e.target.value); if(Online.inMatch()) return; if(Sim.phase!=="running") resetMatch(); else Match.skill=e.target.value; });
   $("#practice").addEventListener("change",e=>{ store.set("ftcbench.practice",e.target.checked?"1":"0"); updateClock(); });
   NetUI.init(); SetupUI.init(); ImportFlow.init(); Recorder.init(); Sounds.init(); Results.init(); Minimap.init(); PathEdit.init(); KeyBinds.init();
+  // phone controls and the first-visit card (src/touch.js)
+  TouchUI.init(); QuickStart.init();
 
   // code
   $("#addOpMode").addEventListener("click",()=>$("#codeFile").click());

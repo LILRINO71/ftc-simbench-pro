@@ -1,0 +1,135 @@
+/* ============================================================
+   Phone controls and the quick start (src/touch.js).
+   Added to the page's style sheet by the build, after src/styles.css.
+   ============================================================ */
+
+/* ---------- the controls over the field ---------- */
+.touch-ui{position:absolute; z-index:6; pointer-events:none;
+  left:calc(var(--left) + var(--gap)); right:calc(var(--right) + var(--gap));
+  top:calc(var(--bar) + 2*var(--gap)); bottom:calc(var(--dock) + 2*var(--gap));
+  --S:clamp(104px, 34vh, 148px);            /* a stick */
+  --B:48px;                                 /* a button: never under 44 */
+  --m:12px;
+  padding:0 max(var(--m), env(safe-area-inset-right)) max(var(--m), env(safe-area-inset-bottom)) max(var(--m), env(safe-area-inset-left));
+  -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; -webkit-tap-highlight-color:transparent;
+  touch-action:none;}
+.app:not(.drive-mode) .touch-ui{bottom:calc(var(--dock) + 2*var(--gap) + 40px);}   /* above the readouts along the bottom of the field */
+.app:not(.drive-mode) .stage:has(.dock.closed) .touch-ui{bottom:calc(44px + 2*var(--gap) + 40px);}
+@media (max-width:900px){ .touch-ui{left:var(--gap); right:var(--gap);} }
+.touch-ui > *{pointer-events:auto; touch-action:none; position:absolute;}
+.touch-ui button{font:inherit; color:var(--label); touch-action:none; -webkit-user-select:none; user-select:none; -webkit-touch-callout:none;}
+
+/* a stick: a ring and a knob; the invisible margin makes the ring easy to land on */
+.tc-stick{width:var(--S); height:var(--S); border-radius:50%; bottom:max(var(--m), env(safe-area-inset-bottom));
+  background:color-mix(in srgb, var(--card) 46%, transparent); border:2px solid color-mix(in srgb, var(--label) 28%, transparent);
+  box-shadow:0 2px 14px rgba(0,0,0,.14);}
+.tc-stick::before{content:""; position:absolute; inset:-14px; border-radius:50%;}
+.tc-left{left:max(var(--m), env(safe-area-inset-left));}
+.tc-right{right:max(var(--m), env(safe-area-inset-right));}
+.tc-knob{position:absolute; left:50%; top:50%; width:42%; height:42%; margin:-21% 0 0 -21%; border-radius:50%; pointer-events:none;
+  background:color-mix(in srgb, var(--label) 34%, transparent); border:2px solid color-mix(in srgb, var(--label) 44%, transparent);}
+.tc-stick.down{border-color:var(--accent-line); background:color-mix(in srgb, var(--accent) 12%, var(--card) 40%);}
+.tc-stick.down .tc-knob{background:var(--accent); border-color:var(--accent);}
+
+/* buttons: round, translucent, lit while held */
+.tc-btn{width:var(--B); height:var(--B); min-width:44px; min-height:44px; border-radius:50%; padding:0; cursor:pointer;
+  font-size:15px; font-weight:700; letter-spacing:.02em;
+  background:color-mix(in srgb, var(--card) 52%, transparent); border:2px solid color-mix(in srgb, var(--c, var(--label)) 55%, transparent);
+  color:color-mix(in srgb, var(--c, var(--label)) 90%, var(--label)); box-shadow:0 2px 10px rgba(0,0,0,.12);
+  display:inline-flex; align-items:center; justify-content:center;}
+.tc-btn.down{background:var(--c, var(--accent)); border-color:var(--c, var(--accent)); color:#fff; transform:scale(.94);}
+.tc-a{--c:#1F9D45;} .tc-b{--c:#D93025;} .tc-x{--c:#007AFF;} .tc-y{--c:#C98A00;}
+.tc-dp{font-size:18px; font-weight:600; --c:var(--label);}
+.tc-sh{width:60px; border-radius:14px; font-size:13px; --c:var(--label);}
+
+/* the clusters: a diamond of four, a cross of four, two shoulder buttons */
+.tc-cluster{display:grid; grid-template-columns:repeat(3,var(--B)); grid-template-rows:repeat(3,var(--B)); gap:3px;
+  bottom:max(var(--m), env(safe-area-inset-bottom)); pointer-events:none;}
+.tc-cluster > *{pointer-events:auto;}
+.tc-y,.tc-du{grid-area:1/2;} .tc-x,.tc-dl{grid-area:2/1;} .tc-b,.tc-dr{grid-area:2/3;} .tc-a,.tc-dd{grid-area:3/2;}
+.tc-shoulders{display:flex; gap:6px; bottom:calc(max(var(--m), env(safe-area-inset-bottom)) + var(--S) + 12px);}
+.tc-sl{left:max(var(--m), env(safe-area-inset-left));} .tc-sr{right:max(var(--m), env(safe-area-inset-right));}
+
+/* landscape: the cross and the diamond sit beside the sticks, the bar between them */
+.tc-dpad{left:calc(max(var(--m), env(safe-area-inset-left)) + var(--S) + 18px);}
+.tc-faces{right:calc(max(var(--m), env(safe-area-inset-right)) + var(--S) + 18px);}
+.tc-bar{left:50%; bottom:max(var(--m), env(safe-area-inset-bottom)); transform:translateX(-50%); display:grid; grid-template-columns:auto auto; gap:6px; justify-items:stretch; align-items:center;}
+.tc-row{display:contents;} .tc-more{display:none;}
+.tc-pads{display:inline-flex; justify-self:stretch;}
+.tc-pads button{min-width:44px; min-height:44px; flex:1; font-weight:700;}
+.tc-chip{min-height:44px; padding:0 12px; border-radius:12px; border:1px solid var(--glass-rim); font-size:13px; font-weight:600; cursor:pointer;
+  background:color-mix(in srgb, var(--card) 70%, transparent); box-shadow:0 1px 6px rgba(0,0,0,.1);}
+.tc-chip:active{background:var(--accent-soft);}
+.tc-bar .seg{background:color-mix(in srgb, var(--card) 70%, transparent);}
+
+/* a short screen (a phone sideways) */
+@media (max-height:500px){
+  .touch-ui{--S:clamp(100px, 33vh, 132px); --B:46px;}
+  .tc-sh{width:56px;}
+}
+/* a small phone sideways (667 px and under): the sticks and clusters shrink to fit, and the bar keeps the
+   gamepad toggle in view with Reset, Fullscreen and Panels behind one button */
+@media (orientation:landscape) and (max-width:720px){
+  .touch-ui{--S:100px; --B:44px;}
+  .tc-cluster{gap:0;}
+  .tc-dpad{left:calc(max(var(--m), env(safe-area-inset-left)) + var(--S) + 8px);}
+  .tc-faces{right:calc(max(var(--m), env(safe-area-inset-right)) + var(--S) + 8px);}
+  .tc-bar{display:flex; flex-direction:column-reverse; align-items:stretch; gap:6px; width:138px;}
+  .tc-row{display:flex; gap:6px;}
+  .tc-more{display:inline-flex; align-items:center; justify-content:center; min-width:44px; padding:0;}
+  .tc-bar .tc-chip:not(.tc-more){display:none;}
+  .tc-bar.open .tc-chip:not(.tc-more){display:inline-flex; align-items:center; justify-content:center;}
+}
+/* portrait: the bar goes to the top, the cross and diamond sit above the sticks */
+@media (orientation:portrait) and (max-width:700px){
+  .touch-ui{--S:clamp(116px, 31vw, 148px);}
+  .tc-dpad{left:max(var(--m), env(safe-area-inset-left)); bottom:calc(max(var(--m), env(safe-area-inset-bottom)) + var(--S) + 12px);}
+  .tc-faces{right:max(var(--m), env(safe-area-inset-right)); bottom:calc(max(var(--m), env(safe-area-inset-bottom)) + var(--S) + 12px);}
+  .tc-shoulders{bottom:calc(max(var(--m), env(safe-area-inset-bottom)) + var(--S) + 12px + 3*var(--B) + 3px*2 + 10px);}
+  .tc-bar{left:var(--m); right:var(--m); bottom:auto; top:calc(var(--bar) + 2*var(--gap) + 40px); transform:none; display:flex; gap:6px;}
+  .tc-chip{padding:0 10px; flex:1;}
+  .tc-more{display:none;}
+}
+.tc-rotate{left:var(--m); right:var(--m); top:calc(var(--bar) + 2*var(--gap) + 94px); display:flex; align-items:center; gap:10px; padding:8px 8px 8px 14px; border-radius:12px;
+  background:var(--glass); border:1px solid var(--glass-rim); font-size:13px; box-shadow:var(--shadow-card);}
+.tc-rotate span{flex:1;}
+.tc-rotate button{min-height:44px; padding:0 14px; border-radius:10px; border:0; background:var(--accent); color:var(--accent-ink); font-weight:600;}
+
+/* a short portrait screen: smaller sticks and buttons, so the controls and the card above them both fit */
+@media (orientation:portrait) and (max-width:700px) and (max-height:720px){ .touch-ui{--S:104px; --B:44px;} }
+
+/* a way back to the controls, when a phone is showing the panels; and a line of news */
+.tc-back{position:absolute; z-index:40; left:50%; transform:translateX(-50%); bottom:calc(var(--dock) + 3*var(--gap)); min-height:44px; padding:0 18px; border-radius:22px;
+  border:1px solid var(--accent-line); background:var(--accent); color:var(--accent-ink); font:600 14px var(--body); box-shadow:var(--shadow-pop); cursor:pointer;}
+.stage:has(.dock.closed) .tc-back{bottom:calc(44px + 3*var(--gap));}
+.tc-toast{position:absolute; z-index:7; left:50%; transform:translateX(-50%); bottom:calc(var(--dock) + 6*var(--gap)); max-width:min(420px, 90%); padding:10px 16px; border-radius:12px;
+  background:var(--card); border:1px solid var(--sep-2); box-shadow:var(--shadow-pop); font-size:13px; text-align:center;}
+
+/* the page keeps 560 px of height for itself, which a phone held sideways does not have */
+@media (pointer:coarse) and (max-height:560px){ .app{min-height:0;} }
+
+/* ---------- a phone in drive mode: the panels out of the way, the field and the controls ---------- */
+.app.drive-mode .rail,.app.drive-mode .dock,.app.drive-mode .import-card,.app.drive-mode .vp-bottom,.app.drive-mode .vp-tip,
+.app.drive-mode .vp-title,.app.drive-mode .minimap,.app.drive-mode .pip,.app.drive-mode .vp-hint:empty{display:none !important;}
+.app.drive-mode{--left:0px; --right:0px; --dock:0px; min-height:0;}
+.app.drive-mode .vp-fill{display:none;}
+.app.drive-mode .touch-ui{left:0; right:0; top:0; bottom:0;}
+.app.drive-mode .vp-top{left:var(--gap); right:var(--gap); justify-content:center;}
+.app.drive-mode #viewSeg [data-v="side"],.app.drive-mode #viewSeg [data-v="pov"],.app.drive-mode #viewSeg [data-v="cad"]{display:none;}
+.app.drive-mode .op-pick,.app.drive-mode .brand-text,.app.drive-mode #phasePill,.app.drive-mode .ds-clock-wrap{display:none;}
+.app.drive-mode .ds-center{justify-self:start;}
+.app.drive-mode .match-hud{right:var(--gap); top:calc(var(--bar) + 2*var(--gap)); min-width:0; max-width:210px;}
+.app.drive-mode .match-hud .mh-events,.app.drive-mode .match-hud .mh-parts{display:none;}
+html:has(.app.drive-mode),body:has(.app.drive-mode){overscroll-behavior:none; touch-action:none;}
+
+/* ---------- the first-visit card ---------- */
+.quick-card{position:absolute; z-index:25; left:50%; top:50%; transform:translate(-50%,-50%); width:min(360px, calc(100% - 32px)); padding:22px 22px 16px; border-radius:22px; text-align:center;
+  display:flex; flex-direction:column; align-items:center; gap:6px;}
+.qc-mark{width:44px; height:44px;} .qc-mark .bm-hex{fill:#F2B230;} .qc-mark .bm-arc{fill:none; stroke:#231A0E; stroke-width:2.4; stroke-linecap:round;} .qc-mark .bm-dot{fill:#231A0E;}
+.quick-card h2{margin:4px 0 0; font-size:22px; line-height:1.15; letter-spacing:-.01em;}
+.qc-lede{margin:0 0 10px; font-size:14px; color:var(--label-2);}
+.qc-go{width:100%; min-height:60px; border:0; border-radius:16px; background:var(--accent); color:var(--accent-ink); font:700 18px var(--body); cursor:pointer; box-shadow:0 6px 18px rgba(0,122,255,.32);}
+.qc-go:disabled{background:var(--fill); color:var(--label-2); box-shadow:none;}
+.qc-sub{margin:8px 0 0; font-size:12.5px; color:var(--label-3);}
+.qc-skip{min-height:44px; padding:0 14px; border:0; background:none; color:var(--accent-tx); font:500 14px var(--body); cursor:pointer;}
+@media (max-height:420px){ .quick-card{padding:14px 18px 8px; gap:2px;} .qc-mark{display:none;} .quick-card h2{margin:0; font-size:18px;} .qc-lede{margin-bottom:6px;} .qc-go{min-height:52px; font-size:17px;} .qc-sub{display:none;} }
