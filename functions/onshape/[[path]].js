@@ -65,18 +65,32 @@ function cookies(req) {
 const setCookie = (name, value, maxAge) => `${name}=${value}; Path=/onshape; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}`;
 const json = (obj, status = 200, headers = {}) => new Response(JSON.stringify(obj), { status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store", ...headers } });
 
+/* Onshape's client ID and secret are base64 and end in "=", and a copy, or a
+   paste into a settings box, often leaves that last character behind. Onshape
+   then answers "Invalid request" to every sign-in (the live site's ID was
+   saved one "=" short, found 2026-11-18). The padding carries nothing, so it
+   is put back: s as given, or with the "=" a base64 string of its length ends in. */
+export function padded(s) {
+  s = String(s || "").trim();
+  return /^[A-Za-z0-9+/]+$/.test(s) && s.length % 4 > 1 ? s + "=".repeat(4 - s.length % 4) : s;
+}
+
 /* the token from Onshape, by code or by refresh token: {t}, or {why} when
    there is none: "denied" (Onshape refused the code or the refresh token: a
    stale one, or one already used) or "transient" (the token server busy,
    down or unreachable, or an answer that isn't a token) */
 async function token(env, fetchImpl, form) {
+  const ask = (secret) => fetchImpl(OAUTH + "/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+    body: new URLSearchParams({ ...form, client_id: padded(env.ONSHAPE_CLIENT_ID), client_secret: secret }).toString(),
+  });
   let r;
   try {
-    r = await fetchImpl(OAUTH + "/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
-      body: new URLSearchParams({ ...form, client_id: env.ONSHAPE_CLIENT_ID, client_secret: env.ONSHAPE_CLIENT_SECRET }).toString(),
-    });
+    r = await ask(env.ONSHAPE_CLIENT_SECRET);
+    // the secret is tried as it was saved first; refused, and one "=" short of base64, once more with it
+    const full = padded(env.ONSHAPE_CLIENT_SECRET);
+    if ((r.status === 400 || r.status === 401) && full !== env.ONSHAPE_CLIENT_SECRET) { const again = await ask(full); if (again.ok) r = again; }
   } catch (e) { return { why: "transient" }; }
   if (!r.ok) return { why: r.status >= 500 || r.status === 429 ? "transient" : "denied" };
   const t = await r.json().catch(() => null);
@@ -112,7 +126,7 @@ export async function handle(request, env, fetchImpl = fetch) {
     const state = b64u(crypto.getRandomValues(new Uint8Array(18)));
     const to = new URL(OAUTH + "/authorize");
     to.searchParams.set("response_type", "code");
-    to.searchParams.set("client_id", env.ONSHAPE_CLIENT_ID);
+    to.searchParams.set("client_id", padded(env.ONSHAPE_CLIENT_ID));
     to.searchParams.set("redirect_uri", url.origin + "/onshape/callback");
     to.searchParams.set("state", state);
     return new Response(null, { status: 302, headers: { Location: to.toString(), "Set-Cookie": setCookie(STATE, state, 600), "Cache-Control": "no-store" } });

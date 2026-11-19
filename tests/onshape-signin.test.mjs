@@ -346,3 +346,34 @@ test('sign in with Onshape: kept copies of a public library part cost the next t
     assert.equal((await g.go(shapes)).status, 402);
   } finally { globalThis.caches = was; }
 });
+
+// ---- the live site, 2026-11-18: the client ID was saved without its last "=", and Onshape answered "Invalid request" to every sign-in ----
+test('sign-in: a client ID or secret saved one "=" short still signs in', async () => {
+  const ID = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABC=', SECRET = 'abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNO=';   // 40 and 52 characters, as Onshape's are
+  assert.equal(FN.padded(ID.slice(0, -1)), ID);
+  assert.equal(FN.padded(ID), ID, 'a whole one is left alone');
+  assert.equal(FN.padded('AAAAAA'), 'AAAAAA==');
+  assert.equal(FN.padded('AAAAA'), 'AAAAA', 'no base64 string is that long: left alone');
+  assert.equal(FN.padded('client-id'), 'client-id', 'not base64: left alone');
+  assert.equal(FN.padded(' ' + ID.slice(0, -1) + '\n'), ID, 'and a stray space or line end goes');
+  // Onshape's token endpoint, taking only the real pair
+  const forms = [];
+  const fetchImpl = async (u, init) => { const f = Object.fromEntries(new URLSearchParams(init.body)); forms.push(f);
+    return f.client_id === ID && f.client_secret === SECRET ? Response.json({ access_token: 'at', refresh_token: 'rt', expires_in: 3600 }) : Response.json({ error: 'invalid_client' }, { status: 401 }); };
+  for (const env of [{ ONSHAPE_CLIENT_ID: ID.slice(0, -1), ONSHAPE_CLIENT_SECRET: SECRET }, { ONSHAPE_CLIENT_ID: ID.slice(0, -1), ONSHAPE_CLIENT_SECRET: SECRET.slice(0, -1) }, { ONSHAPE_CLIENT_ID: ID, ONSHAPE_CLIENT_SECRET: SECRET }]) {
+    const login = await FN.handle(new Request(SITE + '/onshape/login'), env, fetchImpl);
+    const to = new URL(login.headers.get('Location'));
+    assert.equal(to.searchParams.get('client_id'), ID, 'Onshape is sent the whole ID');
+    assert.ok(/client_id=[A-Z0-9]+%3D(&|$)/.test(to.search), 'with its "=" encoded: ' + to.search.replace(/[A-Z0-9]{20,}/, '…'));
+    const state = to.searchParams.get('state');
+    const back = await FN.handle(new Request(`${SITE}/onshape/callback?code=c&state=${encodeURIComponent(state)}`, { headers: { Cookie: 'sb_os_state=' + state } }), env, fetchImpl);
+    assert.equal(back.status, 200, 'signed in with ' + JSON.stringify(Object.values(env).map((v) => v.length)));
+    assert.ok(back.headers.getSetCookie().some((c) => /^sb_os=[^;]+/.test(c)), 'and the sign-in is kept');
+  }
+  // a secret that is simply wrong is still refused, after one more try at most
+  forms.length = 0;
+  const wrong = { ONSHAPE_CLIENT_ID: ID, ONSHAPE_CLIENT_SECRET: 'wrongwrongwrong' };
+  const login = await FN.handle(new Request(SITE + '/onshape/login'), wrong, fetchImpl), state = new URL(login.headers.get('Location')).searchParams.get('state');
+  const back = await FN.handle(new Request(`${SITE}/onshape/callback?code=c&state=${encodeURIComponent(state)}`, { headers: { Cookie: 'sb_os_state=' + state } }), wrong, fetchImpl);
+  assert.equal(back.status, 400); assert.ok(forms.length <= 2, forms.length + ' tries');
+});
