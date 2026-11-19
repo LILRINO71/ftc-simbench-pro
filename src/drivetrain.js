@@ -332,7 +332,10 @@ function dtOnFloor(ws,up){
 function dtIsWheel(s){
   const n=String((s&&s.name)||"")+" "+String((s&&s.part)||"");
   if(DT_NOTWHEEL.test(n)) return false;
-  return (s&&s.kind)==="wheel" || DT_WHEEL.test(n);
+  if((s&&s.kind)==="wheel" || DT_WHEEL.test(n)) return true;
+  // a drive-sized wheel by its goBILDA or REV part number (src/partsdb.js), whatever the part is called
+  const pw=typeof partsWheel==="function"?partsWheel((s&&s.part)||n):null;
+  return !!pw&&(pw.dMm==null||pw.dMm>=48);
 }
 
 /* Wheels from shape alone, for a CAD whose parts are all "Part 7". Pulleys,

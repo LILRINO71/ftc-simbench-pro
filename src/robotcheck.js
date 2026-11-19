@@ -17,6 +17,10 @@
                 (the wrong servo on it, or the wrong drawn position)
      targets    RUN_TO_POSITION targets fit the slide's travel
      scale      drawn at robot size and about a robot's weight (the STEP's units)
+     size       the 18 in starting cube, and the 18 x 24 x 29 in expansion envelope
+                swept across every joint's travel (robotSize, below)
+     parts      goBILDA and REV parts recognised by part number (src/partsdb.js),
+                with the wheel diameter their number says against the CAD's
    Each item: {key, sev: "ok"|"note"|"warn"|"fail", text, device?, joint?, ask?}.
    Only "fail" (answer) and "warn" (confirm) are questions. Something the bench
    can run without a person is a "note": a device with no joint drawn for it
@@ -26,7 +30,7 @@
    moves), "drop-joint", "pick-device" (which of your devices drives it),
    "mates" (exact joints from Onshape), "look" (show it in the CAD view).
    ============================================================ */
-const {checkRobot, setupAuto}=(function(){
+const {checkRobot, setupAuto, robotSize, ROBOT_SIZE_RULES}=(function(){
   const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
   const sub=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]];
   const add=(a,b)=>[a[0]+b[0],a[1]+b[1],a[2]+b[2]];
@@ -204,6 +208,10 @@ const {checkRobot, setupAuto}=(function(){
     // swing each driven joint a little each way: its parts must not go through the frame both ways
     if(opts.swing!==false) for(const it of swingChecks(S,mechs,byId,driven,opts,code,devs)) put(it);
 
+    // the size rules, across every joint's travel, and the parts the part numbers name
+    if(opts.size!==false) for(const it of sizeItems(cad,opts)) put(it);
+    if(opts.parts!==false) for(const it of partItems(cad,D)) put(it);
+
     items.sort((a,b)=>sevRank[a.sev]-sevRank[b.sev]);
     const need=items.filter(i=>i.sev==="fail").length, warn=items.filter(i=>i.sev==="warn").length;
     return {items, need, warn, ready:need===0};
@@ -275,6 +283,165 @@ const {checkRobot, setupAuto}=(function(){
     }
     return out;
   }
+  /* ---- the size rules ----
+     The season book's figures (check the current manual: Team Updates change them): before the
+     match the robot starts inside an 18 x 18 x 18 in cube, and after it starts it may expand into
+     an 18 x 24 x 29 in envelope (the 24 and 29 are the two long sides of the box, so the robot's
+     plan view is held to 18 on its short side and 24 on its long one, and its height to 29).
+     Measured on the parts' own points in the robot frame (x forward, y left, z up; src/frame.js),
+     axis-aligned in that frame.
+     robotSize(cad) gives the robot as drawn, with every joint at its start position, and swept
+     through each joint's travel: each joint on its own through its limits, and, where there are
+     few enough, every combination of the joints' ends. Joint values come from the same functions
+     the view draws with (mateJointQ for the start, jointValues for followers). */
+  const SIZE_IN=0.0254;
+  const ROBOT_SIZE_RULES={cubeIn:18, envIn:[18,24,29], note:"check the current manual: Team Updates change this"};
+  const SIZE_CACHE=new WeakMap();
+  function sizeKey(cad){
+    return (cad.solids||[]).length+"|"+(cad.mechs||[]).map(m=>[m.id,m.parent||"",m.kind,(m.axis||[]).join(","),(m.pivot||[]).join(","),(m.limits||[]).join(","),m.q0||0,m.dir||1,m.drive?1:0,m.internal?1:0,m.couple?m.couple.to+":"+(m.couple.ratio||""):""].join("/")).join(";");
+  }
+  function robotSize(cad,o){
+    o=o||{};
+    const S=(cad&&cad.solids)||[]; if(!S.length) return null;
+    const key=sizeKey(cad), hit=SIZE_CACHE.get(cad); if(hit&&hit.key===key&&!o.fresh) return hit.out;
+    const R=ROBOT_SIZE_RULES, all=cad.mechs||[], byId=new Map(all.map(m=>[m.id,m]));
+    const frame=[], moving=[];
+    S.forEach((s,i)=>{ if(!s.pts||!s.pts.length||s.kind==="game") return; (s.mech&&byId.has(s.mech)?moving:frame).push(i); });
+    const grow=(lo,hi,p)=>{ for(let k=0;k<3;k++){ if(p[k]<lo[k]) lo[k]=p[k]; if(p[k]>hi[k]) hi[k]=p[k]; } };
+    const fLo=[Infinity,Infinity,Infinity], fHi=[-Infinity,-Infinity,-Infinity];
+    for(const i of frame) for(const p of S[i].pts) grow(fLo,fHi,p);
+    const dLo=fLo.slice(), dHi=fHi.slice();                        // as drawn: nothing moved
+    for(const i of moving) for(const p of S[i].pts) grow(dLo,dHi,p);
+    const ext=(lo,hi)=>({x:hi[0]-lo[0], y:hi[1]-lo[1], z:hi[2]-lo[2]});
+    // the moving parts of one joint share a move, so only the corners of their joint hull matter when they swing
+    const byMech=new Map();
+    for(const i of moving){ const k=S[i].mech; if(!byMech.has(k)) byMech.set(k,[]); for(const p of S[i].pts) byMech.get(k).push(p); }
+    for(const [k,P] of byMech) if(P.length>400) byMech.set(k,thinPoints(P,400));      // keeps the extremes in 26 directions
+    const bb=cad.bbox, size=bb?Math.max(bb.max[0]-bb.min[0],bb.max[1]-bb.min[1],bb.max[2]-bb.min[2]):0.5;
+    const zero={kind:"motor", ticks:0, revs:0, act:0, restPos:0, tpr:537.7, travelDeg:300};
+    const lin=m=>normJointKind(m.kind)==="linear";
+    // where a joint stands at the start: the value its device gives at rest, as the sim and the view reckon it
+    const startQ=m=>m.fromMate&&typeof mateJointQ==="function"?mateJointQ(m,zero,size):(lin(m)?0:(m.q0||0));
+    const depth=m=>{ let d=0, p=m.parent; while(p&&byId.has(p)&&d<20){ d++; p=byId.get(p).parent; } return d; };
+    const order=all.slice().sort((a,b)=>depth(a)-depth(b));
+    const measure=get=>{
+      const vals=jointValues(all,m=>m.couple?null:get(m)), T=new Map();
+      for(const m of order){ const par=m.parent&&T.get(m.parent)||ID, v=vals.get(m.id); T.set(m.id,compose(par,v?jointMove(m,v):ID)); }
+      const lo=fLo.slice(), hi=fHi.slice();
+      for(const [k,P] of byMech){ const Ti=T.get(k)||ID; for(const p of P) grow(lo,hi,apply(Ti,p)); }
+      return ext(lo,hi);
+    };
+    const E=R.envIn.map(v=>v*SIZE_IN);
+    // how far past the envelope (metres, negative when inside), and on which side
+    const over=e=>{ const sh=Math.min(e.x,e.y)-E[0], lg=Math.max(e.x,e.y)-E[1], h=e.z-E[2], m=Math.max(sh,lg,h);
+      return {over:m, axis:m===h?"height":m===sh?"short":"long", short:sh, long:lg, height:h}; };
+    const out={rules:R, drawn:ext(dLo,dHi), start:null, startDiffers:false, joints:[], skipped:[], combined:null, worst:null, max:null};
+    const st=m=>startQ(m);
+    out.start=measure(st);
+    out.startDiffers=["x","y","z"].some(k=>Math.abs(out.start[k]-out.drawn[k])>0.001);
+    let worst={e:out.start, o:over(out.start), at:[], combined:false};
+    const mx={x:out.start.x, y:out.start.y, z:out.start.z};
+    const note=(e,at,combined)=>{ for(const k of ["x","y","z"]) if(e[k]>mx[k]) mx[k]=e[k];
+      const w=over(e); if(w.over>worst.o.over+1e-9) worst={e, o:w, at, combined}; };
+    const sweepable=all.filter(m=>!m.drive&&m.kind!=="fixed"&&!m.internal&&!m.couple);
+    const ends=[];
+    for(const m of sweepable){
+      const L=m.limits, a=L&&Number.isFinite(L[0])?L[0]:null, b=L&&Number.isFinite(L[1])?L[1]:null;
+      if(a==null||b==null||b-a<1e-6||(!lin(m)&&b-a>2*Math.PI+1e-6)){ out.skipped.push(m.label||m.id); continue; }
+      const q0=st(m), vs=[]; for(let k=0;k<=12;k++) vs.push(a+(b-a)*k/12); vs.push(Math.max(a,Math.min(b,q0)));
+      const js={id:m.id, label:m.label||m.id, linear:lin(m), lo:a, hi:b, start:q0, worstValue:q0, worst:null};
+      for(const v of vs){
+        const e=measure(mm=>mm.id===m.id?v:st(mm)), w=over(e);
+        if(!js.worst||w.over>js.worst.over){ js.worst=w; js.worstValue=v; js.ext=e; }
+        note(e,[{joint:m.id, label:m.label||m.id, linear:lin(m), value:v, lo:a, hi:b}],false);
+      }
+      out.joints.push(js); ends.push({m, a, b});
+    }
+    // every combination of the joints' ends (up to 2^8): the robot with everything reaching at once
+    if(ends.length>1&&ends.length<=8){
+      let cw=null;
+      for(let mask=0;mask<(1<<ends.length);mask++){
+        const pick=new Map(ends.map((x,i)=>[x.m.id,(mask>>i)&1?x.b:x.a]));
+        const e=measure(mm=>pick.has(mm.id)?pick.get(mm.id):st(mm)), w=over(e);
+        if(!cw||w.over>cw.o.over){ cw={e, o:w, at:ends.map(x=>({joint:x.m.id, label:x.m.label||x.m.id, linear:lin(x.m), value:pick.get(x.m.id), lo:x.a, hi:x.b}))}; }
+      }
+      out.combined={ext:cw.e, over:cw.o};
+      note(cw.e,cw.at,true);
+    }else if(ends.length>8) out.combinedSkipped=ends.length;
+    out.worst={over:worst.o.over, axis:worst.o.axis, parts:worst.o, ext:worst.e, at:worst.at, combined:worst.combined};
+    out.max=mx;
+    SIZE_CACHE.set(cad,{key,out});
+    return out;
+  }
+  // a joint value for people: millimetres along a slide, degrees about a turn
+  const sizeVal=a=>a.linear?Math.round(a.value*1000)+" mm":Math.round(a.value/DEG)+"°";
+  const sizeAt=a=>{ const full=Math.abs(a.value-a.hi)<1e-6||Math.abs(a.value-a.lo)<1e-6;
+    return "\""+a.label+"\" at "+sizeVal(a)+(full?" (its full travel)":""); };
+  const sizeIn=v=>(v/SIZE_IN).toFixed(1);
+  function sizeItems(cad,o){
+    let Z; try{ Z=robotSize(cad,o); }catch(e){ return [{key:"size", sev:"note", text:"The size check stopped: "+e.message}]; }
+    if(!Z) return [];
+    // A size limit is a rule of the season, not a question about the bench: the bench runs the robot as it is. So
+    // an over-size robot is a "note" (kept in view, never holding the check at "to confirm"), with the numbers.
+    const R=Z.rules, out=[], tag=" Check the current manual: Team Updates change this.";
+    const cube=R.cubeIn*SIZE_IN, axes=[["x","length (front to back)"],["y","width (side to side)"],["z","height"]];
+    const cubeOver=e=>axes.map(([k,n])=>({k, n, over:e[k]-cube})).sort((a,b)=>b.over-a.over)[0];
+    const dims=e=>sizeIn(e.x)+" x "+sizeIn(e.y)+" x "+sizeIn(e.z)+" in";
+    const a=cubeOver(Z.drawn), b=cubeOver(Z.start);
+    if(b.over>0.001) out.push({key:"size:cube", sev:"note", ask:"look", size:{stage:"start", axis:b.k, over:b.over/SIZE_IN},
+      text:"Over the starting cube: with every joint at its start position the robot is "+dims(Z.start)+", its "+b.n+" "+sizeIn(b.over)+" in over the "+R.cubeIn+" in cube."+(Z.startDiffers?" As drawn it is "+dims(Z.drawn)+".":"")+tag});
+    else if(a.over>0.001) out.push({key:"size:cube", sev:"note", ask:"look", size:{stage:"drawn", axis:a.k, over:a.over/SIZE_IN},
+      text:"As drawn the robot is "+dims(Z.drawn)+", its "+a.n+" "+sizeIn(a.over)+" in over the "+R.cubeIn+" in starting cube, but with every joint at its start position it is "+dims(Z.start)+" and fits."+tag});
+    else out.push({key:"size:cube", sev:"ok", text:"Fits the "+R.cubeIn+" in starting cube: "+dims(Z.drawn)+" as drawn"+(Z.startDiffers?", "+dims(Z.start)+" with every joint at its start position":", the same with every joint at its start position")+"."});
+    const E=R.envIn, skipped=Z.skipped.length?" ("+Z.skipped.length+" joint"+(Z.skipped.length===1?"":"s")+" with no travel limit "+(Z.skipped.length===1?"was":"were")+" not swept.)":"";
+    const sideOf=(w,e)=>w.axis==="height"?"height reaches "+sizeIn(e.z)+" in, "+sizeIn(w.over)+" in over the "+E[2]+" in limit"
+      :w.axis==="long"?"long side reaches "+sizeIn(Math.max(e.x,e.y))+" in, "+sizeIn(w.over)+" in over the "+E[1]+" in limit"
+      :"short side reaches "+sizeIn(Math.min(e.x,e.y))+" in, "+sizeIn(w.over)+" in over the "+E[0]+" in limit";
+    const W=Z.worst, singles=Z.joints.filter(j=>j.worst.over>0.001).sort((p,q)=>q.worst.over-p.worst.over);
+    if(W.over>0.001){
+      let txt, size;
+      if(!W.at.length){ txt="the "+sideOf(W.parts,W.ext)+", with every joint at its start position."; size={axis:W.axis, over:W.over/SIZE_IN, at:[], combined:false}; }
+      else if(singles.length){
+        // one joint alone breaks the box: say which, and where in its travel
+        const J=singles[0], at={joint:J.id, label:J.label, linear:J.linear, value:J.worstValue, lo:J.lo, hi:J.hi};
+        txt="the "+sideOf(J.worst,J.ext)+", with "+sizeAt(at)+" and the other joints at their start.";
+        size={axis:J.worst.axis, over:J.worst.over/SIZE_IN, at:[{joint:J.id, value:J.worstValue}], combined:false};
+        if(Z.combined&&Z.combined.over.over>J.worst.over+0.0127) txt+=" With every joint at the end of its travel at once it is "+sizeIn(Z.combined.over.over)+" in over.";
+      }else{
+        const at=W.at.slice(0,3).map(sizeAt).join(", ")+(W.at.length>3?" and "+(W.at.length-3)+" more":"");
+        txt="no joint alone breaks it, but with the joints at the ends of their travel together ("+at+") the "+sideOf(W.parts,W.ext)+".";
+        size={axis:W.axis, over:W.over/SIZE_IN, at:W.at.map(x=>({joint:x.joint, value:x.value})), combined:true};
+      }
+      out.push({key:"size:env", sev:"note", ask:"look", size, text:"Past the "+E.join(" x ")+" in expansion envelope: "+txt+skipped+tag});
+    }else out.push({key:"size:env", sev:"ok", text:"Stays inside the "+E.join(" x ")+" in expansion envelope across every joint's travel (largest reach "+
+      sizeIn(Math.min(Z.max.x,Z.max.y))+" x "+sizeIn(Math.max(Z.max.x,Z.max.y))+" x "+sizeIn(Z.max.z)+" in; "+Z.joints.length+" joint"+(Z.joints.length===1?"":"s")+" swept"+(Z.combined?", and every combination of their ends":"")+")."+skipped+tag});
+    return out;
+  }
+
+  /* ---- parts by part number (src/partsdb.js) ---- */
+  function partItems(cad,D){
+    if(typeof partsOfCad!=="function") return [];
+    let P; try{ P=partsOfCad(cad); }catch(e){ return []; }
+    const out=[]; if(!P.length) return out;
+    const g=p=>p.massKnown?Math.round(p.massKg*1000)+" g each (the vendor's page)":"no published mass in the table, so weighed by volume";
+    const line=p=>p.count+" x "+p.vendor+" "+p.part+": "+p.name+(p.kind==="motor"&&p.tpr?", "+p.tpr+" counts per turn":"")+"; "+g(p)+".";
+    out.push({key:"parts", sev:"note", text:P.length+" part number"+(P.length===1?"":"s")+" recognised ("+P.reduce((n,p)=>n+p.count,0)+" parts): "+
+      P.slice(0,3).map(p=>p.count+" x "+p.part).join(", ")+(P.length>3?" and "+(P.length-3)+" more":"")+". Listed under \"checked\".", parts:P});
+    P.slice(0,14).forEach(p=>out.push({key:"part:"+p.part, sev:"ok", text:line(p)}));
+    if(P.length>14) out.push({key:"part:more", sev:"ok", text:(P.length-14)+" more recognised part numbers not listed."});
+    // a wheel's number says its diameter; the CAD's measured wheel should agree
+    const seen=new Set();
+    for(const w of (D&&D.wheels)||[]){
+      const pw=typeof partsWheel==="function"?partsWheel(w.part||w.name):null; if(!pw||seen.has(pw.part)) continue; seen.add(pw.part);
+      const meas=w.r*2000, d=pw.dMm, rg=pw.dRange;
+      const lo=d!=null?d:rg?rg[0]:null, hi=d!=null?d:rg?rg[1]:null; if(lo==null) continue;
+      if(meas<lo*0.94||meas>hi*1.06) out.push({key:"wheeld:"+pw.part, sev:"warn", ask:"look",
+        text:"The wheel \""+(w.name||pw.part)+"\" measures "+meas.toFixed(0)+" mm across in the CAD, but its part number "+pw.part+" is a "+(d!=null?d:rg.join("-"))+" mm wheel ("+pw.name+"). The CAD's wheel, or its scale, is off."});
+      else out.push({key:"wheeld:"+pw.part, sev:"ok", text:"Wheel "+pw.part+" ("+pw.name+") measures "+meas.toFixed(0)+" mm across in the CAD, as its number says."});
+    }
+    return out;
+  }
+
   /* The robot setup steps (src/app.js SetupUI) the robot itself already
      answers, so nobody is asked them: up from standing wheels or an exact
      import; the front axis from the way the wheels roll; the drive base from
@@ -299,5 +466,5 @@ const {checkRobot, setupAuto}=(function(){
     }
     return out;
   }
-  return {checkRobot, setupAuto};
+  return {checkRobot, setupAuto, robotSize, ROBOT_SIZE_RULES};
 })();
