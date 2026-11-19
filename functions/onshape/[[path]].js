@@ -33,6 +33,8 @@ const COOKIE = "sb_os", STATE = "sb_os_state";
 const ALLOWED = /^(?:v\d+\/)?(?:assemblies\/d\/[0-9a-f]{24}\/[wvm]\/[0-9a-f]{24}\/e\/[0-9a-f]{24}(?:\/features)?|partstudios\/d\/[0-9a-f]{24}\/[wvm]\/[0-9a-f]{24}\/e\/[0-9a-f]{24}\/(?:tessellatedfaces|massproperties)|documents\/[0-9a-f]{24})$/i;
 // what may be kept at the edge: a Part Studio's shapes or masses at a version (v) or microversion (m); a workspace (w) moves
 const CACHEABLE = /^(?:v\d+\/)?partstudios\/d\/[0-9a-f]{24}\/[vm]\/[0-9a-f]{24}\/e\/[0-9a-f]{24}\/(?:tessellatedfaces|massproperties)$/i;
+// the most of one answer that is held whole to be kept at the edge; a bigger one is passed straight on (see below)
+const KEEP_MAX = 16 * 1024 * 1024;
 
 const enc = new TextEncoder(), dec = new TextDecoder();
 const b64u = (u8) => btoa(String.fromCharCode(...u8)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -110,7 +112,7 @@ setTimeout(function(){ location.replace("/#onshape-"+(d.ok?"signed-in":"signin-f
 </script>`, { status: ok ? 200 : 400, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
 }
 
-export async function handle(request, env, fetchImpl = fetch) {
+export async function handle(request, env, fetchImpl = fetch, ctx = null) {
   const url = new URL(request.url);
   const route = url.pathname.replace(/^\/onshape\/?/, "");
   const ready = !!(env.ONSHAPE_CLIENT_ID && env.ONSHAPE_CLIENT_SECRET);
@@ -236,16 +238,40 @@ export async function handle(request, env, fetchImpl = fetch) {
     const headers = new Headers({ "Content-Type": r.headers.get("Content-Type") || "application/json", "Cache-Control": "no-store" });
     const ra = r.headers.get("Retry-After"); if (ra) headers.set("Retry-After", ra);
     await keepToken(headers);
-    if (store && r.ok) {
-      const body = await r.arrayBuffer();
-      const keep = new Response(body, { status: 200, headers: { "Content-Type": headers.get("Content-Type"), "Cache-Control": "public, max-age=" + (/\/v\//.test(path) ? 60 * 60 * 24 * 30 : 60 * 60 * 24 * 7) } });
-      try { await store.put(key, keep); } catch (e) { /* too big for the edge cache: served, not kept */ }
-      headers.set("X-SimBench-Cache", "miss");
-      return new Response(body, { status: 200, headers });
+    if (store && r.ok && r.body) {
+      /* An answer is kept at the edge only when it is small. Keeping it means holding it
+         whole, and a big Part Studio's shapes run to 100 MB and more: held whole, the first
+         real robot's largest one ended the function (Cloudflare's error 1101, memory) and
+         its 1,278 parts never arrived. So it is read up to KEEP_MAX; one that ends by then
+         is kept and sent, and a bigger one is passed straight on as it comes, never held.
+         The browser keeps what it read either way (onshapeGeomCache). */
+      const max = +env.ONSHAPE_KEEP_MAX > 0 ? +env.ONSHAPE_KEEP_MAX : KEEP_MAX;
+      const reader = r.body.getReader(), chunks = [];
+      let size = 0, whole = false;
+      while (size <= max) { const x = await reader.read(); if (x.done) { whole = true; break; } chunks.push(x.value); size += x.value.length; }
+      if (whole) {
+        const body = new Uint8Array(size); let at = 0; for (const c of chunks) { body.set(c, at); at += c.length; }
+        const keep = new Response(body, { status: 200, headers: { "Content-Type": headers.get("Content-Type"), "Cache-Control": "public, max-age=" + (/\/v\//.test(path) ? 60 * 60 * 24 * 30 : 60 * 60 * 24 * 7) } });
+        try { await store.put(key, keep); } catch (e) { /* the edge cache wouldn't take it: served, not kept */ }
+        headers.set("X-SimBench-Cache", "miss");
+        return new Response(body, { status: 200, headers });
+      }
+      headers.set("X-SimBench-Cache", "too-big");
+      // what was read so far, then the rest piped as it arrives (Cloudflare's own identity stream where there is one: no script per chunk)
+      const Pipe = typeof IdentityTransformStream !== "undefined" ? IdentityTransformStream : TransformStream;
+      const { readable, writable } = new Pipe();
+      const rest = (async () => {
+        const w = writable.getWriter();
+        for (const c of chunks) await w.write(c);
+        w.releaseLock(); reader.releaseLock();
+        await r.body.pipeTo(writable);
+      })().catch(() => { try { writable.abort(); } catch (e) {} });
+      if (ctx && ctx.waitUntil) ctx.waitUntil(rest);
+      return new Response(readable, { status: 200, headers });
     }
     return new Response(r.body, { status: r.status, headers });
   }
   return json({ error: "not-found" }, 404);
 }
 
-export const onRequest = (context) => handle(context.request, context.env);
+export const onRequest = (context) => handle(context.request, context.env, fetch, context);

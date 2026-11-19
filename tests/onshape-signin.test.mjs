@@ -377,3 +377,38 @@ test('sign-in: a client ID or secret saved one "=" short still signs in', async 
   const back = await FN.handle(new Request(`${SITE}/onshape/callback?code=c&state=${encodeURIComponent(state)}`, { headers: { Cookie: 'sb_os_state=' + state } }), wrong, fetchImpl);
   assert.equal(back.status, 400); assert.ok(forms.length <= 2, forms.length + ' tries');
 });
+
+// ---- the live site, 2026-11-18: the first real robot's largest Part Studio ended the function (error 1101) and 1,278 parts never arrived ----
+test('sign in with Onshape: a Part Studio too big to hold is passed straight on, whole and unkept; a small one is still kept at the edge', async () => {
+  const kept = new Map(), was = globalThis.caches;
+  globalThis.caches = { default: { match: async (k) => { const r = kept.get(k.url); return r ? r.clone() : undefined; }, put: async (k, r) => { kept.set(k.url, r); } } };
+  try {
+    const [gk] = Object.keys(R.onshape.geom), [ps, config] = gk.split('|');
+    const shapes = `/onshape/api/partstudios/d/${ps}/tessellatedfaces?configuration=${encodeURIComponent(config)}`;
+    // Onshape sending a long answer a piece at a time: 400 pieces of 1,000 bytes, counted as they are asked for
+    const N = 400, piece = (i) => new TextEncoder().encode(String(i).padStart(4, '0') + 'x'.repeat(996));
+    const os = onshape(), inner = os.fetch; let asked = 0;
+    os.fetch = async (u, init) => {
+      if (!/\/tessellatedfaces/.test(String(u))) return inner(u, init);
+      let i = 0;
+      return new Response(new ReadableStream({ pull(c) { if (i >= N) { c.close(); return; } asked++; c.enqueue(piece(i++)); } }, { highWaterMark: 0 }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    };
+    // the function holds at most 20,000 bytes here (16 MB live)
+    const b = browser(os, { ...ENV, ONSHAPE_KEEP_MAX: '20000' }); await b.signIn();
+    const big = await b.go(shapes);
+    assert.equal(big.status, 200);
+    assert.equal(big.headers.get('X-SimBench-Cache'), 'too-big');
+    assert.ok(asked < 60, 'answered while Onshape was still sending: ' + asked + ' of ' + N + ' pieces read so far');
+    const text = await big.text();
+    assert.equal(text.length, N * 1000, 'every byte arrives');
+    for (let i = 0; i < N; i++) assert.equal(text.slice(i * 1000, i * 1000 + 4), String(i).padStart(4, '0'), 'in order, none twice: piece ' + i);
+    assert.equal(kept.size, 0, 'and it is not kept at the edge');
+    // the same answer under the limit is kept whole, as before
+    const os2 = onshape(), b2 = browser(os2, { ...ENV, ONSHAPE_KEEP_MAX: '20000' }); await b2.signIn();
+    os2.fetch = ((inner2) => async (u, init) => (/\/tessellatedfaces/.test(String(u)) ? new Response('{"small":true}', { status: 200, headers: { 'Content-Type': 'application/json' } }) : inner2(u, init)))(os2.fetch);
+    const small = await b2.go(shapes);
+    assert.equal(small.headers.get('X-SimBench-Cache'), 'miss');
+    assert.equal(await small.text(), '{"small":true}');
+    assert.equal(kept.size, 1);
+  } finally { globalThis.caches = was; }
+});
