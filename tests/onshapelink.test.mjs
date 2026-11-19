@@ -233,3 +233,31 @@ test('launch: the bookmark, clicked on an Assembly tab, opens SimBench with that
   // anywhere else it says what to do, and opens nothing
   for (const href of ['https://cad.onshape.com/documents', 'https://example.com/', 'https://ftc-simbench-pro.pages.dev/']) { const o = click(href); assert.equal(o.opened, null); assert.match(o.said, /Assembly tab/); }
 });
+
+// ---- the live site, 2026-11-18: read beside five others, the robot's largest Part Studio failed once and 1,278 parts were left out ----
+test('link: a Part Studio that fails once is read again by itself; one the team can\'t open is not', async () => {
+  const studios = Object.keys(R.onshape.geom);
+  const flaky = (status, times) => { const os = onshape(), inner = os.fetch; let left = times, live = 0, alone = null;
+    os.fetch = async (u, init) => {
+      if (!/tessellatedfaces/.test(u) || !u.includes(encodeURI(studios[0].split('|')[0]).replace(/%7C.*/, ''))) { live++; try { return await inner(u, init); } finally { live--; } }
+      if (left > 0) { left--; if (status === 'network') throw new TypeError('fetch failed'); return { ok: false, status, headers: { get: () => null }, json: async () => ({}) }; }
+      alone = live === 0; return inner(u, init); };
+    return { os, wasAlone: () => alone }; };
+  // a 500 from the relay, then fine: the studio arrives, asked for a second time when nothing else is being read
+  for (const how of [500, 'network']) {
+    const f = flaky(how, 1), said = [];
+    const p = await E.onshapeRead(HOST, E.onshapeRef(LINK), { fetch: f.os.fetch, say: (t) => said.push(t) });
+    assert.ok(p.geom[studios[0]] && Object.keys(p.geom[studios[0]].parts).length, how + ': the studio arrives on the second try');
+    assert.equal(p.retried, 1);
+    assert.equal(f.wasAlone(), true, 'read again by itself');
+    assert.ok(said.some((t) => /again/.test(t)), 'and the card says so');
+    assert.equal(E.cadFromOnshape(E.checkOnshapePayload(Object.assign({ format: E.ONSHAPE_FORMAT }, p))).solids.length, R.truth.leafParts, 'the whole robot');
+  }
+  // failing twice: left out, as before, and asked for no third time
+  const twice = flaky(500, 5), p2 = await E.onshapeRead(HOST, E.onshapeRef(LINK), { fetch: twice.os.fetch, say() {} });
+  assert.equal(p2.geom[studios[0]], null);
+  assert.equal(twice.os.calls.filter((c) => /tessellatedfaces/.test(c.u)).length, studios.length - 1, 'the stand-in saw only the others (the failing calls never reached it)');
+  // 403: the team can't open it; no second call
+  const no = flaky(403, 5), p3 = await E.onshapeRead(HOST, E.onshapeRef(LINK), { fetch: no.os.fetch, say() {} });
+  assert.equal(p3.geom[studios[0]], null); assert.equal(p3.retried, 0);
+});

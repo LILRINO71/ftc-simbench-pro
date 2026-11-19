@@ -149,21 +149,34 @@ function onshapeRead(host, ref, opt){
        two calls per part studio (a private Onshape app has 2,500 a year). A
        cache that throws or is full never stops a read. */
     const cache=opt.cache||null;
-    const one=()=>{
-      if(at>=jobs.length) return Promise.resolve();
-      const j=jobs[at++], i=j.i, ps=host+"/api/partstudios/d/"+i.documentId+"/"+j.ver+"/e/"+i.elementId;
+    /* A studio that failed for a reason that may pass (Onshape or the relay answering 5xx, the
+       connection dropping, an answer cut short) is read once more, by itself, after the rest:
+       the owner's robot lost its largest studio (1,278 of 1,375 parts, 281 MB of shapes) when
+       it was asked for beside five others, and arrived whole when asked for alone. One the
+       team can't open (403, 404) is not asked for twice. */
+    const again=[];
+    const fresh=(j)=>{
+      const i=j.i, ps=host+"/api/partstudios/d/"+i.documentId+"/"+j.ver+"/e/"+i.elementId;
       const q="?configuration="+encodeURIComponent(i.configuration||"")+(i.documentId!==ref.did?"&linkDocumentId="+ref.did:"");
-      const fresh=()=>Promise.all([
+      return Promise.all([
         // 1.5 mm chords, 20 degrees per facet: the low-poly mesh the bench wants (src/meshfiles.js thins it further)
         get(ps+"/tessellatedfaces"+q+"&outputFaceAppearances=true&outputFacetNormals=false&chordTolerance=0.0015&angleTolerance=0.35"),
         get(ps+"/massproperties"+q+"&massAsGroup=false&useMassPropertyOverrides=true").catch(()=>null)
-      ]).then(t=>{ geom[j.key]={parts:osCompactTess(t[0]), mass:osCompactMass(t[1])}; if(cache) try{ Promise.resolve(cache.put(j.key,geom[j.key])).catch(()=>{}); }catch(e){} },
-        e=>{ if(e&&(e.status===401||e.status===402)) throw e; geom[j.key]=null; });   // a studio this user can't read (403) is left out, named by the builder
+      ]).then(t=>{ geom[j.key]={parts:osCompactTess(t[0]), mass:osCompactMass(t[1])}; if(cache) try{ Promise.resolve(cache.put(j.key,geom[j.key])).catch(()=>{}); }catch(e){} });
+    };
+    const one=()=>{
+      if(at>=jobs.length) return Promise.resolve();
+      const j=jobs[at++];
       const kept=cache?Promise.resolve().then(()=>cache.get(j.key)).catch(()=>null):Promise.resolve(null);
-      return kept.then(hit=>{ if(hit&&hit.parts){ geom[j.key]=hit; hits++; return; } return fresh(); })
+      return kept.then(hit=>{ if(hit&&hit.parts){ geom[j.key]=hit; hits++; return; }
+          return fresh(j).catch(e=>{ if(e&&(e.status===401||e.status===402)) throw e;
+            geom[j.key]=null;                                   // a studio this user can't read (403) is left out, named by the builder
+            if(!(e&&(e.status===403||e.status===404))) again.push(j); }); })
         .then(()=>{ done++; say("Reading part shapes: "+done+" of "+jobs.length+" part studios"+(hits?" ("+hits+" already here)":"")+" …",done,jobs.length); return one(); });
     };
-    return Promise.all([one(),one(),one(),one(),subLimits()]).then(()=>({asm, features, featuresBy, geom, noLimits:noLimits+(features?0:1), cached:hits}));
+    const retry=()=>again.reduce((p,j,k)=>p.then(()=>{ say("Reading part shapes again: "+(k+1)+" of "+again.length+" that didn't arrive …",jobs.length-again.length+k,jobs.length);
+      return fresh(j).catch(e=>{ if(e&&(e.status===401||e.status===402)) throw e; geom[j.key]=null; }); }),Promise.resolve());
+    return Promise.all([Promise.all([one(),one(),one(),one()]).then(retry),subLimits()]).then(()=>({asm, features, featuresBy, geom, noLimits:noLimits+(features?0:1), cached:hits, retried:again.length}));
   });
 }
 
