@@ -8,19 +8,28 @@
 
      tier 0  a 4 GB Chromebook (Celeron N4500, MediaTek Kompanio 500), or
              a software renderer: no shadow map, pixel ratio 1, the robot's
-             light copy, 2 physics substeps per tick
+             light copy, 2 physics substeps per tick. The look costs it
+             nothing extra: a painted contact shadow under the robot instead
+             of a shadow map, flat tiles, no glass reflections, no passes
      tier 1  an 8 GB laptop on integrated graphics (Intel UHD / Iris Xe):
-             one 1024-pixel shadow map, pixel ratio 1, 4 substeps
-     tier 2  a discrete GPU or Apple silicon: 2048-pixel soft shadows,
-             pixel ratio up to 2, 4 substeps
+             one 1024-pixel shadow map, pixel ratio 1, 4 substeps, ambient
+             occlusion, the foam's bump, reflections on the perimeter glass
+     tier 2  a discrete GPU or Apple silicon: 4096-pixel soft shadows,
+             pixel ratio up to 2, 4 substeps, the same look as tier 1 with
+             finer AO and a slight vignette
 
    The frame-rate watchdog (Perf in src/app.js) still backs off from there
    when a machine can't keep up. ?tier=0|1|2 or the saved choice overrides.
    ============================================================ */
+/* bump: the foam tiles' bump map; glass: the perimeter's reflection layer;
+   aoSamples: GTAO samples (0 = no AO pass); vignette: a slight darkening at the corners */
 const TIER_BUDGETS=[
-  {tier:0, shadows:0,    pixelRatio:1, lite:true,  substeps:2, ownTris:150000, otherTris:30000},
-  {tier:1, shadows:1024, pixelRatio:1, lite:false, substeps:4, ownTris:600000, otherTris:100000},
-  {tier:2, shadows:2048, pixelRatio:2, lite:false, substeps:4, ownTris:Infinity, otherTris:Infinity},
+  {tier:0, shadows:0,    pixelRatio:1, lite:true,  substeps:2, ownTris:150000, otherTris:30000,
+   bump:false, glass:false, aoSamples:0,  vignette:false},
+  {tier:1, shadows:1024, pixelRatio:1, lite:false, substeps:4, ownTris:600000, otherTris:100000,
+   bump:true,  glass:true,  aoSamples:8,  vignette:false},
+  {tier:2, shadows:4096, pixelRatio:2, lite:false, substeps:4, ownTris:Infinity, otherTris:Infinity,
+   bump:true,  glass:true,  aoSamples:16, vignette:true},
 ];
 /* A phone or a tablet, from the user agent and the touch points. iPadOS
    Safari sends a Mac's user agent ("Macintosh; Intel Mac OS X"), so a

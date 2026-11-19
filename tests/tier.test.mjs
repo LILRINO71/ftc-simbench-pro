@@ -25,7 +25,10 @@ test('tiers: each tier\'s budget follows the design (shadows, pixel ratio, light
   const b0 = E.deviceTier({ memoryGB: 4 }).budget, b1 = E.deviceTier({ memoryGB: 8, renderer: 'Intel Iris Xe' }).budget, b2 = E.deviceTier({ override: 2 }).budget;
   assert.deepEqual([b0.shadows, b0.pixelRatio, b0.lite, b0.substeps], [0, 1, true, 2]);
   assert.deepEqual([b1.shadows, b1.pixelRatio, b1.lite, b1.substeps], [1024, 1, false, 4]);
-  assert.deepEqual([b2.shadows, b2.pixelRatio, b2.lite, b2.substeps], [2048, 2, false, 4]);
+  assert.deepEqual([b2.shadows, b2.pixelRatio, b2.lite, b2.substeps], [4096, 2, false, 4]);
+  // the look's extras cost the slowest machine nothing
+  assert.deepEqual([b0.bump, b0.glass, b0.aoSamples, b0.vignette], [false, false, 0, false]);
+  assert.ok(b1.aoSamples > 0 && b2.aoSamples >= b1.aoSamples, 'AO on the tiers that can afford it');
   assert.equal(E.deviceTier({ memoryGB: 4, override: 2 }).tier, 2, 'chosen by hand wins');
   assert.match(E.deviceTier({ memoryGB: 4 }).why, /4 GB/);
 });

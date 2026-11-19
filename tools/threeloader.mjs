@@ -13,6 +13,7 @@ export const ADDONS = [
   ['GTAOPass', 'postprocessing/GTAOPass.js'],
   ['SMAAPass', 'postprocessing/SMAAPass.js'],
   ['OutputPass', 'postprocessing/OutputPass.js'],
+  ['ShaderPass', 'postprocessing/ShaderPass.js'],
   ['RoomEnvironment', 'environments/RoomEnvironment.js'],
 ];
 
