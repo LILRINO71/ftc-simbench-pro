@@ -3296,7 +3296,13 @@ function boot(){
     if(back){ try{ history.replaceState(null,"",location.pathname+location.search); }catch(e){} ImportFlow.signedIn(back[1]==="signed-in",""); }
     // the team's own robot from last time; else the demo (?robot=demo asks for the demo anyway)
     const which=new URLSearchParams(location.search).get("robot");
-    if(which!=="sample") (which==="demo"?Promise.resolve(false):restoreRobot().catch(()=>false)).then(back=>{ if(!back&&!LAST_STEP) loadDefaultRobot(); });
+    // opened from inside Onshape, or by a link that carries the assembly (onshapeLaunch): it is read with
+    // nothing to paste, once the robot from last time is back (the one that lands last is the one on the field)
+    const launch=onshapeLaunch(location.search);
+    if(launch){ try{ history.replaceState(null,"",location.pathname+onshapeLaunchStrip(location.search)+location.hash); }catch(e){} }
+    if(which!=="sample"||launch) (which==="demo"||which==="sample"?Promise.resolve(false):restoreRobot().catch(()=>false)).then(back=>{
+      if(launch) return ImportFlow.launch(launch);
+      if(!back&&!LAST_STEP) loadDefaultRobot(); });
   }catch(e){}
 }
 // three.js arrives as an ES module (tools/build.mjs): boot once it has

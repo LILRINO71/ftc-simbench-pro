@@ -114,6 +114,7 @@ const ImportFlow={
       </div>
       <form class="ic-link" id="icLink" autocomplete="off"><input type="url" id="icLinkUrl" value="${esc(link)}" placeholder="https://cad.onshape.com/documents/…/w/…/e/…" spellcheck="false" aria-label="Your Onshape assembly's address"><button class="btn-sm primary" type="submit">Get my robot</button></form>
       ${tip}${bad}
+      <p class="ic-why">One click next time: drag <a class="linkish" data-ic="bm" href="${esc(onshapeBookmark(location.origin+location.pathname))}" title="Drag me to your bookmarks bar">Send to SimBench</a> to your bookmarks bar, then click it on your Assembly tab in Onshape.</p>
       <details class="ic-alt"><summary>No link to paste? Drop the export instead</summary>${dropZone}</details>
       <div class="ic-row">${S.signedIn?`<button class="linkish" type="button" data-ic="signout">Sign out of Onshape</button><span>·</span>`:""}<button class="linkish" type="button" data-ic="fusion">Fusion, SolidWorks, FreeCAD →</button><span>·</span>${docs}<span>·</span><button class="linkish" type="button" data-ic="close">Keep the demo robot</button></div>`;
   },
@@ -183,7 +184,7 @@ const ImportFlow={
       ${qs.join("")}
       ${notes.length?`<ul class="ic-list">${notes.join("")}</ul>`:""}
       <div class="ic-foot"><button class="btn-sm primary" type="button" data-ic="${ready?"close":"accept"}">${ready?"Looks right":"Looks right as it is"}</button>
-        <button class="btn-sm" type="button" data-ic="cad">Open the CAD view</button>${CAD.mates&&CAD.mates.source==="onshape"?`<button class="btn-sm" type="button" data-ic="sheet">${declared?"Joint sheet":"Declare joints"}</button>`:""}<button class="btn-sm" type="button" data-ic="save">Save setup</button><span class="spacer"></span><span class="dim">${esc(CAD.name||"")}</span></div>`;
+        <button class="btn-sm" type="button" data-ic="cad">Open the CAD view</button>${CAD.source==="onshape"&&CAD.onshape&&CAD.onshape.url&&onshapeRef(CAD.onshape.url)&&this.signin&&this.signin.ready?`<button class="btn-sm" type="button" data-ic="reread" title="Read the assembly from Onshape again, as it is now">Update from Onshape</button>`:""}${CAD.mates&&CAD.mates.source==="onshape"?`<button class="btn-sm" type="button" data-ic="sheet">${declared?"Joint sheet":"Declare joints"}</button>`:""}<button class="btn-sm" type="button" data-ic="save">Save setup</button><span class="spacer"></span><span class="dim">${esc(CAD.name||"")}</span></div>`;
   },
   qHtml(it){
     const btn=(act,arg,txt,cls)=>`<button class="btn-sm${cls?" "+cls:""}" type="button" data-rc="${act}" data-a="${esc(arg)}">${esc(txt)}</button>`;
@@ -204,6 +205,8 @@ const ImportFlow={
     if(rc){ if(rc.dataset.rc==="gauge"){ this.gauge(rc.dataset.a); return; } robotCheckAct(rc.dataset.rc,rc.dataset.a); return; }
     const b=e.target.closest("[data-ic]"); if(!b) return;
     const k=b.dataset.ic;
+    // the bookmark is for the bookmarks bar: clicked here it would only open this page again
+    if(k==="bm"){ e.preventDefault(); this.say("Drag “Send to SimBench” up to your bookmarks bar (Ctrl+Shift+B shows the bar). Then open your Assembly tab in Onshape and click it there."); return; }
     if(k==="close") this.close();
     else if(k==="accept"){ for(const s of SETUP_STEPS) SETUP.done[s]=true; saveRig(); SetupUI.render(); this.close(); }
     else if(k==="pick") $("#cadFile").click();
@@ -212,6 +215,7 @@ const ImportFlow={
     else if(k==="cad"){ CadView.enter(); $$("#viewSeg button").forEach(x=>x.classList.toggle("on",x.dataset.v==="cad")); }
     else if(k==="save") SetupUI.download();
     else if(k==="signout") this.signOut();
+    else if(k==="reread"){ if(CAD&&CAD.onshape&&CAD.onshape.url) this.fromLink(CAD.onshape.url); }
     else if(k==="fusion") this.fusion();
     else if(k==="sheet") this.openSheet();
   },
@@ -222,8 +226,9 @@ const ImportFlow={
      Whether this site can sign in to Onshape at all (it needs the relay), and whether this
      browser has. ready is false on a plain static host: the card offers the export then. */
   async refreshSignIn(){ this.signin=await onshapeSignInState(); return this.signin; },
-  signIn(){
-    const w=window.open("onshape/login","sb_onshape_login","popup,width=560,height=760");
+  signIn(sameTab){
+    // opened from Onshape with nothing clicked here: a browser allows no pop-up then, so the sign-in takes this tab
+    const w=sameTab?null:window.open("onshape/login","sb_onshape_login","popup,width=560,height=760");
     // no pop-up allowed: sign in in this tab; Onshape sends it back to #onshape-signed-in
     if(!w){ location.href="onshape/login"; return; }
     this.say("Finish in the Onshape window: sign in if it asks, then click Allow. The robot is read as soon as you do.");
@@ -233,19 +238,29 @@ const ImportFlow={
     if(ok&&st.signedIn){
       const href=this.pendingLink||store.get("ftcbench.onshapeLink","")||""; this.pendingLink=null;
       this.say(""); this.dismissed=false; this.forced=true;
-      if(href&&onshapeRef(href)){ this.render(true); const i=$("#icLinkUrl"); if(i) i.value=href; this.fromLink(); }
+      if(href&&onshapeRef(href)){ this.render(true); const i=$("#icLinkUrl"); if(i) i.value=href; this.fromLink(href); }
       else this.render(true);
     } else { this.pendingLink=null; this.render(true); this.say("Onshape sign-in didn't finish"+(msg?": "+msg:"")+". Click Get my robot to try again.",true); }
   },
   async signOut(){ try{ await fetch("onshape/logout",{method:"POST",credentials:"same-origin"}); }catch(e){} await this.refreshSignIn(); this.render(true); },
-  /* the pasted address: checked, then read and built in the engine worker */
-  async fromLink(){
-    const inp=$("#icLinkUrl"), href=String(inp?inp.value:"").trim();
+  /* Opened from Onshape with the assembly in the page's address (onshapeLaunch): read with
+     nothing to paste or click. Not signed in yet: Onshape's Allow page takes this tab once and
+     comes back to the read. If the robot doesn't arrive, the bench still gets one to run. */
+  async launch(href){
+    store.set("ftcbench.onshapeLink",href);
+    this.dismissed=false; this.forced=true; this.last=null; this.render(true);
+    const i=$("#icLinkUrl"); if(i) i.value=href;
+    await this.fromLink(href,{auto:true});
+    if(!LAST_STEP) loadDefaultRobot();
+  },
+  /* the address (pasted, or given: a launch, a sign-in's return, an update): checked, then read and built in the engine worker */
+  async fromLink(given,o){
+    const inp=$("#icLinkUrl"), href=String(given||(inp?inp.value:"")).trim();
     if(!onshapeRef(href)){ this.say(href?"That isn't an Onshape assembly address. In Onshape, click your Assembly tab, then copy the whole address from the address bar.":"Paste your assembly's address first.",true); if(inp) inp.focus(); return; }
     store.set("ftcbench.onshapeLink",href);
     const st=await this.refreshSignIn();
     if(!st.ready){ this.say("Reading straight from Onshape isn't switched on for this copy of SimBench. Export the robot instead (below).",true); return; }
-    if(!st.signedIn){ this.pendingLink=href; this.signIn(); return; }
+    if(!st.signedIn){ this.pendingLink=href; this.signIn(!!(o&&o.auto)); return; }
     this.last=null; this.say("");
     this.start("Reading your robot from Onshape","Through your Onshape sign-in, straight from the assembly. A big robot takes a minute or two; the page stays usable.");
     let r;

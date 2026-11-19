@@ -41,6 +41,49 @@ function onshapeRef(href){
   return {host:m[1], did:m[2], wvm:m[3].toLowerCase(), wvmid:m[4], eid:m[5], config};
 }
 
+/* Opened from inside Onshape, or by a link that carries the assembly: the
+   address to read, or null. A page address's query, in either spelling:
+     ?onshape=<the assembly's address, encoded>
+     ?documentId=…&workspaceId=…&elementId=…      (or versionId, microversionId,
+        or workspaceOrVersion=w|v|m with workspaceOrVersionId; and maybe
+        configuration, and server for an enterprise's own address)
+   The second is what an Onshape app extension's action URL fills in
+   (docs/onshape-app-store.md, "One click from Onshape"), so a button in the
+   assembly's own menu opens SimBench with that assembly already being read. */
+const ONSHAPE_LAUNCH_KEYS=["onshape","documentId","workspaceId","versionId","microversionId","workspaceOrVersion","workspaceOrVersionId","elementId","configuration","server"];
+function onshapeLaunch(search){
+  let q; try{ q=new URLSearchParams(String(search||"").replace(/^[?#]/,"")); }catch(e){ return null; }
+  const direct=(q.get("onshape")||"").trim();
+  if(direct) return onshapeRef(direct)?direct:null;
+  const hex=v=>/^[0-9a-f]{24}$/i.test(v||"")?v.toLowerCase():null;
+  const did=hex(q.get("documentId")), eid=hex(q.get("elementId"));
+  if(!did||!eid) return null;
+  let wvm=null, id=null;
+  const kind=(q.get("workspaceOrVersion")||"").toLowerCase();
+  if(/^[wvm]$/.test(kind)&&hex(q.get("workspaceOrVersionId"))){ wvm=kind; id=hex(q.get("workspaceOrVersionId")); }
+  else for(const k of [["w","workspaceId"],["v","versionId"],["m","microversionId"]]) if(hex(q.get(k[1]))){ wvm=k[0]; id=hex(q.get(k[1])); break; }
+  if(!wvm) return null;
+  const s=(q.get("server")||"").trim(), host=/^https:\/\/(?:[a-z0-9-]+\.)*onshape\.com\/?$/i.test(s)?s.replace(/\/$/,""):"https://cad.onshape.com";
+  // a field Onshape had nothing to put in stays as its placeholder ("{$configuration}"): that is no configuration
+  const cfg=(q.get("configuration")||"").trim(), config=cfg&&!/[{}$]/.test(cfg)?cfg:"";
+  return host+"/documents/"+did+"/"+wvm+"/"+id+"/e/"+eid+(config?"?configuration="+encodeURIComponent(config):"");
+}
+/* A bookmark that does the same from any browser, with nothing to install or
+   approve in Onshape: clicked on the Assembly tab, it opens this SimBench
+   (site: its address) with that tab's address to read. A javascript: address. */
+function onshapeBookmark(site){
+  const to=String(site||"").replace(/[?#].*$/,"");
+  // its pattern is written with [/] and [.]: a bookmark's address is no place for backslashes
+  return "javascript:(function(){var u=location.href;if(!/^https:[/][/]([a-z0-9-]+[.])*onshape[.]com[/]documents[/][0-9a-f]{24}[/][wvm][/][0-9a-f]{24}[/]e[/][0-9a-f]{24}/i.test(u)){alert('Open your robot in Onshape and click its Assembly tab first, then click this bookmark.');return;}window.open("+JSON.stringify(to)+"+'?onshape='+encodeURIComponent(u),'_blank');})()";
+}
+/* The page's query without what onshapeLaunch read, so a reload or a shared
+   address doesn't read the assembly again: "" or "?…". */
+function onshapeLaunchStrip(search){
+  let q; try{ q=new URLSearchParams(String(search||"").replace(/^\?/,"")); }catch(e){ return ""; }
+  for(const k of ONSHAPE_LAUNCH_KEYS) q.delete(k);
+  const s=q.toString(); return s?"?"+s:"";
+}
+
 /* Reading one assembly, the whole robot. host is where "/api/..." lives:
    "<SimBench>/onshape" (functions/onshape) after Sign in with Onshape. ref is
    onshapeRef(href). opt.say(text, done, total) reports progress. Resolves to

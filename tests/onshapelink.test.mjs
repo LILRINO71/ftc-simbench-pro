@@ -177,3 +177,54 @@ test('link: a surface (no mass and no volume from Onshape) weighs nothing, throu
   const solid = cad.solids.find((s) => !s.massless);
   assert.ok(E.partMass(solid).kg > 0, 'a solid part still has its mass');
 });
+
+// ---- opened from inside Onshape: the assembly rides in the page's own address ----
+test('launch: an Onshape extension\'s action URL, or a link that carries the address, names the assembly to read', () => {
+  const d = 'a'.repeat(24), w = 'b'.repeat(24), e = 'c'.repeat(24), at = 'https://cad.onshape.com/documents/' + d;
+  // what an app extension fills in ({$documentId}, {$workspaceOrVersion}, {$workspaceOrVersionId}, {$elementId})
+  assert.equal(E.onshapeLaunch(`?documentId=${d}&workspaceOrVersion=w&workspaceOrVersionId=${w}&elementId=${e}`), `${at}/w/${w}/e/${e}`);
+  assert.equal(E.onshapeLaunch(`?documentId=${d}&workspaceOrVersion=v&workspaceOrVersionId=${w}&elementId=${e}`), `${at}/v/${w}/e/${e}`);
+  assert.equal(E.onshapeLaunch(`?documentId=${d}&workspaceId=${w}&elementId=${e}&view=cad`), `${at}/w/${w}/e/${e}`);
+  assert.equal(E.onshapeLaunch(`?documentId=${d}&versionId=${w}&elementId=${e}`), `${at}/v/${w}/e/${e}`);
+  // a configuration rides along; one Onshape left as its placeholder is none
+  assert.equal(E.onshapeLaunch(`?documentId=${d}&workspaceId=${w}&elementId=${e}&configuration=List_7Xq%3DSim`), `${at}/w/${w}/e/${e}?configuration=List_7Xq%3DSim`);
+  assert.equal(E.onshapeLaunch(`?documentId=${d}&workspaceId=${w}&elementId=${e}&configuration=%7B%24configuration%7D`), `${at}/w/${w}/e/${e}`);
+  // an enterprise's own address, and nothing that isn't Onshape's
+  assert.equal(E.onshapeLaunch(`?documentId=${d}&workspaceId=${w}&elementId=${e}&server=https%3A%2F%2Fpuhsd.onshape.com`), `https://puhsd.onshape.com/documents/${d}/w/${w}/e/${e}`);
+  assert.equal(E.onshapeLaunch(`?documentId=${d}&workspaceId=${w}&elementId=${e}&server=https%3A%2F%2Fevil.example`), `${at}/w/${w}/e/${e}`);
+  // the whole address, encoded: what a teammate's link carries
+  const full = `${at}/w/${w}/e/${e}?configuration=default`;
+  assert.equal(E.onshapeLaunch('?onshape=' + encodeURIComponent(full) + '&alliance=red'), full);
+  // what it reads is what the pasted box reads
+  assert.deepEqual(E.onshapeRef(E.onshapeLaunch(`?documentId=${d}&workspaceId=${w}&elementId=${e}&configuration=Sim`)), { host: 'https://cad.onshape.com', did: d, wvm: 'w', wvmid: w, eid: e, config: 'Sim' });
+  // nothing to read: an ordinary visit, a broken id, an address that isn't Onshape's
+  for (const q of ['', '?robot=demo', `?documentId=${d}&elementId=${e}`, `?documentId=xyz&workspaceId=${w}&elementId=${e}`, '?onshape=' + encodeURIComponent('https://example.com/documents/' + d + '/w/' + w + '/e/' + e), '?onshape=javascript:alert(1)'])
+    assert.equal(E.onshapeLaunch(q), null, q);
+});
+
+test('launch: the address bar keeps everything but the assembly, so a reload reads nothing again', () => {
+  const d = 'a'.repeat(24), w = 'b'.repeat(24), e = 'c'.repeat(24);
+  assert.equal(E.onshapeLaunchStrip(`?documentId=${d}&workspaceOrVersion=w&workspaceOrVersionId=${w}&elementId=${e}&configuration=x&server=y`), '');
+  assert.equal(E.onshapeLaunchStrip(`?alliance=red&documentId=${d}&workspaceId=${w}&elementId=${e}&view=cad`), '?alliance=red&view=cad');
+  assert.equal(E.onshapeLaunchStrip('?onshape=' + encodeURIComponent('https://cad.onshape.com/documents/' + d) + '&tier=1'), '?tier=1');
+  assert.equal(E.onshapeLaunch(E.onshapeLaunchStrip(`?documentId=${d}&workspaceId=${w}&elementId=${e}`)), null);
+});
+
+test('launch: the bookmark, clicked on an Assembly tab, opens SimBench with that tab\'s address to read', () => {
+  const d = 'a'.repeat(24), w = 'b'.repeat(24), e = 'c'.repeat(24);
+  const at = `https://cad.onshape.com/documents/${d}/w/${w}/e/${e}?configuration=List_7Xq%3DSim&renderMode=0`;
+  const code = E.onshapeBookmark('https://ftc-simbench-pro.pages.dev/?robot=demo#x');
+  assert.ok(code.startsWith('javascript:'));
+  const click = (href) => { const out = { opened: null, said: null };
+    new Function('location', 'window', 'alert', code.slice(11))({ href }, { open: (u) => { out.opened = u; } }, (m) => { out.said = m; });
+    return out; };
+  const on = click(at);
+  assert.ok(on.opened.startsWith('https://ftc-simbench-pro.pages.dev/?onshape='), on.opened);
+  // what SimBench then reads is the tab's own address, configuration and all
+  assert.equal(E.onshapeLaunch(new URL(on.opened).search), at);
+  assert.deepEqual(E.onshapeRef(E.onshapeLaunch(new URL(on.opened).search)).config, 'List_7Xq=Sim');
+  // an enterprise's own address works the same
+  assert.ok(click(at.replace('cad.', 'puhsd.')).opened);
+  // anywhere else it says what to do, and opens nothing
+  for (const href of ['https://cad.onshape.com/documents', 'https://example.com/', 'https://ftc-simbench-pro.pages.dev/']) { const o = click(href); assert.equal(o.opened, null); assert.match(o.said, /Assembly tab/); }
+});
