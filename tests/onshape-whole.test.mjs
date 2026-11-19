@@ -99,3 +99,51 @@ test('onshape whole robot: two subassemblies that reuse an instance id each plac
   const names = cad.solids.map((s) => s.name);
   assert.ok(names.includes('Left claw') && names.includes('Right claw'), names.join(', '));
 });
+
+// ---- what cad.onshape.com really answered for the owner's robot (read 2026-11-18): the two things the spec didn't say ----
+test('onshape whole robot: a part\'s colour comes as four bytes in base64, on the body', () => {
+  // verbatim: "color":"nc/t/w==" on the body, no colour on its faces
+  const tess = [{ id: 'JJD', bodyType: 'solid', color: 'nc/t/w==', faces: [{ id: 'JJG', facets: [{ vertices: [[0, 0, 0], [0.1, 0, 0], [0, 0.1, 0]] }] }] }];
+  assert.deepEqual(E.osColor('nc/t/w==').map((v) => Math.round(v * 255)), [157, 207, 237]);
+  assert.deepEqual(E.osCompactTess(tess).JJD.color.map((v) => Math.round(v * 255)), [157, 207, 237], 'the body\'s colour reaches the part');
+  // six base64 characters can spell a hex colour: the "==" says which it is
+  assert.deepEqual(E.osColor('abcdeA==').map((v) => Math.round(v * 255)), [105, 183, 29]);
+  assert.deepEqual(E.osColor('#abcdef').map((v) => Math.round(v * 255)), [171, 205, 239]);
+  assert.equal(E.osColor('not a colour'), null);
+});
+
+test('onshape whole robot: a part with no material has no centroid in Onshape\'s answer, so its centre comes from its shape', () => {
+  // verbatim figures for one body of an imported part: hasMass false, a volume, and zeros where the centroid would be
+  const raw = { hasMass: false, massMissingCount: 1, mass: [0, -1.4e-9, 1.4e-9], volume: [5.2371e-5, 5.2369e-5, 5.2372e-5],
+    centroid: [0, 0, 0, -0.000001, -0.000001, -0.000001, 0.000001, 0.000001, 0.000001], inertia: new Array(9).fill(0).concat(new Array(9).fill(-5.2e-11), new Array(9).fill(5.2e-11)) };
+  const m = E.osCompactMass({ bodies: { JID: raw } }).JID;
+  assert.equal(m.com, null, 'zeros are not a centre');
+  assert.equal(m.kg, 5.2371e-5); assert.equal(m.vol, 5.2371e-5); assert.equal(m.I, null);
+  // a part with a material keeps Onshape's centroid, the origin included
+  assert.deepEqual(E.osCompactMass({ bodies: { A: { hasMass: true, mass: [1, 1, 1], volume: [4e-4, 4e-4, 4e-4], centroid: [0, 0, 0] } } }).A.com, [0, 0, 0]);
+
+  // the centre of a closed shape: a 20 x 40 x 60 mm box with one corner at (1, 2, 3) m
+  const box = (o, s) => { const v = (i) => [o[0] + (i & 1 ? s[0] : 0), o[1] + (i & 2 ? s[1] : 0), o[2] + (i & 4 ? s[2] : 0)];
+    const quads = [[0, 2, 3, 1], [4, 5, 7, 6], [0, 1, 5, 4], [2, 6, 7, 3], [0, 4, 6, 2], [1, 3, 7, 5]], out = [];
+    for (const q of quads) for (const t of [[q[0], q[1], q[2]], [q[0], q[2], q[3]]]) for (const i of t) out.push(...v(i));
+    return Float32Array.from(out); };
+  const c = E.osMeshCentroid(box([1, 2, 3], [0.02, 0.04, 0.06]));
+  [1.01, 2.02, 3.03].forEach((w, a) => assert.ok(Math.abs(c[a] - w) < 1e-5, 'box centre ' + c));
+  assert.equal(E.osMeshCentroid(box([0, 0, 0], [0.02, 0.04, 0.06]).slice(0, 18)), null, 'one open face encloses nothing');
+
+  // the whole robot with no material anywhere, as the API answers it: every part's centre is inside its own shape
+  const p = payload();
+  for (const k in p.geom) p.geom[k].mass = { bodies: Object.fromEntries(Object.keys(p.geom[k].parts).map((id) => [id, raw])) };
+  const cad = E.cadFromOnshape(p);
+  let far = 0;
+  for (const s of cad.solids) {
+    assert.ok(Array.isArray(s.com) && s.com.every(Number.isFinite), s.name + ' has a centre');
+    const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+    for (const q of s.pts) for (let a = 0; a < 3; a++) { if (q[a] < lo[a]) lo[a] = q[a]; if (q[a] > hi[a]) hi[a] = q[a]; }
+    for (let a = 0; a < 3; a++) if (s.com[a] < lo[a] - 0.005 || s.com[a] > hi[a] + 0.005) { far++; break; }
+  }
+  assert.equal(far, 0, far + ' part(s) have their centre outside their own shape (it was each Part Studio\'s origin)');
+  assert.equal(cad.onshape.kg, null, 'no mass came from Onshape, and none is claimed');
+  assert.ok(cad.onshape.why.some((w) => /No part has a material set/.test(w)), cad.onshape.why.join(' | '));
+  assert.ok(!cad.onshape.why.some((w) => /Mass from Onshape: 0\.00 kg/.test(w)), 'a volume is not reported as a mass');
+});

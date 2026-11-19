@@ -34,10 +34,16 @@ function onshapeGeomKey(i){
   return i.documentId+"/"+ver+"/e/"+i.elementId+"|"+(i.configuration||"");
 }
 /* A colour as Onshape may give it: [r,g,b] in 0..1 or 0..255, "#rrggbb",
-   {red,green,blue}, or an appearance holding one. Out: [r,g,b] 0..1 or null. */
+   {red,green,blue}, an appearance holding one, or four bytes (red, green,
+   blue, opacity) in base64, which is how tessellatedfaces writes a part's
+   colour ("nc/t/w=="). Out: [r,g,b] 0..1 or null. */
 function osColor(c){
   if(c==null) return null;
-  if(typeof c==="string"){ const m=/^#?([0-9a-f]{6})/i.exec(c.trim()); if(!m) return null; const v=parseInt(m[1],16); return [(v>>16&255)/255,(v>>8&255)/255,(v&255)/255]; }
+  if(typeof c==="string"){
+    const t=c.trim();
+    // four bytes in base64 are six characters and "==": read before the hex form, which six of those characters can look like
+    if(/^[A-Za-z0-9+\/]{6}==$/.test(t)){ try{ const b=atob(t); if(b.length===4) return [b.charCodeAt(0)/255,b.charCodeAt(1)/255,b.charCodeAt(2)/255]; }catch(e){} return null; }
+    const m=/^#?([0-9a-f]{6})/i.exec(t); if(!m) return null; const v=parseInt(m[1],16); return [(v>>16&255)/255,(v>>8&255)/255,(v&255)/255]; }
   if(Array.isArray(c)&&c.length>=3){ const n=c.slice(0,3).map(Number); if(!n.every(Number.isFinite)) return null;
     const big=n.some(x=>x>1); return n.map(x=>Math.max(0,Math.min(1,big?x/255:x))); }
   if(typeof c==="object"){
@@ -80,7 +86,9 @@ function osCompactTess(tess){
    inertia is the tensor about the centroid, row-major. A part with no
    material has no mass: it carries its volume as kg (density 1), the way
    Onshape's own URDF export writes it, and src/inertia.js weighs that
-   volume at the density its kind implies. */
+   volume at the density its kind implies. For such a part Onshape writes
+   zeros for the centroid too (it has no mass to centre), so the part comes
+   with no centre here and cadFromOnshape takes it from the part's shape. */
 function osCompactMass(mp){
   const out={}, B=mp&&mp.bodies;
   if(!B) return out;
@@ -95,9 +103,30 @@ function osCompactMass(mp){
     if(!(kg>0)){ if(Number.isFinite(vol)&&vol<=0&&!(m>0)) out[id]={kg:0, surface:true}; continue; }
     // the tensor only when it is one: Onshape writes zeros for a body with no material
     const I=first(b.inertia,9), real=I&&I.some(v=>v!==0)?I:null;
-    out[id]={kg, com:first(b.centroid,3), I:real, vol:Number.isFinite(vol)&&vol>0?vol:null};
+    const c=first(b.centroid,3);
+    out[id]={kg, com:c&&(has||c.some(v=>v!==0))?c:null, I:real, vol:Number.isFinite(vol)&&vol>0?vol:null};
   }
   return out;
+}
+
+/* The centre of the volume a closed mesh encloses (flat xyz triples), or null
+   when it encloses none (a surface, an open or inside-out shell). It is the
+   centre of mass of a part of one material, which is what a part with no
+   material set is weighed as. */
+function osMeshCentroid(tri){
+  let V=0, cx=0, cy=0, cz=0;
+  // about the first corner, so a small part far from the origin keeps its digits
+  const ox=tri[0], oy=tri[1], oz=tri[2];
+  for(let i=0;i+8<tri.length;i+=9){
+    const ax=tri[i]-ox, ay=tri[i+1]-oy, az=tri[i+2]-oz, bx=tri[i+3]-ox, by=tri[i+4]-oy, bz=tri[i+5]-oz, dx=tri[i+6]-ox, dy=tri[i+7]-oy, dz=tri[i+8]-oz;
+    const v=ax*(by*dz-bz*dy)-ay*(bx*dz-bz*dx)+az*(bx*dy-by*dx);   // six times the corner tetrahedron's signed volume
+    V+=v; cx+=v*(ax+bx+dx); cy+=v*(ay+by+dy); cz+=v*(az+bz+dz);
+  }
+  if(!(Math.abs(V)>1e-15)) return null;
+  const c=[ox+cx/(4*V), oy+cy/(4*V), oz+cz/(4*V)];
+  // a centre outside the shape's own box is a mesh that doesn't close: no answer beats a wrong one
+  for(let a=0;a<3;a++){ let lo=Infinity, hi=-Infinity; for(let i=a;i<tri.length;i+=3){ if(tri[i]<lo) lo=tri[i]; if(tri[i]>hi) hi=tri[i]; } if(c[a]<lo-1e-6||c[a]>hi+1e-6) return null; }
+  return c;
 }
 
 /* The CAD object, from a payload {name, url, asm, features, geom}. geom as
@@ -136,7 +165,7 @@ function cadFromOnshape(p,opts){
     const tri=body.tri instanceof Float32Array?body.tri:Float32Array.from(body.tri);
     const R=meshReduce(tri,opts.reduce||{}); triBefore+=R.before; triAfter+=R.after;
     const idx=shapes.length;
-    shapes.push({pos:R.pos, idx:R.idx, box:R.box, color:lin(osColor(body.color)), name:body.name||inst.name||inst.partId, file:null});
+    shapes.push({pos:R.pos, idx:R.idx, box:R.box, color:lin(osColor(body.color)), name:body.name||inst.name||inst.partId, file:null, tri0:tri});
     shapeOf.set(sk,idx);
     if(shapes.length%25===0) say("Thinning part shapes: "+shapes.length+" …");
     return idx;
@@ -144,7 +173,9 @@ function cadFromOnshape(p,opts){
   // ---- solids: one per occurrence ----
   const solids=[], P=[];
   const mn=[Infinity,Infinity,Infinity], mx=[-Infinity,-Infinity,-Infinity];
-  let kgSum=0, kgParts=0, nOcc=0;
+  let kgSum=0, kgParts=0, volParts=0, nOcc=0;
+  // a part with no material: its centre from its own shape, worked out once per shape
+  const cenOf=S=>{ if(S.cen===undefined) S.cen=osMeshCentroid(S.tri0); return S.cen; };
   const toSrgb=v=>v<=0.0031308?12.92*v:1.055*Math.pow(v,1/2.4)-0.055;
   for(const o of A.rootAssembly.occurrences||[]){
     if(o.hidden) continue;
@@ -172,9 +203,12 @@ function cadFromOnshape(p,opts){
     const m=G.mass&&G.mass[inst.partId];
     if(m&&m.surface) sd.massless=true;
     if(m&&m.kg>0){
-      sd.kg=m.kg; kgSum+=m.kg; kgParts++;
+      sd.kg=m.kg;
+      // a real mass, or a volume standing in for one (no material: density 1, to four digits)
+      if(m.vol>0&&Math.abs(m.kg/m.vol-1)<1e-4) volParts++; else { kgSum+=m.kg; kgParts++; }
       const Rm=[T[0],T[1],T[2],T[4],T[5],T[6],T[8],T[9],T[10]];
-      if(m.com) sd.com=place(T,m.com);
+      const c=m.com||cenOf(S);
+      if(c) sd.com=place(T,c);
       if(m.I&&m.I.length===9) sd.I=rotI(Rm,m.I);
       if(m.vol>0) sd.vol=m.vol;
     }
@@ -200,7 +234,9 @@ function cadFromOnshape(p,opts){
   for(const s of solids){ const e=counts.get(s.name)||{name:s.name,part:s.part,n:0,kind:"struct"}; e.n++; counts.set(s.name,e); }
   const parts=[...counts.values()].map(e=>{ const hw=typeof hwFromPart==="function"?hwFromPart(e.part,e.name):null; return Object.assign(e,{kind:hw?hw.kind:"struct"}); });
   why.push(shapes.length+" unique shapes placed "+solids.length+" times, thinned from "+(triBefore/1e6).toFixed(1)+" M to "+(triAfter/1e6).toFixed(2)+" M triangles.");
-  if(kgParts) why.push("Mass from Onshape: "+kgSum.toFixed(2)+" kg over "+kgParts+" of "+solids.length+" parts"+(kgParts<solids.length*0.7?" (parts with no material are weighed by their volume at the material their kind implies)":"")+".");
+  for(const S of shapes) delete S.tri0;
+  if(kgParts) why.push("Mass from Onshape: "+kgSum.toFixed(2)+" kg over "+kgParts+" of "+solids.length+" parts"+(volParts?"; "+volParts+" have no material set, so each is weighed by its own volume at the material its kind implies":"")+".");
+  else if(volParts) why.push("No part has a material set in Onshape, so each of the "+volParts+" is weighed by its own volume at the material its kind implies. Set materials in Onshape (right-click a part, Assign material) for its real weight.");
   const cad={name:p.name||"Onshape robot", units:"METRE", points:P, pointCount:P.length, solids, bbox, parts, mechs:[], placements:[], frame, occs:[],
     source:"onshape", shapes, onshape:{url:p.url||null, parts:nOcc, withShape:solids.length, kg:kgParts?kgSum:null, kgParts, triangles:triAfter, trianglesBefore:triBefore}};
   // ---- the joints: the mates, onto parts that are Onshape's own, so all of them match ----
