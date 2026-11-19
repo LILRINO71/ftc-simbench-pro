@@ -14,6 +14,12 @@
    hasn't loaded theirs, places the robot at the start and presses INIT and
    START. Copy Java and Save .java hand the code over; the path itself is
    kept in this browser and saves as a small JSON a teammate can open.
+
+   Under the legs, the Grade (src/grader.js): inside the field, clear of the
+   HIVEs, a legal start, the time against 30 s, the points driving alone earns,
+   and risks, each pass, warn or fail. Copy path link puts the path in the page
+   address (#p1=..., src/pedrogen.js pathLinkEncode); opening such a link loads
+   the path here and says so.
    ============================================================ */
 const PathEdit={
   P:null, sel:null, drag:null, cv:null, on:false,
@@ -35,11 +41,13 @@ const PathEdit={
     $("#peName").addEventListener("input",e=>{ if(this.P){ this.P.name=e.target.value.slice(0,40); this.store(); this.renderCode(); } });
     $("#peFile").addEventListener("click",()=>this.download());
     $("#peLink").addEventListener("click",()=>this.shareLink());
-    // a shared link opens its path (and keeps the address clean afterwards)
-    const fromHash=()=>{ const m=/^#path=([A-Za-z0-9_-]+)/.exec(location.hash||""); if(!m) return;
+    // a shared link (#p1=..., or an older #path=...) opens its path, and the address is kept clean afterwards
+    const fromHash=async()=>{ const raw=location.hash||""; if(!/^#(p\d+|path)=/i.test(raw)) return;
       try{ history.replaceState(null,"",location.pathname+location.search); }catch(e){}
-      try{ this.P=pedroFromHash(m[1]); this.store(); this.open(); this.say("Opened a shared path. Run it, or change it and share it back."); }
-      catch(e){ this.open(); this.say("That path link couldn't be read: "+e.message); } };
+      try{
+        const r=await pathLinkDecode(raw); this.P=r.path; this.sel=null; this.store(); this.open();
+        this.say("Opened a shared path"+this.linkFor(r)+". Run it, or change it and share it back.");
+      }catch(e){ this.open(); this.say("That path link couldn't be read: "+e.message+". Ask for the link again."); } };
     addEventListener("hashchange",fromHash);
     this.fromHash=fromHash;
     try{ const s=store.get("ftcbench.pedroPath",null); if(s) this.P=pedroClean(JSON.parse(s)); }catch(e){ this.P=null; }
@@ -143,6 +151,7 @@ const PathEdit={
     const len=pedroLength(P), chk=this.check();
     $("#peInfo").textContent=P.legs.length+" leg"+(P.legs.length===1?"":"s")+" · "+Math.round(len)+" in"+(chk.length?" · "+chk[0]:"");
     $("#peInfo").className="pe-info"+(chk.length?" warn":"");
+    this.renderGrade();
   },
   /* the path against the field, with this robot's size */
   check(){ const fp=Sim.footprint||{hx:0.22,hy:0.22}; return pedroCheck(this.P,Field.ok?Field.obstacles(fp.h):null,Math.min(fp.hx,fp.hy)*0.9); },
@@ -194,10 +203,36 @@ const PathEdit={
   },
   saveJava(){ const J=this.java(); this.file(J.file,J.src,"text/x-java"); },
   download(){ this.file(pedroClass(this.P.name)+".pedropath.json",JSON.stringify(this.P,null,1),"application/json"); },
+  /* what a link says it was drawn for, against this bench */
+  linkFor(r){
+    const fp=Sim.footprint, mine=fp?[2*fp.hy/0.0254,2*fp.hx/0.0254]:null; let t="";
+    if(r.robot){ t+=" drawn for a "+r.robot[0].toFixed(1)+" x "+r.robot[1].toFixed(1)+" in robot";
+      // only against a real robot: the built-in sample stands in while the team's own is still coming in
+      if(mine&&typeof LAST_STEP!=="undefined"&&LAST_STEP&&(Math.abs(mine[0]-r.robot[0])>1||Math.abs(mine[1]-r.robot[1])>1)) t+=" (yours is "+mine[0].toFixed(1)+" x "+mine[1].toFixed(1)+" in, so check the grade)"; }
+    if(r.field&&r.field!=="biobuzz") t+=" for the "+r.field+" field";
+    return t;
+  },
   async shareLink(){
-    const url=location.origin+location.pathname+"#path="+pedroToHash(this.P);
+    const fp=Sim.footprint, meta={field:"biobuzz", robot:fp?[Math.round(2*fp.hy/0.0254*10)/10,Math.round(2*fp.hx/0.0254*10)/10]:null};
+    let code; try{ code=await pathLinkEncode(this.P,meta); }catch(e){ this.say("The link couldn't be made: "+e.message); return; }
+    const url=location.origin+location.pathname+"#"+code;
     let ok=false; try{ await navigator.clipboard.writeText(url); ok=true; }catch(e){}
-    this.say(ok?"Link copied: whoever opens it gets this path in the editor.":"Copy this link: "+url);
+    this.say(ok?"Path link copied ("+url.length+" characters): whoever opens it gets this path in the editor.":"Copy this link: "+url);
+    this.lastLink=url;
+  },
+  /* ---------------- the grade (src/grader.js) ---------------- */
+  grade(){
+    const fp=Sim.footprint||{hx:0.2286,hy:0.2286,h:0.4,ox:0,oy:0}, sk=typeof MATCH_SKILL!=="undefined"?MATCH_SKILL.typical:null;
+    return gradePath(this.P,{fp, field:Field.ok?Field.data.field:null, obs:Field.ok?Field.obstacles(fp.h):null, half:Field.ok?Field.data.field.field.half:undefined,
+      vmax:sk?sk.vmax:undefined, acc:sk?sk.acc:undefined, turn:sk?sk.turn:undefined});
+  },
+  renderGrade(){
+    const box=$("#peGrade"); if(!box||!this.P) return;
+    let g; try{ g=this.grade(); }catch(e){ box.innerHTML='<p class="pe-fine">The grade stopped: '+esc(e.message)+'</p>'; return; }
+    this.G=g;
+    const L={pass:"PASS",warn:"WARN",fail:"FAIL"};
+    box.innerHTML='<div class="pe-gh"><b>Grade</b><span class="pill '+(g.fail?"bad":g.warn?"warnp":"ok")+'">'+(g.fail?g.fail+" to fix":g.warn?g.warn+" to look at":"all clear")+'</span></div>'+
+      '<ul class="pe-gl">'+g.items.map(i=>'<li class="pe-g '+i.sev+'"><span class="pe-gs">'+L[i.sev]+'</span><span>'+esc(i.text)+'</span></li>').join("")+'</ul>';
   },
   file(name,text,type){ const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([text],{type})); a.download=name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),5000); },
   say(t){ const s=$("#peMsg"); if(s){ s.textContent=t||""; s.hidden=!t; } },

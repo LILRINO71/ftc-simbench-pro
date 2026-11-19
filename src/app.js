@@ -1354,6 +1354,7 @@ function refitRobot(){
   Sim.footprint=footprintOf(CAD,OPTS.front,Sim.base);
   Sim.obstacles=Field.ok&&OPTS.obstacles!=="walls"?Field.obstacles(Sim.footprint.h):[];
   if(Field.ok) Field.collide(Sim.chassis,Sim.footprint,Sim.obstacles);
+  if(typeof PathEdit!=="undefined"&&PathEdit.on&&PathEdit.P) PathEdit.renderGrade();       // the path's grade is for this robot's size
   // the physics rig is built in the robot's own axes, so a new front (or a
   // drawn base) needs a new one — a stale rig kept the wheels placed for the
   // old front and the robot slid sideways when it turned
@@ -3290,7 +3291,7 @@ function boot(){
   requestAnimationFrame(frame);
   try{
     if(/^#join=/i.test(location.hash)) NetUI.invited(location.hash.slice(6));
-    if(/^#path=/i.test(location.hash)&&PathEdit.fromHash) setTimeout(()=>PathEdit.fromHash(),800);   // a shared path, once the robot is in
+    if(/^#(p\d+|path)=/i.test(location.hash)&&PathEdit.fromHash) setTimeout(()=>PathEdit.fromHash(),800);   // a shared path, once the robot is in
     // back from signing in to Onshape in this tab (no pop-up allowed): the card carries on with the pasted address
     const back=/^#onshape-(signed-in|signin-failed)/.exec(location.hash);
     if(back){ try{ history.replaceState(null,"",location.pathname+location.search); }catch(e){} ImportFlow.signedIn(back[1]==="signed-in",""); }

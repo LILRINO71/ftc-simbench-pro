@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { buildRobot } from '../tools/stepgen.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const ENGINE = ['hardware', 'samples', 'step', 'hull', 'inertia', 'expr', 'jvm', 'jvmlib', 'jvmprelude', 'jvmrun', 'java', 'roadrunner', 'mapping', 'robotconfig', 'compare', 'analyze', 'drivetrain', 'frame', 'mates', 'onshapelink', 'onshapecad', 'meshfiles', 'urdf', 'jointspec', 'jointsheet', 'pedrogen', 'autorig-lib', 'autorig', 'robotcheck', 'bind', 'dynamics', 'joltmech', 'field', 'shots', 'match', 'robotlite', 'net', 'netrelay', 'controllers', 'session', 'mathdoc', 'gitimport', 'onboarding', 'sim', 'tier'];
+const ENGINE = ['hardware', 'samples', 'step', 'hull', 'inertia', 'expr', 'jvm', 'jvmlib', 'jvmprelude', 'jvmrun', 'java', 'roadrunner', 'mapping', 'robotconfig', 'compare', 'analyze', 'drivetrain', 'frame', 'mates', 'onshapelink', 'onshapecad', 'meshfiles', 'urdf', 'jointspec', 'jointsheet', 'pedrogen', 'grader', 'autorig-lib', 'autorig', 'robotcheck', 'bind', 'dynamics', 'joltmech', 'field', 'shots', 'match', 'robotlite', 'net', 'netrelay', 'controllers', 'session', 'mathdoc', 'gitimport', 'onboarding', 'sim', 'tier'];
 const EXPORTS = [
   'Field', 'Shots', 'IN', 'TIP_GRAMS', 'FRONTS', 'footprintOf', 'capsulePush', 'nearestMotorId', 'SHOOTER_JAVA',
   'convexHull', 'boxCorners', 'solidTriangles', 'thinPoints', 'solidKind', 'sampleSolids', 'robotBase', 'makeRng',
@@ -24,6 +24,8 @@ const EXPORTS = [
   'Match', 'MATCH_SKILL', 'MATCH_PTS', 'boxPush', 'Online', 'netRelay', 'netConnect', 'netPackBin', 'netUnpackBin', 'netRandomId', 'netLoopback', 'netGzip', 'netGunzip', 'netHash', 'netSample', 'netAB', 'netKeep', 'dtWheelGeom', 'dtCompositeWheels', 'dtWheelOfParts', 'dtRollerHand', 'dtFrame', 'dtBaseSet', 'dtSymmetricSet', 'dtDriveComposites', 'driveFromSpec', 'liteCluster', 'liteBuild', 'liteEncode', 'liteDecode', 'LITE_FORMAT', 'netCode', 'netSlotPose', 'netSlotY', 'netEl', 'netEls', 'NET_SLOTS', 'NET_PROTO', 'autoMap', 'wheelCorner', 'detectDrivetrain', 'analyze', 'checkRobot', 'setupAuto', 'isDriveDevice', 'Sim', 'driveProbe', 'driveVerdict', 'motorTpr', 'normalizeExpr',
   'AUTO_JAVA', 'coverage', 'lineAt', 'collectStaticFields',
   'parseRobotConfig', 'checkRobotConfig', 'configKind', 'codeKind', 'diffOpModes',
+  // grader, path links, size rules, parts by number
+  'gradePath', 'GRADER_DEFAULTS', 'pathLinkEncode', 'pathLinkDecode', 'robotSize', 'ROBOT_SIZE_RULES', 'partsParse', 'partsLookup', 'partsWheel', 'partsOfCad', 'dtIsWheel',
   // Pro
   'MATERIALS', 'hullVolume', 'partMass', 'massProps', 'inertiaOf',
   'driveFromCAD', 'DRIVE_KINDS', 'ikMatrix', 'fkFromIk', 'wheelSpeeds', 'chassisFromWheels',

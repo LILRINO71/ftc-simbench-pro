@@ -117,6 +117,71 @@ function pedroFromHash(h){
   return pedroClean({name:H.n, start:{x:H.s[0],y:H.s[1],h:H.s[2]},
     legs:H.l.map(L=>({to:{x:L[0],y:L[1],h:L[2]}, heading:PEDRO_HEADINGS[L[3]]||"linear", reversed:!!L[4], wait:L[5], ctrl:Array.isArray(L[6])?L[6]:[]}))});
 }
+/* ---- share links, version 1:  #p1=<z|j><data>
+   The path's numbers as compact JSON (the same arrays as pedroToHash), then z: deflated
+   (CompressionStream) and base64url, or j: the plain JSON in base64url where the browser has
+   no CompressionStream. Beside the path: the field it was drawn for ("f") and the robot's size
+   in inches ("r": width, length) when known. That is all a link carries: no name of a person,
+   a team or a file, no robot CAD. Reading it goes through pedroClean, so a link can only give
+   a path within the field, and what it unpacks to is capped (a link can't be a zip bomb). */
+const PATHLINK_V="p1", PATHLINK_MAX_IN=12000, PATHLINK_MAX_OUT=65536;
+const pathB64=bytes=>{ let bin=""; for(const b of bytes) bin+=String.fromCharCode(b); return btoa(bin).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,""); };
+const pathUnB64=s=>{ s=String(s).replace(/-/g,"+").replace(/_/g,"/"); while(s.length%4) s+="="; return Uint8Array.from(atob(s),c=>c.charCodeAt(0)); };
+/* bytes through a (De)CompressionStream, giving up past cap output bytes */
+async function pathPipe(bytes,ts,cap){
+  const w=ts.writable.getWriter(); w.write(bytes).catch(()=>{}); w.close().catch(()=>{});
+  const r=ts.readable.getReader(), chunks=[]; let n=0;
+  for(;;){
+    const x=await r.read(); if(x.done) break;
+    n+=x.value.length; if(cap&&n>cap){ try{ r.cancel(); }catch(e){} throw new Error("that link unpacks to far more than a path"); }
+    chunks.push(x.value);
+  }
+  const out=new Uint8Array(n); let at=0; for(const c of chunks){ out.set(c,at); at+=c.length; }
+  return out;
+}
+/* meta: {field: "biobuzz", robot: [width, length] in inches} */
+async function pathLinkEncode(P,meta){
+  const n=v=>Math.round(v*10)/10, M=meta||{};
+  const H={n:P.name, s:[n(P.start.x),n(P.start.y),n(P.start.h)],
+    l:P.legs.map(L=>[n(L.to.x),n(L.to.y),n(L.to.h),PEDRO_HEADINGS.indexOf(L.heading),L.reversed?1:0,n(L.wait),(L.ctrl||[]).map(c=>[n(c[0]),n(c[1])])])};
+  if(typeof M.field==="string"&&/^[\w.-]{1,24}$/.test(M.field)) H.f=M.field;
+  if(Array.isArray(M.robot)&&M.robot.length===2&&M.robot.every(v=>Number.isFinite(+v)&&v>0&&v<200)) H.r=M.robot.map(n);
+  const bytes=new TextEncoder().encode(JSON.stringify(H));
+  if(typeof CompressionStream==="function"){
+    try{ return PATHLINK_V+"=z"+pathB64(await pathPipe(bytes,new CompressionStream("deflate"),0)); }catch(e){ /* fall through to plain */ }
+  }
+  return PATHLINK_V+"=j"+pathB64(bytes);
+}
+/* The path (and what it says it was for) in a link: with or without the "#", and the old
+   "#path=" links as well. Throws an Error that says in words what is wrong. */
+async function pathLinkDecode(link){
+  let s=String(link==null?"":link).trim().replace(/^[^#]*#/,"").replace(/^#/,"");
+  if(/^path=/i.test(s)) return {path:pedroFromHash(s.slice(5)), field:null, robot:null, v:0};
+  const m=/^p(\d+)=([A-Za-z0-9_-]+)$/.exec(s);
+  if(!m) throw new Error("that isn't a path link");
+  if(m[1]!=="1") throw new Error("that link was made by a newer version of this page");
+  const body=m[2];
+  if(body.length>PATHLINK_MAX_IN) throw new Error("that link is too long to be a path");
+  const kind=body[0], data=body.slice(1);
+  let bytes;
+  try{ bytes=pathUnB64(data); }catch(e){ throw new Error("the link's data is damaged"); }
+  if(kind==="z"){
+    if(typeof DecompressionStream!=="function") throw new Error("this browser can't open compressed links");
+    try{ bytes=await pathPipe(bytes,new DecompressionStream("deflate"),PATHLINK_MAX_OUT); }
+    catch(e){ throw new Error(/far more/.test(e.message)?e.message:"the link's data is damaged"); }
+  }else if(kind!=="j") throw new Error("that link is in a format this page doesn't know");
+  let H; try{ H=JSON.parse(new TextDecoder().decode(bytes)); }catch(e){ throw new Error("the link's data is damaged"); }
+  if(!H||!Array.isArray(H.s)||!Array.isArray(H.l)) throw new Error("that link has no path in it");
+  let path;
+  try{
+    path=pedroClean({name:H.n, start:{x:H.s[0],y:H.s[1],h:H.s[2]},
+      legs:H.l.slice(0,40).map(L=>({to:{x:L[0],y:L[1],h:L[2]}, heading:PEDRO_HEADINGS[L[3]]||"linear", reversed:!!L[4], wait:L[5], ctrl:Array.isArray(L[6])?L[6]:[]}))});
+  }catch(e){ throw new Error("that link has no usable path in it"); }
+  const field=typeof H.f==="string"&&/^[\w.-]{1,24}$/.test(H.f)?H.f:null;
+  const robot=Array.isArray(H.r)&&H.r.length===2&&H.r.every(v=>Number.isFinite(+v)&&v>0&&v<200)?H.r.map(Number):null;
+  return {path, field, robot, v:1};
+}
+
 /* the Java class name for the path's name */
 function pedroClass(name){
   const w=String(name||"").replace(/[^A-Za-z0-9 ]+/g," ").trim().split(/\s+/).filter(Boolean).map(s=>s[0].toUpperCase()+s.slice(1));
