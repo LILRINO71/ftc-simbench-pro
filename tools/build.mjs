@@ -11,7 +11,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { minifyJS, minifyCSS, minifyHTML } from './minify.mjs';
 import { buildRobot } from './stepgen.mjs';
-import { threeLoaderScript } from './threeloader.mjs';
+import { threeLoaderScript, ADDONS, VENDOR_THREE, VENDOR_TRYSTERO } from './threeloader.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const rd = (...p) => fs.readFileSync(path.join(ROOT, ...p), 'utf8');
@@ -32,6 +32,11 @@ export const BROWSER = ['tessellate', 'view3d', 'cadview', 'engineworker', 'impo
 // page puts it on window.THREE with the add-ons the view uses, and only then boots
 // the app (src/app.js waits for "three-ready").
 export const THREE_VERSION = '0.186.1';
+// The libraries the page also serves from its own dist/vendor/ (copied from node_modules below),
+// with the CDN as the fallback. src/net.js, src/joltmech.js and src/tessellate.js name the same versions.
+export const TRYSTERO_VERSION = '0.25.4';
+export const JOLT_VERSION = '1.1.0';
+export const OCCT_VERSION = '0.0.23';
 
 const argv = process.argv.slice(2);
 const MIN = argv.includes('--min');
@@ -80,14 +85,16 @@ const fragment = [
   // the saved theme before anything paints, so there's no flash; light is the default
   `<script>try{var t=localStorage.getItem("ftcbench.theme");document.documentElement.setAttribute("data-theme",t==="dark"?"dark":t==="light"?"light":(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"))}catch(e){document.documentElement.setAttribute("data-theme","light")}</script>`,
   // three.js and the add-ons the view uses, with a second CDN (tools/threeloader.mjs); the app boots on "three-ready"
-  threeLoaderScript(THREE_VERSION),
+  threeLoaderScript(THREE_VERSION, TRYSTERO_VERSION),
   `<style>\n${css}</style>`,
   markup,
   `<script>\n${safe(shotJs)}</script>`,
   `<script>\n${safe(js)}</script>`,
 ].join('\n');
 
-const DIST = path.join(ROOT, 'dist');
+// --out <dir> builds somewhere else (the size test builds into a temp folder, so it never races a test reading dist/)
+const outArg = argv.indexOf('--out');
+const DIST = outArg >= 0 && argv[outArg + 1] ? path.resolve(argv[outArg + 1]) : path.join(ROOT, 'dist');
 fs.mkdirSync(DIST, { recursive: true });
 fs.writeFileSync(path.join(DIST, 'fragment.html'), fragment, 'utf8');
 // the engine for the worker; old hashes are left behind by each deploy's clean build
@@ -134,6 +141,57 @@ if (fs.existsSync(path.join(ROOT, 'assets', 'robots'))) copyDir(path.join(ROOT, 
 // the support, privacy and terms pages (an Onshape App Store listing links to them), served at /support, /privacy, /terms
 if (fs.existsSync(path.join(ROOT, 'site'))) copyDir(path.join(ROOT, 'site'), DIST);
 
+// The libraries, served from the site itself (the page tries these first and the CDNs
+// second, so a school network that blocks CDNs still works). Each folder carries its
+// version, so the files can be cached for good. Only what the page really loads is copied.
+{
+  const NM = path.join(ROOT, 'node_modules');
+  const need = (rel) => {
+    const f = path.join(NM, rel);
+    if (!fs.existsSync(f)) throw new Error(`${rel} is not installed (run npm ci)`);
+    return f;
+  };
+  const put = (from, toRel) => {
+    const to = path.join(DIST, toRel);
+    fs.mkdirSync(path.dirname(to), { recursive: true });
+    fs.copyFileSync(from, to);
+  };
+  const version = (pkgDir) => JSON.parse(fs.readFileSync(path.join(need(pkgDir), 'package.json'), 'utf8')).version;
+  try {
+    fs.rmSync(path.join(DIST, 'vendor'), { recursive: true, force: true });
+    // three.js: the module build, plus the add-ons the view uses and whatever they import
+    for (const [n, v] of [['three', THREE_VERSION], ['trystero', TRYSTERO_VERSION], ['occt-import-js', OCCT_VERSION], ['jolt-physics', JOLT_VERSION]]) {
+      const have = version(n);
+      if (have !== v) throw new Error(`node_modules has ${n} ${have} but the build names ${v}`);
+    }
+    const t3 = VENDOR_THREE(THREE_VERSION);
+    for (const f of ['three.module.js', 'three.core.js']) put(need('three/build/' + f), t3 + 'build/' + f);
+    const seen = new Set();
+    const addon = (rel) => {   // rel: path under examples/jsm/
+      if (seen.has(rel)) return;
+      seen.add(rel);
+      const file = need('three/examples/jsm/' + rel);
+      put(file, t3 + 'examples/jsm/' + rel);
+      for (const m of fs.readFileSync(file, 'utf8').matchAll(/(?:from|import)\s*['"](\.[^'"]+)['"]/g)) addon(path.posix.normalize(path.posix.join(path.posix.dirname(rel), m[1])));
+    };
+    for (const [, p] of ADDONS) addon(p);
+    // Trystero 0.25.4: the nostr strategy, its core and one signing library, all plain ES modules
+    // with bare imports that the page's import map points at these files (tools/threeloader.mjs importMap)
+    const tt = VENDOR_TRYSTERO(TRYSTERO_VERSION);
+    put(need('trystero/dist/index.mjs'), tt + 'index.mjs');
+    put(need('@trystero-p2p/nostr/dist/index.mjs'), tt + 'nostr.mjs');
+    put(need('@noble/secp256k1/index.js'), tt + 'secp256k1.mjs');
+    for (const f of fs.readdirSync(need('@trystero-p2p/core/dist'))) if (f.endsWith('.mjs')) put(path.join(NM, '@trystero-p2p/core/dist', f), tt + 'core/' + f);
+    // Jolt Physics (the WebAssembly is inside this build) and OpenCascade (script + wasm)
+    put(need('jolt-physics/dist/jolt-physics.wasm-compat.js'), `vendor/jolt-physics-${JOLT_VERSION}/jolt-physics.wasm-compat.js`);
+    for (const f of ['occt-import-js.js', 'occt-import-js.wasm']) put(need('occt-import-js/dist/' + f), `vendor/occt-import-js-${OCCT_VERSION}/${f}`);
+  } catch (e) {
+    // a ship build never goes out without them; a dev build falls back to the CDNs
+    if (MIN) { console.error('ship build refused: ' + e.message); process.exit(1); }
+    console.warn('  ! no vendor/ (' + e.message + '); the page will use the CDNs');
+  }
+}
+
 // Cloudflare Pages / Netlify read this. The page is one file that changes every
 // deploy, so it must never be cached hard; everything else here is immutable.
 fs.writeFileSync(path.join(DIST, '_headers'),
@@ -146,6 +204,9 @@ fs.writeFileSync(path.join(DIST, '_headers'),
   `/\n` +
   `  Cache-Control: public, max-age=0, must-revalidate\n` +
   `/engine-*.js\n` +
+  `  Cache-Control: public, max-age=31536000, immutable\n` +
+  // the folder names carry the version, so a file at one of these paths never changes
+  `/vendor/*\n` +
   `  Cache-Control: public, max-age=31536000, immutable\n`, 'utf8');
 
 const kb = (s) => (s.length / 1024).toFixed(0) + ' KB';

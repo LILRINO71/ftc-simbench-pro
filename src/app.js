@@ -3013,7 +3013,7 @@ const Physics={
   async loadJolt(){
     if(typeof JOLT!=="undefined"&&JOLT) return JOLT;
     if(!this.joltLoading) this.joltLoading=(async()=>{
-      const urls=[typeof SIMBENCH_VENDOR!=="undefined"&&SIMBENCH_VENDOR&&SIMBENCH_VENDOR.jolt, JOLT_LIB.cdn].filter(Boolean);
+      const urls=[typeof SIMBENCH_VENDOR!=="undefined"&&SIMBENCH_VENDOR&&SIMBENCH_VENDOR.jolt, JOLT_LIB.self, JOLT_LIB.cdn].filter(Boolean);
       let last=null;
       for(const u of urls){ try{ const mod=await import(u); JOLT=await mod.default(); return JOLT; }catch(e){ last=e; } }
       throw last||new Error("no copy of Jolt Physics could be loaded");

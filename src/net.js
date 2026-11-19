@@ -29,6 +29,9 @@
    ============================================================ */
 const NET_PROTO=2;                                 // 2: timed poses, mechanisms, robot copies
 const NET_APP="ftc-simbench-pro";
+/* the site's own copy first (tools/build.mjs: dist/vendor/, its bare imports mapped by the page's
+   import map), then the CDNs. Absolute, since a bare "vendor/..." is not a valid import() specifier. */
+const NET_LIB_SELF=typeof document!=="undefined"?new URL("vendor/trystero-0.25.4/index.mjs",document.baseURI).href:null;
 const NET_LIB="https://cdn.jsdelivr.net/npm/trystero@0.25.4/+esm";
 /* the same version from a second CDN: a browser remembers a failed module import for
    the rest of the page, so "try again" needs a different address to mean anything */
@@ -108,7 +111,8 @@ async function netTrystero(load,extra){
   load=load||(u=>import(u));
   // extra: more of Trystero's room config, e.g. {turnConfig}: TURN servers on port 443 (src/netrelay.js netConnect)
   extra=extra&&typeof extra==="object"?extra:{};
-  let T; try{ T=await load(NET_LIB); }catch(e){ T=await load(NET_LIB2); }
+  let T=null;
+  for(const u of [NET_LIB_SELF,NET_LIB,NET_LIB2]){ if(!u) continue; try{ T=await load(u); break; }catch(e){ if(u===NET_LIB2) throw e; } }
   const out={self:T.selfId, onError:null, join(name){
     const r=T.joinRoom(Object.assign({}, extra, {appId:NET_APP, relayConfig:{urls:NET_RELAYS}}), name, {onJoinError:d=>{ if(out.onError) out.onError(Object.assign({room:name},d)); }});
     const a=r.makeAction("m"), b=r.makeAction("b");

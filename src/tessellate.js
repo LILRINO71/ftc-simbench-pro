@@ -13,7 +13,11 @@
    solid's mechanism: the arm's exact meshes swing with the arm. The matching
    is pure and tested in Node against the corpus; only Tess touches the DOM.
    ============================================================ */
-const OCCT_CDN="https://cdn.jsdelivr.net/npm/occt-import-js@0.0.23/dist/";
+/* Where OpenCascade comes from, in order: the site's own copy (tools/build.mjs puts it in dist/vendor/,
+   absolute because the worker is a blob), then the CDN. It loads when the first STEP file is read, which
+   the default robot already is, so it is not on the page's critical path. */
+const OCCT_BASES=[typeof document!=="undefined"?new URL("vendor/occt-import-js-0.0.23/",document.baseURI).href:null,
+  "https://cdn.jsdelivr.net/npm/occt-import-js@0.0.23/dist/"].filter(Boolean);
 const OCCT_PARAMS={linearUnit:"meter", linearDeflectionType:"bounding_box_ratio", linearDeflection:0.001, angularDeflection:0.5};
 
 /* Which mechanism carries a point, the rule the view has always used: the
@@ -430,12 +434,17 @@ const Tess={
      tessellates without freezing the page. Typed arrays come back
      transferred, not copied. */
   makeWorker(){
-    const src=`importScripts(${JSON.stringify(OCCT_CDN+"occt-import-js.js")});
+    const src=`const BASES=${JSON.stringify(OCCT_BASES)};
 let ready=null;
+async function boot(){
+  let last=null;
+  for(const b of BASES){ try{ importScripts(b+"occt-import-js.js"); return await occtimportjs({locateFile:f=>b+f}); }catch(e){ last=e; } }
+  throw last||new Error("no copy of OpenCascade could be loaded");
+}
 onmessage=async e=>{
   const d=e.data;
   try{
-    ready=ready||occtimportjs({locateFile:f=>${JSON.stringify(OCCT_CDN)}+f});
+    ready=ready||boot(); ready.catch(()=>{ ready=null; });
     const oc=await ready, r=oc.ReadStepFile(new Uint8Array(d.buf),d.params), tr=[];
     if(r&&r.success) for(const m of r.meshes){
       const P=new Float32Array(m.attributes.position.array); m.attributes.position.array=P; tr.push(P.buffer);
@@ -466,12 +475,19 @@ onmessage=async e=>{
   /* No worker (a sandbox that forbids blob workers): the same library on the
      main thread, loaded by a script tag. */
   mainThread(buf,params){
-    const load=this.mod||(this.mod=new Promise((res,rej)=>{
-      if(typeof occtimportjs==="function"){ res(); return; }
-      const s=document.createElement("script"); s.src=OCCT_CDN+"occt-import-js.js"; s.async=true;
-      s.onload=()=>res(); s.onerror=()=>rej(new Error("couldn't load OpenCascade from the CDN"));
+    const script=u=>new Promise((res,rej)=>{
+      const s=document.createElement("script"); s.src=u; s.async=true;
+      s.onload=()=>res(); s.onerror=()=>{ s.remove(); rej(new Error("couldn't load OpenCascade from "+u)); };
       document.head.appendChild(s);
-    }).then(()=>occtimportjs({locateFile:f=>OCCT_CDN+f})));
+    });
+    const load=this.mod||(this.mod=(async()=>{
+      let last=null;
+      for(const b of OCCT_BASES){
+        try{ if(typeof occtimportjs!=="function") await script(b+"occt-import-js.js"); return await occtimportjs({locateFile:f=>b+f}); }
+        catch(e){ last=e; }
+      }
+      throw last||new Error("couldn't load OpenCascade");
+    })());
     load.catch(()=>{ this.mod=null; });
     return load.then(oc=>{ const r=oc.ReadStepFile(new Uint8Array(buf),params||OCCT_PARAMS);
       if(!r||!r.success) throw new Error("OpenCascade couldn't read this STEP file"); return r; });

@@ -31,7 +31,9 @@
    Jolt is handed in (the browser loads it on demand, the tests from
    node_modules), so this file never loads anything itself.
    ============================================================ */
-const JOLT_LIB={self:"vendor/jolt-physics.wasm-compat.js",
+/* the site's own copy (tools/build.mjs puts it in dist/vendor/), tried first; the CDN is the fallback.
+   An absolute URL, since a bare "vendor/..." is not a valid import() specifier. */
+const JOLT_LIB={self:typeof document!=="undefined"?new URL("vendor/jolt-physics-1.1.0/jolt-physics.wasm-compat.js",document.baseURI).href:"vendor/jolt-physics-1.1.0/jolt-physics.wasm-compat.js",
   cdn:"https://cdn.jsdelivr.net/npm/jolt-physics@1.1.0/dist/jolt-physics.wasm-compat.js"};
 
 const JoltMech=(function(){
