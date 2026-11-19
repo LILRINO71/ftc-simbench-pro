@@ -104,6 +104,9 @@ const Results={
     const rep=meta&&meta.trace?runReport(meta.trace,meta.hits,meta.period==="Autonomous"?30:120):null;
     $("#resultsReport").innerHTML=rep?this.reportHtml(rep,meta.period):"";
     $("#resultsReplay").hidden=!Recorder.url||Recorder.last==="video";
+    // personal bests for this robot and OpMode, and the shared board when the site has one (src/leaderboard.js)
+    if(typeof Board!=="undefined"&&meta&&meta.robot) Board.show($("#resultsBoard"),Board.record(meta,mine.total));
+    else if($("#resultsBoard")) $("#resultsBoard").innerHTML="";
     p.hidden=false;
   },
 };

@@ -948,7 +948,25 @@ button.rmbtn{color:var(--label-3);} button.rmbtn:hover{color:var(--fail);}
 .ic-textbtn:hover{text-decoration:underline;}
 
 /* ================= clips, sounds and results (src/recorder.js, src/sounds.js, src/results.js) ================= */
+/* the leaderboard on the results card (src/leaderboard.js) */
+.rs-board:empty{display:none;}
+.lb h4{margin:12px 0 5px; font-size:11px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; color:var(--label-3);}
+.lb ul,.lb ol{list-style:none; margin:0; padding:0; border-radius:10px; background:var(--card-2);}
+.lb li{display:flex; align-items:center; gap:8px; padding:6px 10px; border-top:1px solid var(--sep-2);}
+.lb li:first-child{border-top:0;}
+.lb li span{flex:1; min-width:0; display:flex; flex-direction:column; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.lb li small{color:var(--label-3); font-size:11px; overflow:hidden; text-overflow:ellipsis;}
+.lb li b{font-family:var(--mono); font-weight:600;}
+.lb li i{font-style:normal; font-size:10px; letter-spacing:.06em; text-transform:uppercase; color:var(--pass);}
+.lb .lb-pb li.now{box-shadow:inset 3px 0 var(--accent);}
+.lb .lb-rows li .r{flex:none; width:22px; color:var(--label-3); font-family:var(--mono); font-size:11.5px;}
+.lb .lb-rows li.me{box-shadow:inset 3px 0 var(--accent); background:var(--accent-soft,transparent);}
+.lb .lb-rows li.gap{justify-content:center; color:var(--label-3); padding:0 10px;}
+.lb-post{display:flex; gap:6px; margin-top:8px;} .lb-post input{flex:1; min-width:0;}
+.lb-note,.lb-empty,.lb-msg{margin:6px 0 0; color:var(--label-3); font-size:11.5px; line-height:1.4;}
+.lb-msg{color:var(--label-2);}
 .rec-btn{display:inline-flex; align-items:center; gap:6px;}
+.rec-btn:disabled{opacity:.45; cursor:default;}
 .rec-btn i{width:8px; height:8px; border-radius:50%; background:var(--fail); opacity:.75;}
 .rec-btn.on{background:var(--fail-soft); color:var(--fail);}
 .rec-btn.on i{opacity:1; animation:recPulse 1s ease-in-out infinite;}
