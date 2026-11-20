@@ -401,8 +401,8 @@ function jvNatives(){
   d("java.lang.Math",{sf:{PI:Math.PI,E:Math.E},s:jvMathStatics()});
   d("java.lang.StrictMath",{sf:{PI:Math.PI,E:Math.E},s:jvMathStatics()});
   d("java.lang.System",{s:{
-    currentTimeMillis(vm){ return Math.round(1.7e12+(vm.host?vm.host.now():0)*1000); },
-    nanoTime(vm){ return Math.round((vm.host?vm.host.now():0)*1e9); },
+    currentTimeMillis(vm){ return Math.round(1.7e12+jvNow(vm)*1000); },
+    nanoTime(vm){ return Math.round(jvNow(vm)*1e9); },
     arraycopy(vm,a){ for(let k=0;k<a[4];k++) a[2][a[3]+k]=a[0][a[1]+k]; },
     exit(){}, gc(){}, getProperty(){ return null; }, lineSeparator(){ return "\n"; }, identityHashCode(vm,a){ return jvIsObj(a[0])?jvHash(a[0]):0; }},
     sget(vm,name){ if(name==="out"||name==="err") return vm.mk("java.io.PrintStream"); }});
@@ -505,13 +505,13 @@ function jvNatives(){
       if(n==="telemetry") return rt?rt.tel:null;
       if(n==="gamepad1") return rt?rt.pads[1]:null;
       if(n==="gamepad2") return rt?rt.pads[2]:null;
-      if(n==="time") return vm.host?vm.host.runtime():0;
+      if(n==="time") return jvRuntime(vm);
       if(n==="blackboard") return vm.blackboard||(vm.blackboard=jvMapObj(vm));
       if(/^msStuckDetect/.test(n)) return 5000;
       return undefined; },
     set(vm,o,n,v){ (o.n||(o.n={})).ov=(o.n.ov||{}); o.n.ov[n]=v; },
     sget(vm,n){ if(n==="blackboard") return vm.blackboard||(vm.blackboard=jvMapObj(vm)); },
-    m:{getRuntime(vm){ return vm.host?vm.host.runtime():0; }, resetRuntime(vm){ if(vm.host&&vm.host.resetRuntime) vm.host.resetRuntime(); },
+    m:{getRuntime(vm){ return jvRuntime(vm); }, resetRuntime(vm){ if(vm.host&&vm.host.resetRuntime) vm.host.resetRuntime(); },
       requestOpModeStop(vm){ if(vm.prog) vm.prog.stopAsked=true; }, terminateOpModeNow(vm){ if(vm.prog) vm.prog.stopAsked=true; const e=new Error("terminateOpModeNow"); e.jvStop=true; throw e; },
       updateTelemetry(vm){ return JV_TEL_M.update(vm); }, init(){}, init_loop(){}, start(){}, loop(){}, stop(){}, internalPostInitLoop(){}, internalPostLoop(){}}};
   d("com.qualcomm.robotcore.eventloop.opmode.OpMode",Object.assign({},OPMODE));
@@ -608,13 +608,13 @@ function jvNatives(){
   // time
   d("com.qualcomm.robotcore.util.ElapsedTime",{
     ctor(vm,o,a){ const r=a.find(x=>x&&x.__en); const n=a.find(x=>typeof x==="number");
-      o.n={t0:(vm.host?vm.host.now():0)-(n?n/1e9:0),res:r?r.__en:"SECONDS"}; },
-    m:{reset(vm,o){ o.n.t0=vm.host?vm.host.now():0; }, seconds(vm,o){ return (vm.host?vm.host.now():0)-o.n.t0; }, milliseconds(vm,o){ return ((vm.host?vm.host.now():0)-o.n.t0)*1000; },
-      nanoseconds(vm,o){ return Math.round(((vm.host?vm.host.now():0)-o.n.t0)*1e9); }, microseconds(vm,o){ return ((vm.host?vm.host.now():0)-o.n.t0)*1e6; },
-      time(vm,o,a){ const s=(vm.host?vm.host.now():0)-o.n.t0; const u=jvEn(a[0]); if(u) return s*({NANOSECONDS:1e9,MICROSECONDS:1e6,MILLISECONDS:1e3,SECONDS:1,MINUTES:1/60}[u]||1); return o.n.res==="MILLISECONDS"?s*1000:s; },
+      o.n={t0:jvNow(vm)-(n?n/1e9:0),res:r?r.__en:"SECONDS"}; },
+    m:{reset(vm,o){ o.n.t0=jvNow(vm); }, seconds(vm,o){ return jvNow(vm)-o.n.t0; }, milliseconds(vm,o){ return (jvNow(vm)-o.n.t0)*1000; },
+      nanoseconds(vm,o){ return Math.round((jvNow(vm)-o.n.t0)*1e9); }, microseconds(vm,o){ return (jvNow(vm)-o.n.t0)*1e6; },
+      time(vm,o,a){ const s=jvNow(vm)-o.n.t0; const u=jvEn(a[0]); if(u) return s*({NANOSECONDS:1e9,MICROSECONDS:1e6,MILLISECONDS:1e3,SECONDS:1,MINUTES:1/60}[u]||1); return o.n.res==="MILLISECONDS"?s*1000:s; },
       startTime(vm,o){ return o.n.res==="MILLISECONDS"?o.n.t0*1000:o.n.t0; }, startTimeNanoseconds(vm,o){ return Math.round(o.n.t0*1e9); },
-      now(vm,o,a){ const s=vm.host?vm.host.now():0; const u=jvEn(a[0]); return u==="MILLISECONDS"?s*1000:u==="NANOSECONDS"?s*1e9:s; },
-      getResolution(vm,o){ return vm.enumConst("com.qualcomm.robotcore.util.ElapsedTime.Resolution",o.n.res); }, log(){}, toString(vm,o){ return ((vm.host?vm.host.now():0)-o.n.t0).toFixed(4)+" seconds"; }}});
+      now(vm,o,a){ const s=jvNow(vm); const u=jvEn(a[0]); return u==="MILLISECONDS"?s*1000:u==="NANOSECONDS"?s*1e9:s; },
+      getResolution(vm,o){ return vm.enumConst("com.qualcomm.robotcore.util.ElapsedTime.Resolution",o.n.res); }, log(){}, toString(vm,o){ return (jvNow(vm)-o.n.t0).toFixed(4)+" seconds"; }}});
   en("com.qualcomm.robotcore.util.ElapsedTime.Resolution",["SECONDS","MILLISECONDS"],"com.qualcomm.robotcore.util.ElapsedTime");
   d("com.qualcomm.robotcore.util.Range",{s:{clip(vm,a){ return Math.max(a[1],Math.min(a[2],a[0])); }, scale(vm,a){ const [n,x1,x2,y1,y2]=a.map(jvNum); return y1+(n-x1)*(y2-y1)/(x2-x1||1); }, throwIfRangeIsInvalid(){}}});
   d("com.qualcomm.robotcore.hardware.configuration.LynxConstants",{s:{isEmbeddedSerialNumber(vm,a){ return a[0]==="(embedded)"; }}});
@@ -623,7 +623,7 @@ function jvNatives(){
   // a direct line to the sim for the Java libraries below (tick, odometry)
   // the robot where the sim has it (metres, field frame) and how fast it's going there: Pedro's localizer
   const jvWorldVel=vm=>{ const v=vm.host&&vm.host.vel?vm.host.vel():{x:0,y:0}, h=vm.host?vm.host.heading():0, c=Math.cos(h), s=Math.sin(h); return {x:v.x*c-v.y*s, y:v.x*s+v.y*c}; };
-  d("simbench.Sim",{s:{tick(){ return {__block:{gate:true}}; }, now(vm){ return vm.host?vm.host.now():0; }, heading(vm){ return vm.host?vm.host.heading():0; },
+  d("simbench.Sim",{s:{tick(){ return {__block:{gate:true}}; }, now(vm){ return jvNow(vm); }, heading(vm){ return vm.host?vm.host.heading():0; },
     x(vm){ return vm.host&&vm.host.pose?vm.host.pose().x:0; }, y(vm){ return vm.host&&vm.host.pose?vm.host.pose().y:0; },
     vx(vm){ return jvWorldVel(vm).x; }, vy(vm){ return jvWorldVel(vm).y; },
     *mecanum(vm,a){ // a: [lf, lb, rb, rf] motors, then the four powers in that order (normalised by the caller)
@@ -639,6 +639,21 @@ function jvGate(vm,value){
   if(!s.passDone){ s.gates++; return value(); }
   return {__block:{gate:true},then(){ jvWaited(s); s.gates++; return value(); }};
 }
+/* The clock the code reads. Between ticks it is the sim's; inside a pass it moves on by a
+   fixed cost per statement run (JV_STMT_SEC), so two reads in one pass are never equal and
+   a dt the code measures from pass to pass averages exactly the tick. The extra stays under
+   one tick, so the clock never runs backwards across a tick. */
+const JV_STMT_SEC=25e-9;   // ~25 ns a statement: the order of a Control Hub running simple Java
+/* A tick begins when the sim's clock has moved: JvProgram says so before it runs the code */
+function jvTickStart(vm){ const now=vm.host?vm.host.now():0, T=vm.tick0;
+  if(T.now!==now){ if(T.now!=null&&now>T.now) T.dt=Math.min(0.1,Math.max(0.001,now-T.now)); T.now=now; T.steps=vm.steps; } }
+function jvCpu(vm){
+  jvTickStart(vm);
+  const T=vm.tick0, c=(vm.steps-T.steps)*JV_STMT_SEC;
+  return T.dt*(1-Math.exp(-c/T.dt));
+}
+const jvNow=vm=>(vm.host?vm.host.now():0)+jvCpu(vm);
+const jvRuntime=vm=>(vm.host?vm.host.runtime():0)+jvCpu(vm);
 function jvDevMapItems(vm,kind){
   const out=[]; if(vm.dev) for(const [,d] of vm.dev) if(d&&d.n&&JV_DEV_KIND[kind]===d.n.kind) out.push(d);
   if(!out.length&&JV_DEV_KIND[kind]==="voltage") out.push(jvDrain(jvGetDevice(vm,"VoltageSensor","Control Hub","VoltageSensor")));

@@ -3,6 +3,7 @@
 // idle() are flag reads and a Thread.yield() on the robot: they take no robot time, so a loop that
 // checks opModeIsActive() three times, or ends in idle() (the SDK samples do), must still run one
 // pass per step. It used to lose a whole step at every extra check (25 or 13 passes a second).
+// The clock moves on inside a pass too, so a dt measured between two reads is never zero.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { runOpMode } from '../tools/run-opmode.mjs';
@@ -88,4 +89,32 @@ test('loop rate: a busy-wait with no gate still lets time pass, and a thread loo
   const [n, th] = t.prints[0].split(' ').map(Number);
   assert.ok(n >= 50 && n <= 51, 'main loop: ' + n);
   assert.ok(th >= 48 && th <= 52, 'thread loop: ' + th);
+});
+
+test('clock: two reads in one pass differ, and a dt measured pass to pass averages the step exactly', () => {
+  const r = run(linear(`    waitForStart();
+    ElapsedTime t = new ElapsedTime();
+    long n0 = System.nanoTime(); long m0 = System.currentTimeMillis(); double r0 = getRuntime();
+    int zero = 0, back = 0, passes = 0; double prevA = -1, prevB = -1, sum = 0;
+    while (opModeIsActive() && passes < 50) {
+      passes++;
+      double a = t.seconds();
+      long na = System.nanoTime();
+      double x = 0; for (int i = 0; i < 100; i++) x += Math.sqrt(i);
+      double b = t.seconds();
+      long nb = System.nanoTime();
+      if (b - a <= 0 || nb - na <= 0) zero++;
+      if (prevA >= 0) { if (a <= prevB) back++; sum += a - prevA; }
+      prevA = a; prevB = b;
+      if (b - a > 0.001) back += 100;
+    }
+    double avg = sum / (passes - 1);
+    System.out.println(zero + " " + back + " " + Math.round(avg * 1e6));
+    System.out.println((System.nanoTime() > n0) + " " + (System.currentTimeMillis() > m0) + " " + (getRuntime() > r0));`));
+  const [zero, back, avgUs] = r.prints[0].split(' ').map(Number);
+  assert.equal(zero, 0, 'a second read in the same pass is later than the first');
+  assert.equal(back, 0, 'never backwards across a step, and a few statements take microseconds, not milliseconds');
+  // the reads are at different points of the pass, so pass to pass they average one step
+  assert.ok(Math.abs(avgUs - 20000) <= 5, 'average dt ' + avgUs + ' us');
+  assert.equal(r.prints[1], 'true true true');
 });

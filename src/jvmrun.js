@@ -113,7 +113,7 @@ JvProgram.prototype.fail=function(e){
 JvProgram.prototype.step=function(){
   if(this.done||!this.gen) return;
   const vm=this.vm;
-  vm.budget=vm.BUDGET; vm.strand=this.strand;
+  vm.budget=vm.BUDGET; vm.strand=this.strand; jvTickStart(vm);
   try{
     for(let guard=0;guard<1e6;guard++){
       const r=this.gen.next();
@@ -130,7 +130,7 @@ JvProgram.prototype.drain=function(g){
   // after a fixed amount of work and say where it was going round
   const vm=this.vm, limit=vm.steps+1e6;
   const host=vm.host;
-  vm.strand=this.strand;
+  vm.strand=this.strand; jvTickStart(vm);
   try{ for(let n=0;n<2e5;n++){ const r=g.next(); if(r.done) return r.value;
     // a busy-wait (a forced gate): the robot keeps moving meanwhile, as it would
     if(r.value&&r.value.forced&&host&&host.world) host.world(0.02);
@@ -195,7 +195,7 @@ JvProgram.prototype.start=function(){
 JvProgram.prototype.tick=function(){
   if(this.done&&!(this.vm.threads&&this.vm.threads.length)) return;
   const vm=this.vm, now=vm.host?vm.host.now():0;
- 
+  jvTickStart(vm);
   if(vm.threads) for(const th of vm.threads.slice()){
     if(th.done||now<th.resumeAt) continue;
     vm.budget=vm.BUDGET; vm.strand=th.st||(th.st=jvStrand());
