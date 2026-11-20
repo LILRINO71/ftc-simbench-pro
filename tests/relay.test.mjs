@@ -132,6 +132,13 @@ test('pages function: TURN and rooms only for the site\'s own pages, not for a r
     ['a sandboxed frame', { Origin: 'null' }],
     ['this site over http', { Origin: 'http://sb.example' }],
     ['own Origin, but the browser says cross-site', { Origin: 'https://sb.example', 'Sec-Fetch-Site': 'cross-site' }],
+    // Referer is only the second way in for a browser that sends no Sec-Fetch-Site
+    ['a Referer of another site', { Referer: 'https://evil.example/page' }],
+    ['a Referer that only starts like this site', { Referer: 'https://sb.example.evil.example/' }],
+    ['a Referer of this site over http', { Referer: 'http://sb.example/' }],
+    ['a Referer that is not an address', { Referer: 'sb.example' }],
+    ['own Referer, but the browser says cross-site', { Referer: 'https://sb.example/', 'Sec-Fetch-Site': 'cross-site' }],
+    ['own Referer, but another site\'s Origin', { Referer: 'https://sb.example/', Origin: 'https://evil.example' }],
   ];
   for (const [what, headers] of refused) {
     for (const [path, method] of [['/room/turn', 'GET'], ['/room/r1abcd/sse?id=bot1abcd', 'GET'], ['/room/r1abcd/ws?id=bot1abcd', 'GET'], ['/room/r1abcd/send?id=bot1abcd', 'POST']]) {
@@ -149,6 +156,21 @@ test('pages function: TURN and rooms only for the site\'s own pages, not for a r
   }
   assert.equal(minted, 1);
   assert.equal(opened, 3);
+  // A browser that sends no Sec-Fetch-Site (Safari before 16.4, any page on plain http): its plain
+  // GET names the site's own page in Referer. That used to be a 403: no TURN, and no way into a
+  // room for a network that strips WebSockets.
+  const OLD = { Referer: 'https://sb.example/?robot=demo' };
+  for (const path of ['/room/turn', '/room/r1abcd/sse?id=old1abcd']) {
+    const r = await handle(req(path, { method: 'GET', headers: OLD }), env, fetchImpl);
+    assert.equal(r.status, 200, `a browser with no Sec-Fetch-Site: GET ${path}`);
+  }
+  assert.equal(minted, 2); assert.equal(opened, 4);
+  // but a WebSocket and a POST always carry Origin: a Referer alone does not open those
+  for (const [path, init] of [['/room/r1abcd/ws?id=old1abcd', { method: 'GET', headers: Object.assign({ Upgrade: 'websocket' }, OLD) }],
+    ['/room/r1abcd/send?id=old1abcd', { method: 'POST', headers: OLD, body: '[]' }]]) {
+    assert.equal((await handle(req(path, init), env, fetchImpl)).status, 403, `a Referer alone: ${init.method} ${path}`);
+  }
+  assert.equal(opened, 4);
   // /room/health costs nothing and tells nothing secret: anyone may ask
   assert.equal((await handle(req('/room/health'), env)).status, 200);
 });

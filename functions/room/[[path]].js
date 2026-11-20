@@ -25,14 +25,25 @@ const json = (obj, status = 200) => new Response(JSON.stringify(obj), { status, 
    Origin, and a same-origin GET (EventSource, fetch), which carries no Origin, carries
    Sec-Fetch-Site: same-origin. So a request must have an Origin of this site, or no
    Origin and Sec-Fetch-Site: same-origin; and a Sec-Fetch-Site, when there is one, must
-   say same-origin. A request with neither header came from no page at all (curl, a bot,
-   a server) and is refused. A client outside a browser can still write both headers:
-   this keeps other sites and casual scripts out, it is not a rate limit. */
+   say same-origin.
+   Some browsers send no Sec-Fetch-Site: Safari before 16.4, and any browser on a page
+   served over plain http (a phone testing against a computer on the same network). Their
+   same-origin GET still says where it came from in Referer (the site's referrer policy
+   sends it to its own origin), so a plain GET with neither header is accepted when its
+   Referer is a page of this site. A WebSocket and a POST always carry Origin, in every
+   browser, so they get no such second way in.
+   A request that names no page at all (curl, a bot, a server) is refused. A client outside
+   a browser can still write these headers: this keeps other sites and casual scripts out,
+   it is not a rate limit. */
 export function fromOwnPage(request, url) {
   const origin = request.headers.get('Origin'), site = request.headers.get('Sec-Fetch-Site');
   if (site != null && site !== 'same-origin') return false;
   if (origin != null) return origin === url.origin;
-  return site === 'same-origin';
+  if (site === 'same-origin') return true;
+  if (request.method !== 'GET' || request.headers.get('Upgrade') != null) return false;
+  const referer = request.headers.get('Referer');
+  if (!referer) return false;
+  try { return new URL(referer).origin === url.origin; } catch (e) { return false; }
 }
 
 export async function handle(request, env, fetchImpl = fetch) {
