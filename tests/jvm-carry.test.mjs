@@ -74,13 +74,29 @@ test('carry: the TeleOp starts from the statics and the blackboard the Autonomou
   assert.deepEqual(fresh.log, ['static=0.0 blackboard=null runs=0']);
 });
 
-test('carry: a class whose source changed between the runs starts afresh, as after a redeploy', () => {
+test('carry: when any class changed its source between the runs nothing is carried, as after a redeploy', () => {
   const auto = drive(AUTO, [STORE, SIDE, POSE]);
   const changed = STORE.replace('public static int runs = 0;', 'public static int runs = 5;');
   const tele = drive(TELE.replace('System.out.println((PoseStore.side', 'if (false) System.out.println((PoseStore.side').replace('System.out.println(PoseStore.lift', 'if (false) System.out.println(PoseStore.lift'),
     [changed, SIDE, POSE], { carry: auto.P.carry() });
-  // PoseStore was edited: its statics are the new file's; the blackboard is the app's and stays
-  assert.deepEqual(tele.log, ['static=0.0 blackboard=90.0 runs=5']);
+  // PoseStore was edited, so the code was redeployed and the app restarted: its statics are the
+  // new file's, and the blackboard (the app's) is empty too
+  assert.deepEqual(tele.log, ['static=0.0 blackboard=null runs=5']);
+  assert.deepEqual(tele.P.carried.classes, []);
+  assert.equal(tele.P.carried.blackboard, false);
+  assert.deepEqual(tele.P.carried.changed, ['PoseStore']);
+  assert.equal(tele.P.carried.dropped.length, 1);
+  assert.match(tele.P.carried.dropped[0], /PoseStore changed since the last run.*redeploy/);
+  // an edited class held in an unchanged class's static: its object would keep its old fields
+  const HOLDER = PKG + 'public class Holder { public static Data d = null; }';
+  const DATA1 = PKG + 'public class Data { public double heading = 1.5; }';
+  const DATA2 = PKG + 'public class Data { public double heading = 1.5; public int count = 5; public java.util.List<Integer> marks = new java.util.ArrayList<>(); }';
+  const A = PKG + '@Autonomous(name="A") public class A extends LinearOpMode { public void runOpMode() { waitForStart(); Holder.d = new Data(); Holder.d.heading = 90; } }';
+  const T = PKG + `@TeleOp(name="T") public class T extends LinearOpMode { public void runOpMode() { waitForStart();
+    if (Holder.d == null) Holder.d = new Data();
+    Holder.d.marks.add(3); System.out.println("heading " + Holder.d.heading + " count " + Holder.d.count + " marks " + Holder.d.marks.size()); } }`;
+  const t = drive(T, [HOLDER, DATA2], { carry: drive(A, [HOLDER, DATA1]).P.carry() });
+  assert.deepEqual(t.log, ['heading 1.5 count 5 marks 1']);
 });
 
 test('carry: a device in a static is wired to the new robot only when the new run uses it, and never throws', () => {

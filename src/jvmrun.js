@@ -140,6 +140,17 @@ function jvCarryInto(P,carry){
   const srcOf=c=>{ const u=c.decl?(old.unitOf(c)||nv.unitOf(c)):null; return u&&u.src; };
   const same=(a,b)=>!!a&&!!b&&!!a.decl&&!!b.decl&&(a.decl===b.decl||(!!srcOf(a)&&srcOf(a)===srcOf(b)&&a.decl.name===b.decl.name));
   const cls=c=>c?(nv.classes.get(c.fqn)||(c.opaque?nv.opaqueClass(c.fqn):null)):null;
+  // new code on a robot means a redeploy, and a redeploy restarts the app: no static and no
+  // blackboard survive it. So if any class both programs have changed its source, nothing is
+  // carried (an object of an edited class would keep its old fields: new ones read null)
+  const changed=[];
+  for(const [fqn,c] of old.classes){ const n=nv.classes.get(fqn); if(c.decl&&n&&n.decl&&!same(c,n)&&changed.indexOf(c.name)<0) changed.push(c.name); }
+  if(changed.length){
+    out.changed=changed;
+    out.dropped.push("everything: "+changed.slice(0,3).join(", ")+(changed.length>3?" and "+(changed.length-3)+" more":"")+" changed"+
+      " since the last run, and new code means a redeploy, which restarts the Robot Controller app (every static and the blackboard start afresh)");
+    return out;
+  }
   const pairs=[];
   for(const [fqn,c] of old.classes){
     const n=nv.classes.get(fqn);
