@@ -43,3 +43,36 @@ test('boxed ints: entries, iterators, var, fields, a team class of its own and O
   static class Box<T> { T v; Box(T v) { this.v = v; } T get() { return v; } }`),
   ['a=2', '3', '4', '3 1', '3', '5', '1.5', '3.0']);
 });
+
+test('int arithmetic wraps at 32 bits like Java (JLS 15.17, 15.18, 15.15)', () => {
+  assert.deepEqual(say(`int a = Integer.MAX_VALUE; a = a + 1; say(a);
+    int b = 100000; say(b * b);
+    int c = Integer.MAX_VALUE; c++; say(c); c--; say(c);
+    int m = Integer.MIN_VALUE; say(m / -1); say(-m); say(Math.abs(Integer.MIN_VALUE));
+    int h = 7; for (int i = 0; i < 20; i++) h = 31 * h + 12345; say(h);
+    int x = 5; x += 2.7; say(x); x += 3e10; say(x);
+    byte by = 127; by++; say(by); short sh = 32767; sh += 1; say(sh);
+    say(0xFFFFFFFF); say(1 << 31); say(-1 >>> 28); say(-1 >>> 0);`),
+  ['-2147483648', '1410065408', '-2147483648', '2147483647', '-2147483648', '-2147483648', '-2147483648',
+    String(Array.from({ length: 20 }).reduce((h) => (Math.imul(31, h) + 12345) | 0, 7)),
+    '7', '2147483647', '-128', '-32768', '-1', '-2147483648', '15', '-1']);
+});
+
+test('long arithmetic: 64-bit shifts and masks, and wrapping at 2^63', () => {
+  assert.deepEqual(say(`long x = 1L << 40; say(x); say(x >> 3); say((1L << 62) * 2);
+    long a = Long.MAX_VALUE; a = a + 1; say(a); say(Long.MIN_VALUE);
+    long mask = 0xFFFFFFFFFL; say(mask & (1L << 35)); say(mask | (1L << 40));
+    long t = System.nanoTime(); say(t >= 0);
+    int lo = (int) 4294967297L; say(lo); say((int) 3.9e10); say((long) 1e19);
+    long ms = System.currentTimeMillis(); say(ms / 1000 > 1000000000);`),
+  ['1099511627776', '137438953472', '-9223372036854775808', '-9223372036854775808', '-9223372036854775808',
+    '34359738368', '1168231104511', 'true', '1', '2147483647', '9223372036854775807', 'true']);
+});
+
+test('Integer.parseInt is strict: a stray character or an out-of-range number throws', () => {
+  assert.deepEqual(say(`String[] in = {"12a", " 12", "", "2147483648", "+7", "-0", "ff"};
+    for (String s : in) { try { say(Integer.parseInt(s)); } catch (NumberFormatException e) { say("NFE " + e.getMessage()); } }
+    say(Integer.parseInt("ff", 16)); say(Long.parseLong("9223372036854775807")); say(Integer.valueOf("42") / 5);`),
+  ['NFE For input string: "12a"', 'NFE For input string: " 12"', 'NFE For input string: ""', 'NFE For input string: "2147483648"',
+    '7', '0', 'NFE For input string: "ff"', '255', '9223372036854775807', '8']);
+});
