@@ -88,8 +88,8 @@ const DYN_DEFAULTS = {
   wheelRadius: 0.048,  // only used when the CAD gave no radius at all
   gear: 1,             // motor shaft revs per wheel rev, on top of the gearmotor's own box
   efficiency: 0.90,    // chain/belt/spur losses between the gearbox and the wheel
-  stallAmps: 9.2,      // goBILDA 5203, for turning a current limit into a torque cap
-  freeAmps: 0.30,
+  stallAmps: 9.2,      // goBILDA 5203 at 12 V (its product page), for a spec that names no currents:
+  freeAmps: 0.25,      // a current limit's torque cap, and the gearmotor's own friction (gearmotorFriction)
   sweeps: 6,
   vEps: 0.05,          // m/s: the slip-ratio denominator floor, so kappa is finite at rest
   vMax: 8,             // sanity ceilings; nothing on an FTC field goes near these
@@ -141,8 +141,10 @@ function dynPer(v, i, d) {
    negative torque, and a shaft dragged faster than its command — coasting
    downhill, or shoved by another robot — gives torque opposing the motion,
    which is the braking a hub does in BRAKE mode. A motor left FLOATing
-   makes no torque at all, so callers that model float pass cmd = 0 and
-   ignore the result rather than expecting this to know.
+   makes no motor torque at all, so callers that model float ignore the
+   result rather than expecting this to know; what still slows a floating
+   wheel is the gearmotor's own friction (gearmotorFriction below), which
+   this line, a net torque, already has inside it while powered.
 
    The clip at stall matters: at cmd = 1 and omega = -omega_free the line
    says 2 x stall, which no motor does — that is the moment it would draw
@@ -163,11 +165,37 @@ function motorTorque(spec, omega, cmd, opts) {
 
   const lim = dynNum(opts.currentLimit, 0);
   if (lim > 0) {
-    const iStall = dynNum(opts.stallAmps, dynNum(spec.stallAmps, DYN_DEFAULTS.stallAmps));
-    const iFree = dynNum(opts.freeAmps, dynNum(spec.freeAmps, DYN_DEFAULTS.freeAmps));
+    const iStall = dynNum(opts.stallAmps, dynMotorAmps(spec).stall);
+    const iFree = dynNum(opts.freeAmps, dynMotorAmps(spec).free);
     if (iStall > iFree) cap = Math.min(cap, stall * dynClamp((lim - iFree) / (iStall - iFree), 0, 1));
   }
   return dynClamp(stall * (c - w / wFree), -cap, cap);
+}
+
+/* A spec's stall and free-running currents, amps: hardware.js gives them as
+   stallA / freeA (older specs said stallAmps / freeAmps); a spec with
+   neither is taken for the goBILDA 5203 motor every FTC gearmotor shares. */
+function dynMotorAmps(spec) {
+  spec = spec || {};
+  return {
+    stall: dynNum(spec.stallA, dynNum(spec.stallAmps, DYN_DEFAULTS.stallAmps)),
+    free: dynNum(spec.freeA, dynNum(spec.freeAmps, DYN_DEFAULTS.freeAmps))
+  };
+}
+
+/* The gearmotor's own friction at its output shaft, N.m: what is left to
+   slow a wheel when the windings are open (ZeroPowerBehavior.FLOAT).
+   Running free, all the current a motor draws goes into its own bearing,
+   brush and gearbox friction, so that friction is the torque the free
+   current makes: tau_f = tau_stall * I_free / I_stall (torque goes with
+   current along the motor line). A 5203 312 rpm: 2.38 * 0.25 / 9.2 =
+   0.065 N.m, 1.2 N at a 104 mm wheel's rim. It is quoted at the rated
+   voltage and does not change with it. */
+function gearmotorFriction(spec) {
+  const stall = dynNum(spec && spec.stallNm, 0);
+  if (!(stall > 0)) return 0;
+  const a = dynMotorAmps(spec);
+  return a.stall > a.free && a.free > 0 ? stall * a.free / a.stall : 0;
 }
 
 /* The slope of the motor line, N.m per rad/s at its own shaft.
@@ -542,9 +570,10 @@ const Dyn = {
      produced by whatever ran the OpMode; this function only does physics.
      `coast`, optional, is per wheel: true for a motor set to
      ZeroPowerBehavior.FLOAT, which at zero command has its windings open
-     and makes no torque at all, back-EMF braking included (see
-     motorTorque). Returns the next state — the one passed in is not
-     touched. */
+     and makes no motor torque, back-EMF braking included (see
+     motorTorque); only the gearmotor's own friction (gearmotorFriction)
+     still slows the wheel. Returns the next state — the one passed in is
+     not touched. */
   step(state, cmd, rig, dt, coast) {
     rig = rig || {};
     const W = dynWheels(rig), n = W.length;
@@ -586,11 +615,12 @@ const Dyn = {
 
     for (let i = 0; i < n; i++) {
       const w = W[i], row = w.vel;
-      let spec = motors[i] || motors[0] || null;
+      const rated = motors[i] || motors[0] || null;
+      let spec = rated;
       // a battery above or below the 12.6 V the specs are quoted at (rig.vScale): both stall torque and free speed go with it
       if (vScale !== 1 && spec) spec = Object.assign({}, spec, { stallNm: dynNum(spec.stallNm, 0) * vScale, rpm: dynNum(spec.rpm, 0) * vScale });
       const c = dynClamp(dynNum(Array.isArray(cmd) ? cmd[i] : cmd, 0), -1, 1);
-      // FLOAT at zero power: the windings are open, so no torque and no droop
+      // FLOAT at zero power: the windings are open, so no motor torque and no droop
       const open = c === 0 && Array.isArray(coast) && !!coast[i];
 
       u[i] = st.wheelOmega[i] * w.r;                                   // rim speed, m/s
@@ -606,7 +636,17 @@ const Dyn = {
 
       // implicit in the motor's speed droop (see motorSlope): with the ground
       // taking nothing, the rim gains tau / (J/dt + k), not dt*tau/J
-      kW[i] = open ? 0 : motorSlope(spec) * w.gear * w.gear * w.eff;
+      kW[i] = motorSlope(spec) * w.gear * w.gear * w.eff;
+      if (open) {
+        // ...but the gearmotor's own friction still turns against the wheel. It is solved
+        // like the motor line, implicit in the end-of-step speed: a drag of slope
+        // fr/|omega|, which is the friction torque fr at the speed the wheel has, can only
+        // bring it to rest, never turn it round, and is never steeper than the shorted
+        // motor's own (BRAKE), so it never holds harder than fr.
+        const fr = gearmotorFriction(rated) * w.gear, o0 = Math.abs(st.wheelOmega[i]);
+        kW[i] = fr > 0 ? Math.min(fr / Math.max(o0, 1e-9), motorSlope(rated) * w.gear * w.gear * w.eff) : 0;
+        tauW[i] = -kW[i] * st.wheelOmega[i];                 // the drag's torque at the start of the step
+      }
       Jdt[i] = w.J / dt;
       b0[i] = (u[i] - v[i]) + tauW[i] * w.r / (Jdt[i] + kW[i]);
       K[i] = Cs * loads[i] / Math.max(Math.abs(v[i]), vEps);
