@@ -567,6 +567,7 @@ function JVM(units,natives){
   // team's code; JvProgram switches it when it runs a thread the OpMode started
   this.strand=jvStrand();
   this.tick0={now:null,steps:0,dt:0.02};   // the pass's clock (jvNow in src/jvmlib.js)
+  this.wall0s=0;                           // s the wall clock is ahead of the sim's (a carry)
   this.host=null;
   // what a run learns about a node of the parsed code (who owns a method, a field's
   // type, whether a call returns an int, an anonymous class). Parsed code is cached

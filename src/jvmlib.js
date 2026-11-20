@@ -684,7 +684,10 @@ function jvCpu(vm){
   const T=vm.tick0, c=(vm.steps-T.steps)*JV_STMT_SEC;
   return T.dt*(1-Math.exp(-c/T.dt));
 }
-const jvNow=vm=>(vm.host?vm.host.now():0)+jvCpu(vm);
+/* The wall clock (System.nanoTime, currentTimeMillis, ElapsedTime): the sim's clock, moved on by
+   vm.wall0s when statics were carried from a run before (jvCarryInto), since a robot's clock
+   doesn't restart between OpModes. getRuntime() and `time` (jvRuntime) are the OpMode's own. */
+const jvNow=vm=>vm.wall0s+(vm.host?vm.host.now():0)+jvCpu(vm);
 const jvRuntime=vm=>(vm.host?vm.host.runtime():0)+jvCpu(vm);
 function jvDevMapItems(vm,kind){
   const out=[]; if(vm.dev) for(const [,d] of vm.dev) if(d&&d.n&&JV_DEV_KIND[kind]===d.n.kind) out.push(d);

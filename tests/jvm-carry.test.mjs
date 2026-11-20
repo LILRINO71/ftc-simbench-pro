@@ -129,3 +129,36 @@ test('carry: a device in a static is wired to the new robot only when the new ru
   assert.equal(t3.H.devs.get('lift').cmd, 0.5);
   assert.deepEqual([...t3.P.vm.devices.keys()], ['lift']);
 });
+
+test("carry: the robot's clock goes on from the Autonomous; getRuntime() starts again", () => {
+  const timers = PKG + 'import com.qualcomm.robotcore.util.ElapsedTime;\npublic class Clocks { public static ElapsedTime match = null, late = null; public static long ns0 = 0; }';
+  const auto = PKG + `import com.qualcomm.robotcore.util.ElapsedTime;
+@Autonomous(name="A") public class A extends LinearOpMode { public void runOpMode() { waitForStart();
+  Clocks.match = new ElapsedTime(); Clocks.ns0 = System.nanoTime();
+  while (opModeIsActive()) { if (Clocks.late == null && getRuntime() >= 10) Clocks.late = new ElapsedTime(); idle(); } } }`;
+  const tele = PKG + `@TeleOp(name="T") public class T extends LinearOpMode { public void runOpMode() { waitForStart();
+  System.out.println(String.format("%.2f %.2f %.2f %.2f", Clocks.match.seconds(), Clocks.late.seconds(), (System.nanoTime() - Clocks.ns0) / 1e9, getRuntime()));
+  sleep(1000);
+  System.out.println(String.format("%.2f %.2f %.2f", Clocks.match.seconds(), Clocks.late.seconds(), getRuntime())); } }`;
+  // INIT, START, `secs` of 50 Hz ticks, STOP; every run's host clock starts at 0, as the bench's do
+  const run = (main, carry, secs) => {
+    const log = [], h = host(log);
+    const comp = E.jvCompile(main, [{ file: 'Clocks.java', src: timers }]);
+    const P = new E.JvProgram(comp, h.host, carry ? { carry } : undefined);
+    P.init(); P.start();
+    for (let k = 0; k < Math.round(secs / 0.02) && !P.done; k++) { h.H.clock += 0.02; h.H.t += 0.02; P.tick(); }
+    P.stop();
+    assert.equal(P.error, null, JSON.stringify(P.error));
+    return { P, log };
+  };
+  const a = run(auto, null, 30);
+  const t = run(tele, a.P.carry(), 1.5);
+  // robot: the match timer reads the Autonomous's 30 s, the one started 10 s in reads 20 s, never
+  // negative, and both keep counting; getRuntime() is the TeleOp's own
+  assert.deepEqual(t.log, ['30.00 20.00 30.00 0.00', '31.00 21.00 1.00']);
+  // a fresh run, nothing carried: the clock starts at 0 as before
+  const fresh = run(PKG + `import com.qualcomm.robotcore.util.ElapsedTime;
+@TeleOp(name="F") public class F extends LinearOpMode { public void runOpMode() { waitForStart(); ElapsedTime e = new ElapsedTime(); sleep(500);
+  System.out.println(String.format("%.2f %.2f %.2f", e.seconds(), System.nanoTime() / 1e9, getRuntime())); } }`, null, 1);
+  assert.deepEqual(fresh.log, ['0.50 0.50 0.50']);
+});

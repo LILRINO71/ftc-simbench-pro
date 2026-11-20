@@ -108,7 +108,7 @@ function JvProgram(comp,host,opts){
    TeleOp starts, until the app restarts. Each bench run is a fresh VM, so the TeleOp would
    always start from zero. P.carry() is what a program leaves; new JvProgram(comp, host,
    {carry}) starts from it. */
-JvProgram.prototype.carry=function(){ return {vm:this.vm,prog:this,main:this.comp.main}; };
+JvProgram.prototype.carry=function(){ return {vm:this.vm,prog:this,main:this.comp.main,wall:jvNow(this.vm)}; };
 /* The team's statics, as plain data: {"PoseStorage.heading": 90, ...} (numbers, strings,
    booleans, enum names, and "Class.field" of other values' class), for a report */
 JvProgram.prototype.statics=function(){
@@ -151,6 +151,11 @@ function jvCarryInto(P,carry){
       " since the last run, and new code means a redeploy, which restarts the Robot Controller app (every static and the blackboard start afresh)");
     return out;
   }
+  // the robot's clock didn't restart with the OpMode: System.nanoTime(), currentTimeMillis() and
+  // every ElapsedTime go on from where the last run's ended (so a match timer started at the
+  // Autonomous's START reads its length at the TeleOp's); getRuntime() and `time` start at 0
+  const wall=carry.wall!=null?carry.wall:jvNow(old);
+  nv.wall0s=wall-(nv.host?nv.host.now():0);
   const pairs=[];
   for(const [fqn,c] of old.classes){
     const n=nv.classes.get(fqn);
