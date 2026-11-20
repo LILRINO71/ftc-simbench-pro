@@ -60,19 +60,27 @@ test('room: a taken id, a full room, a bad id, oversize, junk and floods are ref
   assert.ok(['bad-frame', 'slow-down'].includes(a.heard.at(-1).why));
 });
 
-test('room: the clock, and the lockstep ledger replayed to a player who comes back', () => {
+test('room: the clock', () => {
   let t = 5000; const R = new RoomCore('r', { now: () => t }), a = conn(), b = conn();
   R.join('aaaa', a, T('aaaa')); R.join('bbbb', b, T('bbbb'));
   R.text('aaaa', JSON.stringify({ t: 'time', echo: 42 }));
   assert.deepEqual(a.heard.at(-1), { t: 'time', now: 5000, echo: 42 });
-  for (let k = 0; k < 5; k++) { R.text('aaaa', JSON.stringify({ t: 'cmd', tick: k, d: 'A' + k })); R.text('bbbb', JSON.stringify({ t: 'cmd', tick: k, d: 'B' + k })); }
-  R.text('aaaa', JSON.stringify({ t: 'cmd', tick: 2, d: 'changed my mind' }));
-  assert.equal(b.heard.filter((m) => m.t === 'cmd').length, 5, 'a tick is said once');
-  R.leave('bbbb'); const b2 = conn(); R.join('bbbb', b2, T('bbbb'));
-  R.text('bbbb', JSON.stringify({ t: 'replay', from: 3 }));
-  const rep = b2.heard.find((m) => m.t === 'replay');
-  assert.deepEqual(rep.rows, [[3, [['aaaa', 'A3'], ['bbbb', 'B3']]], [4, [['aaaa', 'A4'], ['bbbb', 'B4']]]]);
-  assert.equal(rep.done, true);
+});
+
+/* The room kept a lockstep command ledger no page used, and one player could push another's
+   commands out of it by sending ticks ever further ahead (audit F7). It is gone: a room relays
+   and keeps nothing about the match, so a flood of 'cmd' or 'replay' reaches nobody and stays
+   nowhere. */
+test('room: no command ledger: cmd and replay messages are neither relayed nor kept', () => {
+  const R = new RoomCore('r'), a = conn(), b = conn();
+  R.join('aaaa', a, T('aaaa')); R.join('bbbb', b, T('bbbb'));
+  const before = b.heard.length;
+  for (let k = 0; k < 200; k += 1) R.text('aaaa', JSON.stringify({ t: 'cmd', tick: 1000 + k * 120, d: 'x' }));
+  R.text('bbbb', JSON.stringify({ t: 'replay', from: 0 }));
+  assert.equal(b.heard.length, before, 'nothing reached the other player, and no replay came back');
+  assert.ok(!('ledger' in R) && typeof R.command !== 'function' && typeof R.replay !== 'function');
+  R.text('aaaa', JSON.stringify({ t: 'm', d: 'still here' }));
+  assert.deepEqual(b.heard.at(-1), { t: 'm', from: 'aaaa', d: 'still here' }, 'ordinary messages still go through');
 });
 
 /* What a browser on the site's own page sends: a WebSocket and a POST carry Origin; a
@@ -211,18 +219,19 @@ for (const mode of ['WebSocket', 'SSE', 'SSE after a stripped WebSocket']) {
   });
 }
 
-test('relay: the room\'s clock and the command ledger reach the page', async () => {
+test('relay: the room\'s clock reaches the page', async () => {
   const hub = relayHub();
   const A = hub.endpoint('aaaa1').join('r1'), B = hub.endpoint('bbbb1').join('r1');
-  const cmds = [];
-  B.onCommand((from, tick, d) => cmds.push([from, tick, d]));
+  const msgs = [];
+  B.onMessage((m, from) => msgs.push([from, m]));
   hub.flush();
   const t = A.time(); hub.flush();
   const got = await t;
   assert.ok(Number.isFinite(got.now) && got.rtt >= 0);
-  A.command(0, 'x'); A.command(1, 'y'); hub.flush();
-  assert.deepEqual(cmds, [['aaaa1', 0, 'x'], ['aaaa1', 1, 'y']]);
+  A.send('x'); A.send('y'); hub.flush();
+  assert.deepEqual(msgs, [['aaaa1', 'x'], ['aaaa1', 'y']]);
   assert.equal(A.via(), 'ws');
+  assert.equal(typeof A.command, 'undefined', 'no ledger calls: the room has no ledger');
 });
 
 test('relay: nobody can post as another player, even knowing their id', async () => {
@@ -231,11 +240,11 @@ test('relay: nobody can post as another player, even knowing their id', async ()
   core.join('alice1', { kind: 'sse', send() {}, close() {} }, T('alice1'));
   core.join('bobby1', { kind: 'sse', send: (m) => heard.push(JSON.parse(m)), close() {} }, T('bobby1'));
   const post = (tok, body) => D.fetch(new Request('https://sb.example/room/r2/send?id=alice1&tok=' + tok, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body }));
-  const forged = await post('guessed-secret-000000000', JSON.stringify({ t: 'cmd', tick: 7, d: 'forged' }));
+  const forged = await post('guessed-secret-000000000', JSON.stringify({ t: 'm', d: 'forged' }));
   assert.equal(forged.status, 403);
-  const real = await post(T('alice1'), JSON.stringify({ t: 'cmd', tick: 7, d: 'real' }));
+  const real = await post(T('alice1'), JSON.stringify({ t: 'm', d: 'real' }));
   assert.equal(real.status, 200);
-  assert.deepEqual(heard.filter((m) => m.t === 'cmd').map((m) => m.d), ['real'], 'only her own command counts');
+  assert.deepEqual(heard.filter((m) => m.t === 'm').map((m) => m.d), ['real'], 'only her own message counts');
   const huge = await D.fetch(new Request('https://sb.example/room/r2/send?id=alice1&tok=' + T('alice1'), { method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': '9999999' }, body: '[]' }));
   assert.equal(huge.status, 413, 'an oversize body is refused before it is read');
 });
@@ -254,14 +263,13 @@ test('relay: a WebSocket a proxy holds open falls back to one SSE stream, and le
 test('relay: a big binary from an SSE client goes up on its own and arrives, and the batch with it', () => {
   const hub = relayHub({ sse: true });
   const A = hub.endpoint('aaaa3').join('r4'), B = hub.endpoint('bbbb3').join('r4');
-  const bins = [], msgs = [], cmds = [];
-  B.onBin((buf, meta, from) => bins.push([buf.byteLength, meta.k, from])); B.onMessage((m) => msgs.push(m)); B.onCommand((f, t) => cmds.push(t));
+  const bins = [], msgs = [];
+  B.onBin((buf, meta, from) => bins.push([buf.byteLength, meta.k, from])); B.onMessage((m) => msgs.push(m));
   hub.flush();
-  A.send({ k: 'state' }); A.sendBin(new Uint8Array(200000).fill(7).buffer, { k: 'mdl' }, ['bbbb3']); A.command(0, 'x');
+  A.send({ k: 'state' }); A.sendBin(new Uint8Array(200000).fill(7).buffer, { k: 'mdl' }, ['bbbb3']); A.send({ k: 'after' });
   hub.flush();
   assert.deepEqual(bins, [[200000, 'mdl', 'aaaa3']]);
-  assert.deepEqual(msgs, [{ k: 'state' }]);
-  assert.deepEqual(cmds, [0]);
+  assert.deepEqual(msgs, [{ k: 'state' }, { k: 'after' }]);
   assert.ok(hub.posts.includes('application/octet-stream'));
 });
 
@@ -275,57 +283,20 @@ test('relay: a dropped player comes back with its secret and takes its place, no
   assert.ok(!b.heard.some((m) => m.t === 'leave'), 'nobody saw her leave');
 });
 
-test('room: the ledger takes each player\'s ticks in order and only a little ahead', () => {
-  const R = new RoomCore('r6'), a = conn(), b = conn();
-  R.join('alice', a, T('alice')); R.join('bobby', b, T('bobby'));
-  const cmd = (id, tick) => R.text(id, JSON.stringify({ t: 'cmd', tick, d: 'x' }));
-  cmd('alice', 0); cmd('alice', 1); cmd('alice', 1000000);
-  assert.equal(R.ledgerMax, 1, 'the far future is refused');
-  cmd('alice', 0);
-  assert.equal(R.ledger.get(0).size, 1, 'and so is going back');
-  for (let t = 2; t < 60; t++) cmd('alice', t);
-  assert.equal(R.ledgerMax, 59);
-});
-
-test('room: a player\'s commands that arrive out of order (two SSE batches, the later one first) are all kept', () => {
-  const R = new RoomCore('r7'), a = conn(), b = conn();
-  R.join('alice', a, T('alice')); R.join('bobby', b, T('bobby'));
-  const cmd = (tick, d) => R.text('alice', JSON.stringify({ t: 'cmd', tick, d }));
-  cmd(0, 'x'); cmd(1, 'y');
-  cmd(3, 'w'); cmd(2, 'v');
-  assert.deepEqual(b.heard.filter((m) => m.t === 'cmd').map((m) => m.tick), [0, 1, 3, 2], 'tick 2 is not lost for landing after 3');
-  cmd(2, 'again');
-  assert.equal(R.ledger.get(2).get('alice'), 'v', 'a tick is still said once');
-});
-
-test('room: rebuilt after hibernating, a match past tick 120 still has its commands taken', () => {
+test('room: rebuilt after hibernating, the players in it still reach each other', () => {
   // the sockets survive hibernation, with what was kept on them; the room in memory doesn't
   const sock = (att) => { const s = { sent: [], att, deserializeAttachment: () => s.att, serializeAttachment: (v) => { s.att = v; }, send: (d) => s.sent.push(d), close() {} }; return s; };
   const sa = sock({ id: 'alice1', tok: T('alice1'), room: 'r8' }), sb = sock({ id: 'bobby1', tok: T('bobby1'), room: 'r8' });
   const D = new RoomDO({ getWebSockets: () => [sa, sb] }, {});
-  for (let k = 0; k < 6000; k++) D.room('r8').command('alice1', { t: 'cmd', tick: k, d: 'a' });
-  D.webSocketMessage(sa, JSON.stringify({ t: 'cmd', tick: 6000, d: 'a' }));
-  assert.ok(sa.att.lastTick >= 5980, 'the newest tick is kept on the socket: ' + sa.att.lastTick);
-  assert.equal(sa.att.tok, T('alice1'), 'and the rest of what was kept stays');
+  D.webSocketMessage(sa, JSON.stringify({ t: 'm', d: 'before' }));
+  assert.deepEqual(sb.sent.map((s) => JSON.parse(s)).filter((m) => m.t === 'm').map((m) => m.d), ['before']);
+  assert.equal(sa.att.tok, T('alice1'), 'what was kept on the socket stays');
   // hibernation: a new object, the same sockets
   const D2 = new RoomDO({ getWebSockets: () => [sa, sb] }, {});
   sb.sent.length = 0;
-  D2.webSocketMessage(sa, JSON.stringify({ t: 'cmd', tick: 6001, d: 'after' }));
-  assert.deepEqual(sb.sent.map((s) => JSON.parse(s)).filter((m) => m.t === 'cmd').map((m) => m.tick), [6001]);
-});
-
-test('room: a replay sends only the ticks kept, however far apart, and one a second', () => {
-  let t = 0; const R = new RoomCore('r9', { now: () => t }), a = conn(), b = conn();
-  R.join('alice', a, T('alice')); R.join('bobby', b, T('bobby'));
-  for (let k = 0; k <= 30 * 120; k += 120) R.command('alice', { t: 'cmd', tick: k, d: 'j' + k });
-  R.replay('bobby', 0);
-  const rows = b.heard.filter((m) => m.t === 'replay').flatMap((m) => m.rows);
-  assert.equal(rows.length, 31);
-  assert.deepEqual(rows.slice(0, 2), [[0, [['alice', 'j0']]], [120, [['alice', 'j120']]]]);
-  R.replay('bobby', 0);
-  assert.equal(b.heard.at(-1).why, 'slow-down', 'a second replay straight away waits');
-  t = 1500; R.replay('bobby', 3000);
-  assert.deepEqual(b.heard.at(-1).rows.map((r) => r[0]), [3000, 3120, 3240, 3360, 3480, 3600]);
+  D2.webSocketMessage(sa, JSON.stringify({ t: 'm', d: 'after' }));
+  assert.deepEqual(sb.sent.map((s) => JSON.parse(s)).filter((m) => m.t === 'm').map((m) => m.d), ['after']);
+  assert.ok(D2.room('r8').owns('alice1', T('alice1')), 'and her secret is still hers');
 });
 
 test('relay: a POST with no length is cut off at the cap while it is read, and an oversize binary says 413', async () => {

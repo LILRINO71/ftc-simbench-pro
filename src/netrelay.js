@@ -13,7 +13,7 @@
    onBin, onJoin, onLeave, leave}. It speaks a WebSocket to the room; where a
    proxy strips the upgrade it falls back to Server-Sent Events down and
    batched POSTs up, which is plain HTTPS. The room also tells the time, so a
-   countdown is the same everywhere, and keeps the lockstep command ledger.
+   countdown is the same everywhere.
 
    netConnect() climbs the ladder: the site's own rooms when it has them,
    else WebRTC with TURN over port 443 when the site has TURN credentials,
@@ -64,7 +64,7 @@ function netRelay(opts){
     const url=base+"/room/"+encodeURIComponent(name), q="?id="+encodeURIComponent(self)+"&tok="+encodeURIComponent(tok);
     let ws=null, es=null, mode=null, ready=false, closed=false, timer=null, postT=null, tries=0, inRoom=false, keepBytes=0;
     const queue=[], posts=[], peers=new Set();
-    const H={msg:null, bin:null, join:null, leave:null, time:[], cmd:null, replay:null};
+    const H={msg:null, bin:null, join:null, leave:null, time:[]};
     const err=d=>{ if(out.onError) out.onError(Object.assign({room:name, via:mode},d)); };
     const handle=m=>{
       if(!m||typeof m!=="object") return;
@@ -79,8 +79,6 @@ function netRelay(opts){
       else if(m.t==="m"){ if(H.msg&&peers.has(m.from)) H.msg(m.d,m.from); }
       else if(m.t==="b"&&m.b64!=null){ const u=netUnB64(m.b64); if(u&&H.bin&&peers.has(m.from)) H.bin(u.buffer,m.meta||{},m.from); }
       else if(m.t==="time"){ const fs=H.time.splice(0); for(const f of fs) f(m.now); }
-      else if(m.t==="cmd"){ if(H.cmd) H.cmd(m.from,m.tick,m.d); }
-      else if(m.t==="replay"){ if(H.replay) H.replay(m.rows||[],!!m.done); }
       else if(m.t==="err") err({error:m.why||"error"});
     };
     /* keepalive lets a POST finish after the page goes, but a browser allows
@@ -161,9 +159,6 @@ function netRelay(opts){
       onMessage(f){ H.msg=f; }, onBin(f){ H.bin=f; }, onJoin(f){ H.join=f; }, onLeave(f){ H.leave=f; },
       /* the room's clock, in ms: one round trip, and how long it took */
       time(){ const t0=Date.now(); return new Promise(res=>{ H.time.push(now=>res({now, rtt:Date.now()-t0, at:Date.now()})); say({t:"time", echo:t0}); }); },
-      /* lockstep's command ledger (src/lockstep.js) */
-      command(tick,d){ say({t:"cmd", tick, d}); }, onCommand(f){ H.cmd=f; },
-      replay(from){ say({t:"replay", from}); }, onReplay(f){ H.replay=f; },
       via(){ return mode; },
       leave(){ closed=true; stop(timer); if(postT) stop(postT);
         try{ if(ws) ws.close(1000,"bye"); }catch(e){} try{ if(es) es.close(); }catch(e){}

@@ -223,6 +223,8 @@ live site says `ready:true`).
   Relations, the agreement, five beta testers.
 - The room's ledger lives in memory; a room that hibernates keeps its window but not its history
   (a replay after that has nothing before the pause). Persisting it is for when lockstep lands.
+  (2026-11-19: the ledger was removed, unused by any page and open to one player pushing out
+  another's commands; see the note at the top of `workers/room/room.js`.)
 - The WebSocket client's "dropped" branch is unreachable (a hello resets the count, and a retry
   that never gets in falls back to SSE, which reports). Harmless; left as is.
 

@@ -12,9 +12,12 @@
        binary, exactly as the browsers' own WebRTC channel would carry it
      - the clock: {t:"time"} answers with the room's time, so every player
        counts down to the same start whoever hosts (and whoever leaves)
-     - the command ledger for lockstep matches: each player's commands for
-       each tick, kept so a player who arrives late or reconnects replays to
-       the present (src/lockstep.js)
+
+   It keeps nothing about the match itself. (A lockstep command ledger was
+   here once, unused by any page; it went, since a billed object should do no
+   more than it must. If lockstep comes back, bound a tick by the room's own
+   clock, not by the newest tick a player sent, or one player can push the
+   others' history out.)
 
    Ids are public (everyone in the room hears them), so each connection also
    carries a secret its own browser chose (tok). The first connection with an
@@ -36,9 +39,6 @@ export const ROOM_LIMITS = {
   binBytes: 900 * 1024,      // one binary message (a robot's light copy); a WebSocket frame tops out at 1 MiB
   ratePerSec: 300, burst: 600,
   bytesPerSec: 3e6,
-  ledgerTicks: 30000,        // 10 minutes at 50 Hz
-  ledgerBytes: 8e6,          // all the commands kept
-  tickAhead: 120,            // how far past the newest tick a command may be (2.4 s)
   idLen: 40,
 };
 const ID = /^[A-Za-z0-9_-]{4,40}$/;
@@ -72,11 +72,7 @@ export class RoomCore {
     this.name = name;
     this.L = Object.assign({}, ROOM_LIMITS, (opts && opts.limits) || {});
     this.now = (opts && opts.now) || (() => Date.now());
-    this.peers = new Map();                // id -> {conn, tok, kind, tokens, bytes, at, lastTick}
-    this.ledger = new Map();               // tick -> Map(id -> data)
-    this.ledgerMin = 0;                    // no tick below this is kept or taken
-    this.ledgerMax = -1;                   // the newest tick kept
-    this.ledgerSize = 0;                   // bytes of commands kept
+    this.peers = new Map();                // id -> {conn, tok, kind, tokens, bytes, at}
   }
   /* a connection arrives: conn = {send(textOrBytes), close(code, why), kind:"ws"|"sse"}.
      tok is the secret its browser chose; the same id with the same secret replaces
@@ -94,7 +90,7 @@ export class RoomCore {
     }
     if (this.peers.size >= this.L.peers) return 'full';
     const others = [...this.peers.keys()];
-    this.peers.set(id, { conn, tok, ws: conn.ws || null, kind: conn.kind || 'ws', tokens: this.L.burst, bytes: this.L.bytesPerSec, at: this.now(), lastTick: -1 });
+    this.peers.set(id, { conn, tok, ws: conn.ws || null, kind: conn.kind || 'ws', tokens: this.L.burst, bytes: this.L.bytesPerSec, at: this.now() });
     this.out(id, { t: 'hello', self: id, peers: others, now: this.now(), room: this.name });
     for (const o of others) this.out(o, { t: 'join', id });
     return null;
@@ -151,8 +147,6 @@ export class RoomCore {
     if (!m || typeof m !== 'object') return;
     if (m.t === 'm') { for (const id of this.targets(from, m.to)) this.out(id, { t: 'm', from, d: m.d }); }
     else if (m.t === 'time') this.out(from, { t: 'time', now: this.now(), echo: typeof m.echo === 'number' ? m.echo : null });
-    else if (m.t === 'cmd') this.command(from, m);
-    else if (m.t === 'replay') this.replay(from, m.from);
     else if (m.t === 'ping') this.out(from, { t: 'pong' });
   }
   bin(from, buf) {
@@ -162,44 +156,6 @@ export class RoomCore {
     if (!this.allow(p, u.length)) { this.out(from, { t: 'err', why: 'slow-down' }); return; }
     const f = unpackBin(u); if (!f) { this.out(from, { t: 'err', why: 'bad-frame' }); return; }
     for (const id of this.targets(from, f.header.to)) this.outBin(id, { t: 'b', from, meta: f.header.meta || {} }, f.payload);
-  }
-  /* ---- lockstep: each player's commands, by tick ----
-     A tick's command is said once, and never far past the newest tick anyone
-     has said: one player can't fill the ledger with the far future, or push the
-     real history out of it. A player's ticks may arrive out of order: an SSE
-     client's batches are separate POSTs, and the later one can land first. */
-  command(from, m) {
-    const tick = m.tick, p = this.peers.get(from);
-    if (!p || !Number.isInteger(tick) || typeof m.d !== 'string' || m.d.length > 2048) return;
-    if (tick < this.ledgerMin || tick > Math.max(this.ledgerMax, p.lastTick) + this.L.tickAhead) return;
-    let row = this.ledger.get(tick);
-    if (!row) { row = new Map(); this.ledger.set(tick, row); }
-    if (row.has(from)) return;               // a tick's command is said once
-    row.set(from, m.d); if (tick > p.lastTick) p.lastTick = tick;
-    this.ledgerSize += m.d.length + 16;
-    if (tick > this.ledgerMax) this.ledgerMax = tick;
-    // the oldest go first, by walking up from the oldest kept
-    while ((this.ledger.size > this.L.ledgerTicks || this.ledgerSize > this.L.ledgerBytes) && this.ledgerMin <= this.ledgerMax) {
-      const old = this.ledger.get(this.ledgerMin);
-      if (old) { for (const d of old.values()) this.ledgerSize -= d.length + 16; this.ledger.delete(this.ledgerMin); }
-      this.ledgerMin++;
-    }
-    for (const id of this.targets(from, null)) this.out(id, { t: 'cmd', from, tick, d: m.d });
-  }
-  /* the ticks kept, from fromTick on: only the ticks there are (they can be 120
-     apart), and one replay a second per player */
-  replay(to, fromTick) {
-    const p = this.peers.get(to); if (!p) return;
-    const t = this.now(); if (p.replayAt != null && t - p.replayAt < 1000) { this.out(to, { t: 'err', why: 'slow-down' }); return; }
-    p.replayAt = t;
-    const start = Math.max(this.ledgerMin, Number.isInteger(fromTick) ? fromTick : 0);
-    const ticks = [...this.ledger.keys()].filter((k) => k >= start).sort((a, b) => a - b);
-    let rows = [];
-    for (const k of ticks) {
-      rows.push([k, [...this.ledger.get(k)]]);
-      if (rows.length === 200) { this.out(to, { t: 'replay', rows, done: false }); rows = []; }
-    }
-    this.out(to, { t: 'replay', rows, done: true });
   }
 }
 
@@ -215,15 +171,11 @@ export class RoomDO {
   }
   room(name) {
     if (!this.core) this.core = new RoomCore(name);
-    // after hibernation the sockets are still there; the room around them is rebuilt, and each
-    // player's newest tick (kept on its socket) puts the ledger's window back where the match
-    // is, or a match past tick 120 could never say another command
+    // after hibernation the sockets are still there; the room around them is rebuilt
     for (const ws of this.ctx.getWebSockets()) {
       const a = ws.deserializeAttachment && ws.deserializeAttachment();
       if (a && a.id && !a.refused && !this.core.peers.has(a.id)) {
-        const lastTick = Number.isInteger(a.lastTick) ? a.lastTick : -1;
-        this.core.peers.set(a.id, { conn: wsConn(ws), tok: a.tok, ws, kind: 'ws', tokens: this.core.L.burst, bytes: this.core.L.bytesPerSec, at: Date.now(), lastTick });
-        if (lastTick > this.core.ledgerMax) this.core.ledgerMax = lastTick;
+        this.core.peers.set(a.id, { conn: wsConn(ws), tok: a.tok, ws, kind: 'ws', tokens: this.core.L.burst, bytes: this.core.L.bytesPerSec, at: Date.now() });
       }
     }
     return this.core;
@@ -268,8 +220,6 @@ export class RoomDO {
     const core = this.room(a.room), p = core.peers.get(a.id);
     if (!p || p.ws !== ws) return;           // a socket that's been replaced says nothing
     if (typeof msg === 'string') core.text(a.id, msg); else core.bin(a.id, msg);
-    // the newest tick, kept on the socket every 20, for a room rebuilt after hibernating (room())
-    if (p.lastTick >= (Number.isInteger(a.lastTick) ? a.lastTick : -1) + 20) ws.serializeAttachment(Object.assign({}, a, { lastTick: p.lastTick }));
   }
   webSocketClose(ws) { const a = ws.deserializeAttachment(); if (a && !a.refused) this.room(a.room).leave(a.id, ws); }
   webSocketError(ws) { this.webSocketClose(ws); }
