@@ -107,11 +107,17 @@ const JV_MAP_M={
 /* ---- the gamepad ---- */
 const JV_PAD_FIELDS=["left_stick_x","left_stick_y","right_stick_x","right_stick_y","left_trigger","right_trigger","a","b","x","y","dpad_up","dpad_down","dpad_left","dpad_right",
   "left_bumper","right_bumper","back","start","guide","left_stick_button","right_stick_button","options","share","touchpad","ps","cross","circle","square","triangle",
-  "touchpad_finger_1","touchpad_finger_2","touchpad_finger_1_x","touchpad_finger_1_y","id","user","timestamp"];
+  "touchpad_finger_1","touchpad_finger_2","touchpad_finger_1_x","touchpad_finger_1_y","touchpad_finger_2_x","touchpad_finger_2_y","id","user","timestamp",
+  // SDK 11: a trigger pulled past trigger_threshold (0.5 unless setTriggerThreshold) reads as pressed
+  "left_trigger_pressed","right_trigger_pressed","trigger_threshold"];
 const JV_PAD_ALIAS={cross:"a",circle:"b",square:"x",triangle:"y",options:"start",share:"back",ps:"guide"};
 const JV_PAD_AXES=/^(left|right)_(stick_[xy]|trigger)$/;
+const JV_PAD_THRESHOLD=0.5;   // Gamepad.trigger_threshold's default in SDK 11.1 (its one float constant)
 function jvPadRaw(vm,o,f){
   const k=JV_PAD_ALIAS[f]||f;
+  if(k==="trigger_threshold") return o.n.thr!=null?o.n.thr:JV_PAD_THRESHOLD;
+  if((k==="left_trigger_pressed"||k==="right_trigger_pressed")&&!(o.n.snap&&k in o.n.snap&&!o.n.live))
+    return jvPadRaw(vm,o,k.slice(0,-8))>(o.n.thr!=null?o.n.thr:JV_PAD_THRESHOLD);
   let v;
   if(o.n.live) { const p=vm.host&&vm.host.pad(o.n.live)||{}; v=p[k]; if(v===undefined&&JV_PAD_ALIAS[f]===undefined){ for(const a in JV_PAD_ALIAS) if(JV_PAD_ALIAS[a]===k&&p[a]!==undefined) v=p[a]; } }
   else v=o.n.snap[k];
@@ -122,7 +128,8 @@ function jvPadRaw(vm,o,f){
 /* SDK 10.3+: aWasPressed(), leftBumperWasReleased(), dpadUpWasPressed()… */
 function jvPadEdge(vm,o,name){
   const m=/^(\w+?)Was(Pressed|Released)$/.exec(name); if(!m) return undefined;
-  const field=m[1].replace(/([A-Z])/g,"_$1").toLowerCase();
+  let field=m[1].replace(/([A-Z])/g,"_$1").toLowerCase();
+  if(field==="left_trigger"||field==="right_trigger") field+="_pressed";   // leftTriggerWasPressed(): the SDK's edge on left_trigger_pressed
   const cur=jvPadRaw(vm,o,field);
   const pv=o.n.edge[name]; o.n.edge[name]=cur;
   const was=pv===undefined?false:pv;
@@ -179,7 +186,16 @@ function* jvGetDevice(vm,kindName,name,clsName){
   const kind=JV_DEV_KIND[kindName]!==undefined?JV_DEV_KIND[kindName]:null;
   const key=name+"|"+(kind==="motor"||kind==="crservo"?"motor":kind);
   if(rt.has(key)){ const d=rt.get(key); vm.devUse(name,d.n.kind,clsName); return d; }
-  if(!kind||kind==="opaque"){ vm.note("hardwareMap.get("+(clsName||kindName)+")"); const o=vm.opaqueVal(clsName||kindName); rt.set(key,o); return o; }
+  // with the Robot Controller's configuration loaded (src/robotconfig.js), a name it doesn't
+  // have, or has as another kind of device, throws in INIT as HardwareMap.get does
+  const cfg=kind&&kind!=="hub"&&kind!=="voltage"&&vm.host&&typeof vm.host.robotConfig==="function"?vm.host.robotConfig():null;
+  if(cfg&&Array.isArray(cfg.devices)){
+    const hit=cfg.devices.find(d=>d.name===name), TYPED={motor:1,servo:1,crservo:1,imu:1};
+    const want=kind==="bno"?"imu":kind, got=hit&&hit.kind;
+    if(!hit||(TYPED[want]&&TYPED[got]&&want!==got))
+      throw vm.jthrow("IllegalArgumentException","Unable to find a hardware device with name \""+name+"\" and type "+(clsName||kindName));
+  }
+  if(!kind||kind==="opaque"){ vm.note("hardwareMap.get("+(clsName||kindName)+")",kind==="opaque"?JV_HW+"HardwareMap":null); const o=vm.opaqueVal(clsName||kindName); rt.set(key,o); return o; }
   const s=vm.host?vm.host.dev(name,JV_KIND_TYPE[kind]||kindName,kind):{};
   const cls=JV_KIND_CLASS[kind];
   let o;
@@ -205,11 +221,14 @@ const JV_MOTOR_M={
     const s=jvS(o), m=jvEn(a[0])||"";
     s.modeName=m;
     if(/STOP_AND_RESET_ENCODER|RESET_ENCODERS/.test(m)){ s.offset=s.ticks||0; s.cmd=0; s.mode="reset"; }
-    else if(/RUN_TO_POSITION/.test(m)) s.mode="rtp";
+    else if(/RUN_TO_POSITION/.test(m)){
+      // the SDK (LynxDcMotorController) refuses RUN_TO_POSITION before a target is set
+      if(!s.targetSet) throw vm.jthrow("com.qualcomm.robotcore.exception.TargetPositionNotSetException","Failed to enable motor. You must set a target position before switching to RUN_TO_POSITION mode");
+      s.mode="rtp"; }
     else s.mode="run";
   },
   getMode(vm,o){ return vm.enumConst(JV_HW+"DcMotor.RunMode",jvS(o).modeName||"RUN_WITHOUT_ENCODER"); },
-  setTargetPosition(vm,o,a){ jvS(o).target=Math.trunc(jvArg(a[0])); if(vm.host&&vm.host.cmd) vm.host.cmd(o.n.name,"setTargetPosition",jvS(o).target); },
+  setTargetPosition(vm,o,a){ jvS(o).target=Math.trunc(jvArg(a[0])); jvS(o).targetSet=true; if(vm.host&&vm.host.cmd) vm.host.cmd(o.n.name,"setTargetPosition",jvS(o).target); },
   getTargetPosition(vm,o){ return jvS(o).target||0; },
   getCurrentPosition(vm,o){ const s=jvS(o); return Math.round((s.ticks||0)-(s.offset||0)); },
   isBusy(vm,o){ const s=jvS(o); return s.mode==="rtp"&&Math.abs((s.target||0)-((s.ticks||0)-(s.offset||0)))>(s.tol||10); },
@@ -393,11 +412,12 @@ function jvNatives(){
   d("java.lang.Runnable",{kind:"interface",functional:true});
   ["Throwable","Exception","Error","RuntimeException","InterruptedException","IllegalArgumentException","IllegalStateException","NullPointerException",
    "ArithmeticException","IndexOutOfBoundsException","ArrayIndexOutOfBoundsException","UnsupportedOperationException","ClassCastException","NumberFormatException",
-   "NoSuchMethodError","NoSuchFieldError","StackOverflowError","AbstractMethodError","InstantiationException","NegativeArraySizeException","AssertionError","IOException","ConcurrentModificationException"]
+   "NoSuchMethodError","NoSuchFieldError","StackOverflowError","OutOfMemoryError","AbstractMethodError","InstantiationException","NegativeArraySizeException","AssertionError","IOException","ConcurrentModificationException"]
     .forEach(n=>d("java.lang."+n,{sup:n==="Throwable"?"java.lang.Object":/Error$/.test(n)?"java.lang.Error":/^(IllegalArgument|IllegalState|NullPointer|Arithmetic|IndexOutOfBounds|UnsupportedOperation|ClassCast|ConcurrentModification)Exception$/.test(n)?"java.lang.RuntimeException":
       n==="ArrayIndexOutOfBoundsException"?"java.lang.IndexOutOfBoundsException":n==="NumberFormatException"?"java.lang.IllegalArgumentException":n==="Error"||n==="Exception"?"java.lang.Throwable":"java.lang.Exception",
       ctor:THROW, m:{getMessage(vm,o){ return o.n&&o.n.msg; }, getLocalizedMessage(vm,o){ return o.n&&o.n.msg; }, printStackTrace(){}, getCause(){ return null; },
         toString(vm,o){ return o.__c.name+(o.n&&o.n.msg?": "+o.n.msg:""); }, getStackTrace(){ return []; }}}));
+  d("com.qualcomm.robotcore.exception.TargetPositionNotSetException",{sup:"java.lang.RuntimeException",ctor:THROW,m:N["java.lang.RuntimeException"].m});
   d("java.lang.Math",{sf:{PI:Math.PI,E:Math.E},s:jvMathStatics()});
   d("java.lang.StrictMath",{sf:{PI:Math.PI,E:Math.E},s:jvMathStatics()});
   d("java.lang.System",{s:{
@@ -588,14 +608,15 @@ function jvNatives(){
     ctor(vm,o){ o.n={live:0,snap:{},edge:{}}; },
     has(n){ return JV_PAD_FIELDS.indexOf(n)>=0; },
     get(vm,o,n){ if(JV_PAD_FIELDS.indexOf(n)<0) return undefined; return jvPadRaw(vm,o,n); },
-    set(vm,o,n,v){ o.n.snap[JV_PAD_ALIAS[n]||n]=v; },
-    m:{copy(vm,o,a){ const src=a[0]; if(!src||!src.n) return; const snap={}; for(const f of JV_PAD_FIELDS) snap[JV_PAD_ALIAS[f]||f]=jvPadRaw(vm,src,f); o.n.snap=snap; o.n.live=0; },
+    set(vm,o,n,v){ if(n==="trigger_threshold"){ o.n.thr=jvNum(v); return; } o.n.snap[JV_PAD_ALIAS[n]||n]=v; },
+    m:{copy(vm,o,a){ const src=a[0]; if(!src||!src.n) return; const snap={}; for(const f of JV_PAD_FIELDS) snap[JV_PAD_ALIAS[f]||f]=jvPadRaw(vm,src,f); o.n.snap=snap; o.n.thr=src.n.thr; o.n.live=0; },
       fromByteArray(){}, toByteArray(){ return []; },
       rumble(vm,o,a){ if(vm.host&&vm.host.rumble) vm.host.rumble(o.n.live,"rumble",a.map(jvArg)); }, rumbleBlips(vm,o,a){ if(vm.host&&vm.host.rumble) vm.host.rumble(o.n.live,"rumbleBlips",a.map(jvArg)); },
       stopRumble(vm,o){ if(vm.host&&vm.host.rumble) vm.host.rumble(o.n.live,"stopRumble",[]); }, isRumbling(){ return false; }, runRumbleEffect(){}, setLedColor(){}, runLedEffect(){},
       atRest(vm,o){ return ["left_stick_x","left_stick_y","right_stick_x","right_stick_y","left_trigger","right_trigger"].every(f=>Math.abs(jvPadRaw(vm,o,f))<0.05); },
-      getGamepadId(vm,o){ return o.n.live; }, getUser(){ return null; }, type(){ return null; }, reset(vm,o){ o.n.snap={}; }, toString(){ return "gamepad"; }},
-    any(vm,o,name){ const r=jvPadEdge(vm,o,name); if(r!==undefined) return r; vm.note("Gamepad."+name); return 0; }});
+      getGamepadId(vm,o){ return o.n.live; }, getUser(){ return null; }, type(){ return null; }, reset(vm,o){ o.n.snap={}; }, toString(){ return "gamepad"; },
+      setTriggerThreshold(vm,o,a){ o.n.thr=jvNum(a[0]); }, getTriggerThreshold(vm,o){ return o.n.thr!=null?o.n.thr:JV_PAD_THRESHOLD; }, resetEdgeDetection(vm,o){ o.n.edge={}; }},
+    any(vm,o,name){ const r=jvPadEdge(vm,o,name); if(r!==undefined) return r; vm.note("Gamepad."+name,o.__c); return 0; }});
   // telemetry
   d("org.firstinspires.ftc.robotcore.external.Telemetry",{kind:"interface",m:JV_TEL_M});
   d("org.firstinspires.ftc.robotcore.internal.Telemetry_",{ifs:["org.firstinspires.ftc.robotcore.external.Telemetry"],m:JV_TEL_M});
