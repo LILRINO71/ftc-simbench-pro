@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { scriptError } from '../tools/minify.mjs';   // parses as a script, as the page runs it
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const build = fs.readFileSync(path.join(ROOT, 'tools', 'build.mjs'), 'utf8');
@@ -15,10 +16,10 @@ const ORDER = JSON.parse('[' + /export const ORDER = \[([\s\S]*?)\];/.exec(build
 test('every file in the shipped bundle compiles, the DOM-side ones included', () => {
   for (const n of ORDER) {
     const src = fs.readFileSync(path.join(ROOT, 'src', n + '.js'), 'utf8');
-    assert.doesNotThrow(() => new Function('"use strict";\n' + src), `src/${n}.js`);
+    assert.equal(scriptError('"use strict";\n' + src), null, `src/${n}.js`);
   }
   const all = '"use strict";\n' + ORDER.map((n) => fs.readFileSync(path.join(ROOT, 'src', n + '.js'), 'utf8')).join('\n');
-  assert.doesNotThrow(() => new Function(all), 'the concatenated bundle (duplicate top-level names, etc.)');
+  assert.equal(scriptError(all), null, 'the concatenated bundle (duplicate top-level names, etc.)');
 });
 
 test('no method is defined twice in one of the big objects (the later one silently wins)', () => {

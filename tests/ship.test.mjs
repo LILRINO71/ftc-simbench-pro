@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { engineBundle, loadEngine, loadWithField } from './load.mjs';
-import { minifyJS, minifyCSS, minifyHTML, tokenize } from '../tools/minify.mjs';
+import { minifyJS, minifyCSS, minifyHTML, tokenize, scriptError } from '../tools/minify.mjs';
 
 const run = (src) => new Function(`"use strict";return (${src})`)();
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -56,7 +56,7 @@ test('minifier: a regex inside ${} is a regex, not the start of a string', () =>
   assert.ok(!min.includes('MAIN LOOP') && !min.includes('PRO — one status light'), 'app.js comments after the regex survive the minifier');
   const longest = Math.max(...tokenize(app).filter((t) => t.t === 'tmpl').map((t) => t.v.length));
   assert.ok(longest < 10000, `a ${longest}-character template literal in app.js: the scanner ran past one's end`);
-  assert.doesNotThrow(() => new Function(min), 'minified app.js compiles');
+  assert.equal(scriptError(min), null, 'minified app.js compiles');
 });
 
 /* Whether a '/' after ')' or '}' starts a regex depends on what that bracket
@@ -141,13 +141,26 @@ test('ship build: the whole minified bundle compiles, the browser files included
   const src = '"use strict";\n' + ORDER.map((n) => `// ---- src/${n}.js ----\n` + fs.readFileSync(path.join(ROOT, 'src', n + '.js'), 'utf8')).join('\n');
   for (const strings of [false, true]) {
     const min = minifyJS(src, { strings });
-    assert.doesNotThrow(() => new Function(min), `the minified bundle${strings ? ' with the string table' : ''} compiles`);
+    assert.equal(scriptError(min), null, `the minified bundle${strings ? ' with the string table' : ''} compiles`);
   }
   // and each file alone, so a failure names the file
   for (const n of ORDER) {
     const one = fs.readFileSync(path.join(ROOT, 'src', n + '.js'), 'utf8');
-    assert.doesNotThrow(() => new Function(minifyJS('"use strict";\n' + one)), `minified src/${n}.js compiles`);
+    assert.equal(scriptError(minifyJS('"use strict";\n' + one)), null, `minified src/${n}.js compiles`);
   }
+});
+
+/* The page's scripts run as scripts, not as a function's body. `new Function(code)` was the
+   check, and a function body may `return` at its top level: a stray one compiled here and
+   would have stopped the page in a browser ("Illegal return statement"). */
+test('ship build: the compile check is a script\'s, where a top-level return is an error', () => {
+  assert.doesNotThrow(() => new Function('const a = 1;\nreturn a;'), 'the old check let this through');
+  assert.match(scriptError('const a = 1;\nreturn a;'), /return/i);
+  assert.equal(scriptError('"use strict";\nconst a = 1; function f() { return a / 2 }'), null);
+  assert.match(scriptError('const a = ;'), /Unexpected token/);
+  // build.mjs uses it on everything it writes
+  const build = fs.readFileSync(path.join(ROOT, 'tools', 'build.mjs'), 'utf8');
+  assert.ok(/const why = scriptError\(code\);/.test(build) && !/new Function\(code\)/.test(build), 'tools/build.mjs checks with scriptError');
 });
 
 /* A comment and the whitespace around it are one gap. The old pass looked at

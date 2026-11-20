@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { minifyJS, minifyCSS, minifyHTML } from './minify.mjs';
+import { minifyJS, minifyCSS, minifyHTML, scriptError } from './minify.mjs';
 import { buildRobot } from './stepgen.mjs';
 import { threeLoaderScript, ADDONS, VENDOR_THREE, VENDOR_TRYSTERO, cdnIntegrity } from './threeloader.mjs';
 import { pageHeaders } from './headers.mjs';
@@ -81,8 +81,9 @@ if (MIN) shotWorkerJs = minifyJS(shotWorkerJs);
 // browser file ships as a blank page, and the deploy only looks at this exit code.
 // Compiling is not running, so nothing here needs a DOM.
 for (const [what, code] of [['the page script', js], [ENGINE_FILE, engineJs], ['the Shot Sim script', shotJs], [SHOT_FILE, shotWorkerJs]]) {
-  try { new Function(code); } catch (e) {
-    console.error(`build refused: ${what}${MIN ? ' (minified)' : ''} does not compile: ${e.message}`);
+  const why = scriptError(code);
+  if (why) {
+    console.error(`build refused: ${what}${MIN ? ' (minified)' : ''} does not compile: ${why}`);
     process.exit(1);
   }
 }

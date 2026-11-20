@@ -12,6 +12,14 @@
 // Optional --strings pass hides every plain string literal in an encoded table.
 // That is obfuscation, not security: anything shipped to a browser can be read.
 // It raises the effort of lifting the physics model, nothing more.
+import vm from 'node:vm';
+
+/** Why `code` would not run as a classic script (a <script> tag, a classic worker), or null when
+    it parses. `new Function(code)` is not this check: it makes the text a function body, where a
+    stray top-level `return` is legal. */
+export function scriptError(code) {
+  try { new vm.Script(code); return null; } catch (e) { return (e && e.message) || String(e); }
+}
 
 const KEYWORD_BEFORE_REGEX = new Set(['return', 'typeof', 'instanceof', 'in', 'of', 'new', 'delete', 'void',
   'throw', 'case', 'do', 'else', 'yield', 'await']);
