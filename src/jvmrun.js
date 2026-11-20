@@ -91,6 +91,7 @@ function JvProgram(comp,host){
   this.gen=null; this.waitStart=false; this.resumeAt=0; this.done=false; this.error=null;
   this.cls=vm.classes.get(comp.main);
   this.linear=!!this.cls&&vm.isSubName(this.cls,"LinearOpMode");
+  this.strand=vm.strand;                                   // the OpMode's own thread (jvStrand)
   const pad=i=>{ const g=vm.mk("com.qualcomm.robotcore.hardware.Gamepad"); g.n={live:i,snap:{},edge:{}}; return g; };
   this.pads={1:pad(1),2:pad(2)};
   this.tel=vm.mk("org.firstinspires.ftc.robotcore.internal.Telemetry_");
@@ -112,7 +113,7 @@ JvProgram.prototype.fail=function(e){
 JvProgram.prototype.step=function(){
   if(this.done||!this.gen) return;
   const vm=this.vm;
-  vm.budget=vm.BUDGET;
+  vm.budget=vm.BUDGET; vm.strand=this.strand;
   try{
     for(let guard=0;guard<1e6;guard++){
       const r=this.gen.next();
@@ -129,6 +130,7 @@ JvProgram.prototype.drain=function(g){
   // after a fixed amount of work and say where it was going round
   const vm=this.vm, limit=vm.steps+1e6;
   const host=vm.host;
+  vm.strand=this.strand;
   try{ for(let n=0;n<2e5;n++){ const r=g.next(); if(r.done) return r.value;
     // a busy-wait (a forced gate): the robot keeps moving meanwhile, as it would
     if(r.value&&r.value.forced&&host&&host.world) host.world(0.02);
@@ -193,12 +195,14 @@ JvProgram.prototype.start=function(){
 JvProgram.prototype.tick=function(){
   if(this.done&&!(this.vm.threads&&this.vm.threads.length)) return;
   const vm=this.vm, now=vm.host?vm.host.now():0;
+ 
   if(vm.threads) for(const th of vm.threads.slice()){
     if(th.done||now<th.resumeAt) continue;
-    vm.budget=vm.BUDGET;
+    vm.budget=vm.BUDGET; vm.strand=th.st||(th.st=jvStrand());
     try{ const r=th.g.next(); if(r.done) th.done=true; else if(r.value&&r.value.sleep!=null) th.resumeAt=now+r.value.sleep/1000; }
     catch(e){ th.done=true; }
   }
+  vm.strand=this.strand;
   if(this.done) return;
   if(this.linear){
     if(this.waitStart) return;                          // INIT: parked on waitForStart()
