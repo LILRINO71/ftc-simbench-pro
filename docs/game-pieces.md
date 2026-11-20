@@ -27,7 +27,9 @@ first is saved:
   name, or `null` for an explicit none; `motor` as `{id, for}`, the motor model and the flywheel device it
   was chosen for. A setting you never chose has no entry.
 - **What is in effect**, `Shots.cfg.shooter`, `.feeder`, `.motorId`, `.payload.intakes`, `.payload.transfer`:
-  worked out afresh by `Shots.adopt` for every OpMode. A chosen device counts while the OpMode declares a
+  worked out afresh by `Shots.adopt` every time the sim is loaded (an OpMode picked, INIT, any rebuild: another
+  robot, a Map rebind, a trust change), on that sim, since a flywheel the code gives no rpm takes its motor from
+  the CAD part it is bound to. A chosen device counts while the OpMode declares a
   device of that name; in one that doesn't, the code's answer is used and your choice waits for the device
   to come back. An explicit none always counts. A chosen motor counts only while the flywheel in effect is
   the one it was chosen for; any other flywheel gets the motor its own code declares. Everything else is

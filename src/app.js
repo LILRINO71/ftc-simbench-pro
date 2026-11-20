@@ -330,6 +330,7 @@ function initNow(){
   if(!Online.inMatch()) Field.reset();
   Shots.reset(); ShotUI.dirty=true;
   Sim.load(CODE,CAD,MAP,withPose());
+  Shots.adopt(CODE);                                    // on the sim just loaded, as every Sim.load is
   applyConfigOverrides(); Sim.init(); applyConfigOverrides();
   resetMatch();
   Graph.reset(); updateDS();
@@ -772,7 +773,8 @@ function applyRig(r){
   HW_USER=r.hardware||{};
   if(Array.isArray(r.ignored)){ Ignores.fromRig(IGNORED,ignoreRobot(),r.ignored); saveIgnored(); }
   recomputeChain(CAD.mechs);
-  if(CODE&&Shots.cfg) Shots.adopt(CODE);          // this OpMode's shooter, motor and roles, from the choices and its code
+  // no adopt here: the sim may still be the last robot's (loadCAD applies the rig before it rebuilds);
+  // reloadSim works out what is in effect once this robot's sim is loaded
   syncOptionControls();
   return true;
 }
@@ -1527,11 +1529,14 @@ function reloadSim(){
   if(!CODE||!CAD) return;
   const phase=Sim.phase;
   Sim.load(CODE,CAD,MAP,withPose()); applyConfigOverrides(); Physics.sync();
+  // the shooter, motor and roles in effect, worked out on this sim (its devices' specs come from the
+  // CAD part each is bound to when the code names none): a rebind, a trust change, another robot
+  Shots.adopt(CODE); ShotUI.dirty=true; ShotUI.t=0;
   // a rebuilt sim is a fresh robot: nothing held over from the last one, no feeder rest remembered
   Payload.reset(); Shots.feedRest=null; Shots.feedName=null; Shots.feedWas=false;
   if(phase!=="stopped"){ Sim.init(); applyConfigOverrides(); resetMatch(); }
   if(phase==="running") Sim.start();
-  renderPad(); renderLegend3D(); updateDS();
+  renderPad(); renderLegend3D(); updateDS(); renderShotSetup();     // the Shot tab's selects follow what is in effect now
 }
 function rebuild(){ analyzeAll(); reloadSim(); }
 function syncOptionControls(){
@@ -3114,12 +3119,13 @@ const Session={
       if(s.map&&Object.keys(s.map).length) MAP=s.map;
       // the shooter as it was set up
       if(s.shots){
-        // the choices as saved; what is in effect, from them and this OpMode's code
-        const S=s.shots; if(S.cfg){ Shots.cfg=Shots.restore(S.cfg); if(CODE) Shots.adopt(CODE); }
+        // the choices as saved; what is in effect is worked out by the rebuild below, on the sim of
+        // this robot, this map and these options (not before: the sim is not theirs yet)
+        const S=s.shots; if(S.cfg) Shots.cfg=Shots.restore(S.cfg);
         Shots.seed=S.seed; Shots.spreadScale=S.spreadScale; Shots.fired=S.fired; Shots.scored=S.scored;
-        shotChanged();
       }
       rebuild(); Physics.sync();                       // the simulation on all of the above
+      if(s.shots) shotChanged();
       if(s.alliance) setAlliance(s.alliance,false);
       if(s.chassis&&isFinite(s.chassis.x)){
         Sim.chassis={x:s.chassis.x,y:s.chassis.y,h:s.chassis.h||0};

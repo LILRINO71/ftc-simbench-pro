@@ -31,17 +31,39 @@ const A = bench(java(1620)), B = bench(java(6000)), C = bench(java(6000, 'launch
 const now = () => ({ shooter: S.cfg.shooter, feeder: S.cfg.feeder, motorId: S.cfg.motorId });
 const pose = { x: -40 * E.IN, y: -30 * E.IN, h: 0 };
 
-/* applyRig from src/app.js, run as the page runs it, with the rest of the page stood in for: what
-   the per-robot settings kept in the browser (saveRig: {shot: Shots.cfg, ...} as JSON) put back. */
-function applyRigFromApp(code) {
-  const src = fs.readFileSync(new URL('../src/app.js', import.meta.url), 'utf8');
-  const a = src.indexOf('function applyRig(r){'), z = src.indexOf('\n}\n', a);
-  const env = { CAD: { mechs: [] }, OPTS: {}, View: {}, FRONTS: { '+x': 0, '-x': 1, '+y': 2, '-y': 3 }, Shots: S, CODE: code,
-    cleanDriveSpec: (x) => x, SETUP: { done: {} }, normJointKind: (k) => k, RIG_DEVICES: {}, HW_USER: {},
-    Ignores: { fromRig() {} }, IGNORED: {}, ignoreRobot: () => null, saveIgnored() {}, recomputeChain() {}, syncOptionControls() {} };
+/* A function from src/app.js, run as the page runs it, with the rest of the page stood in for (env). */
+const APP = fs.readFileSync(new URL('../src/app.js', import.meta.url), 'utf8');
+function appFn(name, env) {
+  const a = APP.indexOf(`function ${name}(`), z = APP.indexOf('\n}\n', a);
+  assert.ok(a >= 0 && z > a, name + ' is in src/app.js');
   const names = Object.keys(env);
-  return new Function(...names, `${src.slice(a, z + 3)}\nreturn applyRig;`)(...names.map((n) => env[n]));
+  return new Function(...names, `${APP.slice(a, z + 3)}\nreturn ${name};`)(...names.map((n) => env[n]));
 }
+/* applyRig: what the per-robot settings kept in the browser (saveRig: {shot: Shots.cfg, ...} as JSON) put back. */
+const applyRigFromApp = (code) => appFn('applyRig', { CAD: { mechs: [] }, OPTS: {}, View: {}, FRONTS: { '+x': 0, '-x': 1, '+y': 2, '-y': 3 }, Shots: S, CODE: code,
+  cleanDriveSpec: (x) => x, SETUP: { done: {} }, normJointKind: (k) => k, RIG_DEVICES: {}, HW_USER: {},
+  Ignores: { fromRig() {} }, IGNORED: {}, ignoreRobot: () => null, saveIgnored() {}, recomputeChain() {}, syncOptionControls() {} });
+/* reloadSim (every rebuild(): another robot, a Map rebind, a trust change) and initNow (INIT) on bench b. */
+const pageBits = { Shots: S, Payload: E.Payload, Physics: { sync() {} }, applyConfigOverrides() {}, ShotUI: {}, resetMatch() {},
+  renderPad() {}, renderLegend3D() {}, updateDS() {}, renderShotSetup() {}, Online: { inMatch: () => false }, Field: { reset() {} }, Graph: { reset() {} } };
+const reloadSim = (b, opts) => appFn('reloadSim', { ...pageBits, CODE: b.code, CAD: b.cad, MAP: b.map, Sim: E.Sim, withPose: () => opts || b.opts })();
+const initNow = (b, opts) => appFn('initNow', { ...pageBits, CODE: b.code, CAD: b.cad, MAP: b.map, Sim: E.Sim, withPose: () => opts || b.opts })();
+/* What each Shot tab select marks as selected is what is in effect, on the sim that is loaded now. */
+function agrees(code) {
+  const e = S.effective(code, S.cfg.pick), slots = e.slots;
+  const now = { shooter: S.cfg.shooter, feeder: S.cfg.feeder, motor: S.cfg.motorId, intake1: slots[0], intake2: slots[1], transfer: S.cfg.payload.transfer || null };
+  for (const key of Object.keys(now)) {
+    const sel = S.choices(key, code).options.filter((o) => o.selected).map((o) => o.value);
+    assert.equal(sel.length, 1, key + ': one option selected');
+    const shown = sel[0] === FROM_CODE ? e.code[key] : sel[0] === '' ? null : sel[0];
+    assert.equal(now[key], shown, `${key}: the select shows ${JSON.stringify(shown)} (${sel[0]}), in effect is ${JSON.stringify(now[key])}`);
+  }
+  assert.equal(S.cfg.motorId, e.motorId, 'the motor in effect is the one worked out on this sim');
+}
+// the sample shooter OpMode with no rpm in its comment: the flywheel's motor comes from the CAD part it is bound to
+const noRpm = E.SHOOTER_JAVA.replace(/\/\/ 6000 rpm goBILDA, 1:1 to the flywheel/, '// the flywheel');
+const robotWith = (part) => { const b = bench(noRpm), m = b.cad.mechs[b.cad.mechs.length - 1];
+  m.part = part; m.partName = 'goBILDA 5203 motor'; b.map = Object.assign({}, b.map, { flywheel: m.id }); return b; };
 
 test('shot settings: the samples change as the tests expect (a guard on the fixtures)', () => {
   assert.notEqual(java(1620), E.SHOOTER_JAVA, 'the rpm comment is where the test replaces it');
@@ -154,8 +176,11 @@ test('shot settings: settings saved by the old build get the code\'s values, and
     shooter: 'flywheel', feeder: 'kicker', motorId: 'yj1620', hoodDeg: 70, h0In: 14.5, wheelMm: 72, wheelId: 'gecko72', gear: 1.5,
     mountDeg: 180, ball: 'nectar', type: 'dual', precision: 'rough',
     payload: { intakes: ['flywheel'], transfer: 'kicker', supply: 'real', preload: 2, rollerMm: 60, edges: { intake: 'back' }, dirs: {} } } });
+  // loadCAD: the rig is applied, then the robot's sim is rebuilt (reloadSim), and what is in effect worked out on it
   assert.equal(applyRigFromApp(B.code)(JSON.parse(old)), true);
+  reloadSim(B);
   assert.equal(S.cfg.motorId, 'yj6000', 'B\'s own 6000 rpm motor, not the saved 1620');
+  agrees(B.code);
   select(B);
   assert.deepEqual(now(), { shooter: 'flywheel', feeder: 'kicker', motorId: 'yj6000' }, 'and on the next select');
   assert.deepEqual(S.cfg.pick, {}, 'nothing in an old save counts as chosen');
@@ -264,4 +289,52 @@ test('shot settings: each select the code fills lists "From the code: ..." first
   userPicks('intake1', 'frontRoller', P2);
   assert.equal(sel('intake2', P2).options[0].label, 'From the code: intake');
   assert.deepEqual(picked(sel('intake1', P2)), ['frontRoller']);
+});
+
+// 36d08dd: applyRig worked the motor out on robot X's sim (loadCAD applies the rig before it rebuilds)
+// and nothing worked it out again: Y flew with yj1620 (0 %) while its select said "From the code:
+// 6000 rpm". origin/main: yj6000 (its applyRig copied the saved value back).
+test('shot settings: another robot loaded: what is in effect is worked out on its own sim, and the select agrees', () => {
+  const X = robotWith('5203-2402-0003'), Y = robotWith('5203-2402-0001');   // a 1620 and a 6000 rpm Yellow Jacket
+  S.cfg = null; select(Y);
+  assert.equal(E.Sim.dev.flywheel.spec.rpm, 6000, 'the code names no rpm: the CAD part says');
+  assert.equal(S.cfg.motorId, 'yj6000');
+  const savedY = JSON.stringify({ format: 'ftc-sim-bench.rig', shot: S.cfg });   // saveRig
+  select(X);
+  assert.equal(S.cfg.motorId, 'yj1620');
+  // loadCAD(Y): Shots.cfg = null; loadSavedRig() -> applyRig; mapDevices(); rebuild() -> reloadSim
+  S.cfg = null;
+  applyRigFromApp(Y.code)(JSON.parse(savedY));
+  reloadSim(Y);
+  assert.equal(E.Sim.dev.flywheel.spec.rpm, 6000);
+  assert.equal(S.cfg.motorId, 'yj6000', 'Y\'s own motor, not X\'s');
+  agrees(Y.code);
+  assert.equal(S.choices('motor', Y.code).options[0].label, 'From the code: 6000 rpm · 1:1');
+  assert.ok(E.Field.E.evaluate(S.params(pose), 'coarse').hitRate > 0.9, 'Y\'s good shot, not 0 %');
+  // a robot loaded with no saved rig at all gets its code's settings on its own sim too
+  S.cfg = null; reloadSim(X);
+  assert.equal(S.cfg.motorId, 'yj1620'); agrees(X.code);
+});
+
+// 36d08dd and origin/main: a rebuild (Map rebind, trust change) or an INIT reloaded the sim and never
+// worked out the motor again: the select said "From the code: 1620 rpm" and the shots flew yj6000.
+test('shot settings: after every kind of rebuild the selects show what is in effect', () => {
+  const N = bench(noRpm);                                   // nothing in the map: the flywheel's motor is a guess (6000 rpm assumed)
+  S.cfg = null; select(N);
+  assert.equal(S.cfg.motorId, 'yj6000'); agrees(N.code);
+  // the Map tab binds the flywheel to a joint driven by a 1620 rpm Yellow Jacket
+  const m = N.cad.mechs[0]; m.part = '5203-2402-0003'; m.partName = 'goBILDA 5203 motor';
+  const R = { ...N, map: Object.assign({}, N.map, { flywheel: m.id }) };
+  reloadSim(R);
+  assert.equal(E.Sim.dev.flywheel.spec.rpm, 1620);
+  assert.equal(S.cfg.motorId, 'yj1620', 'the rebind'); agrees(R.code);
+  reloadSim(R, { ...R.opts, trust: 'cad' });
+  assert.equal(S.cfg.motorId, 'yj1620', 'the trust toggle'); agrees(R.code);
+  // back unbound, then INIT alone (initNow loads the sim itself)
+  initNow(N);
+  assert.equal(S.cfg.motorId, 'yj6000', 'INIT'); agrees(N.code);
+  // the user's own choice survives every rebuild, and the select still shows it
+  userPicks('motor', 'yj1150', N); userPicks('feeder', '', N);
+  reloadSim(R); agrees(R.code); initNow(R); agrees(R.code);
+  assert.deepEqual([S.cfg.motorId, S.cfg.feeder], ['yj1150', null]);
 });
