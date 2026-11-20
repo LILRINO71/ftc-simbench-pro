@@ -72,6 +72,8 @@ test('headers: the report-only policy names every inline script of the built pag
   }
   // the root path is the same page
   assert.equal(r['/']['Content-Security-Policy-Report-Only'], r['/index.html']['Content-Security-Policy-Report-Only']);
+  // Pages redirects /fragment.html to /fragment and serves the page there: that path needs the policy too
+  assert.equal(r['/fragment']['Content-Security-Policy-Report-Only'], r['/fragment.html']['Content-Security-Policy-Report-Only']);
 });
 
 test('headers: the hash is the one a browser computes (CR LF read as LF), and src= scripts are not hashed', () => {

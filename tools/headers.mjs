@@ -6,7 +6,7 @@
 //                     frame it: another site can't put the page, which signs in with
 //                     Onshape and posts scores, under a decoy (clickjacking)
 //   nosniff, Referrer-Policy, Permissions-Policy
-// Report-only, on the app's pages (/, /index.html, /fragment.html):
+// Report-only, on the app's pages (/, /index.html, /fragment and /fragment.html):
 //   the whole script, worker and connection policy. The page is one big inline script, so
 //   script-src names each inline script by its SHA-256, computed here from the page the
 //   build wrote. Report-only cannot break anything: a browser runs everything as before
@@ -72,7 +72,9 @@ export function pageHeaders(pageHtml) {
     `  Permissions-Policy: gamepad=(self), geolocation=(), camera=(), microphone=()\n` +
     `/index.html\n` + fresh + appPolicy +
     `/\n` + fresh + appPolicy +
+    // Pages answers /fragment.html with a redirect to /fragment and serves the page there
     `/fragment.html\n` + appPolicy +
+    `/fragment\n` + appPolicy +
     `/engine-*.js\n` + forever +
     // the folder names carry the version, so a file at one of these paths never changes
     `/vendor/*\n` + forever +
