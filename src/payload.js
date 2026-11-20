@@ -19,7 +19,9 @@
                 turns fast enough
      shooter    Shots.cfg.shooter and every other motor named like a shooter:
                 the flywheels, which pay for each shot
-   Each can be set by hand in the Shot tab (Shots.cfg.payload).
+   Each can be chosen in the Shot tab: the choice is kept in Shots.cfg.pick,
+   and Shots.adopt puts what is in effect for each OpMode (the choice where it
+   applies, else the code's) in Shots.cfg.payload.intakes and .transfer.
 
    Where a mouth is: the front edge of the footprint box, nearly its full
    width; a device named back or rear, the back edge; a device bound to a

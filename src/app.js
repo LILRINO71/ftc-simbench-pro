@@ -747,7 +747,8 @@ function applyRig(r){
   if(r.front&&FRONTS[r.front]!==undefined) OPTS.front=r.front;
   if(/^(auto|show|hide)$/.test(r.baseModel||"")) OPTS.baseModel=r.baseModel;
   if(/^(auto|show|hide)$/.test(r.shooterModel||"")) OPTS.shooterModel=r.shooterModel;
-  if(r.shot&&typeof r.shot==="object") Shots.cfg=Object.assign(Shots.defaults(),r.shot);
+  // the user's choices come back; what was in effect is worked out again below (Shots.restore)
+  if(r.shot&&typeof r.shot==="object") Shots.cfg=Shots.restore(r.shot);
   if(r.drive&&typeof r.drive==="object") CAD.driveSpec=cleanDriveSpec(r.drive); else delete CAD.driveSpec;
   SETUP.done=Object.assign({},r.setup&&typeof r.setup==="object"?r.setup:{});
   const byId={}; CAD.mechs.forEach(m=>byId[m.id]=m);
@@ -771,6 +772,7 @@ function applyRig(r){
   HW_USER=r.hardware||{};
   if(Array.isArray(r.ignored)){ Ignores.fromRig(IGNORED,ignoreRobot(),r.ignored); saveIgnored(); }
   recomputeChain(CAD.mechs);
+  if(CODE&&Shots.cfg) Shots.adopt(CODE);          // this OpMode's shooter, motor and roles, from the choices and its code
   syncOptionControls();
   return true;
 }
@@ -1366,25 +1368,30 @@ function renderShotSetup(){
   if(fire){ fire.disabled=!Field.ok||!cfg||!cfg.shooter;
     fire.title=cfg&&cfg.shooter?"Launch one ball with the robot as it is (F)":"This OpMode has no flywheel to fire"; }
   if(!cfg||!Field.ok){ renderShotVerdict(); return; }
-  const devs=(CODE&&CODE.devices)||[];
-  const opt=(list,sel,none)=>[`<option value="">${none}</option>`].concat(list.map(d=>
-    `<option value="${esc(d.name)}"${d.name===sel?" selected":""}>${esc(d.name)}</option>`)).join("");
-  setHTML($("#shotDev"),opt(devs.filter(d=>/DcMotor/i.test(d.type||"")),cfg.shooter,"— none —"));
-  setHTML($("#shotFeed"),opt(devs.filter(d=>d.name!==cfg.shooter&&/Servo|DcMotor/i.test(d.type||"")),cfg.feeder,"— by hand (F) —"));
+  renderPick("#shotDev","shooter"); renderPick("#shotFeed","feeder"); renderPick("#motorSel","motor");
   $$("#ballSeg button").forEach(b=>b.classList.toggle("on",b.dataset.ball===cfg.ball));
   $$("#typeSeg button").forEach(b=>b.classList.toggle("on",b.dataset.type===cfg.type));
   $$("#mountSeg button").forEach(b=>b.classList.toggle("on",+b.dataset.mount===(cfg.mountDeg||0)));
   $$("#precSeg button").forEach(b=>b.classList.toggle("on",b.dataset.prec===(cfg.precision||"typical")));
   $("#hoodSlider").value=cfg.hoodDeg; $("#hoodVal").textContent=cfg.hoodDeg+"°";
   $("#h0Slider").value=cfg.h0In; $("#h0Val").textContent=cfg.h0In+" in";
-  const motors=Field.data.motors.motors;
-  setHTML($("#motorSel"),motors.map(m=>`<option value="${esc(m.id)}"${m.id===cfg.motorId?" selected":""}>${esc(m.label)}</option>`).join(""));
   const wheels=Field.data.shooter.wheels;
   setHTML($("#wheelSel"),wheels.map(w=>`<option value="${w.diameterMm}|${esc(w.id)}"${w.diameterMm===cfg.wheelMm&&(!cfg.wheelId||cfg.wheelId===w.id)?" selected":""}>${esc(w.label)}</option>`).join(""));
   if(document.activeElement!==$("#gearIn")) $("#gearIn").value=cfg.gear;
   renderPieceSetup();
   renderShotVerdict(); renderShotLive(); renderHives(); renderShotLog();
 }
+/* A select adopt fills (src/shots.js choices): "From the code: ..." first, the user's own choice
+   marked, so the page always says which the value is and there is a way back to the code. */
+function renderPick(id,key){
+  const el=$(id); if(!el) return;
+  const c=Shots.choices(key,CODE);
+  setHTML(el,c.options.map(o=>`<option value="${esc(o.value)}"${o.selected?" selected":""}>${esc(o.label)}</option>`).join(""));
+  el.classList.toggle("picked",c.mine);
+  el.title=c.mine?"Your choice, kept for this robot. “From the code” hands it back to each OpMode's code.":"From this OpMode's code.";
+}
+/* The user picked in one of those selects: kept as a choice, and everything in effect worked out again. */
+function pickChanged(key,value){ if(!Shots.cfg) return false; Shots.choose(key,value,CODE); return true; }
 function shotChanged(){ ShotUI.dirty=true; ShotUI.t=0; saveRig(); renderShotSetup(); }
 /* Fire the robot's own shooter as it stands — no perfect test shots. With real pieces it
    launches the one waiting at the shooter, or says there is none (src/payload.js). */
@@ -1428,12 +1435,8 @@ function renderPieces(){
 }
 function renderPieceSetup(){
   const P=pcCfg(); if(!P||!$("#pcIntake1")) return;
-  const devs=((CODE&&CODE.devices)||[]).filter(d=>/DcMotor|CRServo/i.test(d.type||""));
-  const opt=(sel,none)=>[`<option value="">${none}</option>`].concat(devs.map(d=>`<option value="${esc(d.name)}"${d.name===sel?" selected":""}>${esc(d.name)}</option>`)).join("");
   const ins=Payload.intakes();
-  setHTML($("#pcIntake1"),opt(ins[0],"— none —"));
-  setHTML($("#pcIntake2"),opt(ins[1],"— none —"));
-  setHTML($("#pcTransfer"),opt(Payload.transfer(),"— none —"));
+  renderPick("#pcIntake1","intake1"); renderPick("#pcIntake2","intake2"); renderPick("#pcTransfer","transfer");
   $$("#pcSupply button").forEach(b=>b.classList.toggle("on",b.dataset.sup===(P.supply||"auto")));
   $("#pcPreload").value=P.preload==null?"":String(P.preload);
   if(document.activeElement!==$("#pcRoller")) $("#pcRoller").value=P.rollerMm||48;
@@ -1450,9 +1453,9 @@ function pieceChanged(){
 }
 function wirePieces(){
   const set=(id,f)=>$(id).addEventListener("change",e=>{ const P=pcCfg(); if(!P) return; f(P,e.target.value); pieceChanged(); });
-  const intake=(k)=>(P,v)=>{ const l=Payload.intakes().slice(); if(v) l[k]=v; else l.splice(k,1); P.intakes=l.filter((n,i)=>n&&l.indexOf(n)===i).slice(0,4); };
-  set("#pcIntake1",intake(0)); set("#pcIntake2",intake(1));
-  set("#pcTransfer",(P,v)=>{ P.transfer=v; });
+  // the roles adopt fills: a choice (or "From the code"), and the intakes and transfer worked out again
+  for(const [id,key] of [["#pcIntake1","intake1"],["#pcIntake2","intake2"],["#pcTransfer","transfer"]])
+    $(id).addEventListener("change",e=>{ if(pickChanged(key,e.target.value)) pieceChanged(); });
   set("#pcPreload",(P,v)=>{ P.preload=v===""?null:Math.max(0,Math.min(4,+v)); });
   set("#pcRoller",(P,v)=>{ const n=parseFloat(v); if(isFinite(n)) P.rollerMm=Math.max(10,Math.min(150,n)); });
   $("#pcSupply").addEventListener("click",e=>{ const b=e.target.closest("button"), P=pcCfg(); if(!b||!P) return; P.supply=b.dataset.sup; pieceChanged(); });
@@ -1475,13 +1478,11 @@ function wireShotTab(){
   seg("#precSeg",b=>Shots.cfg.precision=b.dataset.prec);
   $("#hoodSlider").addEventListener("input",e=>{ if(!Shots.cfg) return; Shots.cfg.hoodDeg=+e.target.value; $("#hoodVal").textContent=e.target.value+"°"; ShotUI.dirty=true; saveRig(); });
   $("#h0Slider").addEventListener("input",e=>{ if(!Shots.cfg) return; Shots.cfg.h0In=+e.target.value; $("#h0Val").textContent=e.target.value+" in"; ShotUI.dirty=true; saveRig(); });
-  $("#motorSel").addEventListener("change",e=>{ if(!Shots.cfg) return; Shots.cfg.motorId=e.target.value; Shots.byHand("motorId"); shotChanged(); });
+  // the shooter, the feeder and the motor: a choice (the motor's tied to the flywheel in effect), or back to the code
+  for(const [id,key] of [["#shotDev","shooter"],["#shotFeed","feeder"],["#motorSel","motor"]])
+    $(id).addEventListener("change",e=>{ if(pickChanged(key,e.target.value)) shotChanged(); });
   $("#wheelSel").addEventListener("change",e=>{ if(!Shots.cfg) return; const p=e.target.value.split("|"); Shots.cfg.wheelMm=+p[0]; Shots.cfg.wheelId=p[1]; shotChanged(); });
   $("#gearIn").addEventListener("change",e=>{ if(!Shots.cfg) return; const v=parseFloat(e.target.value); if(isFinite(v)&&v>0) Shots.cfg.gear=Math.max(0.25,Math.min(4,v)); shotChanged(); });
-  $("#shotDev").addEventListener("change",e=>{ if(!Shots.cfg) return; Shots.cfg.shooter=e.target.value||null; Shots.byHand("shooter");
-    // another device, another motor: its own, worked out again (and again for each OpMode until the user picks one)
-    Shots.cfg.motorId=nearestMotorId(Shots.deviceRpm()); (Shots.cfg.auto||(Shots.cfg.auto={})).motorId=true; shotChanged(); });
-  $("#shotFeed").addEventListener("change",e=>{ if(!Shots.cfg) return; Shots.cfg.feeder=e.target.value||null; Shots.byHand("feeder"); shotChanged(); });
   wirePieces();
   // the drawn parts: which way the CAD faces, and whether to draw a base and a shooter
   const robotSeg=(id,apply)=>$(id).addEventListener("click",e=>{ const b=e.target.closest("button"); if(!b) return;
@@ -3113,7 +3114,8 @@ const Session={
       if(s.map&&Object.keys(s.map).length) MAP=s.map;
       // the shooter as it was set up
       if(s.shots){
-        const S=s.shots; if(S.cfg) Shots.cfg=Object.assign(Shots.defaults(),S.cfg);
+        // the choices as saved; what is in effect, from them and this OpMode's code
+        const S=s.shots; if(S.cfg){ Shots.cfg=Shots.restore(S.cfg); if(CODE) Shots.adopt(CODE); }
         Shots.seed=S.seed; Shots.spreadScale=S.spreadScale; Shots.fired=S.fired; Shots.scored=S.scored;
         shotChanged();
       }

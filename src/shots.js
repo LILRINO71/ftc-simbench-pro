@@ -27,6 +27,11 @@ const NOT_SHOOTER=/slide|lift|claw|wrist|elbow|drive/i;
 const INTAKE_NAME=/intake|collect|sweep|suck|pick_?up|roller/i;
 const NOT_INTAKE=/slide|lift|claw|wrist|elbow|drive|arm|pivot|extend|tilt|flip|turret|hood|angle|link/i;
 const TRANSFER_NAME=/transfer|index|convey|belt|uptake|elevat|tunnel/i;
+// the Shot tab's choices (Shots.cfg.pick): the select option that hands a setting back to the code,
+// the settings that are devices (a name, or null for an explicit none), and how long a kept name may be
+const SHOT_FROM_CODE="@code";
+const PICK_DEVICES=["shooter","feeder","intake1","intake2","transfer"];
+const PICK_MAX=128;
 
 /* A small seeded random source, so a test or a replay sees the same shots. */
 function makeRng(seed){
@@ -102,31 +107,115 @@ const Shots={
     const transfer=devs.filter(d=>spins(d)&&TRANSFER_NAME.test(d.name)&&shooter.indexOf(d.name)<0&&intake.indexOf(d.name)<0).map(d=>d.name);
     return {shooter, feeder, intake, transfer};
   },
-  /* Fill in whatever the user hasn't chosen from what the code declares. What adopt filled is
-     marked in cfg.auto and worked out again for every OpMode; what the user picked in the Shot tab
-     (byHand takes the mark off) stays while its device exists. A value filled once used to be kept
-     for good: the second OpMode ran with the first one's shooter motor, and a flywheel its code
-     declares as 6000 rpm was flown as the 1620 rpm one before it, a 98 % shot read as 0 %. A
-     setting saved before the marks existed has none, so it counts as the user's. */
+  /* What the user chose and what is in effect are two things, and only the first is kept.
+     cfg.pick holds the Shot tab's choices:
+       shooter, feeder, intake1, intake2, transfer   a device name, or null for an explicit none
+       motor                                         {id, for}: a motor model and the shooter device it was chosen for
+     A setting the user never chose has no entry. adopt works out every value in effect (cfg.shooter,
+     cfg.feeder, cfg.motorId, cfg.payload.intakes and .transfer) afresh for each OpMode: the choice
+     where it applies, else what the code says. A value filled once used to be kept for good, so the
+     next OpMode was flown with the last one's motor (a 98 % shot read as 0 %), and a motor picked for
+     one flywheel followed to another. */
   adopt(code){
     if(!this.cfg) this.cfg=this.defaults();
-    const c=this.cfg, d=this.detect(code), names=((code&&code.devices)||[]).map(x=>x.name);
-    const auto=c.auto&&typeof c.auto==="object"?c.auto:(c.auto={});
-    if(auto.shooter||!c.shooter||names.indexOf(c.shooter)<0){ c.shooter=d.shooter[0]||null; auto.shooter=true; }
-    if(auto.feeder||!c.feeder||names.indexOf(c.feeder)<0){ c.feeder=d.feeder[0]||null; auto.feeder=true; }
-    if(auto.motorId||!c.motorId){ c.motorId=nearestMotorId(this.deviceRpm()); auto.motorId=true; }
-    if(!this.cfg.precision) this.cfg.precision="typical";
+    const c=this.cfg, e=this.effective(code,c.pick=this.cleanPick(c.pick));
+    c.shooter=e.shooter; c.feeder=e.feeder; c.motorId=e.motorId;
+    if(!c.precision) c.precision="typical";
     // the game-piece roles (src/payload.js), the same way
-    const p=this.cfg.payload&&typeof this.cfg.payload==="object"?this.cfg.payload:(this.cfg.payload={});
-    if(!Array.isArray(p.intakes)||!p.intakes.length||p.intakes.some(n=>names.indexOf(n)<0)) p.intakes=d.intake.slice();
-    if(!p.transfer||names.indexOf(p.transfer)<0) p.transfer=d.transfer[0]||"";
+    const p=c.payload&&typeof c.payload==="object"?c.payload:(c.payload={});
+    p.intakes=e.intakes; p.transfer=e.transfer;
   },
-  /* The user set this one in the Shot tab: adopt leaves it alone from now on. */
-  byHand(key){ if(this.cfg&&this.cfg.auto) delete this.cfg.auto[key]; },
-  /* Output-shaft free speed of the shooter motor. An unnamed motor is
-     assumed to be the 6000 rpm 1:1 most flywheels use. */
-  deviceRpm(){
-    const s=this.cfg&&this.cfg.shooter&&Sim.dev[this.cfg.shooter];
+  /* What is in effect for this OpMode from the choices (pick, clean) and its code. A chosen device
+     applies while this OpMode declares a device of that name (otherwise the code's answer, and the
+     choice waits for the day the device is back); an explicit none always; a chosen motor only while
+     the shooter in effect is the device it was chosen for. `code` is what the code alone puts in each
+     setting, given the other choices: the Shot tab's "From the code" option. `mine`: the choice applies. */
+  effective(code,pick){
+    pick=pick||{};
+    const d=this.detect(code), names=((code&&code.devices)||[]).map(x=>x.name);
+    const applies=k=>Object.prototype.hasOwnProperty.call(pick,k)&&(pick[k]===null||names.indexOf(pick[k])>=0);
+    const from={shooter:d.shooter[0]||null, feeder:d.feeder[0]||null, transfer:d.transfer[0]||null};
+    const shooter=applies("shooter")?pick.shooter:from.shooter;
+    const feeder=applies("feeder")?pick.feeder:from.feeder;
+    const transfer=applies("transfer")?pick.transfer:from.transfer;
+    from.motor=nearestMotorId(this.deviceRpm(shooter));
+    const m=pick.motor, motorMine=!!(m&&m.for===shooter&&shotMotorKnown(m.id));
+    // the intakes slot by slot (the Shot tab's two): the code's k-th, or, when the other slot was given
+    // that one, the one the other slot would have had; the code's third and fourth after them
+    const D=d.intake, slot=[applies("intake1")?pick.intake1:undefined, applies("intake2")?pick.intake2:undefined];
+    const codeSlot=k=>{ const n=D[k]||null; return n!==null&&slot[1-k]===n?(D[1-k]||null):n; };
+    from.intake1=codeSlot(0); from.intake2=codeSlot(1);
+    const slots=[slot[0]!==undefined?slot[0]:from.intake1, slot[1]!==undefined?slot[1]:from.intake2], intakes=[];
+    for(const n of slots.concat(D.slice(2))) if(typeof n==="string"&&n&&intakes.indexOf(n)<0) intakes.push(n);
+    return {shooter, feeder, motorId:motorMine?m.id:from.motor, intakes:intakes.slice(0,4), slots, transfer:transfer||"",
+      mine:{shooter:applies("shooter"), feeder:applies("feeder"), motor:motorMine,
+            intake1:slot[0]!==undefined, intake2:slot[1]!==undefined, transfer:applies("transfer")},
+      code:from};
+  },
+  /* The user picked in the Shot tab: a device name, "" for an explicit none, SHOT_FROM_CODE to hand
+     the setting back to the code; for "motor" a motor id, tied to the shooter in effect now. Then
+     everything in effect is worked out again. */
+  choose(key,value,code){
+    if(!this.cfg) this.cfg=this.defaults();
+    const pick=this.cleanPick(this.cfg.pick);
+    if(value===SHOT_FROM_CODE) delete pick[key];
+    else if(key==="motor") pick.motor={id:value, for:this.cfg.shooter||null};
+    else pick[key]=value===""||value==null?null:value;
+    this.cfg.pick=this.cleanPick(pick);
+    this.adopt(code);
+  },
+  /* One Shot tab select as data ({options:[{value, label, selected}], mine}): "From the code: <what
+     the code says>" first, then the explicit none and each device that can fill it (the motor table,
+     for "motor"). The user's choice is selected where it applies here, else "From the code"; a choice
+     that doesn't apply in this OpMode is named beside the code's answer, so it is never hidden. */
+  choices(key,code){
+    const pick=this.cleanPick(this.cfg&&this.cfg.pick), e=this.effective(code,pick), mine=!!e.mine[key], opts=[];
+    if(key==="motor"){
+      const list=(Field.data&&Field.data.motors&&Field.data.motors.motors)||[];
+      const label=id=>{ const x=list.filter(t=>t.id===id)[0]; return x?x.label:String(id); };
+      const aside=pick.motor&&!mine?` (your ${label(pick.motor.id)} is for ${pick.motor.for||"no flywheel"})`:"";
+      opts.push({value:SHOT_FROM_CODE, label:"From the code: "+(e.code.motor?label(e.code.motor):"none")+aside, selected:!mine});
+      for(const x of list) opts.push({value:x.id, label:x.label, selected:mine&&x.id===e.motorId});
+      return {options:opts, mine};
+    }
+    const none=key==="feeder"?"by hand (F)":"none", type=key==="shooter"?/DcMotor/i:key==="feeder"?/Servo|DcMotor/i:/DcMotor|CRServo/i;
+    const devs=((code&&code.devices)||[]).filter(x=>type.test(x.type||"")&&!(key==="feeder"&&x.name===e.shooter)).map(x=>x.name);
+    const kept=Object.prototype.hasOwnProperty.call(pick,key)&&!mine?` (your ${pick[key]} isn't in this OpMode)`:"";
+    const chosen=mine?pick[key]:undefined;
+    opts.push({value:SHOT_FROM_CODE, label:"From the code: "+(e.code[key]||none)+kept, selected:!mine});
+    opts.push({value:"", label:"— "+none+" —", selected:chosen===null});
+    for(const n of devs) opts.push({value:n, label:n, selected:chosen===n});
+    if(typeof chosen==="string"&&devs.indexOf(chosen)<0) opts.push({value:chosen, label:chosen, selected:true});
+    return {options:opts, mine};
+  },
+  /* The choices as they may be kept: the known keys only, each a name (1..PICK_MAX characters) or
+     null, the motor an id with the device it was chosen for. Anything else is dropped, no error. */
+  cleanPick(p){
+    const out={};
+    if(!p||typeof p!=="object"||Array.isArray(p)) return out;
+    const own=(o,k)=>Object.prototype.hasOwnProperty.call(o,k);
+    const name=v=>v===null?null:typeof v==="string"&&v.length>0&&v.length<=PICK_MAX?v:undefined;
+    for(const k of PICK_DEVICES) if(own(p,k)){ const v=name(p[k]); if(v!==undefined) out[k]=v; }
+    const m=own(p,"motor")?p.motor:null;
+    if(m&&typeof m==="object"&&!Array.isArray(m)&&own(m,"for")){
+      const id=name(m.id), f=name(m.for);
+      if(typeof id==="string"&&f!==undefined) out.motor={id, for:f};
+    }
+    return out;
+  },
+  /* Settings kept from before (the rig in the browser, a workspace file) as a Shots.cfg. Only the
+     choices are taken as the user's; the values adopt fills are worked out again by the next adopt.
+     A build before cfg.pick saved what it had filled, the very values that went stale, so settings
+     without choices get the code's. */
+  restore(saved){
+    const c=Object.assign(this.defaults(),saved&&typeof saved==="object"?saved:{});
+    if(c.pick!==undefined) c.pick=this.cleanPick(c.pick);
+    return c;
+  },
+  /* Output-shaft free speed of a shooter device (the one in effect when none is named). An unnamed
+     motor is assumed to be the 6000 rpm 1:1 most flywheels use. */
+  deviceRpm(name){
+    const n=arguments.length?name:this.cfg&&this.cfg.shooter, s=n&&Sim.dev[n];
     return s&&s.spec&&s.spec.rpm&&!s.spec.guess ? s.spec.rpm : 6000;
   },
   shooterSpec(){
@@ -351,4 +440,9 @@ function nearestMotorId(rpm){
   let best=null, bd=1e9;
   for(const m of list){ const d=Math.abs(Math.log((m.freeRpm||1)/(rpm||6000))); if(d<bd){ bd=d; best=m.id; } }
   return best;
+}
+/* A motor id the Shot Sim's table has (any id when there is no table: no field, no shots). */
+function shotMotorKnown(id){
+  const list=(Field.data&&Field.data.motors&&Field.data.motors.motors)||[];
+  return typeof id==="string"&&(!list.length||list.some(m=>m.id===id));
 }

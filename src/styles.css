@@ -707,6 +707,9 @@ button.rmbtn{color:var(--label-3);} button.rmbtn:hover{color:var(--fail);}
 .pc-row select{width:100%; min-width:0;}
 .shot-pick{display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:10px;}
 .shot-pick label{display:flex; flex-direction:column; gap:3px; font-size:11px; font-weight:500; color:var(--label-3); min-width:0;}
+.shot-pick select, .pc-form select, #motorSel{min-width:0; max-width:100%; text-overflow:ellipsis;}
+/* a value the user chose (not "From the code"): an accent edge, so it shows at a glance */
+select.picked{box-shadow:inset 3px 0 0 var(--accent);}
 .hive-row{padding:8px 0; border-top:1px solid var(--sep-2);}
 .hive-row:first-child{border-top:none; padding-top:0;}
 .hive-top{display:flex; align-items:center; gap:8px; font-size:12.5px;}

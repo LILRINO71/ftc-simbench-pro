@@ -13,11 +13,36 @@ and types, so it works for any team's code. The engine is `src/payload.js`; test
 |---|---|---|
 | **Intake** (up to 4, one mouth each) | a motor or CR servo named `intake`, `collect`, `sweep`, `suck`, `pickup`, or a `roller` that isn't the shooter. Not a slide, lift, arm, pivot, wrist or claw. | Shot tab → Game pieces: Intake, Second intake |
 | **Transfer** | a motor or CR servo named `transfer`, `index`, `conveyor`, `belt`, `uptake`, `elevator` | Transfer |
-| **Feeder or gate** | the Shot tab's feeder (`kick`, `flick`, `push`, `gate`, `stopper` ...), unless it is the intake or the transfer | Your shooter → Feeder |
-| **Shooter** | the Shot tab's flywheel and every other motor named like a shooter (`shoot`, `flywheel`, `launch`, `outtake`) | Your shooter → Flywheel |
+| **Feeder or gate** | a device named `feed`, `kick`, `flick`, `push`, `gate`, `stopper` ..., unless it is the intake or the transfer | Your shooter → Feeder |
+| **Shooter** | the flywheel in effect and every other motor named like a shooter (`shoot`, `flywheel`, `launch`, `outtake`) | Your shooter → Flywheel (its motor model: Setup → Motor) |
 
-`Shots.detect` returns all four lists; `Shots.adopt` fills `Shots.cfg.payload` (intakes, transfer) the
-way it fills the shooter and feeder.
+`Shots.detect` returns all four lists.
+
+### What you chose and what is in effect
+
+These settings, and the flywheel's motor model, are kept as two different things, and only the
+first is saved:
+
+- **Your choices**, `Shots.cfg.pick`: `shooter`, `feeder`, `intake1`, `intake2`, `transfer` each a device
+  name, or `null` for an explicit none; `motor` as `{id, for}`, the motor model and the flywheel device it
+  was chosen for. A setting you never chose has no entry.
+- **What is in effect**, `Shots.cfg.shooter`, `.feeder`, `.motorId`, `.payload.intakes`, `.payload.transfer`:
+  worked out afresh by `Shots.adopt` for every OpMode. A chosen device counts while the OpMode declares a
+  device of that name; in one that doesn't, the code's answer is used and your choice waits for the device
+  to come back. An explicit none always counts. A chosen motor counts only while the flywheel in effect is
+  the one it was chosen for; any other flywheel gets the motor its own code declares. Everything else is
+  the code's.
+
+Every one of these selects in the Shot tab starts with **From the code: …**, naming what the code gives
+(and, when your choice doesn't apply in this OpMode, which it is); picking it removes your choice. A
+select holding your own choice has an accent edge. The intakes are chosen slot by slot: when you give
+the first slot the code's second intake, the second slot gets the code's first.
+
+The rig kept in the browser and the workspace file keep the choices (checked on the way in: known keys,
+names or null, at most 128 characters; anything else is dropped). Settings saved before the choices
+existed have none, so the code decides again: that build saved whatever it had filled in, which is
+exactly the value that went stale. Settings `adopt` never fills (wheel, hood angle, exit height, supply,
+pre-load, roller, edges, which way is in) come back exactly as saved.
 
 ## Where the mouth is
 

@@ -323,8 +323,10 @@ const {sessionFromBench, packSession, unpackSession} = (function(){
     ball: str(at(c, "ball"), C, "shot ball") || "pollen",
     type: str(at(c, "type"), C, "shot type") || "single",
     precision: str(at(c, "precision"), C, "shot precision") || "typical",
-    // which of these the bench filled in itself (src/shots.js adopt): only a plain true counts
-    ...(isObj(at(c, "auto")) ? {auto: Object.fromEntries(["shooter", "feeder", "motorId"].filter(k => at(at(c, "auto"), k) === true).map(k => [k, true]))} : {}),
+    // what the user chose in the Shot tab (src/shots.js cleanPick: known keys, names or null, short);
+    // shooter, feeder and motorId above are only what was in effect, and the next adopt works them out
+    // again. A file from before the choices has none, so the code decides.
+    ...(isObj(at(c, "pick")) ? {pick: Shots.cleanPick(at(c, "pick"))} : {}),
     // the game pieces through the robot (src/payload.js); a file from before them has none
     ...(isObj(at(c, "payload")) ? {payload: readPayloadCfg(at(c, "payload"), C)} : {})
   };

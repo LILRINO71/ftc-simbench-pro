@@ -181,12 +181,16 @@ test('payload: the roles come from the code\'s device names and types, the shoot
   assert.deepEqual(d.transfer, ['transfer']);
   assert.deepEqual(d.shooter, ['outtake1', 'shooterRoller']);
   assert.equal(d.feeder[0], 'gate');
-  // the Shot tab starts from them, and keeps what the user set while the devices exist
-  E.Shots.cfg = null; E.Shots.adopt(devs([['intake', 'DcMotorEx'], ['outtake1', 'DcMotorEx'], ['belt', 'DcMotor']]));
+  // the Shot tab starts from them, and keeps what the user chose (Shots.cfg.pick) while the devices exist
+  const three = devs([['intake', 'DcMotorEx'], ['outtake1', 'DcMotorEx'], ['belt', 'DcMotor']]);
+  E.Shots.cfg = null; E.Shots.adopt(three);
   assert.deepEqual(E.Shots.cfg.payload, { intakes: ['intake'], transfer: 'belt' });
-  E.Shots.cfg.payload.intakes = ['belt']; E.Shots.cfg.payload.transfer = '';
-  E.Shots.adopt(devs([['intake', 'DcMotorEx'], ['outtake1', 'DcMotorEx'], ['belt', 'DcMotor']]));
-  assert.deepEqual(E.Shots.cfg.payload, { intakes: ['belt'], transfer: 'belt' }, 'a role left empty is filled again from the names, as the shooter is');
+  E.Shots.choose('intake1', 'belt', three); E.Shots.choose('transfer', '', three);
+  E.Shots.adopt(three);
+  assert.deepEqual(E.Shots.cfg.payload, { intakes: ['belt'], transfer: '' }, 'the intake chosen, and no transfer: an explicit none sticks');
+  E.Shots.cfg.payload.transfer = 'intake';      // a value in effect written over is not a choice: the next adopt works it out again
+  E.Shots.adopt(three);
+  assert.equal(E.Shots.cfg.payload.transfer, '');
 });
 
 test('payload: a ball in the mouth comes in only while the intake runs inward, and rides in on the rollers', () => {
