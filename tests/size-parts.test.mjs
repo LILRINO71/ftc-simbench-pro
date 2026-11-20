@@ -82,7 +82,9 @@ test('parts: goBILDA and REV numbers are read out of part names, and only whole 
 test('parts: motors give their reduction and speed; wheels their kind and diameter; channels their length', () => {
   const m = E.partsLookup('5203-2402-0019');
   assert.equal(m.kind, 'motor'); assert.equal(m.ratio, 19.2); assert.equal(m.rpm, 312); assert.equal(m.tpr, 537.7);
-  assert.equal(E.partsLookup('5202-2402-0188').ratio, 188.1);
+  // goBILDA's page names it "188:1 Ratio" (5281.1 counts); the table's 188.1 was nobody's figure
+  assert.equal(E.partsLookup('5202-2402-0188').ratio, 188);
+  assert.equal(E.partsLookup('5202-2402-0188').ratio, E.hwFromPart('5202-2402-0188', '').ratio, 'one Yellow Jacket table');
   assert.equal(E.partsLookup('5203-2402-0001').rpm, 6000);
   assert.equal(E.partsLookup('5203-2402-0999'), null, 'a reduction no page lists');
   assert.equal(E.partsLookup('5203-9999-0019'), null, 'the wrong middle group for that series');

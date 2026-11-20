@@ -50,13 +50,14 @@ test('partMass: a known part number uses its published mass, and can be switched
   const motor = { name: '5203-2402-0019 Yellow Jacket', part: '5203-2402-0019', kind: 'motor', pts: boxPts([0.043, 0.043, 0.11]) };
   const v = E.partMass(motor);
   assert.equal(v.how, 'vendor');
-  assert.equal(v.kg, 0.310);
+  // goBILDA's page for the 19.2:1: "Weight: 437g" (src/partsdb.js PARTS_G); the old 0.310 was no page's
+  assert.equal(v.kg, 0.437);
   assert.ok(/published/.test(v.why));
 
   const d = E.partMass(motor, { vendor: false });
   assert.equal(d.how, 'density');
   // 0.043*0.043*0.11 = 2.034e-4 m^3 x 3200 x 0.63 = 0.4100 kg. (A bounding box
-  // is a worse stand-in than the real hull, which lands within 20 % of 0.310.)
+  // is a worse stand-in than the real hull, which lands within 20 % of 0.310, the figure the fill was tuned to.)
   assert.ok(Math.abs(d.kg - 0.41003) < 1e-4, `density motor ${d.kg}`);
   // the density fallback must at least be the right order of magnitude
   assert.ok(d.kg > 0.5 * v.kg && d.kg < 2.5 * v.kg, `density ${d.kg} vs vendor ${v.kg}`);
@@ -149,6 +150,10 @@ test('the fills are pinned to parts with published masses', () => {
       out.push([c[0] + r * Math.cos(t), c[1] + r * Math.sin(t), c[2] - h / 2], [c[0] + r * Math.cos(t), c[1] + r * Math.sin(t), c[2] + h / 2]); }
     return out;
   };
+  // NOTE: 0.335, 0.116 and 0.310 below are the figures these fills were tuned to, not the vendor
+  // pages in src/partsdb.js PARTS_G (GripForce 104 mm mecanum 236 g, 1120 240 mm channel 159 g,
+  // Yellow Jackets 391-524 g); retuning the fills changes every weighed-by-volume robot, so it is
+  // its own change.
   // goBILDA 104 mm mecanum, 47.5 mm wide: published 0.335 kg
   const wheel = E.partMass({ name: 'drive wheel', kind: 'wheel', pts: cyl(0.052, 0.0475, [0, 0, 0]) }, { vendor: false });
   assert.ok(rel(wheel.kg, 0.335) < 0.15, `mecanum by density ${wheel.kg.toFixed(3)} kg vs 0.335 published`);

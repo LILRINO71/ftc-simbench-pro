@@ -57,20 +57,29 @@ const MATERIALS = {
   game:        {density:0,    fill:0,    solid:0,    label:"game element"}
 };
 
-/* Parts whose published mass we actually know, best match first. Anything
-   not on this list is weighed by density — a guess, and labelled as one.
-   These are vendor ballparks good to roughly +/-10%; the hub and battery
-   rows are the ones to distrust first, since each is quoted for one SKU and
-   teams run several. */
+/* Parts whose published mass we know. The weights by exact part number live
+   in ONE table, src/partsdb.js PARTS_G, each row read off the vendor's page;
+   vendorMassFor asks it first (partsLookup). The rows below are only for a
+   part the table can't name exactly: `like` is the catalogue part whose page
+   weight stands in for it (looked up in PARTS_G when it is used, never copied
+   here), `kg` a figure no vendor page in the table gives. Anything else is
+   weighed by density, a guess, and labelled as one. The hub and battery rows
+   are not from a vendor page in the table and are the ones to distrust first,
+   since each is quoted for one SKU and teams run several. */
 const VENDOR_MASS = [
-  {re:/\b5203-\d{4}-\d{1,4}\b/i,      kg:0.310, label:"goBILDA 5203 Yellow Jacket gearmotor"},
-  {re:/\b2000-0025-000[1-5]\b/,       kg:0.084, label:"goBILDA 2000 Series Dual Mode servo"},
-  {re:/\b3213-\d{4}-\d{1,4}\b/i,      kg:0.335, label:"goBILDA 104 mm mecanum wheel"},
-  {re:/104\s*mm[^a-z]{0,4}mecanum|mecanum[^a-z]{0,6}104/i, kg:0.335, label:"104 mm mecanum wheel"},
+  {re:/\b520[234]-\d{4}-\d{1,4}\b/i,  like:"5203-2402-0019", label:"goBILDA Yellow Jacket gearmotor, a ratio the parts table lacks (weighed as the 19.2:1)"},
+  {re:/\b2000-0025-\d{4}\b/,          like:"2000-0025-0002", label:"goBILDA 2000 Series servo (weighed as the 25-2)"},
+  {re:/104\s*mm[^a-z]{0,4}mecanum|mecanum[^a-z]{0,6}104/i, like:"3625-0202-0104", label:"104 mm mecanum wheel (weighed as goBILDA's GripForce 104 mm)"},
   {re:/\bREV-31-1595\b|\bcontrol hub\b/i,   kg:0.270, label:"REV Control Hub"},
   {re:/\bREV-31-1153\b|\bexpansion hub\b/i, kg:0.190, label:"REV Expansion Hub"},
   {re:/\bbattery\b/i,                 kg:0.550, label:"12 V 3000 mAh NiMH pack"}
 ];
+/* a VENDOR_MASS row's weight: its own kg, or its stand-in part's page weight from src/partsdb.js */
+function vendorRowKg(v){
+  if(Number.isFinite(v.kg)) return v.kg;
+  const p = v.like && typeof partsLookup === "function" ? partsLookup(v.like) : null;
+  return p && p.massKg > 0 ? p.massKg : 0;
+}
 
 /* Hardware that lives *next to* a known device and borrows its name in the
    assembly tree. A battery strap is not a battery. These go by density. */
@@ -136,14 +145,17 @@ function hullVolumeOf(pts){
 function vendorMassFor(solid, volume){
   const s = ((solid&&solid.part) || "") + " " + ((solid&&solid.name) || "");
   if(VENDOR_NOT.test(s)) return null;
+  // a 0.55 kg battery in a 3 cm^3 hull is a cable, not a battery
+  const believable = kg => !(Number.isFinite(volume) && volume > 0) || (kg/volume >= VENDOR_DENSITY.lo && kg/volume <= VENDOR_DENSITY.hi);
+  // the exact part in the catalogue (src/partsdb.js): the weight on its own product page
+  const hit = typeof partsLookup === "function" ? (partsLookup((solid&&solid.part) || "") || partsLookup((solid&&solid.name) || "")) : null;
+  if(hit && hit.massKg > 0)
+    return believable(hit.massKg) ? {kg:hit.massKg, label:(hit.name || "part")+" "+hit.part+", its vendor page"} : null;
   for(const v of VENDOR_MASS){
     if(!v.re.test(s)) continue;
-    // a 0.55 kg battery in a 3 cm^3 hull is a cable, not a battery
-    if(Number.isFinite(volume) && volume > 0){
-      const d = v.kg/volume;
-      if(d < VENDOR_DENSITY.lo || d > VENDOR_DENSITY.hi) return null;
-    }
-    return v;
+    const kg = vendorRowKg(v);
+    if(!(kg > 0)) continue;
+    return believable(kg) ? {kg, label:v.label} : null;
   }
   return null;
 }

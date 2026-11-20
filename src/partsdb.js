@@ -8,9 +8,12 @@
                        number encodes (goBILDA's wheels end in it, in mm)
      motors            gear ratio, free speed, encoder counts per turn
      mass              ONLY where the vendor's own product page gives a
-                       weight; each row has its page beside it. A part with
-                       no row here has no mass from this table (src/inertia.js
-                       still weighs it by volume).
+                       weight; each row has its page beside it. This is the
+                       one table of part weights: src/inertia.js weighs a
+                       part with a row here by it (vendorMassFor). A part
+                       with no row here has no mass from this table
+                       (src/inertia.js weighs it by volume, or by a named
+                       stand-in row of this table).
    The table is small on purpose: every row was read off the vendor's page
    (goBILDA and REV product pages, fetched 2026-11-19), and what could not be
    read there is not here. A number this does not know is "not recognised",
@@ -25,18 +28,15 @@
    series, so each series below says which way it reads. */
 
 // goBILDA Yellow Jacket gearmotors. Series 5202: 6 mm D shaft; 5203: 8 mm REX shaft; 5204: 8 mm REX shaft,
-// 80 mm gearbox. The trailing group is the reduction (0001 is the bare 1:1 motor, 5203 only). Ratio and
-// free speed are as the product pages name them (e.g. "19.2:1 Ratio ... 312 RPM").
+// 80 mm gearbox. The trailing group is the reduction (0001 is the bare 1:1 motor, 5203 only). Ratio, free
+// speed, torque and counts are src/hardware.js's YELLOW_JACKET (each row from its product page, e.g.
+// "19.2:1 Ratio ... 312 RPM"); these are the trailing groups goBILDA actually sells.
 const PARTS_YJ_SERIES={
   5202:{mid:"2402", shaft:"6 mm D shaft", box:"36 mm gearbox"},
   5203:{mid:"2402", shaft:"8 mm REX shaft", box:"36 mm gearbox"},
   5204:{mid:"8002", shaft:"8 mm REX shaft", box:"80 mm gearbox"}
 };
-const PARTS_YJ_RATIO={
-  1:{ratio:1, rpm:6000}, 3:{ratio:3.7, rpm:1620}, 5:{ratio:5.2, rpm:1150}, 14:{ratio:13.7, rpm:435}, 19:{ratio:19.2, rpm:312},
-  27:{ratio:26.9, rpm:223}, 51:{ratio:50.9, rpm:117}, 71:{ratio:71.2, rpm:84}, 100:{ratio:99.5, rpm:60},
-  139:{ratio:139.1, rpm:43}, 188:{ratio:188.1, rpm:30}
-};
+const PARTS_YJ_CODES=[1, 3, 5, 14, 19, 27, 51, 71, 100, 139, 188];
 
 // Published weights, grams, by exact part number. Page weight line ("Weight" in the specs table).
 const PARTS_G={
@@ -72,6 +72,9 @@ const PARTS_G={
   "5204-8002-0051":465, // https://www.gobilda.com/5204-series-yellow-jacket-planetary-gear-motor-50-9-1-ratio-80mm-length-8mm-rex-shaft-117-rpm-3-3-5v-encoder/
   "5204-8002-0071":501, // https://www.gobilda.com/5204-series-yellow-jacket-planetary-gear-motor-71-2-1-ratio-80mm-length-8mm-rex-shaft-84-rpm-3-3-5v-encoder/
   // 5204-8002-0100: weight not stated with a unit on its page, left out  https://www.gobilda.com/5204-series-yellow-jacket-planetary-gear-motor-99-5-1-ratio-80mm-length-8mm-rex-shaft-60-rpm-3-3-5v-encoder/
+  // goBILDA 2000 Series Dual Mode servos (the 25-4's page gives no weight)
+  "2000-0025-0002":60,  // 25-2 Torque, "Weight: 60g": https://www.gobilda.com/2000-series-dual-mode-servo-25-2-torque/
+  "2000-0025-0003":58,  // 25-3 Speed, "Weight: 58g": https://www.gobilda.com/2000-series-dual-mode-servo-25-3-speed/
   // goBILDA wheels
   "3213-3606-0002":207, // 96 mm mecanum wheel set, "207g Each": https://www.gobilda.com/96mm-mecanum-wheel-set-70a-durometer-bearing-supported-rollers/
   "3213-3606-0003":383, // 140 mm mecanum wheel set, "383g Each": https://www.gobilda.com/140mm-mecanum-wheel-set-70a-durometer-bearing-supported-rollers/
@@ -150,11 +153,13 @@ function partsLookup(text){
   const out={part:pn, vendor:/^REV/.test(pn)?"REV":"goBILDA", kind:null, name:null, massKg:grams==null?null:grams/1000, massKnown:grams!=null};
   const g=pn.split("-"), series=+g[0], mid=g[1], tail=+g[2];
   const yj=PARTS_YJ_SERIES[series];
-  if(yj&&mid===yj.mid&&PARTS_YJ_RATIO[tail]){
-    const R=PARTS_YJ_RATIO[tail], hw=typeof hwFromPart==="function"?hwFromPart(pn,""):null;
+  if(yj&&mid===yj.mid&&PARTS_YJ_CODES.indexOf(tail)>=0&&YELLOW_JACKET[tail]){
+    const R=YELLOW_JACKET[tail];
     return Object.assign(out,{kind:"motor", name:"Yellow Jacket "+series+" "+(R.ratio===1?"1:1 (6000 rpm)":R.ratio+":1, "+R.rpm+" rpm")+", "+yj.shaft+(series===5204?", 80 mm gearbox":""),
-      ratio:R.ratio, rpm:R.rpm, tpr:hw&&hw.tpr?hw.tpr:Math.round(28*R.ratio*10)/10});
+      ratio:R.ratio, rpm:R.rpm, tpr:R.tpr});
   }
+  // a servo src/hardware.js knows by number
+  if(HW_PARTS[pn]&&HW_PARTS[pn].kind==="servo") return Object.assign(out,{kind:"servo", name:HW_PARTS[pn].fam});
   const ex=PARTS_WHEEL_EXACT[pn];
   if(ex) return Object.assign(out,{kind:"wheel", name:ex.name, wheelKind:ex.kind, dMm:ex.dMm, dRange:ex.dRange||null});
   if(PARTS_REV[pn]){
