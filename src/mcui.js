@@ -21,8 +21,11 @@ const CalUI={
   apply(){
     const k=CAD&&CAD.name;
     if(this.keyApplied!==k){ this.keyApplied=k; this.cal=this.load(); if(typeof document!=="undefined"&&document.getElementById("calResult")) this.show(); }
-    OPTS.calib=this.cal&&this.cal.on!==false?calOpts(this.cal):null;
+    OPTS.calib=this.cal&&this.cal.on!==false?calOpts(this.cal,this.kind()):null;
   },
+  /* the drive base's kind, when the sim was last built from this robot: a fit made before mecanum
+     roller slip keeps its turn drag only off mecanum (calCheck) */
+  kind(){ return Sim.cad&&Sim.cad===CAD&&Sim.rig&&Sim.rig.drive?Sim.rig.drive.kind:null; },
   /* the rig as the sim builds it with no calibration: what "before" means */
   baseRig(){
     if(!CAD||!Sim.drivetrain||!Sim.drivetrain.ok) return null;
@@ -44,7 +47,7 @@ const CalUI={
     const m=calSanitize(this.read());
     if(!(m.fwd||m.strafe||m.turn||m.massKg||m.ticksPerIn)){ st.textContent="Enter at least one measured number."; return; }
     const r=calFit(rig,m);
-    this.cal={format:CAL_FORMAT, v:1, on:true, measured:m, params:r.params, rows:r.rows, notes:r.notes, ok:r.ok, at:new Date().toISOString()};
+    this.cal={format:CAL_FORMAT, v:1, on:true, measured:m, params:r.params, rows:r.rows, notes:r.notes, ok:r.ok, kind:r.kind, at:new Date().toISOString()};
     this.save(); this.show(); reloadSim();
   },
   reset(){

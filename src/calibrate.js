@@ -27,8 +27,10 @@
                 deliver (DYN_DEFAULTS.strafeEff, see dynWheels): fitted to the
                 strafe speed measured with a tape, NOT the encoders, which count
                 the wheels' roll and so over-read a strafe on a real robot too.
-                A fit made before this meaning (when strafeEff was a force
-                loss) carries no strafeModel: 2 and calOpts drops it.
+                A fit made before roller slip (when strafeEff was a force loss
+                and a mecanum base turned faster) carries no strafeModel: 2;
+                on a mecanum base calCheck leaves out its strafeEff and its
+                yawViscous and says to fit it again.
      yawViscous turn drag in N.m per rad/s (DYN_DEFAULTS.yawViscous): the
                 scrub of rollers and traction wheels while turning
    With ticks per inch given, the encoders fix the gearing (gear) and the
@@ -197,7 +199,8 @@ function calFit(rig, measured) {
     if (pass > 0) { const w = JSON.parse(was); if (Object.keys(p).every(k => Math.abs(p[k] - (w[k] || 0)) <= 2e-4 * Math.abs(p[k]))) break; }
   }
 
-  if (p.strafeEff > 0) p.strafeModel = CAL_STRAFE_MODEL;
+  // what model the fit was made against: a fit with no strafeModel 2 predates mecanum roller slip (calCheck)
+  if (Object.keys(p).length) p.strafeModel = CAL_STRAFE_MODEL;
   const fitted = rigWith({});
   const after = calMeasure(fitted);
   const rows = [];
@@ -217,16 +220,41 @@ function calFit(rig, measured) {
   miss(row("strafe"), "Strafe speed is outside what the strafe loss can reach once forward speed is matched.");
   miss(row("turn"), "Turn rate is above what these wheels can spin the robot at: the model has no way to turn it faster.");
   const ok = rows.length > 0 && rows.every(r => Math.abs(r.errAfter) <= 5);
-  return { params: p, rows, notes, ok, before, after };
+  const kind = rig && rig.drive && rig.drive.kind ? String(rig.drive.kind) : null;
+  return { params: p, rows, notes, ok, before, after, kind };
+}
+
+/* What of a saved calibration the sim can still use. `kind` is the drive base's kind when the
+   caller knows it, else the one the fit saved (cal.kind).
+   A fit made before mecanum roller slip (no strafeModel 2) was fitted to a sim whose mecanum
+   base turned about 8% faster and whose strafeEff was a force loss: on a mecanum base its
+   turn drag (yawViscous) and strafe loss now make the robot turn and strafe off what the team
+   measured, so both are left out and `refit` says to fit it again (mass, gearing and drag set
+   the forward speed, which the slip does not touch, and stay). With no kind to go on, a fit
+   that strafed (a strafeEff, or a measured strafe) is taken for a mecanum base. Off mecanum
+   an old strafeEff meant nothing and its turn drag still holds. */
+function calCheck(cal, kind) {
+  const p = (cal && cal.params) || {}, o = {};
+  for (const k of ["massKg", "gear", "viscous", "strafeEff", "yawViscous"]) if (p[k] > 0) o[k] = +p[k];
+  const dropped = [];
+  let refit = null;
+  if (Object.keys(o).length && p.strafeModel !== CAL_STRAFE_MODEL) {
+    const k = String(kind || (cal && cal.kind) || "").toLowerCase();
+    const strafed = p.strafeEff > 0 || !!(cal && cal.measured && cal.measured.strafe > 0);
+    const mecanum = k ? k === "mecanum" : strafed;
+    if ("strafeEff" in o) { delete o.strafeEff; if (mecanum) dropped.push("strafeEff"); }
+    if (mecanum && "yawViscous" in o) { delete o.yawViscous; dropped.push("yawViscous"); }
+    if (dropped.length) refit = "This calibration was fitted before the sim modelled mecanum roller slip, so its " +
+      dropped.map(d => d === "yawViscous" ? "turn drag" : "strafe loss").join(" and ") +
+      " no longer match" + (dropped.length > 1 ? "" : "es") + " what you measured and " + (dropped.length > 1 ? "are" : "is") +
+      " left out: the sim does not match your turn and strafe until you press Fit the sim again (the numbers are still in the boxes).";
+  }
+  return { opts: Object.keys(o).length ? o : null, dropped, refit };
 }
 
 /* The parameters a fit gave, as the opts.calib the sim's buildRig reads. */
-function calOpts(cal) {
-  const p = (cal && cal.params) || {}, o = {};
-  for (const k of ["massKg", "gear", "viscous", "strafeEff", "yawViscous"]) if (p[k] > 0) o[k] = +p[k];
-  // a strafeEff fitted when it was a force loss means something else now: refit the strafe
-  if (p.strafeModel !== CAL_STRAFE_MODEL) delete o.strafeEff;
-  return Object.keys(o).length ? o : null;
+function calOpts(cal, kind) {
+  return calCheck(cal, kind).opts;
 }
 
 /* The measuring OpMode a team runs on its real robot: plain FTC SDK, three timed

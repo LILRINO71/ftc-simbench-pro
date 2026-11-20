@@ -207,6 +207,35 @@ test('calibrate: a robot that strafes at 0.8 of forward is fitted by its strafe 
   assert.equal(E.calOpts({ params: fit.params }).strafeEff, fit.params.strafeEff);
 });
 
+test('calibrate: a mecanum fit made before roller slip hands the sim neither its turn drag nor its strafe loss, and says to fit it again', () => {
+  // the fit origin/main made for a robot measured at 0.95 forward, 0.8 strafe and 0.8 turn of its default
+  // (12 kg, 96 mm wheels, 312 rpm): its turn drag was fitted to a mecanum base that turned without slip
+  const old = { params: { gear: 1.0611821667187353, strafeEff: 0.32447282207827155, yawViscous: 0.9508904363609516 },
+    measured: { fwd: 1.3433, strafe: 1.0869, turn: 197.547 } };
+  const c = E.calCheck(old);
+  assert.deepEqual(c.opts, { gear: old.params.gear }, 'only the gearing, which sets the forward speed, still holds');
+  assert.deepEqual(c.dropped.sort(), ['strafeEff', 'yawViscous']);
+  assert.match(c.refit, /fit/i);
+  assert.deepEqual(E.calOpts(old), c.opts);
+  // the drive kind decides when it is known: a tank's turn drag holds, a mecanum fit without a strafe does not
+  assert.deepEqual(E.calCheck(old, 'tank').opts, { gear: old.params.gear, yawViscous: old.params.yawViscous });
+  assert.equal(E.calCheck(old, 'tank').refit, null);
+  const turnOnly = { params: { yawViscous: 0.9 }, measured: { turn: 197 } };
+  assert.deepEqual(E.calCheck(turnOnly).opts, { yawViscous: 0.9 }, 'no kind and nothing strafed: nothing says it was mecanum');
+  assert.equal(E.calCheck(turnOnly, 'mecanum').opts, null);
+  assert.match(E.calCheck(turnOnly, 'mecanum').refit, /turn drag/);
+  assert.match(E.calCheck(Object.assign({ kind: 'mecanum' }, turnOnly)).refit, /turn drag/, 'the kind a fit saved counts too');
+  // a fit made now carries the model it was made against, whatever it fitted, and is handed over whole
+  const R = rig({}, false), truth = E.calMeasure(rig({ yawViscous: 0.6 }));
+  const fit = E.calFit(R, { turn: truth.turn });
+  assert.equal(fit.params.strafeModel, 2);
+  assert.equal(fit.kind, 'mecanum');
+  assert.deepEqual(E.calOpts({ params: fit.params }, 'mecanum'), { yawViscous: fit.params.yawViscous });
+  assert.equal(E.calCheck({ params: fit.params }, 'mecanum').refit, null);
+  const turn = E.calMeasure(E.calApplyToRig(R, E.calOpts({ params: fit.params }, 'mecanum'))).turn;
+  assert.ok(Math.abs(turn / truth.turn - 1) < 0.01, `the refit robot turns at ${turn.toFixed(1)} deg/s, measured ${truth.turn.toFixed(1)}`);
+});
+
 test('calibrate: a strafeEff fitted when it was a force loss is not handed to the sim', () => {
   assert.equal(E.calOpts({ params: { strafeEff: 0.35 } }), null);
   assert.deepEqual(E.calOpts({ params: { gear: 1.2, strafeEff: 0.35 } }), { gear: 1.2 });

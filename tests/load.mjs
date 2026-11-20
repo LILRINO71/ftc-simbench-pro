@@ -41,7 +41,7 @@ const EXPORTS = [
   'mathReport', 'mathText', 'mathMarkdown',
   'parseRepoRef', 'rawUrlsFor', 'pickOpModes', 'javaLooksLikeOpMode',
   // calibration + Monte Carlo (src/calibrate.js, src/montecarlo.js)
-  'CAL_FORMAT', 'CAL_SECONDS', 'CAL_BOUNDS', 'calCmd', 'calApplyToRig', 'calRun', 'calMeasure', 'calTicksPerIn', 'calGearFor', 'calSanitize', 'calSolve', 'calFit', 'calOpts', 'calJava',
+  'CAL_FORMAT', 'CAL_SECONDS', 'CAL_BOUNDS', 'calCmd', 'calApplyToRig', 'calRun', 'calMeasure', 'calTicksPerIn', 'calGearFor', 'calSanitize', 'calSolve', 'calFit', 'calOpts', 'calCheck', 'calApplied', 'calJava',
   'MC_RANGES', 'MC_MAX_RUNS', 'mcRng', 'mcSeedFor', 'mcVariation', 'mcExtremes', 'mcPathEnd', 'mcRunOne', 'mcRun', 'mcSummary', 'mcCadForWorker', 'mcPlain', 'mcPrepare', 'mcHistogram', 'mcWorkerBody', 'mcSetup', 'mcJudge', 'mcNominal', 'mcTarget', 'mcSim', 'MC_KEYS', 'MC_AUTO_SECONDS', 'MC_DEFAULT_RUNS',
   'FX_LEVELS', 'fxLevel', 'fxPool', 'fxEaseOut', 'fxHop', 'trailFade', 'trailWidth', 'fxPathAt', 'popupState', 'popupSlot', 'fxSpinRate', 'fxSpinAxis', 'fxShakeAmp', 'ShotFx',
   // the AI robots' and HUMAN PLAYERS' poses (src/figures.js)
