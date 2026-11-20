@@ -14,9 +14,11 @@ Each INIT starts a new match; the random parts come from a seed, so a match can 
 |---|---|
 | **AI robots** | Collect POLLEN (and their own NECTAR), launch it into their own up-CELL, move to the other side after every TIP, put NECTAR on FLOWERs in the last minute, and PARK in their LOADING ZONE at the end. Their shots go through the same Shot Sim as the team's, with the same scatter, into the same HIVEs: a TIP counts whoever makes it. |
 | **Human players** | Stand at the alliance wall with 5 NECTAR. One goes into the LOADING ZONE after each of their HIVE's TIPs, and all that's left in the last 60 s. Nothing in AUTO. |
-| **Getting around** | A path planner (A* on a 9 cm grid) round the HIVE's legs and foot bars, the FLOWERs, the walls and every nearby robot, with robots allowed under the HIVE between its legs. |
-| **Contact** | Robots are boxes that can't overlap: two that touch are pushed apart, half each. The team's robot pushes and gets pushed the same way, and still can't leave the field. |
+| **Getting around** | A path planner (A* on a 9 cm grid) round the HIVE's legs and foot bars, the FLOWERs, the walls and every nearby robot, with robots allowed under the HIVE between its legs. In AUTO they go only for what they can reach standing on their own side. |
+| **Contact** | Robots are boxes that can't overlap: two that touch are pushed apart, half each, and when a wall, the HIVE, a FLOWER or (in AUTO) the centre line stops one, the other takes the rest. The team's robot pushes and gets pushed the same way, and still can't leave the field. No AI robot ends a tick inside the HIVE, a FLOWER or a wall. |
 | **Scoring** | TIPs, LEAVE and PARK in AUTO; TIPs, the up-CELL, FLOWERs (owner and bottom NECTAR), GARDENs and PARK in TELEOP. A FLOWER counts only the elements at least partly between its middle and top rings, so the POLLEN on the tile at the bottom never scores. The scoreboard over the field shows it live. |
+
+A FLOWER holds at most 6 elements: its capacity is counted in elements, not measured in height, until a real FLOWER has been measured. The middle ring is taken as 3.55 in high, from the rules notes; one drawing suggests about 4.2 in, and at 4.06 in or more a NECTAR at the bottom (on the 0.43 in ring) would stop scoring.
 
 ## The rules they keep
 
