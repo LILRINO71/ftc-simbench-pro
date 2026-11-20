@@ -227,12 +227,12 @@ const Match={
       if(e.claim&&e.claim!==b.id) continue;
       if(b.skip.has(e.id)) continue;
       if(!this.own(b,e.kind,e.color)||!this.onSide(b,e.x)) continue;
-      if(this.autoSide(b)&&!this.canTake(b,e)) continue;
       let c=Math.hypot(e.x-b.x,e.y-b.y);
       if(this.inRect(e.x,e.y,this.garden(b.al))) c+=1.2;           // it scores 1 where it lies
       if(this.inRect(e.x,e.y,this.garden(b.al==="red"?"blue":"red"))) c-=0.3; // and 1 for them
       if(e.kind==="nectar") c+=nectarTime?-1.0:-0.3;
-      if(c<bc){ bc=c; best={kind:"collect", el:e}; }
+      // AUTO: only one it can take standing on its own side (asked of the best so far only: it costs)
+      if(c<bc&&(!this.autoSide(b)||this.canTake(b,e))){ bc=c; best={kind:"collect", el:e}; }
     }
     for(const f of this.flowers){
       if(f.claim&&f.claim!==b.id) continue;
