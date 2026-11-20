@@ -20,8 +20,9 @@ const Field={
   hive:{red:-1, blue:1},          // side each HIVE's up-CELL faces: -1 audience, +1 far
   cells:{red:[], blue:[]},        // what sits in each up-CELL right now
   // lastTip: the newest TIP. tipQueue: every TIP whose CELL a match hasn't spilled yet, oldest first
-  // (two can come between two Match ticks); Match.spill empties it
-  tips:{red:0, blue:0}, lastTip:null, tipQueue:[],
+  // (two can come between two Match ticks); Match.spill empties it. tipSeq: the last TIP id given out;
+  // reset() never clears it, so an id is never used twice in a page (Reset field mid-match included)
+  tips:{red:0, blue:0}, lastTip:null, tipQueue:[], tipSeq:0,
 
   init(engine,data){
     this.E=null; this.data=null; this.ok=false;
@@ -66,7 +67,7 @@ const Field={
     this.cells[al]=[];
     this.tips[al]++;
     // what was in the CELL falls out on the side it was up on (a match puts it on the tiles)
-    this.lastTip={al, from, to:-from, n:this.tips[al], spilled, id:(this.lastTip?this.lastTip.id:0)+1};
+    this.lastTip={al, from, to:-from, n:this.tips[al], spilled, id:++this.tipSeq};
     // with no match on, nobody spills: keep only the last few so the queue can't grow without end
     this.tipQueue.push(this.lastTip); if(this.tipQueue.length>TIP_QUEUE_MAX) this.tipQueue.shift();
     this.version++;

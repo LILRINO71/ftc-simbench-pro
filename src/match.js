@@ -80,7 +80,7 @@ const Match={
     // the team's robot as the AI sees it is set by separate() each tick; the last match's would
     // steer this one's first think() (its parking slot), so a seed would not replay exactly
     this.userBody=null;
-    this.spotCache=new Map(); this.obs=null; this.seenTip=Field.lastTip?Field.lastTip.id:0;
+    this.spotCache=new Map(); this.obs=null; this.seenTip=Field.tipSeq||0;
     this.tips0={red:Field.tips.red, blue:Field.tips.blue};
     this.floor=[]; this.flowers=[]; this.bots=[];
     this.humans={red:{tray:5, entered:0, busy:0, anim:null}, blue:{tray:5, entered:0, busy:0, anim:null}};

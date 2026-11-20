@@ -230,6 +230,32 @@ test('match: TIPs between two ticks each spill their CELL, so no element is ever
   assert.equal(M.floor.length, n, 'and each TIP spills once');
 });
 
+test('match: "Reset field" in the middle of a match never makes the next TIPs look already spilled', () => {
+  // the Shot tab's Reset field button calls Field.reset alone (src/app.js), with the match still running.
+  // A TIP's id must never be used twice in a page, or Match.spill takes the next TIPs as ones it has spilled
+  E.Field.reset();
+  const M = E.Match, F = E.Field, sim = userAt(-61.5 * IN, 0);
+  M.on = true; M.reset({ period: 'TeleOp', user: 'red', userPose: sim.chassis, seed: 1 });
+  const tipRed = () => { let n = 1; while (!F.addToCell('red', 'pollen')) n++; return n; };
+  M.tick(0.02, sim);
+  for (let k = 0; k < 3; k++) { tipRed(); M.tick(0.02, sim); }
+  F.reset();
+  const inPlay = () => M.floor.length + M.flying.length + F.cells.red.length + F.cells.blue.length
+    + M.bots.reduce((n, b) => n + b.hold.length, 0) + M.flowers.reduce((n, f) => n + f.stack.length, 0) + M.humans.red.tray + M.humans.blue.tray;
+  const notes0 = M.events.filter((e) => /TIPPED/.test(e.text)).length;
+  let want = inPlay();
+  for (let k = 0; k < 3; k++) {
+    const floor0 = M.floor.length;
+    want += tipRed();                                           // the POLLEN put in to TIP it
+    const spilled = F.lastTip.spilled.length;
+    M.tick(0.02, sim);
+    assert.ok(M.floor.length - floor0 >= spilled, `TIP ${k + 1} after the reset: ${M.floor.length - floor0} of ${spilled} on the tiles`);
+    assert.equal(inPlay(), want, `TIP ${k + 1} after the reset: every element is still somewhere`);
+  }
+  assert.equal(M.events.filter((e) => /TIPPED/.test(e.text)).length - notes0, 3, 'all three TIPs logged');
+  E.Match.on = false;
+});
+
 test('match: only the live sim plays the match; the drive probe\'s private copy never does', () => {
   const { cad, code, map, opts } = sampleBench(E);
   E.Field.reset();
