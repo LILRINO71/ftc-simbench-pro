@@ -12,8 +12,11 @@
    chose, the score, and the names of the robot and the OpMode. No account, no
    e-mail, no address; the date is the server's.
 
-   It needs a KV namespace bound to the Pages project as LEADERBOARD (DEPLOY.md,
-   "Leaderboard"). Without that binding every route answers 501
+   It keeps the boards in the Durable Object bound as BOARDS (workers/room/board.js),
+   or else in a KV namespace bound as LEADERBOARD (DEPLOY.md, "Shared leaderboard").
+   KV has no transactions and is eventually consistent, so posts that overlap there
+   can lose a score or slip past the rate limit; the object answers one post at a
+   time and loses nothing. With neither binding every route answers 501
    {"error":"not set up"}, and the page quietly shows personal bests only.
 
    Kept honest, as far as a browser game allows: only this site's own pages may
@@ -112,6 +115,9 @@ export async function handle(request, env, fetchImpl, ctx) {
   const origin = request.headers.get('Origin'), site = request.headers.get('Sec-Fetch-Site');
   if (origin && origin !== url.origin) return bad('origin', 'This board answers only its own site.', 403);
   if (site && site !== 'same-origin' && site !== 'none') return bad('origin', 'This board answers only its own site.', 403);
+  // with the Durable Object bound, the board lives there: one post at a time, nothing lost
+  // (workers/room/board.js, which runs this same handle() against its own storage)
+  if (env && env.BOARDS) return env.BOARDS.get(env.BOARDS.idFromName('leaderboard')).fetch(request);
   const kv = env && env.LEADERBOARD;
   if (!kv) return json({ error: 'not set up' }, 501);
 

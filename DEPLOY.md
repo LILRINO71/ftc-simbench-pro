@@ -207,6 +207,20 @@ The one-time step, in the Cloudflare dashboard (no code, no card):
 4. Check: `https://<site>/leaderboard` answers `{"boards":{"teleop":[],"auto":[]},...}`.
    After a match, the results card now offers **Post my score**.
 
+**Better: keep the board in a Durable Object.** KV has no transactions and takes up to a
+minute to show a write everywhere, so two teams posting at the same moment can lose one score,
+and posts sent all at once can slip past the limit below. The rooms Worker (`workers/room/`,
+"Online rooms" above) also holds the board's Durable Object, `BoardDO`
+(`workers/room/board.js`), which takes one post at a time and loses nothing:
+
+1. Deploy the rooms Worker again (`npx wrangler deploy --config workers/room/wrangler.toml`): its
+   `v2` migration adds `BoardDO`.
+2. **ftc-simbench-pro → Settings → Bindings → Add → Durable Object namespace**: variable name
+   `BOARDS`, Worker `ftc-simbench-rooms`, class `BoardDO`. Then retry the latest deployment.
+3. With `BOARDS` bound, `/leaderboard` uses it and no longer touches the KV namespace (scores
+   already in KV are not copied over). If you set `LEADERBOARD_SALT`, set it on the
+   `ftc-simbench-rooms` Worker as well, since the object hashes the addresses there.
+
 How it behaves (`functions/leaderboard/[[path]].js`, `tests/leaderboard-function.test.mjs`):
 
 - Two boards, TeleOp and Auto, the top 50 each. An entry is a display name the player

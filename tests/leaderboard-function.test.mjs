@@ -5,6 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { handle, LIMITS, TOP, RATE, cleanName, cleanLabel, rude } from '../functions/leaderboard/[[path]].js';
+import { BoardDO, sweepRates } from '../workers/room/board.js';
 
 const SITE = 'https://ftc-simbench-pro.pages.dev';
 function fakeKV() {
@@ -197,4 +198,61 @@ test('leaderboard: a damaged board in KV reads as empty instead of failing', asy
   assert.deepEqual((await call(get('/teleop'), env, c)).j.entries, []);
   await env.LEADERBOARD.put('board:auto', JSON.stringify([{ name: 5 }, null, { name: 'ok', score: 12, robot: 'r', opmode: 'o', date: '2026-01-01' }]));
   assert.deepEqual((await call(get('/auto'), env, c)).j.entries.map((e) => e.name), ['ok']);
+});
+
+/* Posts at the same moment (audit F6). The board is one value read, changed and written back,
+   and so is the address's counter: two posts that overlap both read the old value, and one
+   score is lost and the limit is skipped. Workers KV has no transactions, so the board lives in
+   a Durable Object when one is bound (BOARDS, workers/room/board.js): one instance, one post at
+   a time, strongly consistent storage. Here its storage only answers on the next turn of the
+   event loop, the way a real store makes overlapping requests interleave. */
+const tick = () => new Promise((r) => setTimeout(r, 1));
+function slowStorage() {
+  const m = new Map();
+  return { m, async get(k) { await tick(); return m.get(k); }, async put(k, v) { await tick(); m.set(k, v); },
+    async delete(k) { await tick(); return m.delete(k); }, async list(o) { await tick(); const p = (o && o.prefix) || ''; return new Map([...m].filter(([k]) => k.startsWith(p))); } };
+}
+function boardsBinding(env = {}) {
+  const ctx = { storage: slowStorage() };
+  const one = new BoardDO(ctx, env);   // idFromName('leaderboard') always names the one instance
+  return { ctx, BOARDS: { idFromName: (n) => n, get: () => ({ fetch: (req) => one.fetch(req) }) } };
+}
+
+test('leaderboard (Durable Object): ten teams posting at once all get on the board', async () => {
+  const b = boardsBinding();
+  const env = { BOARDS: b.BOARDS };
+  const res = await Promise.all(Array.from({ length: 10 }, (_, i) => call(post(score({ name: 'Team ' + (1000 + i) }), { headers: { 'CF-Connecting-IP': '198.51.100.' + i } }), env, clock())));
+  assert.ok(res.every((x) => x.r.status === 200 && x.j.improved), 'each was told it got on');
+  const board = (await call(get('/teleop'), env, clock())).j.entries;
+  assert.equal(board.length, 10, 'and all ten are there');
+  assert.equal(JSON.parse(b.ctx.storage.m.get('board:teleop')).length, 10);
+});
+
+test('leaderboard (Durable Object): thirty posts at once from one address, and only 8 get through', async () => {
+  const env = { BOARDS: boardsBinding().BOARDS };
+  const res = await Promise.all(Array.from({ length: 30 }, (_, i) => call(post(score({ name: 'Spam ' + i })), env, clock())));
+  assert.equal(res.filter((x) => x.r.status === 200).length, RATE.max);
+  assert.equal(res.filter((x) => x.r.status === 429).length, 30 - RATE.max);
+});
+
+test('leaderboard (Durable Object): the same rules as the KV board, and old address counters are swept', async () => {
+  const b = boardsBinding(), env = { BOARDS: b.BOARDS };
+  // refused before it reaches the board: another site, a bad score
+  assert.equal((await call(post(score(), { headers: { Origin: 'https://evil.example' } }), env, clock())).r.status, 403);
+  assert.equal((await call(post(score({ score: 9999 })), env, clock())).r.status, 400);
+  // the best per name and robot
+  await call(post(score({ score: 50 })), env, clock());
+  await call(post(score({ score: 40 })), env, clock());
+  assert.deepEqual((await call(get('/teleop'), env, clock())).j.entries.map((e) => e.score), [50]);
+  // only a hash of the address, and a counter past its window is deleted, not kept for ever
+  const keys = [...b.ctx.storage.m.keys()].filter((k) => k.startsWith('rl:'));
+  assert.equal(keys.length, 1);
+  assert.match(keys[0], /^rl:[0-9a-f]{24}$/);
+  await sweepRates(b.ctx.storage, Date.now() + RATE.windowMs + 1000);
+  assert.equal([...b.ctx.storage.m.keys()].filter((k) => k.startsWith('rl:')).length, 0);
+  // GET answers come from the object too, and a KV binding beside it is not used
+  const kv = fakeKV(); const both = { BOARDS: b.BOARDS, LEADERBOARD: kv };
+  await call(post(score({ name: 'Both', score: 77 }), { headers: { 'CF-Connecting-IP': '192.0.2.1' } }), both, clock());
+  assert.equal(kv.m.size, 0);
+  assert.ok((await call(get('/teleop'), both, clock())).j.entries.some((e) => e.name === 'Both'));
 });
