@@ -171,6 +171,26 @@ test('mecanum: forward driving is the same at every roller share, and other base
   }
 });
 
+test('sim: a wall that stops a full-speed strafe stops the wheels with it, through the rows the dynamics turned them with', () => {
+  for (const s of [0.6, 0.85, 1]) {
+    const R = rig({ strafeEff: s });
+    let st = E.Dyn.reset(R);
+    for (let k = 0; k < 150; k++) st = E.Dyn.step(st, LEFT, R, 0.02);
+    const before = st.wheelOmega.map(o => Math.abs(o * R.drive.wheels[0].r));
+    // Sim.stopAgainst on a bare sim: robot facing +x, a wall on its left pushed it back by 1 cm
+    const sim = { dstate: st, rig: R, chassis: { x: 0, y: 0, h: 0 } };
+    E.Sim.stopAgainst.call(sim, 0, -0.01);
+    assert.equal(sim.dstate.v.y, 0);
+    const rim = sim.dstate.wheelOmega.map(o => Math.abs(o * R.drive.wheels[0].r));
+    // a pure strafe has no forward part, so every rim is left (almost) still: what is left is the tyres' own slip
+    for (let i = 0; i < 4; i++) assert.ok(rim[i] < 0.03 * before[i], `s = ${s}: wheel ${i} still turns at ${rim[i].toFixed(3)} m/s after the wall (was ${before[i].toFixed(3)})`);
+    // power off (FLOAT): the robot sits against the wall
+    let y = 0, st2 = sim.dstate;
+    for (let k = 0; k < 25; k++) { st2 = E.Dyn.step(st2, [0, 0, 0, 0], R, 0.02, [true, true, true, true]); y += st2.v.y * 0.02; }
+    assert.ok(Math.abs(y) < 1e-4, `s = ${s}: crept ${(y * 1000).toFixed(2)} mm along after the wall`);
+  }
+});
+
 test('calibrate: a robot that strafes at 0.8 of forward is fitted by its strafe share, spin-up and top speed alike', () => {
   const base = rig(), truth = rig({ strafeEff: 0.8 });
   const m = E.calMeasure(truth);

@@ -668,9 +668,11 @@ const Sim={
     // against the ground, so one that was rolling stops with the robot and one
     // that was spinning keeps spinning. Left alone, every wheel spun on as if
     // the robot had driven through the wall, and its encoder counted it.
+    // Through the rows the dynamics turned the wheels with (a mecanum rim turns
+    // more or less than the ideal geometry for each unit of sideways motion)
     const r=this.rig, wo=this.dstate.wheelOmega;
     if(!r||!wo||!(Math.abs(dvx)+Math.abs(dvy)>0)) return;
-    const ik=ikMatrix(r.drive.kind,r.drive.wheels);
+    const ik=Dyn.rimRows(r,this.dstate);
     this.dstate.wheelOmega=wo.map((o,i)=>{ const w=r.drive.wheels[i], k=ik[i];
       return w&&k&&w.r>0?o+(k[0]*dvx+k[1]*dvy)/w.r:o; });
   }
