@@ -1934,6 +1934,12 @@ const View={
     c.x=nx; c.y=ny;
     m.position.set(nx,z,-ny);
   },
+  /* Is any loose ball still bouncing or rolling (awake in src/ballphys.js)? Then every frame is drawn. */
+  ballsMoving(live){
+    if(live) for(const e of Match.floor) if(e.z!=null&&!e.sleep) return true;
+    if(typeof Shots!=="undefined") for(const l of Shots.landed||[]) if(l.ball&&!l.ball.sleep) return true;
+    return false;
+  },
   /* A ball turns as the physics spins it (rad/s about the field axes; rolling on the tiles, that
      spin is its roll). */
   spinAs(m,b,dt){
@@ -2082,9 +2088,10 @@ const View={
     const ws=this.worldSig(), moved=ws!==this._ws; this._ws=ws;
     const live=typeof Match!=="undefined"&&Match.live&&Match.live();
     const flying=typeof Shots!=="undefined"&&Shots.flying&&Shots.flying.length>0;
-    if(moved||live||flying||this.tipAnim) this.ren.shadowMap.needsUpdate=true;
+    const rolling=this.ballsMoving(live);
+    if(moved||live||flying||rolling||this.tipAnim) this.ren.shadowMap.needsUpdate=true;
     const running=typeof Sim!=="undefined"&&Sim.phase==="running";
-    const busy=moved||flying||this.tipAnim||this.fxBusy(now)||(this.picked&&this.picked.length)||running||(live&&Match.flying&&Match.flying.length)||
+    const busy=moved||flying||this.tipAnim||this.fxBusy(now)||(this.picked&&this.picked.length)||running||(live&&Match.flying&&Match.flying.length)||rolling||
       (typeof Recorder!=="undefined"&&Recorder.on);
     // a match set up but not started: nothing moves but the HUMAN PLAYERS' idle sway, which reads
     // the same at 30 frames a second; a still view otherwise is drawn twice a second
