@@ -38,7 +38,15 @@ const MATCH_SKILL={
   typical:{label:"Typical", vmax:1.2, acc:2.6, turn:3.2, precision:"typical", pick:0.95,miss:0.22, feed:0.6, settle:0.85,think:0.6},
   elite:  {label:"Elite",   vmax:1.6, acc:3.6, turn:4.2, precision:"dialed",  pick:0.5, miss:0.08, feed:0.4, settle:0.45,think:0.25}};
 const MATCH_PTS={leave:3, parkAuto:5, park:5, tip:20, cell:2, flower:2, bottom:5, garden:1};
-const FLOWER_CAP=6;                                // ~4 POLLEN + 2 NECTAR fit between the rings
+/* What a FLOWER's tube holds from the tile up: ~4 POLLEN + 2 NECTAR (game brief, FLOWER). A straight stack
+   would take a 3rd NECTAR just under the top ring (rules-edges.md Appendix A), but that source asks for a
+   physical test and Q&A #7 first, so the cap stays the brief's. */
+const FLOWER_CAP=6;
+/* A FLOWER's scoring volume is between its middle ring and its top ring (manual sec 10.5.2): the middle
+   ring tops the 3.55 in retrieval opening (sec 9.7); the top ring is field.json's openingZ (21.5 in).
+   The bottom POLLEN sits on the tile through the bottom ring's 2.79 in hole; a NECTAR can't pass it
+   and rests on the 0.43 in ring (EFSG 11.2, sec 9.7). */
+const FLOWER_MID_IN=3.55, FLOWER_TOP_IN=21.5, FLOWER_RING_IN=0.43;
 const wrapA=a=>{ while(a>Math.PI) a-=2*Math.PI; while(a<-Math.PI) a+=2*Math.PI; return a; };
 
 const Match={
@@ -85,7 +93,7 @@ const Match={
     }
     for(const fl of D.flowers){
       const n=fl.wall==="+y"?[0,1]:fl.wall==="-y"?[0,-1]:fl.wall==="+x"?[1,0]:[-1,0];
-      this.flowers.push({x:fl.x*IN, y:fl.y*IN, n, stack:[0,1,2,3].map(()=>({kind:"pollen", color:null})), claim:null});
+      this.flowers.push({x:fl.x*IN, y:fl.y*IN, n, top:fl.openingZ||FLOWER_TOP_IN, stack:[0,1,2,3].map(()=>({kind:"pollen", color:null})), claim:null});
     }
     // TELEOP comes after AUTO: the 16 pre-loaded POLLEN have been launched, spilled or missed by
     // now and lie on the tiles around the HIVEs, both sides
@@ -290,7 +298,15 @@ const Match={
     }
   },
   /* ---- NECTAR on top of a FLOWER, last 60 s only (G410) ---- */
-  flowerOwner(f){ for(let i=f.stack.length-1;i>=0;i--) if(f.stack[i].kind==="nectar") return f.stack[i].color; return null; },
+  /* Which of a FLOWER's elements score: stacked straight up the tube from the tile, each is in if any
+     of it is between the middle ring and the top ring (sec 10.5.2 "at least partially within"). */
+  flowerScoring(f){
+    const top=f.top||FLOWER_TOP_IN;
+    let z=f.stack.length&&f.stack[0].kind==="nectar"?FLOWER_RING_IN:0;
+    return f.stack.map(e=>{ const d=2*ballSpec(e.kind).r/IN, inV=z+d>FLOWER_MID_IN&&z<top; z+=d; return inV; });
+  },
+  /* The owner: the alliance of the top-most NECTAR in the scoring volume (sec 10.5.2). */
+  flowerOwner(f){ const s=this.flowerScoring(f); for(let i=f.stack.length-1;i>=0;i--) if(s[i]&&f.stack[i].kind==="nectar") return f.stack[i].color; return null; },
   flowerFor(b){
     let best=null, bc=1e9;
     for(const f of this.flowers){
@@ -722,8 +738,10 @@ const Match={
       if(this.period==="TeleOp"){
         r.cell=Field.cells[al].length*MATCH_PTS.cell;
         for(const f of this.flowers){
-          if(this.flowerOwner(f)===al) r.flower+=f.stack.length*MATCH_PTS.flower;
-          const bottom=f.stack.find(e=>e.kind==="nectar"); if(bottom&&bottom.color===al) r.bottom+=MATCH_PTS.bottom;
+          // the owner gets every element in the scoring volume; the bottom-most NECTAR in it, 5
+          const sc=this.flowerScoring(f);
+          if(this.flowerOwner(f)===al) r.flower+=sc.filter(Boolean).length*MATCH_PTS.flower;
+          const bottom=f.stack.find((e,i)=>sc[i]&&e.kind==="nectar"); if(bottom&&bottom.color===al) r.bottom+=MATCH_PTS.bottom;
         }
         const g=this.garden(al);
         r.garden=this.floor.filter(e=>this.inRect(e.x,e.y,g)).length*MATCH_PTS.garden;

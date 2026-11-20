@@ -69,12 +69,43 @@ test('match: the score adds up the way the manual scores it', () => {
     assert.equal(r.tipPts, 20 * r.tips);
     assert.equal(r.cell, 2 * E.Field.cells[al].length);
   }
-  // FLOWERs by hand: the top-most NECTAR owns every element, the bottom-most NECTAR's colour gets 5
+  // FLOWERs by hand: the top-most NECTAR owns every element in the scoring volume, the bottom-most
+  // NECTAR's colour gets 5. The POLLEN on the tile (0-2.8 in) is under the middle ring and doesn't score
+  // (manual sec 10.5.2 p88), so 3 of the 4 elements score
   M.flowers = [{ x: 0, y: 0, n: [0, 1], stack: [{ kind: 'pollen' }, { kind: 'nectar', color: 'red' }, { kind: 'pollen' }, { kind: 'nectar', color: 'blue' }] }];
   M.floor = [];
   const T = M.score(userAt(0, 0));
-  assert.equal(T.blue.flower, 8); assert.equal(T.red.flower, 0);
+  assert.equal(T.blue.flower, 6); assert.equal(T.red.flower, 0);
   assert.equal(T.red.bottom, 5); assert.equal(T.blue.bottom, 0);
+});
+
+test('match: a FLOWER scores only what is in its scoring volume, between the middle and top rings', () => {
+  // manual sec 10.5.2 p88: an element scores if "at least partially within" the volume between the top
+  // ring (21.5 in) and the middle ring (~3.55 in). Every row is biobuzz-robot/strategy/rules-edges.md
+  // Appendix A (straight stack: POLLEN 2.80 in, NECTAR 3.62 in; a bottom NECTAR rests on the 0.43 in ring)
+  E.Field.reset();
+  const M = E.Match; M.on = true; M.reset({ period: 'TeleOp', user: 'red', userPose: { x: -61.5 * IN, y: 0, h: 0 }, seed: 1 });
+  M.floor = [];
+  const P = { kind: 'pollen' }, N = { kind: 'nectar', color: 'red' };
+  const rows = [
+    ['staged 4 P', [P, P, P, P], 0, 0],
+    ['4 P + 1 N', [P, P, P, P, N], 8, 5],
+    ['4 P + 2 N', [P, P, P, P, N, N], 10, 5],
+    ['4 P + 3 N', [P, P, P, P, N, N, N], 12, 5],
+    ['3 P + 4 N', [P, P, P, N, N, N, N], 12, 5],
+    ['0 P + 6 N', [N, N, N, N, N, N], 12, 5],
+    ['1 N + 4 P + 2 N', [N, P, P, P, P, N, N], 14, 5],
+    ['8 P', [P, P, P, P, P, P, P, P], 0, 0],
+  ];
+  for (const [name, stack, flower, bottom] of rows) {
+    M.flowers = [{ x: 0, y: 0, n: [0, 1], stack }];
+    const S = M.score(userAt(0, 0));
+    assert.equal(S.red.flower, flower, name + ': owner points');
+    assert.equal(S.red.bottom, bottom, name + ': bottom NECTAR bonus');
+  }
+  // the staged FLOWERs as reset() builds them: 3 of each 4 POLLEN in the volume
+  M.reset({ period: 'TeleOp', user: 'red', userPose: { x: -61.5 * IN, y: 0, h: 0 }, seed: 1 });
+  for (const f of M.flowers) assert.deepEqual(M.flowerScoring(f), [false, true, true, true]);
 });
 
 test('match: GARDEN and PARK are counted from where things really are', () => {
