@@ -10,6 +10,14 @@
    speed each scatter by the Shot Sim's precision figures, and the robot's
    own motion is added to the ball. A spot the Shot Sim calls 40 % scores
    about 40 % of the time here too — no perfect shots.
+
+   The ball that leaves is a real one (src/ballphys.js): the launch
+   speed, angle, aim and backspin the Shot Sim used, the same drag and
+   lift, so it flies the Shot Sim's arc; then it goes in, or meets the
+   rim, the frame, a robot or the tiles and bounces and rolls from there.
+   A flight keeps its fields (path, t, dur, pos in inches, hit, cause) and
+   adds `ball`, `vel` and `spin` (m/s, rad/s); `hit` is the Shot Sim's
+   expectation until the ball has decided it.
    ============================================================ */
 const SHOT_STEP_S=0.005;          // the Shot Sim stores a path sample every 5 ms
 const SHOOTER_NAME=/shoot|fly_?wheel|launch|cannon|outtake/i;
@@ -25,13 +33,57 @@ function makeRng(seed){
 }
 function gauss(rnd){ let u=0; while(u===0) u=rnd(); return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*rnd()); }
 
+/* The ball a shot launches: from p0 (inches, the Shot Sim's exit point) at v m/s, thDeg up,
+   yawDeg round, with the backspin the shooter gives it (S0, the Shot Sim's spin share: a
+   single flywheel 1, so its surface turns at v). ignore: the robot it leaves from. */
+function shotBall(kind,al,p0,v,thDeg,yawDeg,S0,ignore){
+  const th=thDeg*Math.PI/180, ps=yawDeg*Math.PI/180, c=Math.cos(th);
+  const b=ballSpawn({kind},{x:p0[0]*IN, y:p0[1]*IN, z:p0[2]*IN, vx:v*c*Math.cos(ps), vy:v*c*Math.sin(ps), vz:v*Math.sin(th),
+    target:al, hive:typeof Field!=="undefined"&&Field.hive?Field.hive[al]:null, ignore:ignore||null});
+  ballBackspin(b,b.vx,b.vy,(S0==null?1:S0)*v);
+  return b;
+}
+/* A flight that came without a ball (another bench's, a test's): one off its own path. */
+function flightBall(f){
+  const P=f.path, a=P[0], st=f.step||SHOT_STEP_S, k=Math.min(8,Math.floor((P.length-1)/2));
+  // the launch speed from the first stretch of the path: a parabola through three of its points
+  // (its points are whole millimetres, so one 5 ms step alone is 0.2 m/s out)
+  const v=i=>k>=1?(4*(P[k][i]-a[i])-(P[2*k][i]-a[i]))/(2*k*st)*IN:(P[Math.min(1,P.length-1)][i]-a[i])*IN/st;
+  const b=ballSpawn({kind:f.kind==="nectar"?"nectar":"pollen"},{x:a[0]*IN, y:a[1]*IN, z:a[2]*IN,
+    vx:v(0), vy:v(1), vz:v(2), target:f.al||null, hive:f.hive==null?null:f.hive});
+  ballBackspin(b,b.vx,b.vy,Math.hypot(b.vx,b.vy,b.vz));
+  return b;
+}
+/* After a physics step: the flight's clock, where it is (inches), how it moves, and its path
+   (what the trails and the online copy draw) to where it really went. */
+function flightAdvance(f,dt){
+  const b=f.ball, P=f.path, st=f.step||SHOT_STEP_S, pos=[b.x/IN, b.y/IN, b.z/IN];
+  f.t+=dt; f.pos=pos; f.vel=[b.vx,b.vy,b.vz]; f.spin=[b.wx,b.wy,b.wz];
+  const k=Math.floor(f.t/st+1e-9);
+  if(k>=1&&P.length){
+    if(k<P.length) P[k]=pos.slice();
+    else{ const a=P[P.length-1], n0=P.length; for(let i=n0;i<=k;i++){ const u=(i-n0+1)/(k-n0+1); P.push([a[0]+(pos[0]-a[0])*u, a[1]+(pos[1]-a[1])*u, a[2]+(pos[2]-a[2])*u]); } }
+  }
+  f.dur=Math.max(f.dur||0,f.t);
+}
+/* Why a ball that didn't go in missed, in the Shot Sim's words where they fit. */
+function flightCause(f){
+  if(f.hit&&f.hive!=null&&typeof Field!=="undefined"&&Field.hive&&Field.hive[f.al]!==f.hive) return "tipped";
+  const t=f.ball&&f.ball.hitTag;
+  if(t&&t!=="floor") return t;
+  if(f.cause==="short"||f.cause==="long") return f.cause;
+  // on the tiles: short of the mouth or past it, along the way it was going
+  try{ const m=Field.model().mouthCentroid[f.al], p=f.path[0], e=f.pos, ux=m[0]-p[0], uy=m[1]-p[1], L=Math.hypot(ux,uy)||1;
+    return ((e[0]-p[0])*ux+(e[1]-p[1])*uy)/L<L?"short":"long"; }catch(e){ return "floor"; }
+}
+
 const Shots={
   cfg:null, alliance:"red", seed:7, spreadScale:1,
   flying:[], landed:[], log:[], fired:0, scored:0, t:0, lastFeed:-1e9, feedWas:false,
   defaults(){ return {shooter:null, feeder:null, motorId:null, hoodDeg:75, h0In:16, wheelMm:96, gear:1, mountDeg:0,
                       ball:"pollen", type:"single", precision:"typical"}; },
   reset(){ this.flying=[]; this.landed=[]; this.log=[]; this.fired=0; this.scored=0; this.t=0;
-           this.lastFeed=-1e9; this.feedWas=false; this.rnd=makeRng(this.seed); },
+           this.lastFeed=-1e9; this.feedWas=false; this.rnd=makeRng(this.seed); this.world=ballWorld(); },
   target(){ return this.alliance==="blue"?"blue":"red"; },
 
   /* Which devices look like a shooter and a feeder, by name and type. */
@@ -161,18 +213,30 @@ const Shots={
     const odds=this.odds(pose,vel,32);
     const L=this.sample(v0,this.cfg.hoodDeg,this.yawDeg(pose),this.spread(v0),this.rnd,vel);
     const p=this.params(pose), r=Field.E.classifyShot(p,L.th,L.v,L.yaw);
-    const b=this.launchPath(r,L.v,why,odds);
+    const b=this.launchPath(r,L.v,why,odds,L);
     // online, away from the host: the host's Shot Sim flies this same launch and decides it (src/net.js)
     if(b&&typeof Online!=="undefined"&&Online.guest()&&Online.playing()){ b.net=true; Online.shot(p,L.th,L.v,L.yaw); }
     return b;
   },
-  launchPath(r,v,why,odds){
+  /* L: the launch ({v, th, yaw} as fired); without it the ball starts off the path. */
+  launchPath(r,v,why,odds,L){
     const ball=this.cfg.ball, path=r.path||[];
     if(path.length<2) return null;
     const b={path, t:0, dur:(path.length-1)*SHOT_STEP_S, hit:!!r.hit, cause:r.cause, kind:ball,
              color:ball==="nectar"?this.target():null, al:this.target(), v, why, odds, pos:path[0].slice(), hive:Field.hive[this.target()]};
+    let S0=1; try{ S0=Field.E.shooterSpin(this.shooterSpec()); }catch(e){}
+    b.ball=L?shotBall(ball,b.al,path[0],L.v,L.th,L.yaw,S0,"user"):flightBall(b);
+    if(!L) b.ball.ignore="user";
+    b.vel=[b.ball.vx,b.ball.vy,b.ball.vz]; b.spin=[b.ball.wx,b.ball.wy,b.ball.wz];
     this.flying.push(b); this.fired++;
     return b;
+  },
+  /* The robots a ball can meet: this one, and in a match everyone else's too. */
+  ballBoxes(){
+    if(typeof Match!=="undefined"&&Match.live()) return Match.ballBoxes(Sim);
+    if(!Sim.chassis||!Sim.footprint) return [];
+    const u=footBox(Sim.chassis,Sim.footprint);
+    return [{id:"user", x:u.x, y:u.y, h:u.h, hx:u.hx, hy:u.hy, hz:Math.max(0.1,Math.min(0.6,Sim.footprint.h||0.35))}];
   },
   note(text){ this.log.unshift({t:Sim.t||0, text}); this.log.length=Math.min(this.log.length,6); return null; },
 
@@ -195,17 +259,18 @@ const Shots={
   tick(dt,pose){
     this.t+=dt;
     if(Field.ok&&this.cfg&&Sim.phase==="running") this.autoFire(pose);
-    for(const b of this.flying){
-      b.t+=dt;
-      const k=Math.min(b.path.length-1, b.t/SHOT_STEP_S), i=Math.floor(k), f=k-i;
-      const a=b.path[i], c=b.path[Math.min(b.path.length-1,i+1)];
-      b.pos=[a[0]+(c[0]-a[0])*f, a[1]+(c[1]-a[1])*f, a[2]+(c[2]-a[2])*f];
-      if(b.t>=b.dur) b.done=true;
-    }
+    if(!this.world) this.world=ballWorld();
+    for(const b of this.flying) if(!b.ball) b.ball=flightBall(b);
+    for(const l of this.landed) if(!l.ball) l.ball=ballSpawn({kind:l.kind==="nectar"?"nectar":"pollen"},{x:l.pos[0]*IN, y:l.pos[1]*IN, z:Math.max(l.pos[2]*IN,0)});
+    if(Field.ok) this.world.statics=Field.ballStatics();
+    const balls=this.flying.map(b=>b.ball).concat(this.landed.map(l=>l.ball));
+    if(balls.length) this.world.step(dt,balls,this.ballBoxes());
+    for(const b of this.flying){ flightAdvance(b,dt); if(b.ball.sunk||b.ball.hitTag||b.t>6) b.done=true; }
     for(const b of this.flying.filter(b=>b.done)){
       const od=b.odds!=null?` · a ${Math.round(b.odds*100)} % shot`:"";
-      // the HIVE tipped while it flew: the CELL it was aimed at is swinging down, not up
-      if(b.hit&&b.hive!=null&&Field.hive[b.al]!==b.hive){ b.hit=false; b.cause="tipped"; }
+      // the ball says: in its up-CELL, or it met something first (the HIVE tipping while it
+      // flew swings that CELL down, so it can't be in it: src/field.js)
+      if(b.ball.sunk){ b.hit=true; b.cause=null; } else { b.cause=flightCause(b); b.hit=false; }
       if(b.net){ this.note(b.hit?`IN, the host says how it counts · ${b.v.toFixed(1)} m/s${od}`:`Missed — ${CAUSE_TEXT[b.cause]||b.cause||"no score"} at ${b.v.toFixed(1)} m/s${od}`); continue; }
       if(b.hit){
         this.scored++;
@@ -213,18 +278,15 @@ const Shots={
         this.note(`IN the ${b.al.toUpperCase()} up-CELL at ${b.v.toFixed(1)} m/s${od}`+(tipped?` — TIP ${Field.tips[b.al]}`:""));
       }else{
         this.note(`Missed — ${CAUSE_TEXT[b.cause]||b.cause||"no score"} at ${b.v.toFixed(1)} m/s${od}`);
-        // in a full match a miss stays on the tiles, where any robot can pick it up (src/match.js)
-        if(typeof Match!=="undefined"&&Match.live()){ const e=b.path[b.path.length-1]; Match.drop(b.kind,b.color,e[0]*IN,e[1]*IN); }
-        else this.landed.push({pos:b.pos.slice(), vz:0, t:0, kind:b.kind, color:b.color});
+        // in a full match a miss stays on the field, bouncing and rolling where any robot can pick it up (src/match.js)
+        if(typeof Match!=="undefined"&&Match.live()) Match.adopt(b.ball,b.kind,b.color);
+        else this.landed.push({pos:b.pos.slice(), t:0, kind:b.kind, color:b.color, ball:b.ball});
       }
     }
     this.flying=this.flying.filter(b=>!b.done);
-    // a miss drops to the tiles and lies there a moment
-    for(const l of this.landed){
-      l.t+=dt;
-      if(l.pos[2]>1.4){ l.vz-=386*dt; l.pos[2]=Math.max(1.4,l.pos[2]+l.vz*dt); }
-    }
-    this.landed=this.landed.filter(l=>l.t<3);
+    // a miss bounces and rolls on the tiles, and lies there a moment once it stops
+    for(const l of this.landed){ l.t+=dt; l.pos=[l.ball.x/IN, l.ball.y/IN, l.ball.z/IN]; if(!l.ball.sleep) l.rest=l.t; }
+    this.landed=this.landed.filter(l=>l.t<12&&l.t-(l.rest||0)<2);
   },
 
   /* What a hood fixed at this angle needs from here: the band of exit
@@ -241,7 +303,7 @@ const Shots={
   }
 };
 const CAUSE_TEXT={tipped:"the HIVE tipped while it flew", short:"fell short", long:"went long", lip:"hit the lip", roof:"hit the CELL roof", cell:"hit the CELL",
-  frame:"hit the HIVE frame", wall:"hit the wall", floor:"hit the floor"};
+  frame:"hit the HIVE frame", wall:"hit the wall", floor:"hit the floor", robot:"hit a robot", flower:"hit a FLOWER"};
 
 /* The goBILDA motor in the Shot Sim's table nearest a free speed. */
 function nearestMotorId(rpm){

@@ -18,6 +18,10 @@
    CELLs, the same scatter), so a TIP is a TIP whoever makes it, and the
    team's robot and these push each other around. Everything random comes
    from one seeded source, so a match replays exactly.
+   Every POLLEN and NECTAR is a real ball (src/ballphys.js): a shot flies
+   from its launch with its backspin and goes in, or bounces off the rim
+   and rolls away; robots shove what they drive into; an intake grips a
+   ball in front of it before it takes it in.
    Online (src/net.js), some places are other people's robots instead
    (Match.players): the host's bench plays the match with them in it, and
    every other bench only mirrors it (Match.mirror), pushing its own robot.
@@ -58,7 +62,7 @@ const Match={
     if(o.seed!=null) this.seed=o.seed;
     if(o.skill&&MATCH_SKILL[o.skill]) this.skill=o.skill;
     this.rnd=makeRng(this.seed*7919+13);
-    this.t=0; this.nid=0; this.flying=[]; this.events=[]; this.placed=[]; this.entries=[];
+    this.t=0; this.nid=0; this.flying=[]; this.events=[]; this.placed=[]; this.entries=[]; this.world=ballWorld();
     this.spotCache=new Map(); this.obs=null; this.seenTip=Field.lastTip?Field.lastTip.id:0;
     this.tips0={red:Field.tips.red, blue:Field.tips.blue};
     this.floor=[]; this.flowers=[]; this.bots=[];
@@ -107,10 +111,18 @@ const Match={
     this.bots.push(b);
     return b;
   },
-  drop(kind,color,x,y){
-    const H=Field.half()-0.04;
+  /* An element onto the tiles at (x, y), at rest unless o gives it a height, a speed, a spin. */
+  drop(kind,color,x,y,o){
+    const H=Field.half()-Math.max(0.04,ballSpec(kind).r);
     const e={id:++this.nid, kind, color:kind==="nectar"?color:null, x:Math.max(-H,Math.min(H,x)), y:Math.max(-H,Math.min(H,y)), claim:null};
+    ballSpawn(e,o);
     this.floor.push(e); return e;
+  },
+  /* A ball that was flying (a miss) is a loose element now, just as it is: moving, spinning. */
+  adopt(ball,kind,color){
+    ball.id=++this.nid; ball.kind=kind; ball.color=kind==="nectar"?color:null; ball.claim=null;
+    ball.target=null; ball.hive=null; ball.hitTag=null; ball.ignore=null;
+    this.floor.push(ball); return ball;
   },
   note(text,al){ this.events.unshift({t:this.t, text, al:al||null}); if(this.events.length>40) this.events.length=40; },
   left(){ return this.len-this.t; },
@@ -124,7 +136,7 @@ const Match={
     this.spill();
     for(const b of this.bots) this.think(b,dt);
     this.separate(sim);
-    this.flights(dt);
+    this.flights(dt,sim);
     this.humansTick(dt);
     this.version++;
   },
@@ -134,10 +146,14 @@ const Match={
     const L=Field.lastTip; if(!L||L.id===this.seenTip) return;
     this.seenTip=L.id;
     const hx=(Field.data.field.hive.hiveX||{})[L.al]!=null?Field.data.field.hive.hiveX[L.al]:(L.al==="red"?-12.75:12.75);
-    for(const e of L.spilled||[]){
-      const r=this.rnd();
-      this.drop(e.kind,e.color,(hx+(r*2-1)*16)*IN,L.from*(26+this.rnd()*18)*IN);
-    }
+    // they tumble out of the mouth of the CELL as it swings down, on the side it was up on
+    const X=Field.E._internal, G=X.geometry(), sg=Field.hive[L.al], bc=G.b0+G.centroidB;
+    (L.spilled||[]).forEach((e,i)=>{
+      const w=(this.rnd()*2-1)*(G.W2-2.2), a=-G.aOut-2.4-(i%2)*3.8;
+      const p=X.bodyToWorld(w,a,bc,hx,sg), q=X.bodyToWorld(w,a-1,bc,hx,sg), d=Math.hypot(q[0]-p[0],q[1]-p[1],q[2]-p[2]);
+      const v=0.6+this.rnd()*0.8;
+      this.drop(e.kind,e.color,p[0]*IN,p[1]*IN,{z:p[2]*IN, vx:(q[0]-p[0])/d*v, vy:(q[1]-p[1])/d*v, vz:(q[2]-p[2])/d*v});
+    });
     const who=L.by?" by "+L.by:"";
     this.note(L.al.toUpperCase()+" HIVE TIPPED"+who+" (TIP "+(Field.tips[L.al]-this.tips0[L.al])+") +"+MATCH_PTS.tip,L.al);
   },
@@ -206,24 +222,33 @@ const Match={
   /* ---- fetching: drive the intake (the front edge) onto an element ---- */
   doCollect(b,P,dt){
     const e=P.el;
-    if(this.floor.indexOf(e)<0||b.hold.length>=MATCH_BOT.cap){ this.release(P); P.done=true; return; }
+    if(this.floor.indexOf(e)<0||b.hold.length>=MATCH_BOT.cap){ this.letGo(e,b); this.release(P); P.done=true; return; }
     if(!P.dir) P.dir=this.approach(b,e);
     const reach=MATCH_BOT.hx+0.05, th=Math.atan2(P.dir[1],P.dir[0]);
-    // where the robot's centre goes, kept where a robot can be (a ball in a corner is taken off-centre)
-    const lim=Field.half()-MATCH_BOT.hx-0.01;
-    const tx=Math.max(-lim,Math.min(lim,e.x-P.dir[0]*reach)), ty=Math.max(-lim,Math.min(lim,e.y-P.dir[1]*reach));
-    const d=this.drive(b,dt,tx,ty,th);
-    if(this.giveUp(b,d)){ this.release(P); b.skip.set(e.id,this.t+12); P.done=true; return; }
+    // where the robot's centre goes, kept where a robot can be (a ball in a corner is taken off-centre);
+    // a ball that rolls is followed once it's 3 cm off, one in the rollers holds the robot where it is
+    const lim=Field.half()-MATCH_BOT.hx-0.01, held=e.hold&&e.hold.id===b.id;
+    if(!held&&(P.gx==null||Math.hypot(e.x-P.ex,e.y-P.ey)>0.03)){
+      P.ex=e.x; P.ey=e.y;
+      P.gx=Math.max(-lim,Math.min(lim,e.x-P.dir[0]*reach)); P.gy=Math.max(-lim,Math.min(lim,e.y-P.dir[1]*reach));
+    }
+    const d=this.drive(b,dt,P.gx,P.gy,th);
+    if(this.giveUp(b,d)){ this.letGo(e,b); this.release(P); b.skip.set(e.id,this.t+12); P.done=true; return; }
     if(this.inIntake(b,e)){
+      // the rollers have it: it rides in the mouth of the intake, drawn in
+      if(!e.hold){ const c=Math.cos(b.h), s=Math.sin(b.h), dx=e.x-b.x, dy=e.y-b.y;
+        e.hold={id:b.id, lx:dx*c+dy*s, ly:-dx*s+dy*c, tx:MATCH_BOT.hx+ballSpec(e.kind).r*0.4}; e.sleep=false; P.gx=b.x; P.gy=b.y; }
       P.pick=(P.pick||0)+dt;
       if(P.pick>=this.sk().pick){
-        if(this.rnd()<this.sk().miss){                       // it squirted out: knocked a little way off
-          const a=this.rnd()*2*Math.PI, r=0.1+this.rnd()*0.2, H=Field.half()-0.04;
-          e.x=Math.max(-H,Math.min(H,e.x+Math.cos(a)*r)); e.y=Math.max(-H,Math.min(H,e.y+Math.sin(a)*r));
-          P.dir=null; P.pick=0; b.best=1e9; b.stuck=0;
+        if(this.rnd()<this.sk().miss){                       // it squirted out: off it goes, away from the robot
+          let a=this.rnd()*2*Math.PI; const v=0.4+this.rnd()*0.6;
+          if(Math.cos(a-b.h)<0) a=2*b.h+Math.PI-a;
+          e.hold=null; e.sleep=false; e.vx=Math.cos(a)*v+b.vx; e.vy=Math.sin(a)*v+b.vy;
+          P.dir=null; P.pick=0; P.gx=null; b.best=1e9; b.stuck=0;
           return;
         }
         this.floor.splice(this.floor.indexOf(e),1);
+        e.hold=null;
         b.hold.push({kind:e.kind, color:e.color});
         P.done=true;
       }
@@ -236,11 +261,12 @@ const Match={
     if(walls.length) return [walls[0][0],walls[0][1]];
     const d=Math.hypot(e.x-b.x,e.y-b.y)||1; return [(e.x-b.x)/d,(e.y-b.y)/d];
   },
-  /* The intake: just past the front edge, the robot's full width. */
+  /* The intake: just past the front edge, the robot's full width, a ball on the tiles. */
   inIntake(b,e){
     const c=Math.cos(b.h), s=Math.sin(b.h), dx=e.x-b.x, dy=e.y-b.y, fx=dx*c+dy*s, fy=-dx*s+dy*c;
-    return fx>MATCH_BOT.hx-0.03&&fx<MATCH_BOT.hx+0.13&&Math.abs(fy)<MATCH_BOT.hy-0.02;
+    return fx>MATCH_BOT.hx-0.03&&fx<MATCH_BOT.hx+0.13&&Math.abs(fy)<MATCH_BOT.hy-0.02&&(e.z==null||e.z<ballSpec(e.kind).r+0.05);
   },
+  letGo(e,b){ if(e&&e.hold&&(!b||e.hold.id===b.id)){ e.hold=null; e.sleep=false; } },
   /* POLLEN out of a FLOWER's bottom opening, from the field side (G418) */
   doRetrieve(b,P,dt){
     const f=P.f;
@@ -345,35 +371,60 @@ const Match={
       const e=b.hold.shift(), sk=this.sk(), pr=this.precision();
       const a=e.kind===(P.kindAim||"")?P.aim:this.aimAt(b.al,b.x,b.y,e.kind);
       P.kindAim=e.kind; P.aim=a;
-      if(!a){ this.drop(e.kind,e.color,b.x,b.y); P.done=true; return; }
+      const ahead=MATCH_BOT.hx+ballSpec(e.kind).r+0.01;
+      if(!a){ this.drop(e.kind,e.color,b.x+Math.cos(b.h)*ahead,b.y+Math.sin(b.h)*ahead); P.done=true; return; }
       const th=MATCH_BOT.hoodDeg+gauss(this.rnd)*pr.sigThetaDeg, yaw=b.h*180/Math.PI+gauss(this.rnd)*pr.sigYawDeg;
       const v=a.v*(1+gauss(this.rnd)*pr.sigShooter);
       const r=Field.E.classifyShot(this.params(b.al,b.x,b.y,e.kind),th,v,yaw);
       const path=r.path||[];
       b.fired++; b.fire=sk.feed;
-      if(path.length<2){ this.drop(e.kind,e.color,b.x,b.y); return; }
+      if(path.length<2){ this.drop(e.kind,e.color,b.x+Math.cos(b.h)*ahead,b.y+Math.sin(b.h)*ahead); return; }
+      // hit and cause: what the Shot Sim expects of it; the ball itself (src/ballphys.js) decides
+      const ball=shotBall(e.kind,b.al,path[0],v,th,yaw,1,b.id);
       this.flying.push({path, t:0, dur:(path.length-1)*SHOT_STEP_S, hit:!!r.hit, cause:r.cause, kind:e.kind,
-        color:e.color, al:b.al, by:b, pos:path[0].slice(), hive:Field.hive[b.al]});
+        color:e.color, al:b.al, by:b, pos:path[0].slice(), hive:Field.hive[b.al], ball, vel:[ball.vx,ball.vy,ball.vz], spin:[ball.wx,ball.wy,ball.wz]});
     }
   },
-  flights(dt){
-    for(const f of this.flying){
-      f.t+=dt;
-      const k=Math.min(f.path.length-1,f.t/SHOT_STEP_S), i=Math.floor(k), fr=k-i;
-      const a=f.path[i], c=f.path[Math.min(f.path.length-1,i+1)];
-      f.pos=[a[0]+(c[0]-a[0])*fr, a[1]+(c[1]-a[1])*fr, a[2]+(c[2]-a[2])*fr];
-      if(f.t>=f.dur) f.done=true;
+  /* Every ball on the field for dt: the ones in the air and the loose ones, among the robots.
+     A ball in the air is in when it gets into its up-CELL (still the one that was up when it
+     left); the first thing it touches makes it a miss, and a loose element from there on. */
+  flights(dt,sim){
+    if(!this.world) this.world=ballWorld();
+    // a grip nobody's holding any more (the plan changed): the ball is let go
+    for(const e of this.floor) if(e.hold){ const b=this.bots.find(o=>o.id===e.hold.id); if(!b||!b.plan||b.plan.el!==e||b.plan.done) this.letGo(e); }
+    const boxes=this.ballBoxes(sim);
+    // a flight that came as a path (another driver's shot): it leaves from inside whichever robot fired it
+    for(const f of this.flying) if(!f.ball){
+      f.ball=flightBall(f);
+      const B=boxes.find(X=>{ const c=Math.cos(X.h), s=Math.sin(X.h), dx=f.ball.x-X.x, dy=f.ball.y-X.y;
+        return Math.abs(dx*c+dy*s)<=X.hx+0.05&&Math.abs(-dx*s+dy*c)<=X.hy+0.05; });
+      if(B) f.ball.ignore=B.id;
     }
+    if(Field.ok){ const st=Field.ballStatics(); if(this.world.statics!==st){ this.world.wakeAll(this.floor); this.world.statics=st; } }
+    const balls=this.floor.slice(); for(const f of this.flying) balls.push(f.ball);
+    this.world.step(dt,balls,boxes);
+    for(const f of this.flying){ flightAdvance(f,dt); if(f.ball.sunk||f.ball.hitTag||f.t>6) f.done=true; }
     for(const f of this.flying.filter(f=>f.done)){
-      if(f.hit&&Field.hive[f.al]===f.hive){
-        f.by.scored++;
-        if(Field.addToCell(f.al,f.kind,f.color)) Field.lastTip.by=f.by.name;
+      if(f.ball.sunk){
+        f.hit=true; f.cause=null;
+        if(f.by) f.by.scored++;
+        if(Field.addToCell(f.al,f.kind,f.color)&&f.by) Field.lastTip.by=f.by.name;
       }else{
-        const end=f.path[f.path.length-1];
-        this.drop(f.kind,f.color,end[0]*IN+(this.rnd()-0.5)*0.15,end[1]*IN+(this.rnd()-0.5)*0.15);
+        f.cause=flightCause(f); f.hit=false;
+        this.adopt(f.ball,f.kind,f.color);
       }
     }
     this.flying=this.flying.filter(f=>!f.done);
+  },
+  /* The robots, as the boxes the balls meet (ballphys.js): AI, other drivers', the team's own. */
+  ballBoxes(sim){
+    const out=this.bots.map(b=>({id:b.id, x:b.x, y:b.y, h:b.h, hx:MATCH_BOT.hx, hy:MATCH_BOT.hy, hz:0.4}));
+    for(const p of this.players) out.push({id:"pl:"+p.id, x:p.x, y:p.y, h:p.h||0, hx:p.hx, hy:p.hy, hz:0.4});
+    if(sim&&sim.chassis&&sim.footprint&&!this.noUser){
+      const u=footBox(sim.chassis,sim.footprint);
+      out.push({id:"user", x:u.x, y:u.y, h:u.h, hx:u.hx, hy:u.hy, hz:Math.max(0.1,Math.min(0.6,sim.footprint.h||0.35))});
+    }
+    return out;
   },
 
   /* ---- parking ---- */
@@ -601,8 +652,12 @@ const Match={
       if(H.anim){
         H.anim.t+=dt;
         if(H.anim.t>=H.anim.dur){
-          const to=H.anim.to; H.anim=null; H.tray--; H.entered++;
-          this.drop("nectar",al,to.x,to.y);
+          // a robot filling the zone: the hand waits with it
+          const to=this.clearSpot(H.anim.to,al), s=al==="red"?-1:1;
+          if(!to){ H.anim.t=H.anim.dur; continue; }
+          H.anim=null; H.tray--; H.entered++;
+          // it comes down from the hand into the zone and rolls a little way out toward the field
+          this.drop("nectar",al,to.x,to.y,{z:ballSpec("nectar").r+0.04, vx:-s*(0.12+this.rnd()*0.18), vz:-0.3});
           this.entries.push({t:this.t, al, earned:this.earned(al), lastMinute:this.left()<=60, x:to.x, y:to.y});
           this.note((al==="red"?"Red":"Blue")+" HUMAN PLAYER entered a NECTAR"+(this.left()<=60?"":" (for TIP "+H.entered+")"),al);
         }
@@ -615,6 +670,19 @@ const Match={
         H.busy=2.2;
       }
     }
+  },
+  /* Where in the LOADING ZONE a hand can put a NECTAR down: the spot it aimed for, or the
+     nearest one along the zone that no robot is sitting on. */
+  clearSpot(to,al){
+    const z=this.zone(al), r=ballSpec("nectar").r+0.01, boxes=this.ballBoxes(null);
+    const free=(x,y)=>boxes.every(B=>{ const c=Math.cos(B.h), s=Math.sin(B.h), dx=x-B.x, dy=y-B.y;
+      return Math.abs(dx*c+dy*s)>B.hx+r||Math.abs(-dx*s+dy*c)>B.hy+r; })&&!(this.userBody&&Math.hypot(x-this.userBody.x,y-this.userBody.y)<this.userBody.r+r);
+    if(free(to.x,to.y)) return to;
+    for(let k=1;k<=12;k++) for(const sg of [1,-1]){
+      const y=to.y+sg*k*0.05; if(y<z.y0+r||y>z.y1-r) continue;
+      if(free(to.x,y)) return {x:to.x, y};
+    }
+    return null;
   },
   /* NECTAR a HUMAN PLAYER may enter: one per own TIP this period */
   earned(al){ return Field.tips[al]-this.tips0[al]; },

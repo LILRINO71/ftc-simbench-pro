@@ -23,7 +23,7 @@ export const SITE = 'https://ftc-simbench-pro.pages.dev';
 // Concatenation order matters: later files use functions and constants the
 // earlier ones define. The engine never touches the DOM; only view3d and app do.
 export const ORDER = ['hardware', 'samples', 'step', 'hull', 'inertia', 'expr', 'jvm', 'jvmlib', 'jvmprelude', 'jvmrun', 'java', 'roadrunner', 'mapping', 'robotconfig',
-  'compare', 'analyze', 'drivetrain', 'frame', 'mates', 'onshapelink', 'onshapecad', 'meshfiles', 'urdf', 'jointspec', 'jointsheet', 'pedrogen', 'partsdb', 'grader', 'autorig-lib', 'autorig', 'robotcheck', 'bind', 'dynamics', 'joltmech', 'field', 'shots', 'match', 'robotlite', 'net', 'netrelay', 'controllers', 'session', 'mathdoc',
+  'compare', 'analyze', 'drivetrain', 'frame', 'mates', 'onshapelink', 'onshapecad', 'meshfiles', 'urdf', 'jointspec', 'jointsheet', 'pedrogen', 'partsdb', 'grader', 'autorig-lib', 'autorig', 'robotcheck', 'bind', 'dynamics', 'joltmech', 'field', 'ballphys', 'shots', 'match', 'robotlite', 'net', 'netrelay', 'controllers', 'session', 'mathdoc',
   'gitimport', 'onboarding', 'sim', 'calibrate', 'montecarlo', 'tier', 'tessellate', 'figures', 'shotfx', 'postfx', 'view3d', 'cadview', 'engineworker', 'importflow', 'recorder', 'sounds', 'leaderboard', 'results', 'minimap', 'pathedit', 'keybinds', 'challenges', 'touch', 'mcui', 'app'];
 // The browser-side files: everything before them is the engine, which also ships on
 // its own as dist/engine.js for the background worker (src/engineworker.js).

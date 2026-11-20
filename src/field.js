@@ -38,7 +38,7 @@ const Field={
     this.cells={red:[], blue:[]};
     for(const al of ["red","blue"]) for(let i=0;i<3;i++) this.cells[al].push({kind:"nectar", color:al});
     this.tips={red:0, blue:0}; this.lastTip=null;
-    this._hm=null; this.version++;
+    this._hm=null; this._bs=null; this.version++;
   },
   half(){ return this.ok ? this.data.field.field.half*IN : 1.83; },
   wallH(){ return this.ok ? this.data.field.field.wallHeight*IN : 0.31; },
@@ -104,6 +104,63 @@ const Field={
       const a=along?[c[0]-half,c[1]]:[c[0],c[1]-half], b=along?[c[0]+half,c[1]]:[c[0],c[1]+half];
       out.push({what:"FLOWER", r:fl.depth/2*IN, a:[a[0]*IN,a[1]*IN], b:[b[0]*IN,b[1]*IN]});
     }
+    return out;
+  },
+
+  /* What a loose ball can hit (src/ballphys.js), in metres: the tiles, the perimeter (as tall as
+     it needs to be: a ball never leaves the field), the HIVE frame as capsules, the FLOWERs as
+     boxes, and the four CELLs as the Shot Sim draws them. An up-CELL is a thin-walled tube open
+     at its mouth for a ball aimed at it (b.target) while it's still the CELL that was up when
+     the ball left (b.hive); a ball whose centre gets a radius into it is in. Every other CELL is
+     solid. Built again when a HIVE tips. */
+  ballStatics(){
+    if(!this.ok) return [];
+    const key=this.hive.red+","+this.hive.blue;
+    if(this._bs&&this._bsKey===key) return this._bs;
+    const F=this.data.field, H=this.half(), K=BALL_K, BIG=1e9, out=[];
+    const m=p=>[p[0]*IN, p[1]*IN, p[2]*IN];
+    const bound=(o,pts,R)=>{ o.x0=o.y0=o.z0=Infinity; o.x1=o.y1=o.z1=-Infinity;
+      for(const p of pts){ o.x0=Math.min(o.x0,p[0]-R); o.x1=Math.max(o.x1,p[0]+R); o.y0=Math.min(o.y0,p[1]-R); o.y1=Math.max(o.y1,p[1]+R); o.z0=Math.min(o.z0,p[2]-R); o.z1=Math.max(o.z1,p[2]+R); }
+      return o; };
+    out.push({type:"plane", tag:"floor", floor:true, n:[0,0,1], c:0, e:K.floorE, mu:K.floorMu, x0:-BIG, x1:BIG, y0:-BIG, y1:BIG, z0:-BIG, z1:0});
+    out.push({type:"plane", tag:"wall", n:[-1,0,0], c:-H, e:K.wallE, mu:K.wallMu, x0:H, x1:BIG, y0:-BIG, y1:BIG, z0:-BIG, z1:BIG});
+    out.push({type:"plane", tag:"wall", n:[1,0,0], c:-H, e:K.wallE, mu:K.wallMu, x0:-BIG, x1:-H, y0:-BIG, y1:BIG, z0:-BIG, z1:BIG});
+    out.push({type:"plane", tag:"wall", n:[0,-1,0], c:-H, e:K.wallE, mu:K.wallMu, x0:-BIG, x1:BIG, y0:H, y1:BIG, z0:-BIG, z1:BIG});
+    out.push({type:"plane", tag:"wall", n:[0,1,0], c:-H, e:K.wallE, mu:K.wallMu, x0:-BIG, x1:BIG, y0:-BIG, y1:-H, z0:-BIG, z1:BIG});
+    const cap=(a,b,r)=>out.push(bound({type:"capsule", tag:"frame", a:m(a), b:m(b), r:r*IN, e:K.hiveE, mu:K.hiveMu},[m(a),m(b)],r*IN));
+    const fr=F.hive.frame;
+    for(const s of fr.legs) cap(s[0],s[1],fr.tubeRadius);
+    cap(fr.crossbar[0],fr.crossbar[1],fr.tubeRadius);
+    if(fr.cornerBlocks) for(const s of fr.cornerBlocks.segments) cap(s[0],s[1],fr.cornerBlocks.radius);
+    if(fr.footBars) for(const s of fr.footBars.segments) cap(s[0],s[1],fr.footBars.width/2);
+    const M=this.model();
+    for(const hv of M.hives) for(let i=0;i+1<hv.armBar.length;i++) cap(hv.armBar[i],hv.armBar[i+1],hv.armRadius);
+    // FLOWERs: a box against the wall, as tall as the backstop
+    for(const fl of F.flowers){
+      const along=fl.wall==="+y"||fl.wall==="-y", sg=fl.wall.charAt(0)==="+"?1:-1, ac=sg*(F.field.half-fl.depth/2);
+      const cx=along?fl.x:ac, cy=along?ac:fl.y, ex=(along?fl.alongWall:fl.depth)/2, ey=(along?fl.depth:fl.alongWall)/2;
+      out.push({type:"aabb", tag:"flower", x0:(cx-ex)*IN, x1:(cx+ex)*IN, y0:(cy-ey)*IN, y1:(cy+ey)*IN, z0:0, z1:(fl.backstopTopZ||22.75)*IN, e:K.hiveE, mu:K.hiveMu});
+    }
+    // the CELLs, through the Shot Sim's own geometry (inches inside)
+    const X=this.E._internal, G=X.geometry(), r2in=1/IN;
+    for(const hv of M.hives) hv.cells.forEach((cw,ci)=>{
+      const al=hv.alliance, sg=hv.sigma, hx=hv.hx, up=ci===0;
+      const open=b=>up&&b.target===al&&(b.hive==null||b.hive===sg);
+      const C=bound({type:"sdf", tag:"cell", al, up, e:K.hiveE, mu:K.hiveMu},cw.vertices.map(m),0);
+      C.dist=(x,y,z,b)=>{
+        const p=X.worldToBody(x*r2in,y*r2in,z*r2in,hx,sg);
+        return (open(b)?X.shellDist(p[0],p[1],p[2]):up?X.prismDist(p[0],p[1],p[2],G.aIn,G.aOut):X.prismDist(p[0],p[1],p[2],-G.aOut,-G.aIn))*IN;
+      };
+      // which part it hit, the way the Shot Sim names it: the lip (the rim's low edge), the roof, or a CELL
+      C.tagOf=b=>{ if(!open(b)) return "cell"; const p=X.worldToBody(b.x*r2in,b.y*r2in,b.z*r2in,hx,sg); return p[2]-G.b0<1.5?"lip":"roof"; };
+      C.sink=up?(b,r)=>{
+        if(!open(b)) return false;
+        const p=X.worldToBody(b.x*r2in,b.y*r2in,b.z*r2in,hx,sg), f=p[1]-G.aOut;
+        return f< -r*r2in&&f>=-G.depth&&X.insidePentagon(p[0],p[2]);
+      }:null;
+      out.push(C);
+    });
+    this._bs=out; this._bsKey=key;
     return out;
   },
 
