@@ -26,6 +26,7 @@ function jvParseCached(src,file){
   if(JV_PARSE_CACHE.has(key)) return JV_PARSE_CACHE.get(key);
   let u;
   try{ u=jvParse(src,file); }catch(e){ u={error:String(e.message||e),pos:e.jvPos,file}; }
+  u.src=src;                                              // what "the same class" means for a carry (jvCarryInto)
   if(JV_PARSE_CACHE.size>400) JV_PARSE_CACHE.clear();
   JV_PARSE_CACHE.set(key,u);
   return u;
@@ -83,7 +84,8 @@ function jvNewVM(comp){
   return vm;
 }
 
-function JvProgram(comp,host){
+/* opts.carry: what an earlier program left (its carry()), to start from: see jvCarryInto */
+function JvProgram(comp,host,opts){
   const vm=jvNewVM(comp);
   this.vm=vm; vm.host=host; vm.prog=this;
   this.comp=comp;
@@ -97,6 +99,96 @@ function JvProgram(comp,host){
   this.tel=vm.mk("org.firstinspires.ftc.robotcore.internal.Telemetry_");
   this.hw=vm.mk(JV_HW+"HardwareMap");
   this.self=null;
+  this.carried=null;
+  if(opts&&opts.carry) this.carried=jvCarryInto(this,opts.carry);
+}
+/* ---- one Robot Controller session: from the Autonomous to the TeleOp ----
+   On the robot every OpMode runs in one app process: a static field the Autonomous wrote
+   (PoseStorage.heading, a Road Runner pose) and OpMode.blackboard are still there when the
+   TeleOp starts, until the app restarts. Each bench run is a fresh VM, so the TeleOp would
+   always start from zero. P.carry() is what a program leaves; new JvProgram(comp, host,
+   {carry}) starts from it. */
+JvProgram.prototype.carry=function(){ return {vm:this.vm,prog:this,main:this.comp.main}; };
+/* The team's statics, as plain data: {"PoseStorage.heading": 90, ...} (numbers, strings,
+   booleans, enum names, and "Class.field" of other values' class), for a report */
+JvProgram.prototype.statics=function(){
+  const out={};
+  for(const [,c] of this.vm.classes){
+    if(!c.decl||c.decl.lib||!c.ready||c.decl.anon) continue;
+    for(const f of c.sinits){
+      if(f.k!=="field"||(f.final&&f.init&&(f.init.k==="lit"||f.init.k==="un"&&f.init.a.k==="lit"))) continue;   // a constant says nothing
+      const v=c.sf[f.name], key=c.name+"."+f.name;
+      out[key]=v==null||typeof v==="number"||typeof v==="string"||typeof v==="boolean"?(typeof v==="number"&&!isFinite(v)?String(v):v):
+        v.__en!==undefined?v.__en:Array.isArray(v)?"array["+v.length+"]":v.__c?v.__c.name:String(v);
+    }
+  }
+  return out;
+};
+/* Start program P where the program carry came from left off: the static fields of every
+   class that both programs have from the same source, and the blackboard. A class whose source
+   changed starts afresh, as it would after a redeploy (which restarts the app). Values are
+   copied into P's own VM: objects re-made as P's classes, enum constants as P's constants, a
+   device as P's device of that name. A lambda can't be carried (it closes over the old run)
+   and becomes null; so does an inner object's captured scope. Returns {classes, blackboard,
+   dropped}: what was carried. */
+function jvCarryInto(P,carry){
+  const old=carry&&carry.vm, nv=P.vm, out={classes:[],blackboard:false,dropped:[]};
+  if(!old||old===nv) return out;
+  const memo=new Map();
+  // what stands for the old run's own objects
+  if(carry.prog){ memo.set(carry.prog.tel,P.tel); memo.set(carry.prog.hw,P.hw); memo.set(carry.prog.pads[1],P.pads[1]); memo.set(carry.prog.pads[2],P.pads[2]); }
+  const srcOf=c=>{ const u=c.decl?(old.unitOf(c)||nv.unitOf(c)):null; return u&&u.src; };
+  const same=(a,b)=>!!a&&!!b&&!!a.decl&&!!b.decl&&(a.decl===b.decl||(!!srcOf(a)&&srcOf(a)===srcOf(b)&&a.decl.name===b.decl.name));
+  const cls=c=>c?(nv.classes.get(c.fqn)||(c.opaque?nv.opaqueClass(c.fqn):null)):null;
+  const pairs=[];
+  for(const [fqn,c] of old.classes){
+    const n=nv.classes.get(fqn);
+    if(!c.ready||!c.decl||!n||n.ready||!same(c,n)) continue;
+    n.ready=true;                                          // initialised once per app run, as in Java
+    pairs.push([c,n]);
+  }
+  const copyN=(n)=>{
+    if(n==null||typeof n!=="object") return n;
+    if(n instanceof Map){ const m=new Map(); for(const [k,e] of n) m.set(typeof k==="object"?val(k):k,Array.isArray(e)?e.map(val):val(e)); return m; }
+    if(Array.isArray(n)) return n.map(val);
+    if(jvIsObj(n)||n instanceof JvFn) return val(n);
+    const o={}; for(const k of Object.keys(n)) o[k]=copyN(n[k]); return o;
+  };
+  function val(v){
+    if(v==null||typeof v!=="object") return v;
+    if(memo.has(v)) return memo.get(v);
+    if(v instanceof JvFn){ out.dropped.push("a lambda"); memo.set(v,null); return null; }
+    if(Array.isArray(v)){ const a=new Array(v.length); memo.set(v,a); for(let i=0;i<v.length;i++) a[i]=val(v[i]); return a; }
+    if(v.__type){ const c=cls(v.__type); return c?Object.assign({},v,{__type:c}):null; }
+    if(v.__pkg) return v;
+    if(!jvIsObj(v)) return v;
+    const c=v.__c;
+    if(v[JV_OPAQUE_TAG]||c.opaque){ const o=nv.opaqueVal(c.fqn); memo.set(v,o); return o; }
+    // a device: the new run's own device of that name
+    if(v.n&&v.n.s&&v.n.kind&&v.n.name!=null&&JV_KIND_TYPE[v.n.kind]){ const d=jvDrain(jvGetDevice(nv,JV_KIND_TYPE[v.n.kind],v.n.name,c.name)); memo.set(v,d); return d; }
+    const nc=cls(c);
+    if(v.__en!==undefined&&nc&&!pairs.some(p=>p[0]===c)){
+      // an enum whose class isn't carried: the new run's constant of that name
+      jvDrain(nv.ready(nc)); const k=nc.sf[v.__en]||null; memo.set(v,k); return k;
+    }
+    if(!nc){ out.dropped.push(c.name); memo.set(v,null); return null; }
+    const o={__c:nc,f:Object.create(null),n:null};
+    if(v.__en!==undefined){ o.__en=v.__en; o.__eo=v.__eo; }
+    if(v.__h) o.__h=v.__h;
+    memo.set(v,o);
+    for(const k in v.f) o.f[k]=val(v.f[k]);
+    o.n=copyN(v.n);
+    if(v.__outer) o.__outer=val(v.__outer);
+    if(v.__cap) out.dropped.push(c.name+"'s captured locals");
+    return o;
+  }
+  for(const [c,n] of pairs){
+    if(c.consts) n.consts=c.consts.map(val);
+    for(const k in c.sf) n.sf[k]=val(c.sf[k]);
+    out.classes.push(n.fqn);
+  }
+  if(old.blackboard){ nv.blackboard=val(old.blackboard); out.blackboard=true; }
+  return out;
 }
 JvProgram.prototype.fail=function(e){
   if(e&&e.jvStop){ this.done=true; return; }
