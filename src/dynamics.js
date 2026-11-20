@@ -20,7 +20,8 @@
 
    Frames are drivetrain.js's: x forward, y left, z up, omega counter-
    clockwise, origin at the centre of the wheels. Velocities are in the
-   BODY frame, so the omega x v terms are carried explicitly. SI
+   BODY frame, so each step turns the velocity back by the angle the body
+   turned (an exact rotation, not omega x v added on). SI
    throughout: newtons, N.m, m/s, rad/s, kg, kg.m^2.
 
    INTEGRATION SCHEME. Semi-implicit (symplectic) Euler at a fixed dt,
@@ -693,10 +694,11 @@ const Dyn = {
     const E = side.map(j => j < 0 ? 0 : Math.max(1e-9, dt * A[j][j]));
     // the sideways slip the step would end with and no contact force: the
     // ground speed under the patch (the rim has no sideways speed of its
-    // own), with the body-frame velocity already turned by omega x v. Left
-    // out, a robot holding a steady corner slid out by a whole step's worth
-    // of centripetal acceleration.
-    const fvx = vx + dt * om * vy, fvy = vy - dt * om * vx;
+    // own), with the body-frame velocity already turned as the step turns it
+    // (below). Left out, a robot holding a steady corner slid out by a whole
+    // step's worth of centripetal acceleration.
+    const turnC = Math.cos(om * dt), turnS = Math.sin(om * dt);
+    const fvx = vx * turnC + vy * turnS, fvy = vy * turnC - vx * turnS;
     const c0 = side.map((j, i) => {
       if (j < 0) return 0;
       const l = W[i].lat;
@@ -750,21 +752,24 @@ const Dyn = {
       if (l) { Fx += Gs[i] * l[0]; Fy += Gs[i] * l[1]; Tz += Gs[i] * l[2]; }
     }
 
-    // ---- rigid body, body frame: omega x v is what makes a turning robot
-    // carry its speed round the corner instead of sliding off tangentially
-    let ax = Fx / m + om * vy;
-    let ay = Fy / m - om * vx;
-    let al = Tz / Izz;
+    // ---- rigid body, body frame. The chassis frame turns by omega dt over the
+    // step, so the velocity it carries is turned back by exactly that angle
+    // (fvx, fvy above): that is what makes a turning robot carry its speed
+    // round the corner instead of sliding off tangentially, and a rotation
+    // keeps the speed's length. (It was added as dt (omega x v), which grew the
+    // speed by (dt omega)^2 of itself every step: energy from nothing on every
+    // curved path.) The contacts then add F/m.
     const aMax = DYN_DEFAULTS.vMax / dt;
-    ax = dynClamp(dynFin(ax), -aMax, aMax);
-    ay = dynClamp(dynFin(ay), -aMax, aMax);
+    const ax = dynClamp(dynFin(Fx / m), -aMax, aMax);
+    const ay = dynClamp(dynFin(Fy / m), -aMax, aMax);
+    let al = Tz / Izz;
     al = dynClamp(dynFin(al), -DYN_DEFAULTS.omegaMax / dt, DYN_DEFAULTS.omegaMax / dt);
 
-    let nvx = vx + dt * ax, nvy = vy + dt * ay, nom = om + dt * al;
+    let nvx = fvx + dt * ax, nvy = fvy + dt * ay, nom = om + dt * al;
     // what the body really accelerates at, for next step's load transfer:
-    // force over mass. ax, ay above are d(v_body)/dt, which in a steady turn
-    // is zero (the velocity only rotates) though the robot leans outward.
-    const lx = dynClamp(dynFin(Fx / m), -aMax, aMax), ly = dynClamp(dynFin(Fy / m), -aMax, aMax);
+    // force over mass, which in a steady turn leans the robot outward though
+    // its body-frame velocity only rotates
+    const lx = ax, ly = ay;
 
     // ---- losses, as a decrement rather than a force: a robot that has
     // stopped must stay stopped, not jitter across the tile
