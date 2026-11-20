@@ -568,6 +568,7 @@ function JVM(units,natives){
   this.strand=jvStrand();
   this.tick0={now:null,steps:0,dt:0.02};   // the pass's clock (jvNow in src/jvmlib.js)
   this.wall0s=0;                           // s the wall clock is ahead of the sim's (a carry)
+  this.wallK=16; this.wallN=16; this.wallT=0;   // how often the watchdog reads the page's clock (overWall)
   this.host=null;
   // what a run learns about a node of the parsed code (who owns a method, a field's
   // type, whether a call returns an int, an anonymous class). Parsed code is cached
@@ -1049,7 +1050,7 @@ JVM.prototype.run=function*(m,self,args,owner){
   this.bindParams(m.params,args,sc);
   // a call counts toward the busy-wait guard like a loop pass: recursion with no loop in it
   // (fib(32), 7 million calls) still lets time pass instead of holding the page for seconds
-  if(--this.budget<0||((this.budget&3)===0&&this.overWall())){ this.budget=this.BUDGET; jvWaited(this.strand); this.wall0=null; yield {gate:true,forced:true,at:m.p}; }
+  if(--this.budget<0||(--this.wallN<=0&&this.overWall())){ this.budget=this.BUDGET; jvWaited(this.strand); this.wall0=null; yield {gate:true,forced:true,at:m.p}; }
   const st=this.strand;
   st.depth=(st.depth||0)+1;
   // this frame never reaches the finally below, so it gives its level back itself
@@ -1114,15 +1115,29 @@ JVM.prototype.backEdge=function(w){
   if(s.gates>(w.g>s.yg?w.g:s.yg)) s.passDone=true;
   w.g=s.gates;
 };
-JVM.prototype.tickCheck=function*(node,w){
-  if(w) this.backEdge(w);
-  // a loop with no gate in it (a busy-wait on isBusy(), say) still lets time pass; and so does
-  // one whose passes are slow (a quarter second of the page's own time in one tick)
-  if(--this.budget<0||((this.budget&3)===0&&this.overWall())){ this.budget=this.BUDGET; jvWaited(this.strand); this.wall0=null; yield {gate:true,forced:true,at:node&&node.p}; }
+/* A loop's back-edge: true when it must wait for the next tick (then `yield this.forced(node)`).
+   A loop with no gate in it (a busy-wait on isBusy(), say) still lets time pass; and so does one
+   whose passes are slow (a quarter second of the page's own time in one tick). A plain function,
+   not a generator: a loop pays for no generator object a pass. */
+JVM.prototype.edge=function(w){
+  this.backEdge(w);
+  return --this.budget<0||(--this.wallN<=0&&this.overWall());
 };
+JVM.prototype.forced=function(node){ this.budget=this.BUDGET; jvWaited(this.strand); this.wall0=null; return {gate:true,forced:true,at:node&&node.p}; };
 /* The wall-clock watchdog: JvProgram sets wall0 when it starts running code for a tick */
 const JV_WALL_MS=250;
-JVM.prototype.overWall=function(){ return this.wall0!=null&&Date.now()-this.wall0>JV_WALL_MS; };
+/* The page's clock is read only every wallK back-edges or calls (wallN counts down): wallK
+   doubles up to JV_WALL_K while the steps between two reads take under a millisecond (a tight
+   loop reads it once in 256 steps, not once in 4), and falls fast when they take longer (a pass
+   that rewrites a big string is checked every pass or so). */
+const JV_WALL_K=256;
+JVM.prototype.overWall=function(){
+  const now=Date.now(), gap=now-this.wallT;
+  this.wallT=now;
+  this.wallK=gap<1?Math.min(this.wallK*2,JV_WALL_K):gap>4?Math.max(1,this.wallK>>3):this.wallK;
+  this.wallN=this.wallK;
+  return this.wall0!=null&&now-this.wall0>JV_WALL_MS;
+};
 /* The deepest the team's calls may nest. The interpreter's frames are generators on the page's
    own stack (about 1 MB, and several JS frames a Java call), so it is far below a robot's
    thousands; past it, and wherever the JS stack runs out first, Java's StackOverflowError. */
@@ -1148,8 +1163,8 @@ JVM.prototype.ex=function*(st,sc){
       const w={g:this.strand.gates};
       while(jvTruth(yield* this.ev(st.c,sc))){
         const r=yield* this.ex(st.body,new JvScope(sc));
-        if(r){ if(r.s===JV_BRK&&(!r.l||r.l===st.label)) break; if(r.s===JV_CONT&&(!r.l||r.l===st.label)){ yield* this.tickCheck(st,w); continue; } return r; }
-        yield* this.tickCheck(st,w);
+        if(r){ if(r.s===JV_BRK&&(!r.l||r.l===st.label)) break; if(r.s===JV_CONT&&(!r.l||r.l===st.label)){ if(this.edge(w)) yield this.forced(st); continue; } return r; }
+        if(this.edge(w)) yield this.forced(st);
       }
       return null;
     }
@@ -1157,8 +1172,8 @@ JVM.prototype.ex=function*(st,sc){
       const w={g:this.strand.gates};
       do{
         const r=yield* this.ex(st.body,new JvScope(sc));
-        if(r){ if(r.s===JV_BRK&&(!r.l||r.l===st.label)) break; if(r.s===JV_CONT&&(!r.l||r.l===st.label)){ yield* this.tickCheck(st,w); continue; } return r; }
-        yield* this.tickCheck(st,w);
+        if(r){ if(r.s===JV_BRK&&(!r.l||r.l===st.label)) break; if(r.s===JV_CONT&&(!r.l||r.l===st.label)){ if(this.edge(w)) yield this.forced(st); continue; } return r; }
+        if(this.edge(w)) yield this.forced(st);
       }while(jvTruth(yield* this.ev(st.c,sc)));
       return null;
     }
@@ -1170,7 +1185,7 @@ JVM.prototype.ex=function*(st,sc){
         const r=yield* this.ex(st.body,new JvScope(fs));
         if(r){ if(r.s===JV_BRK&&(!r.l||r.l===st.label)) break; if(!(r.s===JV_CONT&&(!r.l||r.l===st.label))) return r; }
         for(const u of st.upd) yield* this.ev(u,fs);
-        yield* this.tickCheck(st,w);
+        if(this.edge(w)) yield this.forced(st);
       }
       return null;
     }
@@ -1181,7 +1196,7 @@ JVM.prototype.ex=function*(st,sc){
         const bs=new JvScope(sc); bs.v[st.name]=jvCoerce(v,st.type); bs.t[st.name]=st.type;
         const r=yield* this.ex(st.body,bs);
         if(r){ if(r.s===JV_BRK&&(!r.l||r.l===st.label)) break; if(!(r.s===JV_CONT&&(!r.l||r.l===st.label))) return r; }
-        yield* this.tickCheck(st,w);
+        if(this.edge(w)) yield this.forced(st);
       }
       return null;
     }
@@ -1337,6 +1352,7 @@ JVM.prototype.str=function*(v,kind){
   const r=yield* this.invoke(v,"toString",[],null);
   return typeof r==="string"?r:String(r);
 };
+const JV_BOOL_OPS=new Set(["==","!=","<",">","<=",">=","&&","||"]);
 /* What Java type an expression has, as far as arithmetic and printing go (5/2 is 2, 5.0/2 is
    2.5): "i" int (short, byte too), "l" long, "c" char, "d" double, "s" String, null unknown */
 JVM.prototype.kind=function(e,sc){
@@ -1355,7 +1371,7 @@ JVM.prototype.kind=function(e,sc){
     case "un":{ if(e.op==="!") return null; const k=this.kind(e.a,sc); return k==="c"?"i":k; }
     case "pre": case "post": return this.kind(e.a,sc);
     case "bin":{
-      if(/^(==|!=|<|>|<=|>=|&&|\|\|)$/.test(e.op)) return null;
+      if(JV_BOOL_OPS.has(e.op)) return null;
       const a=this.kind(e.a,sc), b=this.kind(e.b,sc);
       if(e.op==="+"&&(a==="s"||b==="s")) return "s";
       if(e.op==="<<"||e.op===">>"||e.op===">>>") return a==="l"?"l":"i";
@@ -1374,6 +1390,25 @@ JVM.prototype.typeOf=function(e,sc){
   if(e.k==="index"){ const t=this.typeOf(e.a,sc); return t&&t.dims?Object.assign({},t,{dims:t.dims-1}):null; }
   return null;
 };
+/* The integral type ("int", "long", "char"…) a store into target t narrows to, or null. Worked
+   out once per node and program: which declaration a name, field or element is never changes in
+   one program, but parsed code is shared by every program (JV_PARSE_CACHE), and the same
+   other.count++ can be an int in one and a double in another, so it is kept in this VM's
+   nodeInfo, never on the node. Only a type that was found is kept (a field's type is known once
+   it has been read). */
+JVM.prototype.narrowOf=function(t,sc){ return this.target(t,sc).nt; };
+/* {nt: what a store into t narrows to, kt: t's kind (as kind() gives it)}, kept per node and
+   program once t's declared type is known (see narrowOf) */
+JVM.prototype.target=function(t,sc){
+  const ni=this.ni(t);
+  if(ni.nt===undefined){
+    const ty=this.typeOf(t,sc);
+    if(!ty) return {nt:null,kt:this.kind(t,sc)};
+    const tn=!ty.dims?ty.name:null;
+    ni.nt=tn&&JV_INTS.has(tn)?jvPrimOf(tn):null; ni.kt=jvTypeKind(ty);
+  }
+  return ni;
+};
 JVM.prototype.fieldType=function(c,name){
   for(let k=c;k;k=this.supOf(k)){ if(k.ftypes&&k.ftypes[name]) return k.ftypes[name]; for(const f of this.ifsOf(k)) if(f.ftypes&&f.ftypes[name]) return f.ftypes[name]; }
   if(c.outer) return this.fieldType(c.outer,name);
@@ -1384,6 +1419,10 @@ JVM.prototype.fieldType=function(c,name){
 JVM.prototype.lookup=function(name,sc){
   const s=sc.find(name);
   if(s) return {k:"local",s};
+  return this.lookupOut(name,sc);
+};
+/* lookup past the locals (a caller that has looked there already) */
+JVM.prototype.lookupOut=function(name,sc){
   const fr=sc.fr;
   for(let self=fr&&fr.self, cls=fr&&fr.cls; cls; ){
     if(self&&self.f&&name in self.f) return {k:"field",o:self};
@@ -1425,7 +1464,9 @@ JVM.prototype.ev=function*(e,sc){
     case "lit": return e.v;
     case "paren": return yield* this.ev(e.e,sc);
     case "name":{
-      const w=this.lookup(e.name,sc);
+      // a local, the commonest read: found without making a lookup record
+      for(let s=sc;s;s=s.up) if(e.name in s.v) return s.v[e.name];
+      const w=this.lookupOut(e.name,sc);
       if(w){
         if(w.k==="local") return w.s.v[e.name];
         if(w.k==="field") return w.o.f[e.name];
@@ -1509,8 +1550,8 @@ JVM.prototype.ev=function*(e,sc){
       const old=jvNum(yield* this.ev(e.a,sc));
       let nv=e.op==="++"?old+1:old-1;
       // MAX_VALUE + 1 wraps; a byte, short or char wraps at its own width
-      const t=this.typeOf(e.a,sc), tn=t&&!t.dims?t.name:null;
-      if(tn&&JV_INTS.has(tn)) nv=jvNarrow(nv,jvPrimOf(tn),true);
+      const tn=this.narrowOf(e.a,sc);
+      if(tn) nv=jvNarrow(nv,tn,true);
       yield* this.store(e.a,nv,sc);
       return e.k==="pre"?nv:old;
     }
@@ -1519,18 +1560,9 @@ JVM.prototype.ev=function*(e,sc){
     case "assign":{
       if(e.op==="="){ const v=yield* this.ev(e.v,sc); return yield* this.store(e.t,v,sc); }
       const cur=yield* this.ev(e.t,sc), v=yield* this.ev(e.v,sc);
-      const op=e.op.slice(0,-1);
       let r;
-      if(op==="+"&&(typeof cur==="string"||typeof v==="string")){ const x=yield* this.str(cur,this.kind(e.t,sc)), y=yield* this.str(v,this.kind(e.v,sc)); jvRoom(this,x.length,y.length,JV_MAX_CHARS,"a String"); r=x+y; }
-      else{
-        // x op= y is (T)(x op y) (JLS 15.26.2): the operation in the promoted type, then
-        // narrowed to x's type, wrapping from an integral result and saturating from a double
-        const kt=this.kind(e.t,sc), kv=this.kind(e.v,sc);
-        const k=op==="<<"||op===">>"||op===">>>"?(kt==="l"?"l":jvIntegral(kt)?"i":null):jvPromote(kt,kv);
-        r=this.arith(op,cur,v,k,e);
-        const t=this.typeOf(e.t,sc), tn=t&&!t.dims?t.name:null;
-        if(tn&&JV_INTS.has(tn)&&typeof r==="number") r=jvNarrow(r,jvPrimOf(tn),!!k);
-      }
+      if(e.op==="+="&&(typeof cur==="string"||typeof v==="string")){ const x=yield* this.str(cur,this.kind(e.t,sc)), y=yield* this.str(v,this.kind(e.v,sc)); jvRoom(this,x.length,y.length,JV_MAX_CHARS,"a String"); r=x+y; }
+      else r=this.compound(e,cur,v,sc);
       return yield* this.store(e.t,r,sc);
     }
     case "cast":{
@@ -1559,6 +1591,17 @@ JVM.prototype.ev=function*(e,sc){
     case "super": return sc.fr&&sc.fr.self;
   }
   throw JvError("expression "+e.k+" isn't supported",e.p);
+};
+/* x op= y on numbers is (T)(x op y) (JLS 15.26.2): the operation in the promoted type, then
+   narrowed to x's type, wrapping from an integral result and saturating from a double */
+JVM.prototype.compound=function(e,cur,v,sc){
+  const op=e.aop||(e.aop=e.op.slice(0,-1));               // syntax only: kept on the node
+  const T=this.target(e.t,sc), kt=T.kt;
+  // a double target: double arithmetic whatever the right side is, and nothing to narrow
+  const k=!kt?null:op==="<<"||op===">>"||op===">>>"?(kt==="l"?"l":jvIntegral(kt)?"i":null):jvPromote(kt,this.kind(e.v,sc));
+  let r=this.arith(op,cur,v,k,e);
+  if(T.nt&&typeof r==="number") r=jvNarrow(r,T.nt,!!k);
+  return r;
 };
 function jvToInt(v,n){
   if(!isFinite(v)) return isNaN(v)?0:(v>0?(n==="long"?9223372036854775807:2147483647):(n==="long"?-9223372036854775808:-2147483648));
@@ -1601,6 +1644,30 @@ function jvLongOp(op,x,y){
 /* One arithmetic operator. k is the operands' promoted kind: "i" int arithmetic, which wraps
    at 32 bits like Java's; "l" long, which wraps at 64; anything else is double arithmetic */
 JVM.prototype.arith=function(op,a,b,k,node){
+  // double arithmetic, the commonest, stays small enough to be inlined; int and long apart
+  if(k==="i"||k==="l") return this.arithIL(op,a,b,k,node);
+  const x=typeof a==="number"?a:jvNum(a), y=typeof b==="number"?b:jvNum(b);
+  switch(op){
+    case "+": return x+y;
+    case "-": return x-y;
+    case "*": return x*y;
+    case "/": return x/y;
+  }
+  return jvArithD(op,a,b,x,y);
+};
+function jvArithD(op,a,b,x,y){
+  switch(op){
+    case "%": return x%y;
+    case "&": return typeof a==="boolean"?(a&&b):(x&y);
+    case "|": return typeof a==="boolean"?(a||b):(x|y);
+    case "^": return typeof a==="boolean"?(a!==b):(x^y);
+    case "<<": return x<<y;
+    case ">>": return x>>y;
+    case ">>>": return x>>>y;
+  }
+  return 0;
+}
+JVM.prototype.arithIL=function(op,a,b,k,node){
   const x=jvNum(a), y=jvNum(b);
   if(k==="i") switch(op){
     case "+": return (x+y)|0;
@@ -1623,15 +1690,8 @@ JVM.prototype.arith=function(op,a,b,k,node){
     case "-": return x-y;
     case "*": return x*y;
     case "/": return x/y;
-    case "%": return x%y;
-    case "&": return typeof a==="boolean"?(a&&b):(x&y);
-    case "|": return typeof a==="boolean"?(a||b):(x|y);
-    case "^": return typeof a==="boolean"?(a!==b):(x^y);
-    case "<<": return x<<y;
-    case ">>": return x>>y;
-    case ">>>": return x>>>y;
   }
-  return 0;
+  return jvArithD(op,a,b,x,y);
 };
 /* A value narrowed to the integral type n (JLS 5.1.3): from a double it saturates, from an
    integral value (fromInt) it keeps the low bits */
@@ -1666,7 +1726,9 @@ JVM.prototype.binop=function*(e,sc){
 JVM.prototype.store=function*(t,v,sc){
   if(t.k==="paren") return yield* this.store(t.e,v,sc);
   if(t.k==="name"){
-    const w=this.lookup(t.name,sc);
+    const ls=sc.find(t.name);
+    if(ls){ const cv=jvCoerce(v,ls.t[t.name]); ls.v[t.name]=cv; return cv; }
+    const w=this.lookupOut(t.name,sc);
     if(!w){ sc.v[t.name]=v; return v; }       // shouldn't happen in Java; keep running
     if(w.k==="local"){ const ty=w.s.t[t.name]; const cv=jvCoerce(v,ty); w.s.v[t.name]=cv; return cv; }
     if(w.k==="field"){ const ty=this.fieldType(w.o.__c,t.name); const cv=jvCoerce(v,ty); w.o.f[t.name]=cv; return cv; }

@@ -1,0 +1,20 @@
+{
+  "note": "Time of 150 ticks of the loop-heavy OpMode in tests/jvm-speed.test.mjs on the Java VM alone (the quickest of 16 pieces of 15 ticks, times 10), divided by the time of the fixed JavaScript reference in tools/bench-cpu.mjs (the quickest of 16). The test fails when it is more than maxSlowdown times this. Re-measure: UPDATE_JVM_SPEED=1 node --test tests/jvm-speed.test.mjs",
+  "ratio": 83.92,
+  "maxSlowdown": 2,
+  "measured": {
+    "vmMs": 426.3,
+    "referenceMs": 5.08,
+    "node": "v24.22.1",
+    "runs": [
+      91.38,
+      83.92,
+      78.74,
+      80.47,
+      83,
+      91.18,
+      94.3
+    ],
+    "how": "the median of 7 runs, on a busy machine (other agents running test suites); re-measure at landing"
+  }
+}

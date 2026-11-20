@@ -65,6 +65,29 @@ test('a team generic class: the declared return type decides, double included; a
   ['1.25', '1.25', 'avg 2.5', '3.75', '1.5', '1', '1', 'n 2', '2.0', '2.5', '3 3.5 4.5']);
 });
 
+test('what ++ and op= narrow to is worked out per program: one parsed helper, an int in one program and a double in another', () => {
+  // Bump.java is the same text in both programs, so the parse cache hands both the same nodes;
+  // o.count is an int in one program's Other and a double in the other's
+  const bump = `package org.firstinspires.ftc.teamcode;
+public class Bump { public static double go(Other o) { o.count++; o.count += 0.5; o.count -= 1; return o.count - 2147483000; } }`;
+  const other = (t, v) => `package org.firstinspires.ftc.teamcode;\npublic class Other { public ${t} count = ${v}; }`;
+  const main = `package org.firstinspires.ftc.teamcode;
+import com.qualcomm.robotcore.eventloop.opmode.*;
+@TeleOp(name="T") public class T extends LinearOpMode { @Override public void runOpMode() { waitForStart();
+  Other o = new Other(); System.out.println(Bump.go(o) + " " + Bump.go(o)); } }`;
+  const run = (t, v) => {
+    const r = runOpMode({ code: [{ file: 'T.java', src: main }, { file: 'Bump.java', src: bump }, { file: 'Other.java', src: other(t, v) }], opmode: 'T.java', seconds: 0.1 });
+    assert.equal(r.error, null, JSON.stringify(r.error));
+    return r.prints;
+  };
+  // int: MAX_VALUE + 1 wraps to MIN_VALUE, += 0.5 is (int)(x + 0.5), and the int subtraction
+  // wraps back (Java: 648.0, then 649.0); double: nothing wraps or truncates (647.5, 648.0)
+  for (let k = 0; k < 2; k++) {
+    assert.deepEqual(run('int', '2147483647'), ['648.0 649.0']);
+    assert.deepEqual(run('double', '2147483647'), ['647.5 648.0']);
+  }
+});
+
 test('int arithmetic wraps at 32 bits like Java (JLS 15.17, 15.18, 15.15)', () => {
   assert.deepEqual(say(`int a = Integer.MAX_VALUE; a = a + 1; say(a);
     int b = 100000; say(b * b);
