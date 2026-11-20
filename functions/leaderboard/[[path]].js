@@ -32,7 +32,8 @@ export const RATE = { max: 8, windowMs: 10 * 60 * 1000 };
 const NAME_MAX = 24, LABEL_MAX = 40, BODY_MAX = 2048;
 const MODES = Object.keys(LIMITS);
 
-const json = (obj, status = 200, extra = {}) => new Response(JSON.stringify(obj), { status, headers: Object.assign({ 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }, extra) });
+// Pages does not apply dist/_headers to a Function's answers: nosniff is set here
+const json = (obj, status = 200, extra = {}) => new Response(JSON.stringify(obj), { status, headers: Object.assign({ 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }, extra) });
 const bad = (error, message, status = 400) => json({ error, message }, status);
 
 /* ---------------- names ---------------- */

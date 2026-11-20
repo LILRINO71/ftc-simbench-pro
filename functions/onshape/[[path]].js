@@ -65,7 +65,11 @@ function cookies(req) {
   return out;
 }
 const setCookie = (name, value, maxAge) => `${name}=${value}; Path=/onshape; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}`;
-const json = (obj, status = 200, headers = {}) => new Response(JSON.stringify(obj), { status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store", ...headers } });
+// Pages does not apply dist/_headers to a Function's answers, so the relay sets its own: an answer
+// is never sniffed into something else (Onshape's Content-Type is passed through), and the sign-in
+// page frames only where the app may be framed (tools/headers.mjs FRAME_ANCESTORS)
+const NOSNIFF = { "X-Content-Type-Options": "nosniff" };
+const json = (obj, status = 200, headers = {}) => new Response(JSON.stringify(obj), { status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store", ...NOSNIFF, ...headers } });
 
 /* Onshape's client ID and secret are base64 and end in "=", and a copy, or a
    paste into a settings box, often leaves that last character behind. Onshape
@@ -109,7 +113,7 @@ function backPage(ok, msg) {
 var d=${data};
 try{ if(window.opener&&!window.opener.closed){ window.opener.postMessage(d,location.origin); window.close(); } }catch(e){}
 setTimeout(function(){ location.replace("/#onshape-"+(d.ok?"signed-in":"signin-failed")); },400);
-</script>`, { status: ok ? 200 : 400, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
+</script>`, { status: ok ? 200 : 400, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", ...NOSNIFF, "Content-Security-Policy": "frame-ancestors 'self' https://*.onshape.com" } });
 }
 
 export async function handle(request, env, fetchImpl = fetch, ctx = null) {
@@ -216,7 +220,7 @@ export async function handle(request, env, fetchImpl = fetch, ctx = null) {
             if (info && info.public === true) try { await store.put(open, new Response("1", { headers: { "Cache-Control": "public, max-age=86400" } })); } catch (e) {}
           } else if (can.status !== 403 && can.status !== 404) {
             // Onshape busy (429, 5xx) or the app's allowance used up (402): said as a fresh read would say it
-            const h = await keepToken(new Headers({ "Content-Type": can.headers.get("Content-Type") || "application/json", "Cache-Control": "no-store" }));
+            const h = await keepToken(new Headers({ "Content-Type": can.headers.get("Content-Type") || "application/json", "Cache-Control": "no-store", ...NOSNIFF }));
             const ra = can.headers.get("Retry-After"); if (ra) h.set("Retry-After", ra);
             return new Response(can.body, { status: can.status, headers: h });
           } else if (!url.searchParams.get("linkDocumentId")) {
@@ -227,7 +231,7 @@ export async function handle(request, env, fetchImpl = fetch, ctx = null) {
           // and only the read itself can carry the link. Onshape decides on a fresh read, below.
         }
         if (serve) {
-          const h = await keepToken(new Headers(hit.headers)); h.set("X-SimBench-Cache", "hit"); h.set("Cache-Control", "no-store");
+          const h = await keepToken(new Headers(hit.headers)); h.set("X-SimBench-Cache", "hit"); h.set("Cache-Control", "no-store"); h.set("X-Content-Type-Options", "nosniff");
           return new Response(hit.body, { status: hit.status, headers: h });
         }
       }
@@ -235,7 +239,7 @@ export async function handle(request, env, fetchImpl = fetch, ctx = null) {
     const got = await ask(path, url.search);
     if (got.out) return got.out;
     const r = got.r;
-    const headers = new Headers({ "Content-Type": r.headers.get("Content-Type") || "application/json", "Cache-Control": "no-store" });
+    const headers = new Headers({ "Content-Type": r.headers.get("Content-Type") || "application/json", "Cache-Control": "no-store", ...NOSNIFF });
     const ra = r.headers.get("Retry-After"); if (ra) headers.set("Retry-After", ra);
     await keepToken(headers);
     if (store && r.ok && r.body) {

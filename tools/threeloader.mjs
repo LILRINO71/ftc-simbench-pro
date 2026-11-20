@@ -27,8 +27,10 @@ export const ADDONS = [
 export async function loadThree(imp, version, addons, local) {
   const routes = [];
   if (local) routes.push({ from: 'site', core: 'three', add: local + 'examples/jsm/' });
+  // three.module.js, the file the package publishes, not .min.js, which jsDelivr makes itself:
+  // only a published file's bytes are known here, so only it can carry an integrity hash
   routes.push(
-    { from: 'jsdelivr', core: 'https://cdn.jsdelivr.net/npm/three@' + version + '/build/three.module.min.js', add: 'https://cdn.jsdelivr.net/npm/three@' + version + '/examples/jsm/' },
+    { from: 'jsdelivr', core: 'https://cdn.jsdelivr.net/npm/three@' + version + '/build/three.module.js', add: 'https://cdn.jsdelivr.net/npm/three@' + version + '/examples/jsm/' },
     { from: 'esm.sh', core: 'https://esm.sh/three@' + version, add: 'https://esm.sh/three@' + version + '/examples/jsm/' },
   );
   let last = null, partial = null;
@@ -54,20 +56,53 @@ export async function loadThree(imp, version, addons, local) {
 export const VENDOR_THREE = (version) => 'vendor/three-' + version + '/';
 export const VENDOR_TRYSTERO = (version) => 'vendor/trystero-' + version + '/';
 /* The import map: "three" (what the add-ons import) and Trystero's three bare imports
-   point at the site's copies; each file's own relative imports need no entry. */
-export function importMap(version, trysteroVersion) {
+   point at the site's copies; each file's own relative imports need no entry. Its
+   `integrity` (when given) holds the CDN fallbacks' hashes: a module import() of one of
+   those URLs is refused unless the bytes match (browsers without it ignore the key). */
+export function importMap(version, trysteroVersion, integrity) {
   const t = VENDOR_TRYSTERO(trysteroVersion);
-  return { imports: {
+  const map = { imports: {
     three: './' + VENDOR_THREE(version) + 'build/three.module.js',
     '@trystero-p2p/nostr': './' + t + 'nostr.mjs',
     '@trystero-p2p/core': './' + t + 'core/index.mjs',
     '@noble/secp256k1': './' + t + 'secp256k1.mjs',
   } };
+  if (integrity && Object.keys(integrity).length) map.integrity = integrity;
+  return map;
 }
 
+/* The CDN fallbacks whose bytes are a published file, so their hashes can be known here:
+   three.js from jsDelivr (the core, three.core.js it imports, every add-on and what each
+   imports) and Jolt from jsDelivr (src/joltmech.js). Trystero's fallbacks (jsDelivr's
+   +esm, esm.sh) and esm.sh's three.js are built by the CDN, so no hash could hold;
+   OpenCascade loads with importScripts in a worker, which takes no integrity.
+   read(rel) returns a file under node_modules as bytes; returns {url: 'sha384-…'}. */
+export function cdnIntegrity(read, sha384, { three, jolt }) {
+  const out = {};
+  const put = (url, rel) => { out[url] = 'sha384-' + sha384(read(rel)); };
+  const T = 'https://cdn.jsdelivr.net/npm/three@' + three + '/';
+  for (const f of ['build/three.module.js', 'build/three.core.js']) put(T + f, 'three/' + f);
+  const seen = new Set();
+  const walk = (rel) => {   // rel: a path under examples/jsm/
+    if (seen.has(rel)) return;
+    seen.add(rel);
+    put(T + 'examples/jsm/' + rel, 'three/examples/jsm/' + rel);
+    const text = new TextDecoder().decode(read('three/examples/jsm/' + rel));
+    for (const m of text.matchAll(/(?:from|import)\s*['"](\.[^'"]+)['"]/g)) walk(posixJoin(rel, m[1]));
+  };
+  for (const [, p] of ADDONS) walk(p);
+  if (jolt) put('https://cdn.jsdelivr.net/npm/jolt-physics@' + jolt + '/dist/jolt-physics.wasm-compat.js', 'jolt-physics/dist/jolt-physics.wasm-compat.js');
+  return out;
+}
+const posixJoin = (from, rel) => {
+  const parts = from.split('/').slice(0, -1);
+  for (const p of rel.split('/')) { if (p === '..') parts.pop(); else if (p !== '.') parts.push(p); }
+  return parts.join('/');
+};
+
 /* The page's two tags: the import map and the module that loads three.js. */
-export function threeLoaderScript(version, trysteroVersion) {
-  return `<script type="importmap">${JSON.stringify(importMap(version, trysteroVersion))}</script>
+export function threeLoaderScript(version, trysteroVersion, integrity) {
+  return `<script type="importmap">${JSON.stringify(importMap(version, trysteroVersion, integrity))}</script>
 <script type="module">
 const loadThree=${loadThree.toString()};
 loadThree(u=>import(u),${JSON.stringify(version)},${JSON.stringify(ADDONS)},new URL(${JSON.stringify(VENDOR_THREE(version))},document.baseURI).href).then(r=>{

@@ -9,7 +9,7 @@ const V = '0.186.1';
 const LOCAL = 'https://site.test/' + VENDOR_THREE(V);
 const fakeThree = { WebGLRenderer: function () {} };
 const fakeAddon = (u) => Object.fromEntries(ADDONS.map(([k]) => [k, u.includes(k) ? { k, u } : undefined]));
-const isCore = (u) => u === 'three' || /three\.module\.min\.js$|esm\.sh\/three@[\d.]+$/.test(u);
+const isCore = (u) => u === 'three' || /three\.module\.js$|esm\.sh\/three@[\d.]+$/.test(u);
 /* an import() that fails for every URL `down` matches; the log keeps what was asked for */
 const importer = (down, log) => async (u) => {
   if (log) log.push(u);

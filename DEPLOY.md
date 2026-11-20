@@ -18,7 +18,7 @@ That writes `dist/`:
 | `index.html` | the app, one file; three.js r186 and its add-ons load from jsDelivr as ES modules |
 | `engine-<hash>.js` | the engine alone, run in a Web Worker to read CAD (and an Onshape assembly) off the page's thread; immutable, cached for a year |
 | `fragment.html` | the same app without `<html>`/`<head>`, for embedding |
-| `_headers` | cache and security headers, read by Cloudflare Pages |
+| `_headers` | cache and security headers, read by Cloudflare Pages (see "Security headers") |
 | `robots/`, `demo/`, `og.png` | the default robot, the demo STEP and the link-preview image |
 
 `functions/` (`onshape`, `room`, `leaderboard`) is not in `dist/`: Cloudflare Pages picks it up by
@@ -228,6 +228,38 @@ How it behaves (`functions/leaderboard/[[path]].js`, `tests/leaderboard-function
 is two writes (the address's counter and the board), so about 500 posts a day; a read is one
 per board shown (cached for 15 seconds). Past that, posts fail quietly and personal bests keep
 working. Workers Paid ($5 a month) lifts the limit, and only if you ever want it.
+
+## Security headers
+
+`tools/headers.mjs` writes them into `dist/_headers` on every build; nothing to set up.
+
+- **Enforced, on every path:** `Content-Security-Policy: frame-ancestors 'self' https://*.onshape.com`
+  (only this site and Onshape may frame the app, so another site can't put it under a decoy),
+  `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`. The
+  functions (`/onshape`, `/room`, `/leaderboard`) don't get `_headers`, so they send nosniff
+  themselves, and the Onshape sign-in page the same frame-ancestors.
+- **Report-only, on the app page:** `Content-Security-Policy-Report-Only` with the whole script,
+  worker and connect policy. The page is one inline script, so each inline script is allowed by
+  its SHA-256, computed by the build from the page it wrote; there is no `'unsafe-inline'` for
+  scripts. Report-only never blocks anything: the browser prints each violation in the console.
+- **CDN fallbacks:** when the site's own copy of three.js or Jolt can't load, the page imports
+  them from jsDelivr; the import map's `integrity` holds each file's SHA-384, taken from the
+  same `node_modules` files the build vendors (jsDelivr serves a package's published bytes
+  unchanged). Trystero's fallbacks (jsDelivr `+esm`, esm.sh) and esm.sh's three.js are built
+  by the CDN, so no hash could hold; OpenCascade loads with `importScripts`, which takes none.
+
+**Before the report-only policy is enforced** (renaming the header in `tools/headers.mjs`), open
+a deployed build in Chrome, Firefox and Safari with the console open and do the whole tour:
+load the default robot and let its exact geometry finish, drop a STEP and an export zip, paste
+an Onshape link and sign in, switch Physics → Mechanisms → solved (Jolt), run a Monte Carlo,
+record and play a clip, host and join an online match (rooms and the public relays), import
+OpModes from GitHub, and open the app inside an Onshape tab. There must be no
+"violates the following Content Security Policy directive" line. One is known today: a local
+run of the ship build (2026-11-19) showed `'unsafe-eval'` violations from OpenCascade, whose
+generated bindings build functions from strings in the tessellation workers; with the policy
+enforced those workers failed and exact geometry did not load (the robot still loaded with its
+parsed shapes). So either the policy gains `'unsafe-eval'` (it applies to the page too), or the
+OpenCascade worker is served from its own URL with its own policy, before enforcing.
 
 ## About "protecting" the code
 

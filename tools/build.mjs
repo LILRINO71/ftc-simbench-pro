@@ -11,7 +11,8 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { minifyJS, minifyCSS, minifyHTML } from './minify.mjs';
 import { buildRobot } from './stepgen.mjs';
-import { threeLoaderScript, ADDONS, VENDOR_THREE, VENDOR_TRYSTERO } from './threeloader.mjs';
+import { threeLoaderScript, ADDONS, VENDOR_THREE, VENDOR_TRYSTERO, cdnIntegrity } from './threeloader.mjs';
+import { pageHeaders } from './headers.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const rd = (...p) => fs.readFileSync(path.join(ROOT, ...p), 'utf8');
@@ -86,6 +87,15 @@ for (const [what, code] of [['the page script', js], [ENGINE_FILE, engineJs], ['
   }
 }
 
+// The CDN fallbacks' integrity hashes, from the very files the build vendors (jsDelivr serves
+// a package's published bytes unchanged). Without node_modules there is nothing to hash, and
+// a ship build refuses further down for the same reason.
+let CDN_SRI = {};
+try {
+  CDN_SRI = cdnIntegrity((rel) => fs.readFileSync(path.join(ROOT, 'node_modules', rel)),
+    (bytes) => crypto.createHash('sha384').update(bytes).digest('base64'), { three: THREE_VERSION, jolt: JOLT_VERSION });
+} catch (e) { if (!MIN) console.warn('  ! no CDN integrity hashes (' + e.message + ')'); }
+
 // what a shared link says under its title
 const SHARE = 'Load your team\'s CAD and Java OpModes and drive them on the 2026-27 BIOBUZZ field: real physics, AI alliance partners, and online matches with other teams. Free, in the browser.';
 const DESC = 'Drop in a STEP assembly and a Java OpMode. FTC SimBench Pro resolves the kinematics, works out the robot’s real mass and traction, runs the code at 50 Hz, and shows you the math behind it.';
@@ -99,7 +109,7 @@ const fragment = [
   // the saved theme before anything paints, so there's no flash; light is the default
   `<script>try{var t=localStorage.getItem("ftcbench.theme");document.documentElement.setAttribute("data-theme",t==="dark"?"dark":t==="light"?"light":(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"))}catch(e){document.documentElement.setAttribute("data-theme","light")}</script>`,
   // three.js and the add-ons the view uses, with a second CDN (tools/threeloader.mjs); the app boots on "three-ready"
-  threeLoaderScript(THREE_VERSION, TRYSTERO_VERSION),
+  threeLoaderScript(THREE_VERSION, TRYSTERO_VERSION, CDN_SRI),
   `<style>\n${css}</style>`,
   markup,
   `<script>\n${safe(shotJs)}</script>`,
@@ -214,23 +224,10 @@ if (fs.existsSync(path.join(ROOT, 'site'))) copyDir(path.join(ROOT, 'site'), DIS
 }
 
 // Cloudflare Pages / Netlify read this. The page is one file that changes every
-// deploy, so it must never be cached hard; everything else here is immutable.
-fs.writeFileSync(path.join(DIST, '_headers'),
-  `/*\n` +
-  `  X-Content-Type-Options: nosniff\n` +
-  `  Referrer-Policy: strict-origin-when-cross-origin\n` +
-  `  Permissions-Policy: gamepad=(self), geolocation=(), camera=(), microphone=()\n` +
-  `/index.html\n` +
-  `  Cache-Control: public, max-age=0, must-revalidate\n` +
-  `/\n` +
-  `  Cache-Control: public, max-age=0, must-revalidate\n` +
-  `/engine-*.js\n` +
-  `  Cache-Control: public, max-age=31536000, immutable\n` +
-  // the folder names carry the version, so a file at one of these paths never changes
-  `/vendor/*\n` +
-  `  Cache-Control: public, max-age=31536000, immutable\n` +
-  `/shotsim-*.js\n` +
-  `  Cache-Control: public, max-age=31536000, immutable\n`, 'utf8');
+// deploy, so it must never be cached hard; everything else here is immutable. The
+// security headers, and the page's script policy with the hash of each inline script
+// as it was written into the page, come from tools/headers.mjs.
+fs.writeFileSync(path.join(DIST, '_headers'), pageHeaders(page), 'utf8');
 
 const kb = (s) => (s.length / 1024).toFixed(0) + ' KB';
 console.log(`FTC SimBench Pro ${pkg.version} build ${build}${MIN ? (STRINGS ? ' [ship +strings]' : ' [ship]') : ' [dev]'}`);
