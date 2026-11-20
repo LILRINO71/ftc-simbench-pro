@@ -1774,8 +1774,9 @@ const View={
       let m=this.ballPool[i];
       if(!m||m.userData.key!==key2){ if(m) this.dynG.remove(m); m=this.ball(b.kind,b.color); m.userData.key=key2; this.ballPool[i]=m; this.dynG.add(m); }
       const p=this.fv(b.pos);
-      // in flight it spins (backspin off the flywheel); on the tiles it lies still
+      // in flight it spins (backspin off the flywheel); a miss on the tiles turns as it really spins
       if(i<fl.length) ShotFx.spinBall(m,p,fl[i]);
+      else if(b.ball) this.spinAs(m,b.ball,this.fdt||0.016);
       m.userData.lp=p; m.position.copy(p);
     }
     this.trails(fl);
@@ -1902,12 +1903,15 @@ const View={
   /* A stand-in robot to where it is: its mecanum wheels turn as that motion turns them,
      and it kicks and rocks back a little when it fires (src/figures.js). */
   moveBot(g,x,y,h,dt){ Figures.moveBot(g,x,y,h,dt); },
-  /* A new element on the tiles comes from somewhere: the end of a missed shot
-     (it bounces on from there), a CELL that just tipped (it falls out), or a hand
-     or a bumper (a small hop). The match's first elements are simply there. */
+  /* A new element on the tiles. Where the match runs here it is a real ball (src/ballphys.js):
+     it is drawn exactly where it is, already bouncing or rolling. A bench that only mirrors
+     another's match (src/net.js) sees x and y alone, twice a second or so: there it comes from
+     somewhere (the end of a missed shot, a CELL that just tipped, a hand) with a small hop. */
   floorEnter(m,e,now){
     const r=(e.kind==="nectar"?1.81:1.4)*IN, U=m.userData;
     U.cur={x:e.x, y:e.y};
+    this.fdt=this.fdt||0.016;
+    if(e.z!=null){ m.position.set(e.x,e.z,-e.y); return; }
     if(!this.floorInit) return;
     const end=(this.recentEnds||[]).filter(q=>Math.hypot(q.x-e.x,q.y-e.y)<0.8).pop();
     if(end){ end.t=-1e9; U.cur={x:end.x, y:end.y}; U.bounce={z:Math.max(r,end.z), vz:-2.2}; return; }
@@ -1916,7 +1920,10 @@ const View={
     U.bounce={z:r+0.1, vz:0.8};
   },
   floorMove(m,e,dt){
-    const r=(e.kind==="nectar"?1.81:1.4)*IN, U=m.userData, B=U.bounce, c=U.cur||(U.cur={x:e.x, y:e.y});
+    const r=(e.kind==="nectar"?1.81:1.4)*IN, U=m.userData, c=U.cur||(U.cur={x:e.x, y:e.y});
+    this.fdt=dt;
+    if(e.z!=null){ c.x=e.x; c.y=e.y; m.position.set(e.x,e.z,-e.y); this.spinAs(m,e,dt); return; }
+    const B=U.bounce;
     let z=r;
     if(B){ B.vz-=9.8*dt; B.z+=B.vz*dt;
       if(B.z<=r){ B.z=r; if(Math.abs(B.vz)<0.5) U.bounce=null; else B.vz=-B.vz*0.42; }
@@ -1926,6 +1933,14 @@ const View={
     if(d>1e-5) m.rotateOnWorldAxis(new THREE.Vector3(-dy,0,-dx).normalize(),d/r);
     c.x=nx; c.y=ny;
     m.position.set(nx,z,-ny);
+  },
+  /* A ball turns as the physics spins it (rad/s about the field axes; rolling on the tiles, that
+     spin is its roll). */
+  spinAs(m,b,dt){
+    const w=Math.hypot(b.wx||0,b.wy||0,b.wz||0);
+    if(w<1e-3) return;
+    const v=this._spinAx||(this._spinAx=new THREE.Vector3());
+    m.rotateOnWorldAxis(v.set(b.wx/w,(b.wz||0)/w,-(b.wy||0)/w),w*dt);
   },
   /* An element gone from the tiles next to an AI robot's intake was taken in:
      it rolls into the robot. Otherwise it simply goes. */
