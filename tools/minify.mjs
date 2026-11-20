@@ -44,7 +44,7 @@ const RESERVED = new Set(['break', 'case', 'catch', 'class', 'const', 'continue'
 // a line break right after one of these ends the statement
 const RESTRICTED = new Set(['return', 'yield', 'break', 'continue']);
 // the brace after these opens a block
-const BLOCK_WORDS = new Set(['else', 'do', 'try', 'finally', 'static']);
+const BLOCK_WORDS = new Set(['else', 'do', 'try', 'catch', 'finally', 'static']);   // catch: the form with no variable, `catch {`
 
 /* Tokens from `start`. Inside a template's ${…} (inTemplate) it stops at the
    brace that closes the expression and returns that brace's index as `end`:
@@ -66,7 +66,7 @@ function lex(src, start, inTemplate) {
   /* Would a token after out[k] begin a statement? Asked only before `{`,
      `function` and `class`, none of which can continue an expression, so after
      a token that ends one only an inserted semicolon puts them there. */
-  const startsStatement = (k) => {
+  const startsStatement = (k, brace) => {
     if (top().v !== '{' || !top().stmts) return false;   // inside ( ), [ ] or an object literal
     if (k < 0) return true;
     const p = out[k];
@@ -79,6 +79,11 @@ function lex(src, start, inTemplate) {
     if (p.t === 'id') {
       if (isMember(k)) return true;                     // obj.else: a property name ends an expression
       if (BLOCK_WORDS.has(p.v)) return true;
+      // a module's `export function`, `export class` and `export { a }`: a declaration or a clause, and a new
+      // statement after it. After `export default` a function or a class is a declaration too; a brace there
+      // is an object literal, which is an expression.
+      if (p.v === 'export') return true;
+      if (p.v === 'default' && !brace) { const e = sig(k - 1), b = e >= 0 ? out[e] : null; if (b && b.t === 'id' && b.v === 'export' && !isMember(e)) return true; }
       if (RESTRICTED.has(p.v)) {
         for (let j = k + 1; j < out.length; j++) if (out[j].t !== 'lc' && LINE_BREAK.test(out[j].v)) return true;
         return false;
@@ -165,7 +170,7 @@ function lex(src, start, inTemplate) {
       else if (p && p.t === 'punc' && p.v === ')') { stmts = true; re = p.fn ? p.fn === 'decl' : true; }
       // an arrow is the whole expression: after its body only a new line, so a new statement, can come
       else if (p && p.t === 'punc' && p.v === '=>') { stmts = true; re = true; }
-      else stmts = re = startsStatement(k);
+      else stmts = re = startsStatement(k, true);
       tok.stmts = stmts;
       stack.push({ v: '{', stmts, re, q: 0 });
     } else if (v === ')' || v === ']' || v === '}') {

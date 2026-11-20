@@ -89,6 +89,11 @@ test('minifier: a regex after a control header or a block, division after an exp
     ['ternary then object', '(() => { const g = 1; const o = true ? { valueOf() { return 4 } } : 0; return o /2/ g })()', 2],
     ['label then a block', '(() => { let n = 0; a: { n = 1 } /\\//.test("/") && n++; return n })()', 2],
     ['case then a block', '(() => { let n = 0; switch (1) { case 1: { n = 1 } /\\//.test("/") && n++ } return n })()', 2],
+    // a catch with no variable: its brace was read as an object literal, so the regex after it was a division
+    ['regex after catch { } with no variable', '(() => { let n = 0; try { throw 1 } catch { n = 1 } /\\//.test("/") && n++; return n })()', 2],
+    ['regex after catch { } keeps its spaces', '(() => { let n = 0; try { throw 1 } catch { n = 1 }\n/a  b/.test("a  b") && n++; return n })()', 2],
+    ['regex after catch (e) { }', '(() => { let n = 0; try { throw 1 } catch (e) { n = e } /\\//.test("/") && n++; return n })()', 2],
+    ['a member named catch', '(() => { const p = { catch: (f) => f }; const g = 2; return p.catch(8) /2/ g })()', 2],
     ['optional chain is not a ternary', '(() => { const o = { a: 1 }, g = 1; return (o?.a ? { b: 6 } : 0).b /3/ g })()', 2],
     ['a ternary with a leading-dot number', '(() => { const t = true; return t?.5:1 })()', 0.5],
   ];
@@ -98,6 +103,34 @@ test('minifier: a regex after a control header or a block, division after an exp
     let got; assert.doesNotThrow(() => { got = run(min); }, `${what}: minified to ${min}`);
     assert.deepEqual(got, want, `${what}: minified to ${min}`);
   }
+});
+
+/* A module's `export function`, `export class` and `export default function` are
+   declarations: the next statement may start with a regex. They were read as
+   expressions, so that regex was lexed as a division and its inside as code: the
+   spaces in /a  b/ became one, and the module still compiled. Nothing shipped is
+   a module today (the Functions are not minified); this keeps the minifier right
+   for the day one is. A module cannot be run with new Function, so the check is
+   the text of the regex and that the module still parses. */
+test('minifier: a regex after an exported declaration in a module is a regex', async () => {
+  const vm = await import('node:vm');
+  const parses = (code) => { new vm.SourceTextModule(code); return true; };
+  const heads = [
+    'export function g() { return 1 }', 'export async function g() { return 1 }', 'export function* g() { yield 1 }',
+    'export class K { m() { return 1 } }', 'export default function () { return 1 }', 'export default function g() { return 1 }',
+    'export default async function () { return 1 }', 'export default class { m() { return 1 } }', 'export default class K { }',
+    'const a = 1; export { a }',
+  ];
+  for (const head of heads) {
+    const src = `let n = 0;\n${head}\n/a  b|\\/\\//.test("a  b") && n++;\n`;
+    const min = minifyJS(src);
+    assert.ok(min.includes('/a  b|\\/\\//.test("a  b")'), `${head}: the regex is whole in ${min}`);
+    if (vm.SourceTextModule) assert.doesNotThrow(() => parses(min), `${head}: still a module: ${min}`);
+  }
+  // an exported object literal is still an expression: a slash after it divides (read as a regex, the
+  // spaces inside / 2 / would stay)
+  const obj = minifyJS('const g = 2;\nexport default { valueOf() { return 8 } } / 2 / g;\n');
+  assert.ok(obj.includes('}/2/g'), 'division after export default {…}: ' + obj);
 });
 
 /* The ship build is the readable one minified: every browser file, not only the
