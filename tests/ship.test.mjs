@@ -59,6 +59,64 @@ test('minifier: a regex inside ${} is a regex, not the start of a string', () =>
   assert.doesNotThrow(() => new Function(min), 'minified app.js compiles');
 });
 
+/* Whether a '/' after ')' or '}' starts a regex depends on what that bracket
+   closed: an if/while/for/with header or a block ends nothing, so a regex can
+   follow; a call, a group or an object literal ends an expression, so it is
+   division. The old scanner always said division after ')' and '}', read
+   `if (s) /\//.test(s)` as `if(s) / \ //…` and dropped the rest of the line. */
+test('minifier: a regex after a control header or a block, division after an expression', () => {
+  const cases = [
+    // the audit's probe: the regex holds `//`, so a mis-lex eats the rest of the line
+    ['regex after if(...)', '(() => { let n = 0; const s = "a/b"; if (s) /\\//.test(s) && n++;\n  return n })()', 1],
+    ['regex after if(...) with a quote in it', '(() => { const s = "a\'b"; let n = 0; if (s) /\'/.test(s) && n++;\n  return n; })()', 1],
+    ['regex after while(...)', '(() => { let n = 0, s = "x//y"; while (n < 3) /\\/\\//.test(s) && n++; return n })()', 3],
+    ['regex after for(...)', '(() => { let n = 0; for (let i = 0; i < 2; i++) /\\//.test("/") && n++; return n })()', 2],
+    ['regex after for await(...)', '(() => { let n = 0; const f = async () => { for await (const x of [1]) /\\//.test("/") && n++ }; return typeof f })()', 'function'],
+    ['regex after else', '(() => { let n = 0; if (!1) n = 9; else /\\//.test("/") && n++; return n })()', 1],
+    ['regex after a block }', '(() => { let n = 0; { n = 1 }\n/\\/\\//.test("//") && n++;\n  return n; })()', 2],
+    ['regex after a block } on one line', '(() => { let n = 0; if (1) { n = 1 } /\\//.test("/") && n++; return n })()', 2],
+    ['regex after a function declaration', '(() => { let n = 0; function g() { return 1 } /\\//.test("/") && n++; return n + g() })()', 2],
+    ['regex after an arrow body', '(() => { let n = 0; const g = () => { return 1 }\n/\\//.test("/") && n++; return n + g() })()', 2],
+    ['division after a call', '(() => { const f = (x) => x; const g = 2; return f(8) /2/ g })()', 2],
+    ['division after a group', '(() => { const a = 9, g = 3; return (a) /3/ g })()', 1],
+    ['division after an object literal', '(() => { const g = 1; return ({ valueOf() { return 8 } }) /2/ g })()', 4],
+    ['division after an object literal value', '(() => { const g = 2; const o = { a: { valueOf() { return 8 } } /2/ g }; return o.a })()', 2],
+    ['division after a function expression call', '(() => { const g = 2; return (function () { return 8 })() /2/ g })()', 2],
+    ['division after a function expression body', '(() => { const g = 1; return isNaN(function () { return 6 } /3/ g) ? 1 : 0 })()', 1],
+    ['division after a class expression body', '(() => { const g = 1; return isNaN(class { } /3/ g) ? 1 : 0 })()', 1],
+    ['regex after a class declaration', '(() => { let n = 0; class K { m() { return 1 } } /\\//.test("/") && n++; return n + new K().m() })()', 2],
+    ['member named if', '(() => { const o = { if: (x) => x }; const g = 2; return o.if(8) /2/ g })()', 2],
+    ['ternary then object', '(() => { const g = 1; const o = true ? { valueOf() { return 4 } } : 0; return o /2/ g })()', 2],
+    ['label then a block', '(() => { let n = 0; a: { n = 1 } /\\//.test("/") && n++; return n })()', 2],
+    ['case then a block', '(() => { let n = 0; switch (1) { case 1: { n = 1 } /\\//.test("/") && n++ } return n })()', 2],
+    ['optional chain is not a ternary', '(() => { const o = { a: 1 }, g = 1; return (o?.a ? { b: 6 } : 0).b /3/ g })()', 2],
+    ['a ternary with a leading-dot number', '(() => { const t = true; return t?.5:1 })()', 0.5],
+  ];
+  for (const [what, src, want] of cases) {
+    assert.deepEqual(run(src), want, `${what}: the case itself`);
+    const min = minifyJS(src);
+    let got; assert.doesNotThrow(() => { got = run(min); }, `${what}: minified to ${min}`);
+    assert.deepEqual(got, want, `${what}: minified to ${min}`);
+  }
+});
+
+/* The ship build is the readable one minified: every browser file, not only the
+   engine and app.js. A mis-lex anywhere there ships as a blank page. */
+test('ship build: the whole minified bundle compiles, the browser files included', () => {
+  const build = fs.readFileSync(path.join(ROOT, 'tools', 'build.mjs'), 'utf8');
+  const ORDER = JSON.parse('[' + /export const ORDER = \[([\s\S]*?)\];/.exec(build)[1].replace(/'/g, '"') + ']');
+  const src = '"use strict";\n' + ORDER.map((n) => `// ---- src/${n}.js ----\n` + fs.readFileSync(path.join(ROOT, 'src', n + '.js'), 'utf8')).join('\n');
+  for (const strings of [false, true]) {
+    const min = minifyJS(src, { strings });
+    assert.doesNotThrow(() => new Function(min), `the minified bundle${strings ? ' with the string table' : ''} compiles`);
+  }
+  // and each file alone, so a failure names the file
+  for (const n of ORDER) {
+    const one = fs.readFileSync(path.join(ROOT, 'src', n + '.js'), 'utf8');
+    assert.doesNotThrow(() => new Function(minifyJS('"use strict";\n' + one)), `minified src/${n}.js compiles`);
+  }
+});
+
 /* A comment and the whitespace around it are one gap. The old pass looked at
    each whitespace run alone: the space before `// c` became a space, and the
    newline after it was then dropped because the previous kept token was that

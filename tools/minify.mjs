@@ -21,6 +21,31 @@ const ID_PART = /[A-Za-z0-9_$]/;
 /** JS -> tokens: {t, v} where t is ws|lc|bc|str|tmpl|regex|num|id|punc. */
 export function tokenize(src) { return lex(src, 0, false).out; }
 
+/* Regex or division after ')' and '}' depends on what the bracket closed, and
+   the previous token alone can't say. So the scan keeps a stack of the open
+   brackets and marks each closing ')' and '}' with `re` (a regex may follow):
+     ')'  closed an if / while / for / with header: a statement follows (regex);
+          any other ')' (a call, a group, parameters) ends an expression (division).
+     '}'  closed a block, a function or class declaration, or an arrow body: the
+          next token starts a statement (regex); one that closed an object literal
+          or a function or class expression ends an expression (division).
+   Each '{' on the stack knows two things: whether what it holds is statements
+   (`stmts`: a block or a body, not an object literal) and whether a regex may
+   follow its '}' (`re`). Both come from the token before it (startsStatement),
+   with a '?' count per bracket so a ternary's ':' is not taken for a label's. */
+const CONTROL_HEAD = new Set(['if', 'while', 'for', 'with']);
+// reserved words that end an expression; any other is an operator or a statement
+// keyword, after which an expression must still come
+const VALUE_WORDS = new Set(['this', 'super', 'null', 'true', 'false']);
+const RESERVED = new Set(['break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default', 'delete', 'do',
+  'else', 'export', 'extends', 'finally', 'for', 'function', 'if', 'import', 'in', 'instanceof', 'new', 'return', 'switch',
+  'throw', 'try', 'typeof', 'var', 'void', 'while', 'with', 'yield', 'let', 'static', 'await', 'of', 'async',
+  'this', 'super', 'null', 'true', 'false']);
+// a line break right after one of these ends the statement
+const RESTRICTED = new Set(['return', 'yield', 'break', 'continue']);
+// the brace after these opens a block
+const BLOCK_WORDS = new Set(['else', 'do', 'try', 'finally', 'static']);
+
 /* Tokens from `start`. Inside a template's ${…} (inTemplate) it stops at the
    brace that closes the expression and returns that brace's index as `end`:
    the expression is code like any other, with its own strings, regexes and
@@ -29,7 +54,39 @@ function lex(src, start, inTemplate) {
   const out = [];
   let i = start, depth = 0;
   const n = src.length;
-  const last = () => { for (let k = out.length - 1; k >= 0; k--) { const t = out[k].t; if (t !== 'ws' && t !== 'lc' && t !== 'bc') return out[k]; } return null; };
+  const sig = (k) => { for (; k >= 0; k--) { const t = out[k].t; if (t !== 'ws' && t !== 'lc' && t !== 'bc') return k; } return -1; };
+  const last = () => { const k = sig(out.length - 1); return k < 0 ? null : out[k]; };
+  const isMember = (k) => { const b = k >= 0 ? out[sig(k - 1)] : null; return !!b && b.t === 'punc' && (b.v === '.' || b.v === '?.'); };
+  // the open brackets: {v:'(', ctl, fn} | {v:'['} | {v:'{', stmts, re}; each counts its open '?'
+  // (a template's ${…} is an expression, so its root is not a statement list)
+  const stack = [inTemplate ? { v: '(', q: 0 } : { v: '{', stmts: true, re: true, q: 0 }];
+  const top = () => stack[stack.length - 1];
+  let fnNext = null;      // after `function`: 'decl' or 'expr', until its parameter list opens
+  let classNext = null;   // after `class`: {decl, at} until its body's '{' at the same bracket depth
+  /* Would a token after out[k] begin a statement? Asked only before `{`,
+     `function` and `class`, none of which can continue an expression, so after
+     a token that ends one only an inserted semicolon puts them there. */
+  const startsStatement = (k) => {
+    if (top().v !== '{' || !top().stmts) return false;   // inside ( ), [ ] or an object literal
+    if (k < 0) return true;
+    const p = out[k];
+    if (p.t === 'punc') {
+      if (p.v === ';' || p.v === '}' || p.v === ')' || p.v === ']' || p.v === '++' || p.v === '--') return true;
+      if (p.v === '{') return !!p.stmts;
+      if (p.v === ':') return !!p.label;
+      return false;
+    }
+    if (p.t === 'id') {
+      if (isMember(k)) return true;                     // obj.else: a property name ends an expression
+      if (BLOCK_WORDS.has(p.v)) return true;
+      if (RESTRICTED.has(p.v)) {
+        for (let j = k + 1; j < out.length; j++) if (out[j].t !== 'lc' && LINE_BREAK.test(out[j].v)) return true;
+        return false;
+      }
+      return !RESERVED.has(p.v) || VALUE_WORDS.has(p.v);
+    }
+    return true;                                         // a literal
+  };
 
   while (i < n) {
     const c = src[i];
@@ -66,7 +123,16 @@ function lex(src, start, inTemplate) {
     }
     if (ID_START.test(c)) {
       let j = i; while (j < n && ID_PART.test(src[j])) j++;
-      out.push({ t: 'id', v: src.slice(i, j) }); i = j; continue;
+      const v = src.slice(i, j);
+      const k = sig(out.length - 1);
+      if (!isMember(out.length) && v === 'function') {
+        // `async function` stands where `async` does
+        const p = k >= 0 ? out[k] : null;
+        const at = p && p.t === 'id' && p.v === 'async' && !isMember(k) ? sig(k - 1) : k;
+        fnNext = startsStatement(at) ? 'decl' : 'expr';
+      }
+      if (!isMember(out.length) && v === 'class') classNext = { decl: startsStatement(k), at: stack.length };
+      out.push({ t: 'id', v }); i = j; continue;
     }
     // punctuators, longest first
     const three = src.substr(i, 3), four = src.substr(i, 4);
@@ -75,9 +141,43 @@ function lex(src, start, inTemplate) {
     let v = null;
     if (P4.includes(four)) v = four; else if (P3.includes(three)) v = three;
     else if (P2.includes(src.substr(i, 2))) v = src.substr(i, 2); else v = c;
+    if (v === '?.' && /[0-9]/.test(src[i + 2] || '')) v = '?';   // `a?.5:1` is a ternary
     if (inTemplate && v === '{') depth++;
     else if (inTemplate && v === '}' && depth-- === 0) return { out, end: i };
-    out.push({ t: 'punc', v }); i += v.length; continue;
+    const tok = { t: 'punc', v };
+    // `function` and `class` were a property name or key after all (`{ class: 1 }`)
+    if (fnNext && v !== '(' && v !== '*') fnNext = null;
+    if (classNext && classNext.at === stack.length && (v === ':' || v === ',' || v === ';' || v === '=' || v === '}' || v === ')')) classNext = null;
+    if (v === '(') {
+      const k = sig(out.length - 1), p = k >= 0 ? out[k] : null;
+      // the header's keyword, one token further back for `for await (`
+      let kw = p && p.t === 'id' && !isMember(k) ? p.v : null;
+      if (kw === 'await') { const b = out[sig(k - 1)]; if (b && b.t === 'id' && b.v === 'for') kw = 'for'; }
+      const entry = { v: '(', ctl: CONTROL_HEAD.has(kw), q: 0 };
+      if (fnNext) { entry.fn = fnNext; fnNext = null; }
+      stack.push(entry);
+    } else if (v === '[') stack.push({ v: '[', q: 0 });
+    else if (v === '{') {
+      const k = sig(out.length - 1), p = k >= 0 ? out[k] : null;
+      let stmts, re;
+      if (classNext && classNext.at === stack.length) { stmts = true; re = classNext.decl; classNext = null; }
+      // a body after a parameter list or a header: a function's says what it ends; a method's, catch's, switch's end nothing
+      else if (p && p.t === 'punc' && p.v === ')') { stmts = true; re = p.fn ? p.fn === 'decl' : true; }
+      // an arrow is the whole expression: after its body only a new line, so a new statement, can come
+      else if (p && p.t === 'punc' && p.v === '=>') { stmts = true; re = true; }
+      else stmts = re = startsStatement(k);
+      tok.stmts = stmts;
+      stack.push({ v: '{', stmts, re, q: 0 });
+    } else if (v === ')' || v === ']' || v === '}') {
+      const e = stack.length > 1 ? stack.pop() : top();   // a stray closer leaves the root alone
+      if (v === ')') { tok.re = !!e.ctl; if (e.fn) tok.fn = e.fn; }
+      if (v === '}') tok.re = !!e.re;
+    } else if (v === '?') top().q++;
+    else if (v === ':') {
+      if (top().q > 0) top().q--;                                 // a ternary's
+      else tok.label = top().v === '{' && !!top().stmts;          // a label's or a case's; else an object key's
+    }
+    out.push(tok); i += v.length; continue;
   }
   return { out, end: n };
 }
@@ -100,7 +200,10 @@ function regexAllowed(prev) {
   if (!prev) return true;
   if (prev.t === 'id') return KEYWORD_BEFORE_REGEX.has(prev.v);
   if (prev.t === 'num' || prev.t === 'str' || prev.t === 'tmpl' || prev.t === 'regex') return false;
-  if (prev.t === 'punc') return !([')', ']', '}', '++', '--'].includes(prev.v));
+  if (prev.t === 'punc') {
+    if (prev.v === ')' || prev.v === '}') return !!prev.re;   // see lex(): what the bracket closed
+    return !([']', '++', '--'].includes(prev.v));
+  }
   return true;
 }
 

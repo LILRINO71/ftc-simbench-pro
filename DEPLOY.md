@@ -229,7 +229,9 @@ working. Workers Paid ($5 a month) lifts the limit, and only if you ever want it
 ## About "protecting" the code
 
 The ship build strips every comment and collapses layout, and `tests/ship.test.mjs` runs the whole
-engine suite against the minified bundle, so it is proven to behave like the readable one. That
+engine suite against the minified bundle, so it is proven to behave like the readable one; the
+browser files are compiled after minifying too, and `tools/build.mjs` refuses to write a build whose
+scripts don't compile, so a minifier mistake fails the deploy instead of shipping a blank page. That
 raises the effort of lifting the physics model. It is not security, and nothing that runs in a
 browser can be: anything in the page is readable by anyone who opens it. Nothing secret belongs in
 the bundle. The one secret this project has (the Onshape client secret) lives in Cloudflare, read

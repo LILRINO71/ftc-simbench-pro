@@ -76,6 +76,16 @@ if (MIN) shotJs = minifyJS(shotJs);
 let shotWorkerJs = `self.SHOT_DATA = ${JSON.stringify(shotData)};\n${rd(SHOT, 'engine.js')}`;
 if (MIN) shotWorkerJs = minifyJS(shotWorkerJs);
 
+// Every script this build writes must compile as written: a minifier mistake in any
+// browser file ships as a blank page, and the deploy only looks at this exit code.
+// Compiling is not running, so nothing here needs a DOM.
+for (const [what, code] of [['the page script', js], [ENGINE_FILE, engineJs], ['the Shot Sim script', shotJs], [SHOT_FILE, shotWorkerJs]]) {
+  try { new Function(code); } catch (e) {
+    console.error(`build refused: ${what}${MIN ? ' (minified)' : ''} does not compile: ${e.message}`);
+    process.exit(1);
+  }
+}
+
 // what a shared link says under its title
 const SHARE = 'Load your team\'s CAD and Java OpModes and drive them on the 2026-27 BIOBUZZ field: real physics, AI alliance partners, and online matches with other teams. Free, in the browser.';
 const DESC = 'Drop in a STEP assembly and a Java OpMode. FTC SimBench Pro resolves the kinematics, works out the robot’s real mass and traction, runs the code at 50 Hz, and shows you the math behind it.';
