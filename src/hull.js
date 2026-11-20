@@ -119,22 +119,38 @@ function thinPoints(pts,max){
   return [...keep].map(i=>pts[i]);
 }
 
-/* What a part is made of, from its name and part number — only used to
-   colour it: aluminium, a yellow-can motor, a black servo, rubber … */
+/* A name says what a part is by its last word of that sort: a "motor mount" is a mount, a
+   "wheel hub" a hub, a "roller chain" a chain, a "Core Motor Controller" a controller. When one
+   of these nouns follows the word that would give the kind, the word only describes the part. */
+const KIND_ACCESSORY=/^[\s-]*(mount(s|ing)?|brackets?|plates?|spacers?|adapt[eo]rs?|covers?|guards?|shields?|standoffs?|clamps?|shafts?|axles?|hubs?|horns?|arms?|holders?|housings?|cables?|wires?|leads?|connectors?|controllers?|drivers?|pinions?|pulleys?|sprockets?|inserts?|collars?|bearings?|blocks?|frames?|chains?|encoders?|gear(s|box|boxes)?|power modules?)\b/;
+/* Is the last match of `re` (a global regex) in `w` the thing itself, not a description of what follows? */
+function kindWord(w,re){
+  let m, last=null; re.lastIndex=0;
+  while((m=re.exec(w))){ last=m; if(m[0]==="") re.lastIndex++; }
+  return !!last&&!KIND_ACCESSORY.test(w.slice(last.index+last[0].length));
+}
+
+/* What a part is made of, from its name and part number: aluminium, a yellow-can motor, a black
+   servo, rubber … It colours the part, picks its density (src/inertia.js), and a "wheel" is a
+   candidate for the drive base and so for the floor (src/drivetrain.js, src/frame.js), so a wrong
+   kind is a wrong weight or a wrong frame. Whole words only: "controller" holds "roller",
+   "retraction" holds "traction", "entire" holds "tire". */
 function solidKind(name,pn){
-  const s=String(name||"").toLowerCase(), p=String(pn||"");
+  const s=String(name||"").toLowerCase().replace(/_+/g," "), p=String(pn||"");
   if(/screw|bolt|\bnut\b|washer|rivet|shcs|bhcs|fhcs|set ?screw|locknut/.test(s)) return "fastener";
   // a season's game element drawn in the robot (DECODE's artifact, INTO THE DEEP's sample): not the robot
   if(/\bartifacts?\b|\bspecimens?\b|\bsamples?\b|\bpixels?\b|game ?(piece|element)|am-3376|am-5201|am-5101/.test(s)||/^am-(3376|5201|5101)/.test(p)) return "game";
   // BIOBUZZ's POLLEN and NECTAR (AndyMark am-5852), only when the whole name is the ball: a team's
   // "pollen intake" or "nectar ramp" is robot
   if(/^(am[- ]?5852\b.*|(biobuzz |ftc )?(red |blue |yellow )?(pollen|nectar)( ball)?( \d+)?)$/.test(s.trim())||/^am-5852/.test(p)) return "game";
-  if(/^520[234]-/.test(p)||/yellow ?jacket|gearmotor|\bmotor\b/.test(s)) return "motor";
-  if(/^2000-0025/.test(p)||/\bservo\b/.test(s)) return "servo";
-  if(/mecanum|omni|wheel|tire|tyre|traction|gecko|roller/.test(s)) return "wheel";
-  if(/hub|battery|switch|camera|limelight|sensor|webcam|\bled\b|pcb/.test(s)) return "electronics";
+  if(/^520[234]-/.test(p)||kindWord(s,/yellow ?jacket|gearmotors?|\bmotors?\b/g)) return "motor";
+  if(/^2000-0025/.test(p)||kindWord(s,/\bservos?\b/g)) return "servo";
+  if(kindWord(s,/mecanum|\bomni|wheels?|\bt[iy]res?\b|\btraction\b|gecko|\brollers?\b/g)) return "wheel";
+  // a hub with a name is electronics (REV's Control, Expansion and Servo Hubs); any other hub is a metal part on a shaft
+  if(/\bcontrollers?\b|\b(control|expansion|driver|servo|usb|power) hubs?\b|\b(power|distribution|interface|legacy) modules?\b|battery|switch|camera|limelight|sensor|webcam|\bled\b|pcb/.test(s)) return "electronics";
   if(/polycarb|lexan|window|acrylic/.test(s)) return "clear";
   if(/print|\bpla\b|petg|tpu|nylon|onyx|3d/.test(s)) return "printed";
-  if(/belt|chain|string|cable|wire|spring|surgical/.test(s)) return "belt";
+  // a "belt pulley" or a "chain sprocket" is the metal part, not the loop
+  if(kindWord(s,/belts?|chains?|strings?|cables?|wires?|springs?|surgical/g)) return "belt";
   return "metal";
 }
