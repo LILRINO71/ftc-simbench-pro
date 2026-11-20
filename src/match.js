@@ -614,11 +614,24 @@ const Match={
     this.keepOnField(b);
     return Math.hypot(tx-b.x,ty-b.y);
   },
+  /* The walls, the HIVE and the FLOWERs hold a robot; in AUTO so does the centre line (G402).
+     Out of an obstacle, then back onto the own side, and again until both hold. Where they
+     can't both hold (an obstacle pushes it over the line and the line pushes it back in), the
+     move doesn't happen: it stays where it last stood clear, and its plan sees it stuck. */
   keepOnField(b){
-    const box={x:b.x, y:b.y, h:b.h}, x0=b.x, y0=b.y;
-    Field.collideBox(box,MATCH_BOT,this.obs||[]);
-    if(this.autoSide(b)){ const s=this.autoSide(b); if(box.x*s<MATCH_BOT.hx) box.x=s*MATCH_BOT.hx; }
+    const box={x:b.x, y:b.y, h:b.h}, x0=b.x, y0=b.y, s=this.autoSide(b), obs=this.obs||[], lim=MATCH_BOT.hx;
+    let ok=!s;
+    if(!s) Field.collideBox(box,MATCH_BOT,obs);
+    else for(let k=0;k<6&&!ok;k++){
+      Field.collideBox(box,MATCH_BOT,obs);
+      if(box.x*s>=lim-1e-9){ ok=true; break; }
+      box.x=s*lim;
+      ok=!obs.some(o=>{ const d=capsulePush(box,MATCH_BOT,o); return d&&Math.hypot(d[0],d[1])>1e-5; });
+    }
+    if(!ok&&b.clear){ b.x=b.clear.x; b.y=b.clear.y; b.h=b.clear.h; b.vx=0; b.vy=0; return; }
+    if(!ok&&box.x*s<lim) box.x=s*lim;
     b.x=box.x; b.y=box.y;
+    if(s&&ok) b.clear={x:b.x, y:b.y, h:b.h};
     if(Math.abs(b.x-x0)>1e-6) b.vx=0;
     if(Math.abs(b.y-y0)>1e-6) b.vy=0;
   },

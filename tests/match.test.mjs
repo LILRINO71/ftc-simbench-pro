@@ -61,6 +61,23 @@ test('match: AUTO keeps each robot on its own side, earns LEAVE, TIPs with the p
   assert.ok(parks >= 5, 'the blue robots PARK in the LOADING ZONE at the end (all but one of 6 at most): ' + parks);
 });
 
+test('match: in AUTO an AI robot keeps its own side and still never ends a tick inside a HIVE leg or a FLOWER', () => {
+  const obs = E.Field.obstacles(0.46), MB = { hx: HX, hy: HX };
+  for (const skill of ['rookie', 'typical', 'elite']) for (const seed of [1, 2, 3, 4, 5]) {
+    let worst = null;
+    play({ period: 'Autonomous', seed, skill, watch: (M) => {
+      for (const b of M.bots) {
+        assert.ok(b.x * (b.al === 'red' ? -1 : 1) >= HX - 1e-9, 'G402: own side in AUTO');
+        for (const o of obs) {
+          const d = E.capsulePush({ x: b.x, y: b.y, h: b.h }, MB, o), p = d ? Math.hypot(d[0], d[1]) : 0;
+          if (p > 1e-4 && (!worst || p > worst.p)) worst = { p, t: M.t, id: b.id, what: o.what };
+        }
+      }
+    } });
+    assert.equal(worst, null, worst && `${skill} seed ${seed}: ${worst.id} ${(worst.p * 1000).toFixed(1)} mm into a ${worst.what} at t=${worst.t.toFixed(2)} s`);
+  }
+});
+
 test('match: the score adds up the way the manual scores it', () => {
   const { M, S } = play({ seed: 5 });
   for (const al of ['red', 'blue']) {
