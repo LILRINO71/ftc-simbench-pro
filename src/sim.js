@@ -393,8 +393,7 @@ const Sim={
           /* a flywheel (src/payload.js marks it): a DC motor's speed follows its voltage with time
              constant T = I omega_free / tau_stall. Under setVelocity the hub's loop drives near full
              voltage until the wheel is close, then holds it there */
-          const u=s.vctl?Math.max(-1,Math.min(1,drive+(drive-s.act)*FLY_KP)):drive;
-          act=u+(s.act-u)*Math.exp(-dt/s.flyT);
+          act=flyStep(s.act,drive,s.flyT,dt,s.vctl?FLY_KP:0);
         }else act=s.act+Math.sign(drive-s.act)*Math.min(Math.abs(drive-s.act),slew);
         const lin=s.mech&&isLinearKind(s.mech.kind);
         // a slide asked to lift more than its motor holds doesn't climb; it can still lower
@@ -930,6 +929,23 @@ function lerpPose(out,a,b,k){
   if(!(Math.abs(dh)<1)) return false;
   out.x=a.x+dx*k; out.y=a.y+dy*k; out.h=a.h+dh*k;
   return true;
+}
+/* A flywheel's speed after dt, as a share of free speed: a DC motor follows its voltage u with time
+   constant T. Run on power, u is the command. Under the hub's velocity loop u = cmd + kp (cmd - act),
+   held to +-1: the stretch at full voltage first, then the loop's own approach, each integrated
+   exactly, so it holds however short T is. (One explicit step per tick multiplied the error by
+   21 e^(-dt/T) - 20: a light wheel with T under 0.2 s swung between -0.2 and 0.7 around 0.43.) */
+function flyStep(a,cmd,T,dt,kp){
+  if(!(kp>0)) return cmd+(a-cmd)*Math.exp(-dt/T);
+  let rem=dt;
+  const raw=cmd+kp*(cmd-a);
+  if(Math.abs(raw)>1){
+    const u=Math.sign(raw), ad=cmd-(u-cmd)/kp;        // full voltage one way, until the loop comes off the stop at ad
+    const r=(ad-u)/(a-u), td=r>0&&r<1?-T*Math.log(r):Infinity;
+    if(td>=rem) return u+(a-u)*Math.exp(-rem/T);
+    a=ad; rem-=td;
+  }
+  return cmd+(a-cmd)*Math.exp(-rem*(1+kp)/T);
 }
 const SLEW=8;                                   // motor power change per second (power units / s)
 const RTP_LEAD=0.15;                              // s of travel RUN_TO_POSITION looks ahead

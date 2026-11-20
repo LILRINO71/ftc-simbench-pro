@@ -2,7 +2,7 @@
 
 The team's robot handles POLLEN and NECTAR the way its code does: an intake picks a ball up off the
 tiles, the robot holds four at most, a piece travels to the shooter and waits there, a feeder or gate
-lets it out (or, with neither, it goes as soon as the shooter turns), an intake run backward puts one
+lets it out (or, with neither, the intake pushes it into the shooter once that turns), an intake run backward puts one
 out, and the flywheel slows as each ball takes its energy. It all comes from the OpMode's device names
 and types, so it works for any team's code. The engine is `src/payload.js`; tests are in
 `tests/payload.test.mjs`.
@@ -64,9 +64,11 @@ listed in `payload.notTurning`.
   running pushes one per 0.5 s) takes the next piece waiting at the shooter; none waiting, nothing is
   launched and one note says so. A gate (`gate`, `stopper`) held open lets the rest follow. A feeder
   servo's rest is where the code first puts it. With no feeder or gate (Team 7831's Meet 0 robot: the
-  intake pushes balls straight into two shooter rollers) a waiting piece leaves as soon as
-  `Shots.exitSpeed()` is at least 1 m/s, no closer together than the ball takes to clear the shooter
-  ((its diameter + half the wheel) at the exit speed). The ball launched is the piece's kind and colour.
+  intake pushes balls straight into two shooter rollers) a waiting piece leaves while the intake or
+  transfer is running inward and `Shots.exitSpeed()` is at least 1 m/s, no closer together than the ball
+  takes to clear the shooter ((its diameter + half the wheel) at the exit speed). With nothing pushing
+  it, a piece sits short of the wheels however fast they turn: spin up, then feed. Feed into a shooter
+  that is only just turning and the ball dribbles out at whatever speed the wheels have reached. The ball launched is the piece's kind and colour.
 - **Reverse.** With pieces held, an intake running the eject way puts the last one in out through its
   mouth, on the same take-in time, onto the tiles at 0.5 m/s away from the robot.
 - **FLOWERs and the LOADING ZONE.** A running mouth at a FLOWER's bottom opening takes its POLLEN one at

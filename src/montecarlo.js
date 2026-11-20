@@ -194,7 +194,7 @@ function mcSim(job, v, S) {
     obstacleOffsets: v.offsets.map(o => [o[0] * IN, o[1] * IN])
   });
   const wantPoints = job.success.mode === "points", live = S === Sim && Field.ok;
-  const grams = { pollen: ELEMENT_G.pollen, nectar: ELEMENT_G.nectar }, was = { on: Match.on, bots: Match.bots, alliance: Shots.alliance, cfg: Shots.cfg };
+  const grams = { pollen: ELEMENT_G.pollen, nectar: ELEMENT_G.nectar }, was = { on: Match.on, bots: Match.bots, alliance: Shots.alliance, cfg: Shots.cfg, shotSeed: Shots.seed };
   const res = { seed: v.seed, v, ok: false, pose: null, err: null, points: null, t: 0, ended: null, bumps: 0, error: null };
   try {
     // game pieces a few percent off their nominal weight, for this run only
@@ -202,6 +202,9 @@ function mcSim(job, v, S) {
     if (live) {
       Field.reset();
       Shots.alliance = job.alliance; if (job.shots) Shots.cfg = job.shots;
+      // a fresh robot each run: nothing held over from the last one (its pre-loads were only ever given to
+      // the first run of a batch), and the shots' scatter drawn from this run's own seed
+      Shots.seed = (v.seed >>> 0) || 7; Shots.reset();
       if (wantPoints) { Match.on = true; Match.reset({ period: "Autonomous", user: job.alliance, userPose: { x: 0, y: 0, h: 0 }, seed: v.seed, skill: "typical" }); Match.bots = []; }
       else Match.on = false;
     }
@@ -227,7 +230,7 @@ function mcSim(job, v, S) {
     res.error = String(e && e.message || e);
   } finally {
     ELEMENT_G.pollen = grams.pollen; ELEMENT_G.nectar = grams.nectar;
-    if (live) { Match.on = was.on; Match.bots = was.bots; Shots.alliance = was.alliance; Shots.cfg = was.cfg; }
+    if (live) { Match.on = was.on; Match.bots = was.bots; Shots.alliance = was.alliance; Shots.cfg = was.cfg; Shots.seed = was.shotSeed; }
   }
   return res;
 }

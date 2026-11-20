@@ -87,7 +87,7 @@ const Shots={
   defaults(){ return {shooter:null, feeder:null, motorId:null, hoodDeg:75, h0In:16, wheelMm:96, gear:1, mountDeg:0,
                       ball:"pollen", type:"single", precision:"typical"}; },
   reset(){ this.flying=[]; this.landed=[]; this.log=[]; this.fired=0; this.scored=0; this.t=0;
-           this.lastFeed=-1e9; this.feedWas=false; this.feedRest=null; this.rnd=makeRng(this.seed); this.world=ballWorld();
+           this.lastFeed=-1e9; this.feedWas=false; this.feedRest=null; this.feedName=null; this.rnd=makeRng(this.seed); this.world=ballWorld();
            if(typeof Payload!=="undefined") Payload.reset(); },
   target(){ return this.alliance==="blue"?"blue":"red"; },
 
@@ -265,6 +265,8 @@ const Shots={
     const c=this.cfg; if(!c||!c.feeder) return;
     const f=Sim.dev[c.feeder]; if(!f) return;
     const real=typeof Payload!=="undefined"&&Payload.real();
+    // another feeder picked in the Shot tab: its rest is its own, not the last one's
+    if(real&&this.feedName!==c.feeder){ this.feedName=c.feeder; this.feedRest=null; this.feedWas=false; this.lastFeed=-1e9; }
     if(real&&!Payload.gate()) return;                    // an intake or transfer moves pieces; it doesn't push them out
     let pulse=false, away=false;
     if(f.kind==="servo"){

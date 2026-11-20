@@ -342,6 +342,17 @@ function resetMatch(){
     seed:1+Math.floor(Math.random()*99999), skill:$("#matchSkill").value, solo});
   renderMatchHud(true);
 }
+/* The AI robots are switched off in a match that is running. What they held is left where they stood
+   and the loose pieces stay for a robot that can pick them up; with no such robot the field is
+   cleared, as it always was. Never a fresh field over the one in play: that doubled the pieces. */
+function matchAiOffNow(){
+  const pc=$("#piecesOn"), solo=!!(pc&&pc.checked&&Field.ok&&OPTS.obstacles!=="walls")&&Payload.real();
+  if(!solo){ Match.on=false; Match.solo=false; Match.bots=[]; Match.floor=[]; Match.flying=[]; Match.events=[]; renderMatchHud(true); return; }
+  for(const b of Match.bots) for(const e of b.hold) Match.drop(e.kind,e.color,b.x,b.y);
+  for(const e of Match.floor) if(e.hold&&e.hold.id!=="user"){ e.hold=null; e.sleep=false; }
+  Match.bots=[]; Match.solo=true; Match.len=Infinity; Match.version++;
+  renderMatchHud(true);
+}
 let HUD_T=0, LAST_SCORE=null;
 /* What a clip shows on top of the field (src/recorder.js), refreshed with the page's slow loop */
 let REC_HUD={};
@@ -1356,7 +1367,7 @@ function renderPieces(){
       out.push(`<div><code>${esc(m.name)}</code> at the ${esc(m.edge)} edge (${esc(m.from)}); ${way}</div>`);
     }
     const st=Payload.stats||{}, tr=Payload.transfer(), g=Payload.gate();
-    out.push(`<div>${tr?`<code>${esc(tr)}</code> carries pieces to the shooter; `:""}${g?`<code>${esc(g)}</code> lets them out`:"no feeder: a piece leaves as soon as the shooter turns"}.</div>`);
+    out.push(`<div>${tr?`<code>${esc(tr)}</code> carries pieces to the shooter; `:""}${g?`<code>${esc(g)}</code> lets them out`:"no feeder: the intake pushes a piece into the shooter once it turns"}.</div>`);
     out.push(`<div>This run: ${st.picked||0} picked up${st.fromFlowers?" ("+st.fromFlowers+" from FLOWERs)":""} · ${st.fired||0} launched · ${st.scored||0} in · ${st.ejected||0} put out</div>`);
   }
   setIfChanged(el,out.join(""));
@@ -1459,6 +1470,8 @@ function reloadSim(){
   if(!CODE||!CAD) return;
   const phase=Sim.phase;
   Sim.load(CODE,CAD,MAP,withPose()); applyConfigOverrides(); Physics.sync();
+  // a rebuilt sim is a fresh robot: nothing held over from the last one, no feeder rest remembered
+  Payload.reset(); Shots.feedRest=null; Shots.feedName=null; Shots.feedWas=false;
   if(phase!=="stopped"){ Sim.init(); applyConfigOverrides(); resetMatch(); }
   if(phase==="running") Sim.start();
   renderPad(); renderLegend3D(); updateDS();
@@ -3332,10 +3345,15 @@ function boot(){
   addEventListener("keydown",e=>{ if(e.key==="Escape"&&!mm.hidden) openMatch(false); });
   $("#matchOn").addEventListener("change",matchDot); matchDot();
   $("#matchSkill").value=store.get("ftcbench.matchSkill","typical");
-  $("#matchOn").addEventListener("change",e=>{ store.set("ftcbench.match",e.target.checked?"1":"0"); if(Online.inMatch()) return; if(Sim.phase!=="running") resetMatch(); else { Match.on=e.target.checked; if(!Match.on) resetMatch(); } });
+  $("#matchOn").addEventListener("change",e=>{ store.set("ftcbench.match",e.target.checked?"1":"0"); if(Online.inMatch()) return; if(Sim.phase!=="running") resetMatch(); else if(e.target.checked) Match.on=true; else matchAiOffNow(); });
   // the game pieces without the AI robots (src/payload.js): on or off at once, a match with AI robots left alone
   $("#piecesOn").checked=store.get("ftcbench.pieces","1")==="1";
-  $("#piecesOn").addEventListener("change",e=>{ store.set("ftcbench.pieces",e.target.checked?"1":"0"); if(Online.inMatch()||Match.live()) return; resetMatch(); });
+  $("#piecesOn").addEventListener("change",e=>{ store.set("ftcbench.pieces",e.target.checked?"1":"0"); if(Online.inMatch()||Match.live()) return;
+    if(Sim.phase!=="running"){ resetMatch(); return; }
+    // mid-run: off takes the loose pieces away at once; on waits for the next INIT (a fresh field over the
+    // one in play would add to what the robot already holds)
+    if(!e.target.checked&&Match.solo){ Match.on=false; Match.solo=false; Match.floor=[]; Match.flying=[]; Match.events=[]; renderMatchHud(true); }
+  });
   $("#matchSkill").addEventListener("change",e=>{ store.set("ftcbench.matchSkill",e.target.value); if(Online.inMatch()) return; if(Sim.phase!=="running") resetMatch(); else Match.skill=e.target.value; });
   $("#practice").addEventListener("change",e=>{ store.set("ftcbench.practice",e.target.checked?"1":"0"); updateClock(); });
   NetUI.init(); SetupUI.init(); ImportFlow.init(); Recorder.init(); Sounds.init(); Results.init(); Minimap.init(); PathEdit.init(); KeyBinds.init();

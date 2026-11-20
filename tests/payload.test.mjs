@@ -415,9 +415,16 @@ test('payload: AUTO starts with 4 pre-loaded POLLEN (G304), TELEOP with none unl
   assert.equal(held(), 4, 'four POLLEN');
   assert.ok(E.Payload.held.every((p) => p.kind === 'pollen'));
   assert.equal(E.Payload.summary().preloaded, 4);
-  // spun up, then the intake feeds them through: the auto's intake command decides which way is in
-  run(E, 6);
+  // spun up for 1.5 s, then the intake feeds them through a ball's width apart: the auto's intake command
+  // decides which way is in. (Left running, the intake later picks its own misses back up as they roll
+  // home off the far wall and launches them again, so the count is taken as soon as the four are out.)
+  run(E, 1.4);
+  assert.equal(E.Shots.fired, 0, 'nothing leaves while the shooter spins up and nothing pushes');
+  assert.equal(held(), 4);
+  run(E, 1.4);
   assert.equal(E.Shots.fired, 4, 'all four launched: ' + JSON.stringify(E.Shots.log.map((l) => l.text)));
+  assert.equal(held(), 0);
+  assert.ok(E.Shots.flying.concat(E.Shots.log).length >= 1 && E.Shots.flying.every((b) => b.v > 5), 'at speed, not dribbled out: ' + E.Shots.flying.map((b) => b.v.toFixed(1)));
   assert.equal(E.Payload.dirs.intake.from, 'first feed', 'decided while the flywheel was up');
   bench(MEET0());
   run(E, 0.1);
@@ -609,4 +616,151 @@ test('payload: the workspace file keeps the game-piece settings and refuses junk
   assert.equal(E.unpackSession(JSON.stringify(raw).replace('"preload":null', '"preload":1e999')).ok, false, 'Infinity is a corrupt file');
   raw.shots.cfg.payload = 'not an object';
   assert.equal('payload' in E.unpackSession(JSON.stringify(raw)).session.shots.cfg, false);
+});
+
+// ---- what an independent review of this feature found, each held by a test ----
+
+test('payload: the velocity loop on a light flywheel settles on its target instead of swinging', () => {
+  // T = I w / tau for a geared-down or small wheel is well under 0.2 s. Stepped as one explicit update a tick,
+  // the loop multiplied its error by 21 e^(-dt/T) - 20: a 312 rpm motor's wheel (T = 0.03 s) swung between
+  // -0.19 and 0.68 around a 0.43 target, running backward part of the time.
+  for (const T of [0.03, 0.08, 0.13, 0.5, 1.77]) for (const cmd of [0.43, 0.9, -0.6]) {
+    let a = 0, lo = 0, hi = 0, prev = Math.abs(cmd);
+    for (let i = 0; i < 600; i++) {
+      a = E.flyStep(a, cmd, T, DT, 20);
+      lo = Math.min(lo, a); hi = Math.max(hi, a);
+      const err = Math.abs(cmd - a);
+      assert.ok(err <= prev + 1e-12, `T ${T}, target ${cmd}: the error grew at step ${i} (${prev} to ${err})`);
+      prev = err;
+    }
+    assert.ok(Math.abs(a - cmd) < 1e-6, `T ${T}: settles on ${cmd}, got ${a}`);
+    assert.ok(lo >= Math.min(0, cmd) - 1e-9 && hi <= Math.max(0, cmd) + 1e-9, `T ${T}, target ${cmd}: stays between rest and its target (${lo} .. ${hi})`);
+  }
+  // run on power it is the plain first-order lag, exactly
+  assert.ok(Math.abs(E.flyStep(0, 1, 0.5, DT, 0) - (1 - Math.exp(-DT / 0.5))) < 1e-12);
+  // far from its target a heavy wheel under the loop gets full voltage, no more: as fast as the motor can
+  assert.ok(Math.abs(E.flyStep(0, 0.9, 1.77, DT, 20) - (1 - Math.exp(-DT / 1.77))) < 1e-12, 'full voltage while far off');
+});
+
+test('payload: two motors on the one shooter share its wheel set, so a shot costs what the Shot Sim says', () => {
+  bench(MEET0());
+  assert.deepEqual(E.Payload.flywheels(), ['outtake1', 'outtake2']);
+  const f = E.Payload.flyParams('outtake1');
+  assert.ok(Math.abs(f.wheel * 2 - f.set) < 1e-12 && f.motors === 2, 'each motor carries half the wheel set: ' + JSON.stringify(f));
+  pad('a', true); run(E, 14);
+  const v = E.Shots.exitSpeed();
+  pad('right_trigger', 1); ballAt('pollen');
+  for (let i = 0; i < 250 && E.Shots.fired === 0; i++) E.Sim.tick(DT);
+  assert.equal(E.Shots.fired, 1, 'fed through and launched');
+  const mv = E.Field.E.motorModel(E.Shots.cfg.motorId, E.Shots.shooterSpec(), 'pollen', v);
+  // counting the whole wheel set on each motor gave 2.3 % here against the Shot Sim's 4.9 % for the same shooter
+  assert.ok(Math.abs(E.Payload.lastDrop / mv.dip - 1) < 0.12, `drop ${(E.Payload.lastDrop * 100).toFixed(2)} % against the Shot Sim's ${(mv.dip * 100).toFixed(2)} %`);
+  pad('right_trigger', 0); pad('a', false);
+});
+
+test('payload: a flywheel the user picked as the shooter is never taken for an intake, whatever it is called', () => {
+  const J = HEAD + `
+@TeleOp(name = "Roller shooter")
+public class RollerShooter extends LinearOpMode {
+  @Override public void runOpMode() {${DRIVE}
+    DcMotorEx roller = hardwareMap.get(DcMotorEx.class, "roller");
+    Servo kicker = hardwareMap.get(Servo.class, "kicker");
+    kicker.setPosition(0.2);
+    waitForStart();
+    while (opModeIsActive()) {
+      roller.setPower(gamepad2.a ? 1.0 : 0.0);
+      kicker.setPosition(gamepad2.right_bumper ? 0.55 : 0.2);
+    }
+  }
+}`;
+  const kicks = () => { pad('a', true); run(E, 2); for (let i = 0; i < 4; i++) { pad('right_bumper', true); run(E, 0.4); pad('right_bumper', false); run(E, 0.6); } pad('a', false); return E.Shots.fired; };
+  // the old bench, told so outright: a ball for every push of the kicker
+  bench(J, { payload: { supply: 'unlimited' } });
+  E.Shots.cfg.shooter = 'roller';
+  const before = kicks();
+  assert.ok(before >= 4, 'the unlimited supply fires on the kicks: ' + before);
+  // left on auto: by its name alone the roller looks like an intake, until the Shot tab says it is the shooter
+  bench(J);
+  assert.deepEqual(E.Shots.detect(E.Sim.code).intake, ['roller']);
+  E.Shots.cfg.shooter = 'roller';
+  assert.deepEqual(E.Payload.intakes(), [], 'the shooter is not an intake');
+  assert.equal(E.Payload.supply().mode, 'unlimited', 'a robot that only shoots keeps the unlimited supply');
+  assert.equal(kicks(), before, 'and fires exactly as it did');
+});
+
+test('payload: another feeder picked in the Shot tab starts from its own rest position', () => {
+  const J = HEAD + `
+@TeleOp(name = "Two servos")
+public class TwoServos extends LinearOpMode {
+  @Override public void runOpMode() {${DRIVE}
+    DcMotorEx intake = hardwareMap.get(DcMotorEx.class, "intake");
+    DcMotorEx flywheel = hardwareMap.get(DcMotorEx.class, "flywheel");
+    Servo pusher = hardwareMap.get(Servo.class, "pusher");
+    Servo kicker = hardwareMap.get(Servo.class, "kicker");
+    pusher.setPosition(0.8);
+    kicker.setPosition(0.2);
+    waitForStart();
+    while (opModeIsActive()) {
+      flywheel.setPower(gamepad2.a ? 1.0 : 0.0);
+      intake.setPower(gamepad2.right_trigger > 0.1 ? 1.0 : 0.0);
+      kicker.setPosition(gamepad2.right_bumper ? 0.55 : 0.2);
+    }
+  }
+}`;
+  bench(J);
+  assert.equal(E.Shots.cfg.feeder, 'pusher', 'the first feeder-like name is picked');
+  run(E, 0.3);
+  pad('right_trigger', 1);
+  for (let i = 0; i < 3; i++) { ballAt('pollen'); run(E, 0.9); }
+  pad('right_trigger', 0);
+  assert.equal(held(), 3);
+  pad('a', true); run(E, 6);
+  assert.equal(E.Shots.fired, 0, 'the pusher never moves: nothing goes');
+  E.Shots.cfg.feeder = 'kicker';               // the user corrects it in the Shot tab
+  run(E, 0.6);
+  assert.equal(E.Shots.fired, 0, "no launch from the switch itself (the kicker at its own rest was read against the pusher's)");
+  pad('right_trigger', 1);                     // the intake brings each next piece up to the kicker
+  for (let i = 0; i < 3; i++) { pad('right_bumper', true); run(E, 0.4); pad('right_bumper', false); run(E, 1.2); }
+  pad('right_trigger', 0);
+  assert.equal(E.Shots.fired, 3, 'then one ball for each kick');
+  assert.equal(held(), 0);
+  pad('a', false);
+});
+
+test('payload: a field reset in the middle of a run empties the robot and never pre-loads it again', () => {
+  bench(AUTO);
+  run(E, 0.5);
+  assert.equal(held(), 4, 'the AUTO pre-loads (its intake has not started feeding them yet)');
+  E.Shots.reset();                             // the Shot tab's Reset field, with the OpMode running
+  run(E, 0.2);
+  assert.equal(held(), 0, 'no second set of pre-loads from nowhere');
+  assert.equal(E.Payload.summary().preloaded, 0);
+  bench(MEET0());
+  pad('right_trigger', 1); ballAt('pollen'); run(E, 1.2); pad('right_trigger', 0);
+  assert.equal(held(), 1);
+  E.Shots.reset(); run(E, 0.2);
+  assert.equal(held(), 0, "and a TeleOp's pieces go with the field");
+});
+
+test('payload: settings that are not numbers fall back instead of stalling the pieces', () => {
+  bench(MEET0(), { payload: { rollerMm: 'abc', preload: 'x', supply: 7, dirs: 3 } });
+  const c = E.Payload.cfg();
+  assert.deepEqual([c.rollerMm, c.preload, c.supply, JSON.stringify(c.dirs)], [48, null, 'auto', '{}']);
+  pad('right_trigger', 1); ballAt('pollen'); run(E, 1.5); pad('right_trigger', 0);
+  assert.equal(held(), 1, 'it still picks up');
+  assert.ok(E.Payload.held[0].s > 0.05, 'and the piece travels toward the shooter (a NaN roller left it at 0 for good): ' + E.Payload.held[0].s);
+  bench(MEET0(), { payload: { rollerMm: NaN, preload: 9 } });
+  assert.deepEqual([E.Payload.cfg().rollerMm, E.Payload.cfg().preload], [48, 4]);
+});
+
+test('Monte Carlo: every run starts with its own pre-loads, and a seed gives the same run again', () => {
+  const code = E.parseJava(AUTO, { engine: 'vm' });
+  E.Field.reset(); E.Shots.cfg = null; E.Shots.reset(); E.Shots.alliance = 'red'; E.Shots.adopt(code);
+  const shots = JSON.parse(JSON.stringify(E.Shots.cfg));
+  const job = E.mcPrepare({ code, cad: BOX(), map: {}, opts: { front: '+x', startPose: { x: -1.0, y: 0, h: 0 } }, alliance: 'red', shots, duration: 8, success: { mode: 'points', points: 1 } });
+  const launched = [], points = [];
+  E.mcRun(job, 0, 0, { seeds: [7, 7, 7], onRun: (i, r) => { launched.push(E.Payload.stats.fired); points.push(r.points); } });
+  // only the first run of a batch ever got the 4 pre-loads: the rest launched nothing
+  assert.deepEqual(launched, [4, 4, 4], 'each run launches its own 4 pre-loads');
+  assert.ok(points[0] === points[1] && points[1] === points[2], 'the same seed, the same points: ' + points);
 });

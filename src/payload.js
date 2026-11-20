@@ -15,7 +15,8 @@
                 once a piece is in, this moves it to the shooter
      feeder     Shots.cfg.feeder (kicker, gate, pusher ...) when it isn't one of
                 the above: it lets a waiting piece out. With none, a piece
-                leaves as soon as the shooter turns fast enough
+                leaves when the intake or transfer pushes it into a shooter that
+                turns fast enough
      shooter    Shots.cfg.shooter and every other motor named like a shooter:
                 the flywheels, which pay for each shot
    Each can be set by hand in the Shot tab (Shots.cfg.payload).
@@ -56,20 +57,27 @@ const FLY_KP=20;                        // a hub velocity loop drives near full 
 
 const Payload={
   held:[], grips:[], fgrips:[], dirs:{}, ej:{}, stats:null, t:0, lastOut:-1e9, primed:false, dryNoted:false,
-  mode:"none", why:"", _fly:null, _flyKey:"",
+  mode:"none", why:"", _fly:null,
 
   defaults(){ return {intakes:null, transfer:null, dirs:{}, edges:{}, preload:null, supply:"auto", rollerMm:48}; },
   /* The settings (Shots.cfg.payload) with every gap filled. */
   cfg(){
     const d=this.defaults(), p=typeof Shots!=="undefined"&&Shots.cfg&&Shots.cfg.payload;
     if(p&&typeof p==="object") for(const k in d) if(p[k]!==undefined&&p[k]!==null) d[k]=p[k];
+    // a headless caller or an old file can put anything here: only what the rest can use
+    d.rollerMm=Number.isFinite(+d.rollerMm)&&+d.rollerMm>0?Math.max(10,Math.min(150,+d.rollerMm)):48;
+    d.preload=d.preload!=null&&Number.isFinite(+d.preload)?Math.max(0,Math.min(MATCH_BOT.cap,Math.round(+d.preload))):null;
+    if(d.supply!=="real"&&d.supply!=="unlimited") d.supply="auto";
+    if(d.intakes!==null&&!Array.isArray(d.intakes)) d.intakes=null;
+    if(!d.dirs||typeof d.dirs!=="object") d.dirs={};
+    if(!d.edges||typeof d.edges!=="object") d.edges={};
     return d;
   },
   /* A fresh run: nothing held, nothing learned. Shots.reset calls this. */
   reset(){
     for(const g of this.grips) if(g.ball.hold&&g.ball.hold.id==="user") g.ball.hold=null;
     this.held=[]; this.grips=[]; this.fgrips=[]; this.dirs={}; this.ej={}; this.t=0; this.lastOut=-1e9;
-    this.primed=false; this.dryNoted=false; this.preloaded=0; this.lastDrop=0; this.stuck={}; this.stuckSaid={};
+    this.primed=false; this.dryNoted=false; this.preloaded=0; this.lastDrop=0; this.feedV=0; this.stuck={}; this.stuckSaid={};
     this.stats={picked:0, ejected:0, fired:0, scored:0, flower:0, g408:0};
   },
 
@@ -85,7 +93,9 @@ const Payload={
   intakes(){
     const P=this.cfg(), have=this.devNames();
     const list=Array.isArray(P.intakes)?P.intakes:this.detected().intake;
-    return list.filter(n=>typeof n==="string"&&have.indexOf(n)>=0).slice(0,4);
+    // never the shooter itself: a flywheel named "roller" the user picked as the shooter is not an intake
+    const sh=Shots.cfg&&Shots.cfg.shooter;
+    return list.filter(n=>typeof n==="string"&&have.indexOf(n)>=0&&n!==sh).slice(0,4);
   },
   /* The transfer: the Shot tab's ("" for none), else what the names say. */
   transfer(){
@@ -259,7 +269,9 @@ const Payload={
     if(!this.stats) this.reset();
     const S=this.prepare();
     if(S.mode!=="real"){ this.letGoAll(); return; }
-    if(!this.primed) this.prime();
+    // pre-loads go in before START (or on its first pass, for a run started in one call), never into a
+    // run already going: a field reset mid-run leaves the robot empty
+    if(!this.primed){ if(sim.phase!=="running"||(sim.t||0)<=1.5*dt) this.prime(); else{ this.primed=true; this.held=[]; this.preloaded=0; } }
     if(sim.phase!=="running") return;
     this.t+=dt;
     const ins=this.intakes(), tr=this.transfer(), M=this.mouths(), X=this.box(), room=this.count()<MATCH_BOT.cap;
@@ -375,6 +387,7 @@ const Payload={
     let v=0;
     if(tr){ if(this.inward(tr)>INTAKE_ON) v=0.5*this.surf(tr); }
     else for(const n of ins) if(this.inward(n)>INTAKE_ON) v=Math.max(v,0.5*this.surf(n));
+    this.feedV=v;                                       // how hard the pieces are being pushed along, this tick
     if(!(v>0)) return;
     const L=this.pathLen();
     for(let i=0;i<this.held.length;i++){
@@ -383,11 +396,14 @@ const Payload={
     }
   },
   waiting(){ const h=this.held[0]; return !!h&&h.s>=this.pathLen()-1e-6; },
-  /* No feeder or gate: the piece goes as soon as the shooter turns fast enough, one at a time,
-     no closer together than a ball takes to clear the shooter (its width and half the wheel it
-     rides round, at the exit speed). */
+  /* No feeder or gate: what pushes a piece into the shooter is the intake or the transfer. While
+     one of them is running inward and the shooter turns fast enough the waiting piece goes, one at a
+     time, no closer together than a ball takes to clear the shooter (its width and half the wheel it
+     rides round, at the exit speed). With nothing pushing, it sits short of the wheels: a piece
+     that left the moment the shooter started turning dribbled out at 1 m/s every time a driver
+     picked a ball up before spinning up. */
   straight(sim){
-    if(!this.waiting()||!Shots.cfg||!Shots.cfg.shooter) return;
+    if(!this.waiting()||!Shots.cfg||!Shots.cfg.shooter||!(this.feedV>0)) return;
     const v=Shots.exitSpeed(); if(v<1) return;
     if(this.t-this.lastOut<this.clearTime(this.held[0].kind,v)) return;
     this.release(sim.chassis,"through "+Shots.cfg.shooter);
@@ -414,14 +430,18 @@ const Payload={
   },
 
   /* ---------------- the flywheel pays for the shot ---------------- */
-  /* A wheel's numbers at the wheel: inertia (the Shot Sim's wheel set plus the motor's rotor
-     through its gearbox and the wheel gearing), free speed and stall torque from the device's
-     spec (src/hardware.js), else the Shot Sim's motor. T = I omega_free / tau_stall is how fast a
-     DC motor's speed follows its command. */
-  flyParams(name){
+  /* A wheel's numbers at the wheel: inertia (this motor's share of the Shot Sim's wheel set plus its
+     own rotor through its gearbox and the wheel gearing), free speed and stall torque from the
+     device's spec (src/hardware.js), else the Shot Sim's motor. T = I omega_free / tau_stall is how
+     fast a DC motor's speed follows its command. The Shot tab describes ONE shooter: two motors the
+     code runs together turn that one wheel set between them, so each carries half of it (counting
+     the whole set on each made a shot cost half the dip the Shot Sim gives the same shooter). */
+  flyParams(name,n){
     const s=Sim.dev[name], c=Shots.cfg||{}, sp=s&&s.spec;
-    const key=[name,c.motorId,c.type,c.wheelMm,c.gear,sp&&sp.rpm,sp&&sp.stallNm,sp&&sp.guess].join("|");
-    if(this._fly&&this._flyKey===key) return this._fly;
+    n=n>0?n:Math.max(1,this.flywheels().length);
+    const key=[n,c.motorId,c.type,c.wheelMm,c.gear,sp&&sp.rpm,sp&&sp.stallNm,sp&&sp.guess].join("|");
+    const hit=this._fly&&this._fly[name];
+    if(hit&&hit.key===key) return hit;
     let rpm=6000, stall=0.1442, ratio=1;
     const mo=((typeof Field!=="undefined"&&Field.data&&Field.data.motors&&Field.data.motors.motors)||[]).find(x=>x.id===c.motorId);
     if(sp&&sp.rpm>0&&sp.stallNm>0&&!sp.guess){ rpm=sp.rpm; stall=sp.stallNm; ratio=sp.ratio>0?sp.ratio:6000/rpm; }
@@ -430,9 +450,9 @@ const Payload={
     let I=4e-4;
     try{ I=Field.E.motorModel(c.motorId,Shots.shooterSpec(),c.ball||"pollen",1).details.inertiaKgM2; }catch(e){}
     const rotor=((typeof JoltMech!=="undefined"&&JoltMech.ROTOR)?JoltMech.ROTOR.motor:5e-6)*ratio*ratio/(gear*gear);
-    const It=I+rotor, wf=rpm*gear*2*Math.PI/60, ts=stall/gear;
-    this._flyKey=key;
-    return (this._fly={wheel:I, rotor, I:It, wf, ts, T:It*wf/ts});
+    const share=I/n, It=share+rotor, wf=rpm*gear*2*Math.PI/60, ts=stall/gear;
+    if(!this._fly) this._fly={};
+    return (this._fly[name]={key, wheel:share, set:I, motors:n, rotor, I:It, wf, ts, T:It*wf/ts});
   },
   /* The flywheels get the torque model (src/sim.js stepDevices); every other motor keeps SLEW. */
   markFlywheels(on){
@@ -440,7 +460,7 @@ const Payload={
     const names=on?this.flywheels():[];
     for(const n in Sim.dev){
       const s=Sim.dev[n];
-      if(names.indexOf(n)>=0) s.flyT=this.flyParams(n).T;
+      if(names.indexOf(n)>=0) s.flyT=this.flyParams(n,names.length).T;
       else if(s.flyT) delete s.flyT;
     }
   },
@@ -451,7 +471,8 @@ const Payload={
     let E=0;
     try{ E=Field.E.motorModel(c.motorId,Shots.shooterSpec(),kind,v).shotEnergyJ; }
     catch(e){ const b=ballSpec(kind); E=2*(0.5*b.m*v*v+0.5*b.I*Math.pow(v/b.r,2)); }
-    let KE=0; const fw=this.flywheels().map(n=>[Sim.dev[n],this.flyParams(n)]);
+    const names=this.flywheels(), fw=names.map(n=>[Sim.dev[n],this.flyParams(n,names.length)]);
+    let KE=0;
     for(const [s,f] of fw) KE+=0.5*f.I*Math.pow(s.act*f.wf,2);
     if(!(KE>0)||!(E>0)) return 0;
     const k=Math.sqrt(Math.max(0,1-E/KE));
