@@ -1904,6 +1904,24 @@ function jvRegex(vm,src,flags,input){
     const e=new Error("a regular expression with a repeat inside a repeat ("+src+") on a "+String(input).length+"-character string: it can backtrack for minutes, and on the robot it would stall the loop"); e.jvHang=true; throw e; }
   return re;
 }
+/* Java's String.split(regex, limit), not JS's: a group's captures are not pieces, a zero-width
+   match at the start gives no empty first piece, limit > 0 caps the pieces (the last keeps the
+   rest), and with limit 0 the empty pieces at the end are dropped (",".split(",") has none).
+   re has the "g" flag. */
+function jvSplit(re,s,limit){
+  const out=[]; let last=0, m, any=false;
+  re.lastIndex=0;
+  while((m=re.exec(s))){
+    const at=m.index, w=m[0].length;
+    if(!w){ re.lastIndex++; if(at>=s.length) break; if(at===0) continue; }
+    if(limit>0&&out.length>=limit-1) break;
+    any=true; out.push(s.slice(last,at)); last=at+w;
+  }
+  if(!any) return [s];
+  out.push(s.slice(last));
+  if(limit===0) while(out.length&&out[out.length-1]==="") out.pop();
+  return out;
+}
 /* ---- strings, boxed numbers ---- */
 function jvStringMethod(vm,s,name,a){
   switch(name){
@@ -1924,7 +1942,7 @@ function jvStringMethod(vm,s,name,a){
     case "trim": case "strip": return s.trim();
     case "replace": return s.split(typeof a[0]==="number"?String.fromCharCode(a[0]):String(a[0])).join(typeof a[1]==="number"?String.fromCharCode(a[1]):String(a[1]));
     case "replaceAll": { const re=jvRegex(vm,a[0],"g",s); return re?s.replace(re,a[1]):s; }
-    case "split": { const re=jvRegex(vm,a[0],"",s); return re?s.split(re):[s]; }
+    case "split": { const re=jvRegex(vm,a[0],"g",s); return re?jvSplit(re,s,a.length>1?Math.trunc(jvNum(a[1])):0):[s]; }
     case "hashCode": { let h=0; for(let k=0;k<s.length;k++) h=(h*31+s.charCodeAt(k))|0; return h; }
     case "toString": case "intern": return s;
     case "compareTo": return s<a[0]?-1:s>a[0]?1:0;

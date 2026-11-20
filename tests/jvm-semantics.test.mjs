@@ -79,3 +79,13 @@ import com.qualcomm.robotcore.eventloop.opmode.*;
 }`);
   assert.ok(H.tel.length === 1 && /^loops : \d+$/.test(H.tel[0]), JSON.stringify(H.tel));
 });
+
+test("String.split is Java's: groups are not pieces, empty pieces at the end go, limit caps the pieces", () => {
+  // JS's split puts every capture of a group in the result: the first case gave 5 pieces, Java 3
+  assert.deepEqual(say(`String line = "12.5 , 30 ,, 2";
+    String[] p = line.split("(\\\\s*,\\\\s*)+"); say(p.length + " " + p[1] + "|" + p[2]);
+    say("a,b,,".split(",").length); say(",".split(",").length); say("".split(",").length);
+    say(" a b".split(" ").length); say("abc".split("").length + " " + "abc".split("")[0]);
+    say("a,b,c,d".split(",", 2)[1]); say("a,b,,".split(",", -1).length); say("x1y22z".split("\\\\d+").length);`),
+  ['3 30|2', '2', '0', '1', '3', '3 a', 'b,c,d', '4', '3']);
+});
