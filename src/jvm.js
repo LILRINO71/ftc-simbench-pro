@@ -24,6 +24,8 @@ const JV_INTS=new Set(["int","long","short","byte","char","Integer","Long","Shor
 const JV_MODS=new Set(["public","private","protected","static","final","abstract","native","synchronized","transient","volatile","strictfp","default","sealed","non-sealed"]);
 
 function JvError(msg,p){ const e=new Error(msg); e.jvPos=p; return e; }
+/* a declared type with these dims, its type arguments kept (List<Integer> -> args [Integer]) */
+function jvTy(t,dims){ return t.args?{name:t.name,dims,args:t.args}:{name:t.name,dims}; }
 
 /* ---------------- lexer ---------------- */
 function jvLex(src){
@@ -118,30 +120,32 @@ function jvParse(src,file){
     }
     return m;
   }
-  /* types: generics are read and dropped (erasure) */
+  /* types: generics are erased at run time, but the type arguments are kept on the type
+     (args), so an Integer taken out of a List<Integer> divides as an int (JVM.setRk) */
   function typeArgs(){
     want("<");
-    if(eat(">")) return;
+    const out=[];
+    if(eat(">")) return out;
     for(;;){
       while(is("@")) annotation();
-      if(eat("?")){ if(eat("extends")||eat("super")) type(); }
-      else type();
+      if(eat("?")){ if(eat("extends")) out.push(type()); else { if(eat("super")) type(); out.push({name:"Object",dims:0}); } }
+      else out.push(type());
       while(eat("&")) type();
       if(eat(",")) continue;
-      want(">"); return;
+      want(">"); return out;
     }
   }
   function type(){
     while(is("@")) annotation();
-    const t=pk(); let name;
+    const t=pk(); let name, args=null;
     if(t.t==="kw"&&JV_PRIM.has(t.v)){ i++; name=t.v; }
-    else if(t.t==="id"){ i++; name=t.v; if(is("<")) typeArgs();
-      while(is(".")&&isId(1)){ i++; name+="."+ident(); if(is("<")) typeArgs(); } }
+    else if(t.t==="id"){ i++; name=t.v; if(is("<")) args=typeArgs();
+      while(is(".")&&isId(1)){ i++; name+="."+ident(); if(is("<")) args=typeArgs(); } }
     else fail("expected a type but found '"+t.v+"'");
     let dims=0;
     while(is("[")&&is("]",1)){ i+=2; dims++; }
     if(is("...")){ /* varargs: caller handles */ }
-    return {name,dims};
+    return args&&args.length?{name,dims,args}:{name,dims};
   }
   function tryType(){ const s=i; try{ return type(); }catch(e){ i=s; return null; } }
   function typeParams(){ if(is("<")){ let d=0; do{ if(is("<")) d++; else if(is(">")) d--; i++; }while(d>0); } }
@@ -220,7 +224,7 @@ function jvParse(src,file){
         let dims=ty.dims; while(is("[")&&is("]",1)){ i+=2; dims++; }
         let init=null;
         if(eat("=")) init=is("{")?arrayInit():expr();
-        d.members.push({k:"field",name:nm,type:{name:ty.name,dims},init,static:!!m.static||d.kind==="interface",final:!!m.final||d.kind==="interface",p:fp});
+        d.members.push({k:"field",name:nm,type:jvTy(ty,dims),init,static:!!m.static||d.kind==="interface",final:!!m.final||d.kind==="interface",p:fp});
         if(!eat(",")) break;
         fp=pk().p; nm=ident();
       }
@@ -236,7 +240,7 @@ function jvParse(src,file){
       if(eat("...")) varargs=true;
       if(is("this")){ i++; if(eat(",")) continue; want(")"); return ps; }   // receiver parameter
       const name=ident(); let dims=ty.dims; while(is("[")&&is("]",1)){ i+=2; dims++; }
-      ps.push({name,type:{name:ty.name,dims:dims+(varargs?1:0)},varargs});
+      ps.push({name,type:jvTy(ty,dims+(varargs?1:0)),varargs});
       if(eat(",")) continue;
       want(")"); return ps;
     }
@@ -429,9 +433,9 @@ function jvParse(src,file){
   function arrayInit(){ const p=pk().p; want("{"); const el=[]; while(!eat("}")){ el.push(is("{")?arrayInit():expr()); if(!eat(",")){ want("}"); break; } } return {k:"arrinit",el,p}; }
   function creator(p){
     while(is("@")) annotation();
-    const t=pk(); let name;
+    const t=pk(); let name, targs=null;
     if(t.t==="kw"&&JV_PRIM.has(t.v)){ i++; name=t.v; }
-    else { name=ident(); if(is("<")) typeArgs(); while(is(".")&&isId(1)){ i++; name+="."+ident(); if(is("<")) typeArgs(); } }
+    else { name=ident(); if(is("<")) targs=typeArgs(); while(is(".")&&isId(1)){ i++; name+="."+ident(); if(is("<")) targs=typeArgs(); } }
     if(is("[")){
       const dims=[]; let extra=0;
       while(is("[")){ i++; if(eat("]")){ extra++; continue; } dims.push(expr()); want("]"); }
@@ -440,7 +444,7 @@ function jvParse(src,file){
     }
     const args=argList(); let body=null;
     if(is("{")){ body={kind:"class",name:"",anon:true,mods:{},members:[],impls:[],consts:[],p,file}; classBody(body); }
-    return {k:"new",type:name,args,body,p};
+    return targs&&targs.length?{k:"new",type:name,args,body,p,targs}:{k:"new",type:name,args,body,p};
   }
   function primary(){
     const t=pk(), p=t.p;
@@ -1080,7 +1084,8 @@ JVM.prototype.ex=function*(st,sc){
     case "expr": yield* this.ev(st.e,sc); return null;
     case "local":
       for(const d of st.decls){
-        const t={name:st.type.name,dims:d.dims};
+        // var x = new ArrayList<Integer>(): the type arguments come from the new
+        const t=jvTy(st.type.name==="var"&&d.init&&d.init.targs?{name:d.init.type,args:d.init.targs}:st.type,d.dims);
         const v=d.init?(d.init.k==="arrinit"?yield* this.arrInit(d.init,t,sc):yield* this.ev(d.init,sc)):jvDefault(t);
         sc.v[d.name]=jvCoerce(v,t); sc.t[d.name]=t;
       }
@@ -1701,8 +1706,25 @@ JVM.prototype.setRk=function(e,r,sc){
   if(e.name==="signum"){ ni.rk=on==="Integer"||on==="Long"?"i":null; return; }
   if((on==="Math"||on==="StrictMath")&&/^(abs|max|min)$/.test(e.name)&&sc){ ni.rk=e.args.every(a=>{ const k=this.kind(a,sc); return k==="i"||k==="c"; })?"i":null; return; }
   if(on==="System"&&/^(currentTimeMillis|nanoTime)$/.test(e.name)){ ni.rk="i"; return; }
+  // an element out of a collection declared with its type: List<Integer>.get() is an Integer
+  const el=e.obj&&sc?jvElemType(this.typeOf(e.obj,sc),e.name,e.args.length):null;
+  if(el){ ni.rk=jvTypeKind(el); return; }
   ni.rk=(JV_INT_METHODS.has(e.name)&&typeof r==="number"&&Number.isInteger(r))?"i":null;
 };
+/* The declared type of what `name` returns on a receiver of generic type t (List<Integer>,
+   Map<String,Integer>, Map.Entry<K,V>, Iterator<T>, Optional<T>…), or null */
+const JV_ELEM_M=/^(get|getFirst|getLast|peek|peekFirst|peekLast|poll|pollFirst|pollLast|pop|element|remove|removeFirst|removeLast|next|previous|set|first|last|floor|ceiling|higher|lower|orElse|orElseThrow|getAsInt)$/;
+const JV_MAPV_M=/^(get|getOrDefault|remove|put|putIfAbsent|replace|merge|compute|computeIfAbsent|computeIfPresent)$/;
+function jvElemType(t,name,argc){
+  if(!t||t.dims||!t.args) return null;
+  const n=t.name.replace(/^.*\./,"");
+  if(n==="Entry") return name==="getKey"?t.args[0]:name==="getValue"||name==="setValue"?t.args[1]||null:null;
+  if(/Map$|^Hashtable$/.test(n)){ if(JV_MAPV_M.test(name)) return t.args[1]||null; if(/^(firstKey|lastKey|floorKey|ceilingKey|higherKey|lowerKey)$/.test(name)) return t.args[0]; return null; }
+  // remove(): the element for a Deque's remove() and a List's remove(int index); remove(Object) is a boolean
+  if(name==="remove"&&argc===1&&!/^(List|ArrayList|LinkedList|Vector|Stack|CopyOnWriteArrayList)$/.test(n)) return null;
+  if(JV_ELEM_M.test(name)&&t.args.length===1) return t.args[0];
+  return null;
+}
 /* The kind of a value of declared type t: "i" for the int types, "c" for char */
 function jvTypeKind(t){ return t&&!t.dims?(t.name==="char"||t.name==="Character"?"c":JV_INTS.has(t.name)?"i":null):null; }
 /* The kind of the current native call's i-th argument (see argCtx) */
