@@ -82,7 +82,8 @@ const DYN_DEFAULTS = {
   slipStiffness: 22,   // longitudinal force per unit slip ratio per unit load;
                        // peaks at kappa = mu/Cs, about 4% slip, which is where tread on tile does
   rollerMu: 0.28,      // an omni/mecanum roller along its own axis: it turns, so it barely resists
-  strafeEff: 0.72,     // see dynWheels() — the empirical mecanum strafe loss
+  strafeEff: 0.85,     // see dynWheels(): the share of the ideal sideways speed (and force) a mecanum
+                       // wheel's rollers deliver; real bases strafe at about 0.75-0.9 of forward speed
   wheelInertia: 4.6e-4,// kg.m^2, a 104 mm mecanum wheel about its axle
   wheelRadius: 0.048,  // only used when the CAD gave no radius at all
   gear: 1,             // motor shaft revs per wheel rev, on top of the gearmotor's own box
@@ -380,15 +381,24 @@ function tractionLimit(load, mu, kind, dir) {
 
    `force` maps one newton of rim force back to a chassis wrench. At unit
    efficiency it is the same row, which is just the principle of virtual
-   work. It differs on mecanum, and only there, by `strafeEff`: the
-   sideways half of a mecanum wheel's ground force reaches the chassis
-   through the roller's own little axle, and real rollers on real tile are
-   not free. On paper a square mecanum set strafes exactly as hard as it
-   drives; in the pit it doesn't, and 0.7-0.8 is the factor everyone
-   measures. This is that measurement, lumped into one honest coefficient
-   rather than pretended away — the lost force is heat in the roller, so it
-   never reaches the chassis, but the GROUND still sees the full force and
-   the traction cap is applied there. */
+   work. Both differ on mecanum, and only there, by `strafeEff` (s): the
+   sideways half of a mecanum wheel's motion and force goes through the
+   roller's own little axle, and real rollers on real tile scrub and slip.
+   On paper a square mecanum set strafes exactly as fast as it drives; in
+   the pit it strafes at about 0.75-0.9 of that, and a lateral encoder
+   multiplier of 1.1-1.3 (Road Runner's lateralInPerTick) is what every team
+   tunes. The ground speed under a patch is (vx - y w) forward and
+   (vy + x w) sideways; the rim turns for the forward part plus the
+   sideways part over s, so the chassis moves only s of the sideways
+   distance the wheels roll (strafing and the sideways share of turning
+   alike), and only s of the roller's sideways push reaches the chassis.
+   The lost motion and force are heat in the rollers (the power reaching
+   the chassis is s^2 of the ideal, never more); the GROUND still sees the
+   full force and the traction cap is applied there. Forward driving has
+   no sideways part, so s does not touch it. The loss was once on the
+   force row alone, which only slowed the spin-up: at steady speed, where
+   drag needs little force, the velocity row still held the strafe at the
+   rim speed, 0.99 of forward. */
 function dynWheels(rig) {
   const drive = (rig && rig.drive) || {};
   const list = Array.isArray(drive.wheels) ? drive.wheels : [];
@@ -415,7 +425,7 @@ function dynWheels(rig) {
 
     let vel, force, dir, gain, lat = null;
     if (k) {
-      vel = [1, -k, -(y + k * x)];
+      vel = [1, -k / eta, -(y + k * x / eta)];
       force = [1, -k * eta, -(y + k * eta * x)];
       // the patch can only push along the roller normal, and because that
       // is 45 degrees off the rolling direction the ground force is
@@ -436,7 +446,12 @@ function dynWheels(rig) {
       lat = [-sa, ca, xl * ca + y * sa];
     }
     const row = ik[i];
-    if (row && row.length === 3) vel = [dynNum(row[0], vel[0]), dynNum(row[1], vel[1]), dynNum(row[2], vel[2])];
+    if (row && row.length === 3) {
+      vel = [dynNum(row[0], vel[0]), dynNum(row[1], vel[1]), dynNum(row[2], vel[2])];
+      // a mecanum ik row is the ideal geometry: its sideways part (row[1], and row[1]*x of the
+      // turn) slips through the rollers the same way as above
+      if (k) vel = [vel[0], vel[1] / eta, vel[2] + vel[1] * x * (1 / eta - 1)];
+    }
     const rolls = k !== 0 || kind === "x" || kind === "omni" || kind === "kiwi";
 
     out.push({

@@ -23,7 +23,12 @@
                 (rig.gear): forward speed, and the encoder count per inch
      viscous    drivetrain drag in N per m/s (DYN_DEFAULTS.viscous): what takes
                 the speed down when the encoders already say the gearing is right
-     strafeEff  the mecanum strafe loss (DYN_DEFAULTS.strafeEff)
+     strafeEff  the share of the ideal sideways speed a mecanum base's rollers
+                deliver (DYN_DEFAULTS.strafeEff, see dynWheels): fitted to the
+                strafe speed measured with a tape, NOT the encoders, which count
+                the wheels' roll and so over-read a strafe on a real robot too.
+                A fit made before this meaning (when strafeEff was a force
+                loss) carries no strafeModel: 2 and calOpts drops it.
      yawViscous turn drag in N.m per rad/s (DYN_DEFAULTS.yawViscous): the
                 scrub of rollers and traction wheels while turning
    With ticks per inch given, the encoders fix the gearing (gear) and the
@@ -39,6 +44,8 @@ const CAL_DT = 0.02;
 const CAL_BOUNDS = {
   gear: [0.25, 6], viscous: [1.2, 800], strafeEff: [0.05, 1], yawViscous: [0.08, 120]
 };
+/* what strafeEff means in a fit: 2 is the share of sideways speed (dynWheels' velocity row) */
+const CAL_STRAFE_MODEL = 2;
 const CAL_IN = 0.0254;
 
 function calNum(v) { v = +v; return Number.isFinite(v) ? v : 0; }
@@ -190,6 +197,7 @@ function calFit(rig, measured) {
     if (pass > 0) { const w = JSON.parse(was); if (Object.keys(p).every(k => Math.abs(p[k] - (w[k] || 0)) <= 2e-4 * Math.abs(p[k]))) break; }
   }
 
+  if (p.strafeEff > 0) p.strafeModel = CAL_STRAFE_MODEL;
   const fitted = rigWith({});
   const after = calMeasure(fitted);
   const rows = [];
@@ -216,6 +224,8 @@ function calFit(rig, measured) {
 function calOpts(cal) {
   const p = (cal && cal.params) || {}, o = {};
   for (const k of ["massKg", "gear", "viscous", "strafeEff", "yawViscous"]) if (p[k] > 0) o[k] = +p[k];
+  // a strafeEff fitted when it was a force loss means something else now: refit the strafe
+  if (p.strafeModel !== CAL_STRAFE_MODEL) delete o.strafeEff;
   return Object.keys(o).length ? o : null;
 }
 
@@ -232,7 +242,9 @@ function calJava() {
 //   2. Put the robot on open floor with a tape measure along its path, hub and wheels as they run in a match.
 //   3. INIT. Push the robot 48 in forward by hand. The Driver Station shows ticks per inch.
 //   4. START. Press A for each run: forward, strafe, then turn. Each run is ${T} s at full power from standstill.
-//   5. Enter the numbers it prints in FTC SimBench: Tune, Calibration.
+//      Before the strafe run, mark where the robot stands; after it, measure how far it went sideways with the tape.
+//   5. Enter the numbers it prints in FTC SimBench: Tune, Calibration. Strafe speed is the tape distance / ${T} s:
+//      mecanum rollers slip sideways, so the encoders over-read a strafe (that ratio is your lateral multiplier).
 // Mass: weigh the robot with its battery on a scale (kg).
 
 import com.qualcomm.hardware.rev.RevHubOrientationOnRobot;
@@ -373,11 +385,12 @@ public class CalibrateSimBench extends LinearOpMode {
         telemetry.addData("ticks per inch", "%.2f", ticksPerInch);
         if (ticksPerInch > 0) {
             telemetry.addData("forward speed", "%.1f in/s", fwdTicks / ticksPerInch / RUN_SECONDS);
-            telemetry.addData("strafe speed", "%.1f in/s", strafeTicks / ticksPerInch / RUN_SECONDS);
+            telemetry.addData("strafe by the encoders (not the strafe speed)", "%.1f in", strafeTicks / ticksPerInch);
         } else {
             telemetry.addData("forward ticks in " + RUN_SECONDS + " s", "%.0f", fwdTicks);
             telemetry.addData("strafe ticks in " + RUN_SECONDS + " s", "%.0f", strafeTicks);
         }
+        telemetry.addLine("strafe speed: the sideways distance on the tape (in) / " + RUN_SECONDS + " s");
         telemetry.addData("turn rate", "%.0f deg/s", turnDegrees / RUN_SECONDS);
         telemetry.update();
     }
