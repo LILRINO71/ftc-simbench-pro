@@ -69,6 +69,9 @@ const Match={
     if(o.skill&&MATCH_SKILL[o.skill]) this.skill=o.skill;
     this.rnd=makeRng(this.seed*7919+13);
     this.t=0; this.nid=0; this.flying=[]; this.events=[]; this.placed=[]; this.entries=[]; this.world=ballWorld();
+    // the team's robot as the AI sees it is set by separate() each tick; the last match's would
+    // steer this one's first think() (its parking slot), so a seed would not replay exactly
+    this.userBody=null;
     this.spotCache=new Map(); this.obs=null; this.seenTip=Field.lastTip?Field.lastTip.id:0;
     this.tips0={red:Field.tips.red, blue:Field.tips.blue};
     this.floor=[]; this.flowers=[]; this.bots=[];

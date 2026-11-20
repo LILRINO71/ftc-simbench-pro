@@ -98,6 +98,26 @@ test('match: it replays exactly from its seed, and a new seed plays a new match'
   assert.notDeepEqual(c.M.bots.map((x) => [x.x, x.y]), pos);
 });
 
+test('match: a seed replays the same match whether or not another was played first in the same engine', () => {
+  // the team's robot ended the earlier match somewhere else; nothing of that match may reach this one
+  const run = (Eng, before) => {
+    const go = (seed, skill, sim, tr) => {
+      Eng.Field.reset();
+      const M = Eng.Match; M.on = true; M.reset({ period: 'TeleOp', user: 'red', userPose: sim.chassis, seed, skill });
+      for (let i = 0; i < M.len / 0.02; i++) { M.tick(0.02, sim); if (tr) tr.push(M.bots.map((b) => b.x + ',' + b.y + ',' + b.h).join(';')); }
+      return M.score(sim);
+    };
+    const at = (x, y) => ({ chassis: { x, y, h: 0 }, footprint: { hx: HX, hy: HX, ox: 0, oy: 0 }, obstacles: Eng.Field.obstacles(0.4) });
+    if (before) go(107, 'elite', at(-61.5 * IN, -35 * IN));
+    const tr = [], S = go(7, 'typical', at(-61.5 * IN, 0), tr);
+    return { tr, S };
+  };
+  const fresh = run(loadWithField(), false), after = run(loadWithField(), true);
+  const k = fresh.tr.findIndex((p, i) => p !== after.tr[i]);
+  assert.equal(k, -1, `the AI robots first differ at t=${((k + 1) * 0.02).toFixed(2)} s`);
+  assert.deepEqual(after.S, fresh.S);
+});
+
 test('match: better AI teams TIP more (rookie < typical < elite, blue pair, 3 seeds)', () => {
   const tips = (skill) => [1, 2, 3].reduce((n, seed) => n + play({ seed, skill }).S.blue.tips, 0) / 3;
   const r = tips('rookie'), t = tips('typical'), e = tips('elite');
