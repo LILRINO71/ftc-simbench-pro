@@ -362,6 +362,9 @@ test('payload: a device on a CAD joint takes in at the edge nearest the joint', 
   assert.equal(m.edge, 'left');
   assert.match(m.from, /CAD joint side roller/);
   assert.ok(Math.abs(m.c - 0.025) < 1e-6 && m.w < 0.1, 'centred on the parts it moves, about as wide');
+  // a device the mapping put on a slide is moving something else: no mouth from it (the default robot's Lift)
+  E.Sim.dev.intake.mech = { id: 'j2', label: 'Lift', kind: 'linear', pivot: [-0.1, 0.2, 0.05] };
+  assert.deepEqual([E.Payload.mouths()[0].edge, E.Payload.mouths()[0].from], ['front', 'the default: the front edge']);
 });
 
 test('payload: AUTO starts with 4 pre-loaded POLLEN (G304), TELEOP with none unless set', () => {

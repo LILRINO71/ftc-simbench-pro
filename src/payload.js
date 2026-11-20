@@ -157,7 +157,8 @@ const Payload={
   /* A device on a CAD joint: the edge nearest the joint's pivot, as wide as the parts it moves. */
   jointMouth(name,fp){
     const s=Sim.dev[name], m=s&&s.mech;
-    if(!m||!Array.isArray(m.pivot)||typeof frontToRobot!=="function") return null;
+    // a roller turns: a device bound to a slide is moving something else, and says nothing about the mouth
+    if(!m||!Array.isArray(m.pivot)||typeof frontToRobot!=="function"||(typeof isLinearKind==="function"&&isLinearKind(m.kind))) return null;
     const toR=frontToRobot(Sim.opts&&Sim.opts.front), ox=fp.ox||0, oy=fp.oy||0;
     const p=toR(m.pivot), lx=p[0]-ox, ly=p[1]-oy;
     const d=[["front",fp.hx-lx],["back",fp.hx+lx],["left",fp.hy-ly],["right",fp.hy+ly]].sort((a,b)=>a[1]-b[1])[0];
