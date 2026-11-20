@@ -115,7 +115,7 @@ const JV_MAP_M={
 const JV_PAD_FIELDS=["left_stick_x","left_stick_y","right_stick_x","right_stick_y","left_trigger","right_trigger","a","b","x","y","dpad_up","dpad_down","dpad_left","dpad_right",
   "left_bumper","right_bumper","back","start","guide","left_stick_button","right_stick_button","options","share","touchpad","ps","cross","circle","square","triangle",
   "touchpad_finger_1","touchpad_finger_2","touchpad_finger_1_x","touchpad_finger_1_y","touchpad_finger_2_x","touchpad_finger_2_y","id","user","timestamp",
-  // SDK 11: a trigger pulled past trigger_threshold (0.5 unless setTriggerThreshold) reads as pressed
+  // SDK 11: a trigger pulled to trigger_threshold or past it (0.5 unless setTriggerThreshold) reads as pressed
   "left_trigger_pressed","right_trigger_pressed","trigger_threshold"];
 const JV_PAD_ALIAS={cross:"a",circle:"b",square:"x",triangle:"y",options:"start",share:"back",ps:"guide"};
 const JV_PAD_AXES=/^(left|right)_(stick_[xy]|trigger)$/;
@@ -124,7 +124,7 @@ function jvPadRaw(vm,o,f){
   const k=JV_PAD_ALIAS[f]||f;
   if(k==="trigger_threshold") return o.n.thr!=null?o.n.thr:JV_PAD_THRESHOLD;
   if((k==="left_trigger_pressed"||k==="right_trigger_pressed")&&!(o.n.snap&&k in o.n.snap&&!o.n.live))
-    return jvPadRaw(vm,o,k.slice(0,-8))>(o.n.thr!=null?o.n.thr:JV_PAD_THRESHOLD);
+    return jvPadRaw(vm,o,k.slice(0,-8))>=(o.n.thr!=null?o.n.thr:JV_PAD_THRESHOLD);   // SDK 11.1 Gamepad.java: >=
   let v;
   if(o.n.live) { const p=vm.host&&vm.host.pad(o.n.live)||{}; v=p[k]; if(v===undefined&&JV_PAD_ALIAS[f]===undefined){ for(const a in JV_PAD_ALIAS) if(JV_PAD_ALIAS[a]===k&&p[a]!==undefined) v=p[a]; } }
   else v=o.n.snap[k];

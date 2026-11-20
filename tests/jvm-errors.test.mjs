@@ -48,6 +48,14 @@ test('SDK 11 gamepad: right_trigger_pressed and left_trigger_pressed follow the 
   assert.deepEqual(P.unmodelled(), []);
 });
 
+test('a trigger at exactly trigger_threshold reads as pressed (SDK 11.1 Gamepad.java compares with >=)', () => {
+  const r = run(linear('', `    gamepad2.setTriggerThreshold(0.8);
+    System.out.println(gamepad1.left_trigger_pressed + " " + gamepad1.right_trigger_pressed + " " + gamepad2.left_trigger_pressed);`),
+  { seconds: 0.1, gamepad: [{ t: 0, gamepad1: { left_trigger: 0.5, right_trigger: 0.49 }, gamepad2: { left_trigger: 0.8 } }] });
+  assert.equal(r.error, null, JSON.stringify(r.error));
+  assert.deepEqual(r.prints, ['true false true']);
+});
+
 test('an SDK member the bench does not model is listed as such, apart from third-party stubs', () => {
   const { r, P } = program(linear(`    DistanceSensor d = hardwareMap.get(DistanceSensor.class, "d");
     String c = d.getConnectionInfo();
