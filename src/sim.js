@@ -258,8 +258,8 @@ const Sim={
            is applied only where a motor turns something: wheelCmd() for the
            drive wheels. */
         if(st.op==="setPosition") s.cmd=clamp01(v);
-        else if(st.op==="setVelocity") s.cmd=Math.max(-1,Math.min(1,v/((s.spec.rpm||300)/60*s.tpr)));   // ticks/s → share of free speed
-        else s.cmd=Math.max(-1,Math.min(1,v));
+        else if(st.op==="setVelocity"){ s.cmd=Math.max(-1,Math.min(1,v/((s.spec.rpm||300)/60*s.tpr))); s.vctl=true; }   // ticks/s → share of free speed
+        else{ s.cmd=Math.max(-1,Math.min(1,v)); s.vctl=false; }
       }else if(st.kind==="pidnew"){
         const a=st.args.map(x=>evalNode(x,env));
         this.pidOp(st.obj,"setPID",a);
@@ -341,10 +341,19 @@ const Sim={
       else if(this.code.auto&&this.code.auto.length) this.stepAuto();
     }
 
+    this.stepWorld(dt);
+  },
+  /* Everything after the code's own pass: devices, the chassis, the pieces in the robot, the
+     shots, the match. tick() runs it; so does a headless run on the field (tools/run-opmode.mjs),
+     whose own VM drives the devices. */
+  stepWorld(dt){
+    // which motors are flywheels before they move (src/payload.js): only the live sim's
+    if(this===Sim&&typeof Payload!=="undefined") Payload.prepare();
     this.stepDevices(dt);
     this.updateCOM();
     this.driveChassis(dt);
-    if(this===Sim) Shots.tick(dt,this.chassis);          // a probe's copy never moves the live shots
+    // a probe's copy never moves the live shots: the pieces in the robot first (src/payload.js), then what flies
+    if(this===Sim){ if(typeof Payload!=="undefined") Payload.tick(dt,this); Shots.tick(dt,this.chassis); }
     // the rest of the match (src/match.js): only the live sim plays it, never a probe's copy
     // (online, src/net.js steps it instead, whatever this robot is doing)
     if(this===Sim&&this.phase==="running"&&typeof Match!=="undefined"&&Match.on&&!Match.net) Match.tick(dt,this);
@@ -379,7 +388,14 @@ const Sim={
           drive=Math.abs(s.cmd)*Math.max(-1,Math.min(1,err/band));
         }
         const slew=SLEW*dt;
-        let act=s.act+Math.sign(drive-s.act)*Math.min(Math.abs(drive-s.act),slew);
+        let act;
+        if(s.flyT>0&&s.mode==="run"){
+          /* a flywheel (src/payload.js marks it): a DC motor's speed follows its voltage with time
+             constant T = I omega_free / tau_stall. Under setVelocity the hub's loop drives near full
+             voltage until the wheel is close, then holds it there */
+          const u=s.vctl?Math.max(-1,Math.min(1,drive+(drive-s.act)*FLY_KP)):drive;
+          act=u+(s.act-u)*Math.exp(-dt/s.flyT);
+        }else act=s.act+Math.sign(drive-s.act)*Math.min(Math.abs(drive-s.act),slew);
         const lin=s.mech&&isLinearKind(s.mech.kind);
         // a slide asked to lift more than its motor holds doesn't climb; it can still lower
         if(lin&&s.spec.stallNm&&act&&!solved(s)){

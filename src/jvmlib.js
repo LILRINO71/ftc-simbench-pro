@@ -197,7 +197,7 @@ JVM.prototype.devUse=function(name,kind,cls){
 };
 const jvS=o=>o.n&&o.n.s||{};
 const JV_MOTOR_M={
-  setPower(vm,o,a){ const s=jvS(o); s.cmd=jvClamp(jvArg(a[0]),-1,1); if(vm.host&&vm.host.cmd) vm.host.cmd(o.n.name,"setPower",s.cmd); },
+  setPower(vm,o,a){ const s=jvS(o); s.cmd=jvClamp(jvArg(a[0]),-1,1); s.vctl=false; if(vm.host&&vm.host.cmd) vm.host.cmd(o.n.name,"setPower",s.cmd); },
   getPower(vm,o){ return jvS(o).cmd||0; },
   setDirection(vm,o,a){ jvS(o).reversed=jvEn(a[0])==="REVERSE"; if(vm.host&&vm.host.cmd) vm.host.cmd(o.n.name,"setDirection",jvEn(a[0])); },
   getDirection(vm,o){ return vm.enumConst(JV_HW+"DcMotorSimple.Direction",jvS(o).reversed?"REVERSE":"FORWARD"); },
@@ -217,7 +217,7 @@ const JV_MOTOR_M={
     const s=jvS(o), tpr=s.tpr||537.7, free=(s.spec&&s.spec.rpm||300)/60*tpr;
     let tps=jvArg(a[0]);
     const u=jvEn(a[1]); if(u==="RADIANS") tps=tps/(2*Math.PI)*tpr; else if(u==="DEGREES") tps=tps/360*tpr;
-    s.cmd=jvClamp(tps/free,-1,1);
+    s.cmd=jvClamp(tps/free,-1,1); s.vctl=true;            // the hub's velocity loop holds it (src/sim.js, a flywheel)
     if(vm.host&&vm.host.cmd) vm.host.cmd(o.n.name,"setVelocity",s.cmd);
   },
   getVelocity(vm,o,a){ const s=jvS(o), v=s.vel||0, u=jvEn(a[0]), tpr=s.tpr||537.7; return u==="RADIANS"?v/tpr*2*Math.PI:u==="DEGREES"?v/tpr*360:v; },
@@ -253,7 +253,7 @@ const JV_SERVO_M={
   resetDeviceConfigurationForOpMode(){}, close(){},
 };
 const JV_CRSERVO_M={
-  setPower(vm,o,a){ const s=jvS(o); s.cmd=jvClamp(jvArg(a[0]),-1,1); if(vm.host&&vm.host.cmd) vm.host.cmd(o.n.name,"setPower",s.cmd); },
+  setPower(vm,o,a){ const s=jvS(o); s.cmd=jvClamp(jvArg(a[0]),-1,1); s.vctl=false; if(vm.host&&vm.host.cmd) vm.host.cmd(o.n.name,"setPower",s.cmd); },
   getPower(vm,o){ return jvS(o).cmd||0; },
   setDirection(vm,o,a){ jvS(o).reversed=jvEn(a[0])==="REVERSE"; },
   getDirection(vm,o){ return vm.enumConst(JV_HW+"DcMotorSimple.Direction",jvS(o).reversed?"REVERSE":"FORWARD"); },

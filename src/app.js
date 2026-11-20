@@ -239,8 +239,9 @@ function selectOpMode(id){
   Shots.reset();
   Sim.load(CODE,CAD,MAP,withPose()); Physics.sync();
   applyConfigOverrides(); Sim.init(); applyConfigOverrides();    // like a DS: selected and INIT'd, waiting for START
+  Shots.adopt(CODE);                                           // first: whether the pieces go on the field depends on its roles
   resetMatch();
-  Shots.adopt(CODE); ShotUI.dirty=true; renderShotSetup();
+  ShotUI.dirty=true; renderShotSetup();
   setActivePad(busiestPad(CODE)); Pads.defaults();
   Graph.reset(); renderConfigVars(); renderLegend3D();
   renderOpList(); renderOpSelect(); renderCompareSelects(); updateDS();
@@ -333,10 +334,12 @@ function resetMatch(){
   // online, the match is the one everyone plays: src/net.js staged it at START, and nothing here resets it
   if(Online.inMatch()){ renderMatchHud(true); return; }
   const box=$("#matchOn"), want=!!(box&&box.checked&&Field.ok&&OPTS.obstacles!=="walls");
-  Match.on=want;
-  if(!want){ Match.bots=[]; Match.floor=[]; Match.flying=[]; Match.events=[]; renderMatchHud(true); return; }
+  // no AI robots: the staged pieces still lie on the field for a robot that picks them up (src/payload.js)
+  const pc=$("#piecesOn"), solo=!want&&!!(pc&&pc.checked&&Field.ok&&OPTS.obstacles!=="walls")&&Payload.real();
+  Match.on=want||solo; Match.solo=solo;
+  if(!Match.on){ Match.bots=[]; Match.floor=[]; Match.flying=[]; Match.events=[]; renderMatchHud(true); return; }
   Match.reset({period:CODE&&CODE.kind==="Autonomous"?"Autonomous":"TeleOp", user:Shots.alliance, userPose:Sim.chassis,
-    seed:1+Math.floor(Math.random()*99999), skill:$("#matchSkill").value});
+    seed:1+Math.floor(Math.random()*99999), skill:$("#matchSkill").value, solo});
   renderMatchHud(true);
 }
 let HUD_T=0, LAST_SCORE=null;

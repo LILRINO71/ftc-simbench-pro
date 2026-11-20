@@ -322,8 +322,19 @@ const {sessionFromBench, packSession, unpackSession} = (function(){
     mountDeg: num(at(c, "mountDeg"), 0, C, "shot mountDeg"),
     ball: str(at(c, "ball"), C, "shot ball") || "pollen",
     type: str(at(c, "type"), C, "shot type") || "single",
-    precision: str(at(c, "precision"), C, "shot precision") || "typical"
+    precision: str(at(c, "precision"), C, "shot precision") || "typical",
+    // the game pieces through the robot (src/payload.js); a file from before them has none
+    ...(isObj(at(c, "payload")) ? {payload: readPayloadCfg(at(c, "payload"), C)} : {})
   };
+  const readPayloadCfg = (p, C) => ({
+    intakes: list(at(p, "intakes"), C.caps.maxDevices, C, "payload intakes").map(n => str(n, C, "payload intake")).filter(n => typeof n === "string" && n).slice(0, 4),
+    transfer: str(at(p, "transfer"), C, "payload transfer"),
+    dirs: dict(at(p, "dirs"), C, "payload dirs", x => oneOf(x, ["auto", "positive", "negative"], undefined)),
+    edges: dict(at(p, "edges"), C, "payload edges", x => oneOf(x, ["auto", "front", "back"], undefined)),
+    preload: at(p, "preload") == null ? null : clamp(int(at(p, "preload"), 0, C, "payload preload"), 0, 4),
+    supply: oneOf(at(p, "supply"), ["auto", "real", "unlimited"], "auto"),
+    rollerMm: clamp(num(at(p, "rollerMm"), 48, C, "payload rollerMm"), 10, 150)
+  });
   const readShots = (v, C) => ({
     seed: int(at(v, "seed"), 7, C, "shots.seed"),
     spreadScale: clamp(num(at(v, "spreadScale"), 1, C, "shots.spreadScale"), 0, 5),

@@ -48,16 +48,22 @@ const Match={
   // online: the other drivers' robots as boxes {id, al, name, x, y, h, hx, hy}; net, this match is
   // an online one; mirror, the host plays it and this bench follows; noUser, this bench only watches
   players:[], net:false, mirror:false, noUser:false,
+  // solo: no AI robots and nobody online, only the team's robot among the staged pieces (src/payload.js)
+  solo:false,
   /* Is there a match on the field? */
   live(){ return this.on&&(this.bots.length>0||this.net); },
+  /* Are there loose pieces on the field: a match, or the team's robot playing solo? */
+  pieces(){ return this.on&&(this.live()||this.solo); },
 
   /* A fresh match: the field as staged, the three robots at legal starts.
      o: {period:"TeleOp"|"Autonomous", user:"red"|"blue", userPose, seed, skill,
-         slots (online): {red1, red2, blue1, blue2: "user" | "ai" | "remote"}, AI robots only in "ai" places} */
+         slots (online): {red1, red2, blue1, blue2: "user" | "ai" | "remote"}, AI robots only in "ai" places,
+         solo: the staged pieces and the HUMAN PLAYERS with no AI robot, and no clock of its own} */
   reset(o){
     o=o||{};
     this.period=o.period==="Autonomous"?"Autonomous":"TeleOp";
-    this.len=this.period==="Autonomous"?30:120;
+    this.solo=!!o.solo&&!o.slots;
+    this.len=this.solo?Infinity:this.period==="Autonomous"?30:120;
     this.user=o.user==="blue"?"blue":"red";
     if(o.seed!=null) this.seed=o.seed;
     if(o.skill&&MATCH_SKILL[o.skill]) this.skill=o.skill;
@@ -92,6 +98,7 @@ const Match={
       this.version++;
       return;
     }
+    if(this.solo){ this.version++; return; }
     // the partner takes the start slot away from the team's robot; two opponents on the other wall
     const other=this.user==="red"?"blue":"red", up=o.userPose||Field.startPose(this.user);
     const slots=al=>[0,(al==="red"?-45:45)*IN];
@@ -130,7 +137,7 @@ const Match={
 
   /* One 20 ms step, after the team's robot has moved. sim: the live Sim. */
   tick(dt,sim){
-    if(!this.live()||!Field.ok||this.t>=this.len) return;
+    if(!this.pieces()||!Field.ok||this.t>=this.len) return;
     this.t+=dt;
     if(!this.obs) this.obs=Field.obstacles(0.46);
     this.spill();
@@ -390,8 +397,9 @@ const Match={
      left); the first thing it touches makes it a miss, and a loose element from there on. */
   flights(dt,sim){
     if(!this.world) this.world=ballWorld();
-    // a grip nobody's holding any more (the plan changed): the ball is let go
-    for(const e of this.floor) if(e.hold){ const b=this.bots.find(o=>o.id===e.hold.id); if(!b||!b.plan||b.plan.el!==e||b.plan.done) this.letGo(e); }
+    // a grip nobody's holding any more (the plan changed): the ball is let go. The team's
+    // robot's intake grips are its own (src/payload.js)
+    for(const e of this.floor) if(e.hold&&e.hold.id!=="user"){ const b=this.bots.find(o=>o.id===e.hold.id); if(!b||!b.plan||b.plan.el!==e||b.plan.done) this.letGo(e); }
     const boxes=this.ballBoxes(sim);
     // a flight that came as a path (another driver's shot): it leaves from inside whichever robot fired it
     for(const f of this.flying) if(!f.ball){

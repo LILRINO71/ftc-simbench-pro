@@ -194,11 +194,14 @@ function ballWorld(){
       }
     },
 
-    /* A gripped ball rides in the intake, drawn in toward the rollers. */
+    /* A gripped ball rides in the intake, drawn in toward the rollers: to (tx, ty) in the robot's
+       box, at v m/s (0.5 when the grip doesn't say). */
     carry(b,B,h){
       const H=b.hold, X=B.find(x=>x.id===H.id);
       if(!X){ b.hold=null; return; }
-      if(H.tx!=null){ const d=H.tx-H.lx, st=0.5*h; H.lx+=Math.abs(d)<st?d:Math.sign(d)*st; }
+      const st=(H.v>0?H.v:0.5)*h;
+      if(H.tx!=null){ const d=H.tx-H.lx; H.lx+=Math.abs(d)<st?d:Math.sign(d)*st; }
+      if(H.ty!=null){ const d=H.ty-H.ly; H.ly+=Math.abs(d)<st?d:Math.sign(d)*st; }
       const px=X.x+H.lx*X.c-H.ly*X.s, py=X.y+H.lx*X.s+H.ly*X.c;
       b.vx=X.vx-X.wz*(py-X.y); b.vy=X.vy+X.wz*(px-X.x); b.vz=0;
       b.x=px; b.y=py; b.z=ballSpec(b.kind).r; b.wx=b.wy=b.wz=0; b.still=0;
