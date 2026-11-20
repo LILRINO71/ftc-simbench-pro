@@ -322,9 +322,16 @@ const Match={
   /* Which of a FLOWER's elements score: stacked straight up the tube from the tile, each is in if any
      of it is between the middle ring and the top ring (sec 10.5.2 "at least partially within"). */
   flowerScoring(f){
-    const top=f.top||FLOWER_TOP_IN;
+    const top=f.top||FLOWER_TOP_IN, Z=this.flowerStackZ(f);
+    return f.stack.map((e,i)=>Z[i]+2*ballSpec(e.kind).r/IN>FLOWER_MID_IN&&Z[i]<top);
+  },
+  /* How high each element of a FLOWER's stack sits: the height of its bottom above the tile, in
+     inches, stacked straight up the tube. A POLLEN at the bottom stands on the tile through the bottom
+     ring's hole; a NECTAR there can't pass it and rests on the ring. The score and the 3-D view both
+     take the stack from here. */
+  flowerStackZ(f){
     let z=f.stack.length&&f.stack[0].kind==="nectar"?FLOWER_RING_IN:0;
-    return f.stack.map(e=>{ const d=2*ballSpec(e.kind).r/IN, inV=z+d>FLOWER_MID_IN&&z<top; z+=d; return inV; });
+    return f.stack.map(e=>{ const z0=z; z+=2*ballSpec(e.kind).r/IN; return z0; });
   },
   /* The owner: the alliance of the top-most NECTAR in the scoring volume (sec 10.5.2). */
   flowerOwner(f){ const s=this.flowerScoring(f); for(let i=f.stack.length-1;i>=0;i--) if(s[i]&&f.stack[i].kind==="nectar") return f.stack[i].color; return null; },

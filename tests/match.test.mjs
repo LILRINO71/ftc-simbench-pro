@@ -212,6 +212,22 @@ test('match: a FLOWER scores only what is in its scoring volume, between the mid
   for (const f of M.flowers) assert.deepEqual(M.flowerScoring(f), [false, true, true, true]);
 });
 
+test('match: one function places every element of a FLOWER\'s stack, for the score and the 3-D view', () => {
+  // src/view3d.js draws the stack from Match.flowerStackZ; a NECTAR at the bottom rests on the 0.43 in ring
+  // (it can't pass the bottom ring's 2.79 in hole), a POLLEN stands on the tile; each one sits on the one below
+  const M = E.Match, dP = 2 * E.ballSpec('pollen').r / IN, dN = 2 * E.ballSpec('nectar').r / IN;
+  const P = { kind: 'pollen' }, N = { kind: 'nectar', color: 'red' };
+  const near = (a, b) => a.length === b.length && a.every((v, i) => Math.abs(v - b[i]) < 1e-9);
+  assert.ok(near(M.flowerStackZ({ stack: [P, P, P, P] }), [0, dP, 2 * dP, 3 * dP]));
+  assert.ok(near(M.flowerStackZ({ stack: [N, P, N] }), [0.43, 0.43 + dN, 0.43 + dN + dP]));
+  assert.deepEqual(M.flowerStackZ({ stack: [] }), []);
+  // and the score reads the same heights: in if any of it is above the middle ring (3.55 in)
+  for (const stack of [[P, P, P, P], [N, P, N], [P, N, N, N, N, N]]) {
+    const Z = M.flowerStackZ({ stack }), d = (e) => (e.kind === 'nectar' ? dN : dP);
+    assert.deepEqual(M.flowerScoring({ stack, top: 21.5 }), stack.map((e, i) => Z[i] + d(e) > 3.55 && Z[i] < 21.5));
+  }
+});
+
 test('match: GARDEN and PARK are counted from where things really are', () => {
   E.Field.reset();
   const M = E.Match; M.on = true; M.reset({ period: 'TeleOp', user: 'red', userPose: { x: -61.5 * IN, y: 0, h: 0 }, seed: 3 });

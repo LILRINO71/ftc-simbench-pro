@@ -1889,16 +1889,15 @@ const View={
     this.markG.forEach((m,i)=>{ const k=marks[i]; m.visible=!!k; if(!k) return;
       m.material.color.setHex(k.what==="shoot"?0xf0b54a:k.what==="defend"?0x6fd3e0:0xffffff);
       m.position.set(k.x,0.012,-k.y); const s=1+0.18*Math.sin(tt*5); m.scale.set(s,s,s); });
-    // FLOWERs: the stack from the tile up
+    // FLOWERs: the stack from the tile up, each element where the score has it (Match.flowerStackZ)
     Match.flowers.forEach((f,i)=>{
       const key=f.stack.map(e=>e.kind[0]+(e.color||"")).join(",");
       if(this.flowerKey[i]===key) return;
       this.flowerKey[i]=key;
       if(this.flowerG[i]){ G.remove(this.flowerG[i]); }
       const g=this.flowerG[i]=new THREE.Group(); G.add(g);
-      let z=0, prev=0;
-      for(const e of f.stack){ const r=e.kind==="nectar"?1.81:1.4; z+=prev+r; prev=r;
-        const m=this.ball(e.kind,e.color); m.position.set(f.x,z*IN,-f.y); g.add(m); }
+      const Z=Match.flowerStackZ(f);
+      f.stack.forEach((e,k)=>{ const m=this.ball(e.kind,e.color); m.position.set(f.x,Z[k]*IN+ballSpec(e.kind).r,-f.y); g.add(m); });
     });
   },
   /* A stand-in robot to where it is: its mecanum wheels turn as that motion turns them,
