@@ -13,9 +13,53 @@ const store={
 let CODE=null, CAD=null, MAP={}, FINDINGS=[], activePad=2;
 let JOLT=null;                     // Jolt Physics once loaded (Physics.loadJolt), for solved mechanisms
 const OPTS={payloadKg:0.180, duty:0.30, trust:"code", robotConfig:null, front:"+x", baseModel:"auto", shooterModel:"auto", shift:null};
-let IGNORED={};
-try{ IGNORED=JSON.parse(store.get("ftcbench.ignored","{}"))||{}; }catch(e){ IGNORED={}; }
+/* "Ignore" on a finding. A finding's key names the check (drive:feel), not what it was judged
+   on, so an ignore is kept for the robot and the OpMode it was given on, with the severity it
+   had: it hides that check there at that severity or milder, and never a worse one (an ignored
+   RISKY that turns WON'T WORK shows again). Stored as {JSON [robot, opmode, key]: sev}; the
+   rig carries one robot's as JSON [opmode, key, sev] strings. An entry in the old form (a
+   bare key, for no robot or OpMode in particular) is dropped: it can't be scoped, and
+   dropping it only shows a finding again. Pure: tests/ignores.test.mjs runs it from here. */
+const Ignores={
+  RANK:{pass:0, info:0, warn:1, fail:2},
+  id(robot,op,key){ return JSON.stringify([String(robot||""),String(op||""),String(key)]); },
+  parse(s,n){ try{ const a=JSON.parse(s); return Array.isArray(a)&&a.length===n&&a.every(x=>typeof x==="string")?a:null; }catch(e){ return null; } },
+  // what the page kept, with anything malformed or in the old form left out
+  load(raw){
+    const out={}; let o=null; try{ o=JSON.parse(raw||"{}"); }catch(e){}
+    if(!o||typeof o!=="object"||Array.isArray(o)) return out;
+    for(const k of Object.keys(o)) if(this.parse(k,3)&&Object.prototype.hasOwnProperty.call(this.RANK,o[k])) out[k]=o[k];
+    return out;
+  },
+  hides(map,robot,op,f){
+    const s=map[this.id(robot,op,f.key)];
+    return s!=null&&Object.prototype.hasOwnProperty.call(this.RANK,s)&&(this.RANK[f.sev]||0)<=this.RANK[s];
+  },
+  add(map,robot,op,f){ map[this.id(robot,op,f.key)]=Object.prototype.hasOwnProperty.call(this.RANK,f.sev)?f.sev:"info"; },
+  remove(map,robot,op,key){ delete map[this.id(robot,op,key)]; },
+  // "Restore all": this robot and OpMode's, not every robot's
+  clear(map,robot,op){ for(const k of Object.keys(map)){ const a=this.parse(k,3); if(a&&a[0]===String(robot||"")&&a[1]===String(op||"")) delete map[k]; } },
+  // one robot's, for its rig document
+  forRig(map,robot){
+    const out=[];
+    for(const k of Object.keys(map)){ const a=this.parse(k,3); if(a&&a[0]===String(robot||"")) out.push(JSON.stringify([a[1],a[2],map[k]])); }
+    return out;
+  },
+  // a rig's list replaces that robot's ignores; strings in the old form are dropped
+  fromRig(map,robot,list){
+    for(const k of Object.keys(map)){ const a=this.parse(k,3); if(!a||a[0]===String(robot||"")) delete map[k]; }
+    for(const s of list||[]){
+      const a=typeof s==="string"?this.parse(s,3):null;
+      if(a&&Object.prototype.hasOwnProperty.call(this.RANK,a[2])) map[this.id(robot,a[0],a[1])]=a[2];
+    }
+    return map;
+  }
+};
+let IGNORED=Ignores.load(store.get("ftcbench.ignored","{}"));
 function saveIgnored(){ store.set("ftcbench.ignored",JSON.stringify(IGNORED)); }
+// what an ignore is scoped to: the robot (as its rig is) and the OpMode (its class and its name)
+function ignoreRobot(){ return (CAD&&CAD.name)||"sample"; }
+function ignoreOp(){ return CODE?(CODE.cls||"")+"/"+(CODE.opmode||""):""; }
 let LIBRARY=[], CURRENT_ID=null;
 let USER_CHOSE=false;          // the user picked or edited an OpMode since the page opened (loadDefaultRobot leaves it be)
 let ROBOT_CFG_NAME=null;
@@ -680,7 +724,7 @@ function exportRig(){
       axis:m.axis?m.axis.map(v=>+v.toFixed(4)):null,
       leverMm:m.leverOverride!=null?+(m.leverOverride*1000).toFixed(1):null,
       part:m.part||null, manual:!!m.manual, inferred:!!m.inferred })),
-    devices:Object.assign({},RIG_DEVICES,MAP), hardware:HW_USER, ignored:Object.keys(IGNORED),
+    devices:Object.assign({},RIG_DEVICES,MAP), hardware:HW_USER, ignored:Ignores.forRig(IGNORED,ignoreRobot()),
     // the robot setup (SetupUI): which way is up, where the drive base's middle is, the
     // drive base when set by hand, and which checks the team has been through
     up:OPTS.up||null, shift:OPTS.shift||null, drive:(CAD&&CAD.driveSpec)||null, setup:Object.assign({},SETUP.done)
@@ -717,7 +761,7 @@ function applyRig(r){
   }
   RIG_DEVICES=Object.assign({},r.devices||{});
   HW_USER=r.hardware||{};
-  if(r.ignored){ IGNORED={}; r.ignored.forEach(k=>IGNORED[k]=1); }
+  if(Array.isArray(r.ignored)){ Ignores.fromRig(IGNORED,ignoreRobot(),r.ignored); saveIgnored(); }
   recomputeChain(CAD.mechs);
   syncOptionControls();
   return true;
@@ -817,7 +861,8 @@ function rigChanged(){ recomputeChain(CAD.mechs); View.load(CAD); rebuild(); sav
    CHECKS (findings, with ignore)
    ============================================================ */
 function renderFindings(){
-  const live=FINDINGS.filter(f=>!IGNORED[f.key]), hidden=FINDINGS.filter(f=>IGNORED[f.key]);
+  const robot=ignoreRobot(), op=ignoreOp(), ign=f=>Ignores.hides(IGNORED,robot,op,f);
+  const live=FINDINGS.filter(f=>!ign(f)), hidden=FINDINGS.filter(ign);
   const cnt={fail:0,warn:0,pass:0,info:0}; live.forEach(f=>cnt[f.sev]++);
   $("#score").innerHTML=`<div class="s-fail"><div class="k">${cnt.fail}</div><div class="l">won't work</div></div>
      <div class="s-warn"><div class="k">${cnt.warn}</div><div class="l">risky</div></div>
@@ -837,9 +882,10 @@ function renderFindings(){
   $("#ignoredWrap").innerHTML=hidden.length
     ?`<div class="ignored-head"><h4>Ignored · ${hidden.length}</h4><span class="spacer"></span><button class="btn-sm" id="clearIgnored">Restore all</button></div>`+
       hidden.map(f=>`<div class="ign-row"><span class="t">${esc(f.title.replace(/<[^>]+>/g,""))}</span><button class="btn-sm" data-unig="${esc(f.key)}">Restore</button></div>`).join(""):"";
-  $$("[data-ig]").forEach(b=>b.addEventListener("click",()=>{ IGNORED[b.dataset.ig]=1; saveIgnored(); renderFindings(); saveRig(); }));
-  $$("[data-unig]").forEach(b=>b.addEventListener("click",()=>{ delete IGNORED[b.dataset.unig]; saveIgnored(); renderFindings(); saveRig(); }));
-  const ci=$("#clearIgnored"); if(ci) ci.addEventListener("click",()=>{ IGNORED={}; saveIgnored(); renderFindings(); saveRig(); });
+  $$("[data-ig]").forEach(b=>b.addEventListener("click",()=>{ const f=live.find(x=>x.key===b.dataset.ig); if(!f) return;
+    Ignores.add(IGNORED,robot,op,f); saveIgnored(); renderFindings(); saveRig(); }));
+  $$("[data-unig]").forEach(b=>b.addEventListener("click",()=>{ Ignores.remove(IGNORED,robot,op,b.dataset.unig); saveIgnored(); renderFindings(); saveRig(); }));
+  const ci=$("#clearIgnored"); if(ci) ci.addEventListener("click",()=>{ Ignores.clear(IGNORED,robot,op); saveIgnored(); renderFindings(); saveRig(); });
 }
 
 /* ============================================================
