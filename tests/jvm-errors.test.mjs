@@ -84,6 +84,32 @@ test('an exception nothing catches in a team thread ends the run as the Robot Co
   assert.deepEqual(ok.prints, ['fine']);
 });
 
+test('a crash that ends the run ends every thread of it: nothing commands the robot afterwards', () => {
+  const E = engine();
+  // the crash in one thread, another thread and the main loop still driving the lift; then the
+  // crash in the main thread while a thread drives it
+  const crashIn = (where) => linear(`    DcMotor lift = hardwareMap.get(DcMotor.class, "lift");`, `
+    new Thread(() -> { int[] a = new int[2]; int k = 0; while (opModeIsActive()) { k++; if (${where === 'thread' ? 'k == 10' : 'false'}) a[5] = 1; idle(); } }).start();
+    new Thread(() -> { double p = 0.1; while (opModeIsActive()) { lift.setPower(p); p += 0.01; idle(); } }).start();
+    int n = 0; while (opModeIsActive()) { n++; ${where === 'main' ? 'if (n == 10) { int[] b = new int[1]; b[3] = 1; }' : ''} lift.setPower(-n / 100.0); idle(); }`);
+  for (const where of ['thread', 'main']) {
+    const comp = E.jvCompile(crashIn(where), []);
+    const H = E.jvProbeHost(), P = new E.JvProgram(comp, H.host);
+    P.init(); P.start();
+    let at = null, cmd = null;
+    for (let k = 0; k < 40; k++) {
+      H.clock += 0.02; H.t += 0.02;
+      P.tick();
+      if (P.error && at == null) { at = k; H.cmds.length = 0; cmd = H.devs.get('lift').cmd; }
+    }
+    assert.equal(P.error && P.error.cls, 'ArrayIndexOutOfBoundsException', where);
+    assert.equal(!!P.error.thread, where === 'thread');
+    assert.ok(at != null && at < 30, where + ' crashed at ' + at);
+    assert.deepEqual(H.cmds, [], where + ': commands after the crash');
+    assert.equal(H.devs.get('lift').cmd, cmd, where);
+  }
+});
+
 test('INIT throws what the SDK throws: RUN_TO_POSITION before a target, an impossible hub orientation', () => {
   const rtp = run(linear(`    DcMotor m = hardwareMap.get(DcMotor.class, "m");
     m.setMode(DcMotor.RunMode.RUN_TO_POSITION);`));

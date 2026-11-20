@@ -203,6 +203,13 @@ JvProgram.prototype.fail=function(e){
   const line=src&&w.pos!=null?src.slice(0,w.pos).split("\n").length:null;
   this.error={cls:cls||"error",msg:String(msg||"").replace(/ @\d+$/,""),file:w.file,line,in:(w.cls||"")+(w.meth?"."+w.meth+"()":"")};
   this.done=true;
+  this.endThreads();
+};
+/* A crash ends the Robot Controller app: every thread of the OpMode stops with it, so nothing
+   commands the robot after it. (A LinearOpMode that returns normally leaves its threads running,
+   as Java does.) */
+JvProgram.prototype.endThreads=function(){
+  if(this.vm.threads) for(const th of this.vm.threads) th.done=true;
 };
 /* Drive the program until it blocks: on START, a gate, a sleep, or the end. */
 JvProgram.prototype.step=function(){
@@ -230,7 +237,7 @@ JvProgram.prototype.drain=function(g){
     // a busy-wait (a forced gate): the robot keeps moving meanwhile, as it would
     if(r.value&&r.value.forced){ vm.wall0=Date.now(); if(host&&host.world) host.world(0.02); }
     if(vm.steps>limit){ const at=vm.where(); this.error={cls:"Hang",msg:"INIT never finishes: a loop keeps going without waiting for anything",file:at&&at.file,line:at&&at.line,in:at&&at.in};
-      this.done=true; return undefined; } } }catch(e){ this.fail(e); }
+      this.done=true; this.endThreads(); return undefined; } } }catch(e){ this.fail(e); }
   return undefined;
 };
 JvProgram.prototype.init=function(){
@@ -288,7 +295,7 @@ JvProgram.prototype.start=function(){
 };
 /* One sim tick: threads the OpMode started, then the OpMode itself. */
 JvProgram.prototype.tick=function(){
-  if(this.done&&!(this.vm.threads&&this.vm.threads.length)) return;
+  if(this.done&&(this.error||!(this.vm.threads&&this.vm.threads.length))) return;
   const vm=this.vm, now=vm.host?vm.host.now():0;
   jvTickStart(vm);
   if(vm.threads) for(const th of vm.threads.slice()){
@@ -298,6 +305,7 @@ JvProgram.prototype.tick=function(){
     catch(e){ th.done=true;
       // an exception nothing catches in a thread the OpMode started: Android ends the Robot
       // Controller app (the SDK sets no handler of its own), and the robot stops
+      // and every other thread with it (fail ends them)
       if(!(e&&e.jvStop)&&!this.error){ vm.strand=this.strand; this.fail(e); this.gen=null; this.error.thread=true; this.error.in=(this.error.in?this.error.in+", ":"")+"in a thread the OpMode started"; return; } }
   }
   vm.strand=this.strand;
