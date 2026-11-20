@@ -40,3 +40,14 @@ test('privacy: says what the Onshape relay keeps, as the relay keeps it', () => 
   assert.match(relay, /ask\("documents\/" \+ did\)/);
   assert.match(h, /only ever given to someone whose own Onshape account can open that document/);
 });
+
+/* Cloudflare Pages treats a site with no 404.html as a single-page app and answers every unknown
+   address with the front page. A missing /engine-<hash>.js (a tab left open across an update)
+   then came back as the app's HTML with the one-year "immutable" header of /engine-*.js. */
+test('site pages: a 404 page is built, so an unknown address is not answered with the app', () => {
+  const h = read('site/404.html');
+  assert.match(h, /^<!doctype html>/i);
+  assert.match(h, /href="\/"/, 'links home');
+  assert.match(h, /name="robots" content="noindex"/);
+  assert.ok(!/<script/i.test(h), 'no script: it is what every unknown address gets');
+});
