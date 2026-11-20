@@ -1308,7 +1308,7 @@ function renderShotVerdict(){
   el.className="verdict "+(what?"":VERDICT_CLASS[r.verdict]||"");
   el.innerHTML=what
     ?`<div class="vhead"><span class="vw">No shooter</span></div>
-    <div class="vs">This OpMode has no flywheel. A tuned shooter here would be <b>${esc(r.verdict.toLowerCase())}</b>: ${Math.round((r.hitRate||0)*100)}% of shots in, from ${Math.round(r.distIn)} in to the ${al} up-CELL.</div>`
+    <div class="vs">${esc(noneSaid("shooter","This OpMode has no flywheel"))}. A tuned shooter here would be <b>${esc(r.verdict.toLowerCase())}</b>: ${Math.round((r.hitRate||0)*100)}% of shots in, from ${Math.round(r.distIn)} in to the ${al} up-CELL.</div>`
     :`<div class="vhead"><span class="vw">${esc(r.verdict)}</span><span class="vr">${Math.round((r.hitRate||0)*100)}% score</span></div>
     <div class="vs">From x ${(c.x/IN).toFixed(0)}, y ${(c.y/IN).toFixed(0)} in to the ${al} up-CELL, ${Math.round(r.distIn)} in away. ${esc(r.reason||"")}</div>
     ${b?`<div class="vk"><div><b>${b.thetaDeg.toFixed(0)}°</b><span>launch</span></div><div><b>${b.v.toFixed(2)}</b><span>m/s exit</span></div><div><b>${r.motor?Math.round(r.motor.motorRpm).toLocaleString():"—"}</b><span>motor rpm</span></div></div>`:""}
@@ -1368,7 +1368,7 @@ function renderShotSetup(){
   const cfg=Shots.cfg;
   const fire=$("#fireBtn");
   if(fire){ fire.disabled=!Field.ok||!cfg||!cfg.shooter;
-    fire.title=cfg&&cfg.shooter?"Launch one ball with the robot as it is (F)":"This OpMode has no flywheel to fire"; }
+    fire.title=cfg&&cfg.shooter?"Launch one ball with the robot as it is (F)":noneSaid("shooter","This OpMode has no flywheel to fire"); }
   if(!cfg||!Field.ok){ renderShotVerdict(); return; }
   renderPick("#shotDev","shooter"); renderPick("#shotFeed","feeder"); renderPick("#motorSel","motor");
   $$("#ballSeg button").forEach(b=>b.classList.toggle("on",b.dataset.ball===cfg.ball));
@@ -1392,6 +1392,9 @@ function renderPick(id,key){
   el.classList.toggle("picked",c.mine);
   el.title=c.mine?"Your choice, kept for this robot. “From the code” hands it back to each OpMode's code.":"From this OpMode's code.";
 }
+/* An empty role in words: the user's own choice when it is one ("You chose no flywheel; this code has
+   launcher"), else what the code lacks (`otherwise`). */
+function noneSaid(key,otherwise){ const s=Shots.chosenNone(key,CODE); return s?s.charAt(0).toUpperCase()+s.slice(1):otherwise; }
 /* The user picked in one of those selects: kept as a choice, and everything in effect worked out again. */
 function pickChanged(key,value){ if(!Shots.cfg) return false; Shots.choose(key,value,CODE); return true; }
 function shotChanged(){ ShotUI.dirty=true; ShotUI.t=0; saveRig(); renderShotSetup(); }
@@ -1399,7 +1402,8 @@ function shotChanged(){ ShotUI.dirty=true; ShotUI.t=0; saveRig(); renderShotSetu
    launches the one waiting at the shooter, or says there is none (src/payload.js). */
 function shotFire(){
   if(!Field.ok||!Shots.cfg) return;
-  if(!Shots.cfg.shooter) Shots.note("This OpMode has no flywheel — load one that shoots, or pick its motor in the Shot tab.");
+  if(!Shots.cfg.shooter) Shots.note(Shots.chosenNone("shooter",CODE)?noneSaid("shooter","")+": pick it under Flywheel to fire."
+    :"This OpMode has no flywheel — load one that shoots, or pick its motor in the Shot tab.");
   else if(Payload.real()) Payload.release(Sim.chassis,"fired by hand");
   else Shots.fire(Sim.chassis,"fired by hand",Sim.vel);
   renderShotLog();
@@ -1430,7 +1434,7 @@ function renderPieces(){
       out.push(`<div><code>${esc(m.name)}</code> at the ${esc(m.edge)} edge (${esc(m.from)}); ${way}</div>`);
     }
     const st=Payload.stats||{}, tr=Payload.transfer(), g=Payload.gate();
-    out.push(`<div>${tr?`<code>${esc(tr)}</code> carries pieces to the shooter; `:""}${g?`<code>${esc(g)}</code> lets them out`:"no feeder: the intake pushes a piece into the shooter once it turns"}.</div>`);
+    out.push(`<div>${tr?`<code>${esc(tr)}</code> carries pieces to the shooter; `:""}${g?`<code>${esc(g)}</code> lets them out`:esc(Shots.chosenNone("feeder",CODE)||"no feeder")+": the intake pushes a piece into the shooter once it turns"}.</div>`);
     out.push(`<div>This run: ${st.picked||0} picked up${st.fromFlowers?" ("+st.fromFlowers+" from FLOWERs)":""} · ${st.fired||0} launched · ${st.scored||0} in · ${st.ejected||0} put out</div>`);
   }
   setIfChanged(el,out.join(""));

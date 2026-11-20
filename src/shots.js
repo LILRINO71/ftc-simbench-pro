@@ -31,6 +31,7 @@ const TRANSFER_NAME=/transfer|index|convey|belt|uptake|elevat|tunnel/i;
 // the settings that are devices (a name, or null for an explicit none), and how long a kept name may be
 const SHOT_FROM_CODE="@code";
 const PICK_DEVICES=["shooter","feeder","intake1","intake2","transfer"];
+const PICK_WHAT={shooter:"flywheel", feeder:"feeder", intake:"intake", intake1:"intake", intake2:"second intake", transfer:"transfer", motor:"motor"};
 const PICK_MAX=128;
 
 /* A small seeded random source, so a test or a replay sees the same shots. */
@@ -163,6 +164,16 @@ const Shots={
     else pick[key]=value===""||value==null?null:value;
     this.cfg.pick=this.cleanPick(pick);
     this.adopt(code);
+  },
+  /* An empty role the user chose ("— none —", or "by hand" for the feeder) while the code has one:
+     the words for it ("you chose no flywheel; this code has launcher"), else null (the code has none,
+     and the page says so as before). key: shooter, feeder, intake or transfer. */
+  chosenNone(key,code){
+    const c=this.cfg, pick=(c&&c.pick)||{}, d=this.detect(code);
+    const has=key==="intake"?d.intake:(d[key]||[]);
+    const chosen=key==="intake"?(c&&c.payload&&Array.isArray(c.payload.intakes)&&!c.payload.intakes.length&&("intake1" in pick||"intake2" in pick))
+      :key==="transfer"?pick.transfer===null:(pick[key]===null&&!!c&&!c[key]);
+    return chosen&&has.length?`you chose no ${PICK_WHAT[key]||key}; this code has ${has.join(", ")}`:null;
   },
   /* One Shot tab select as data ({options:[{value, label, selected}], mine}): "From the code: <what
      the code says>" first, then the explicit none and each device that can fill it (the motor table,
@@ -316,7 +327,8 @@ const Shots={
      src/payload.js), which the flywheel then pays for; without it, a ball of the Shot tab's kind. */
   fire(pose,why,vel,piece){
     if(!Field.ok||!this.cfg) return null;
-    if(!this.cfg.shooter) return this.note("No flywheel picked — choose one in the Shot tab.");
+    if(!this.cfg.shooter){ const none=this.chosenNone("shooter",Sim.code);
+      return this.note(none?none.charAt(0).toUpperCase()+none.slice(1)+": pick it under Flywheel in the Shot tab to fire.":"No flywheel picked — choose one in the Shot tab."); }
     const v0=this.exitSpeed();
     if(v0<1) return this.note("Flywheel isn't spinning — "+this.cfg.shooter+" is at "+Math.round(this.spin()*100)+"%.");
     if(!this.rnd) this.rnd=makeRng(this.seed);

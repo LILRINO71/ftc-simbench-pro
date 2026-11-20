@@ -113,7 +113,8 @@ const Payload={
   },
   /* Every motor that spins a shooter wheel. */
   flywheels(){
-    const c=Shots.cfg; if(!c) return [];
+    // no flywheel in effect (the code has none, or the user chose none): nothing pays for a shot
+    const c=Shots.cfg; if(!c||!c.shooter) return [];
     const skip=this.intakes().concat([this.transfer()]), out=[];
     for(const n of [c.shooter].concat(this.detected().shooter))
       if(n&&out.indexOf(n)<0&&skip.indexOf(n)<0&&Sim.dev[n]&&Sim.dev[n].kind==="motor") out.push(n);
@@ -132,8 +133,11 @@ const Payload={
     const ins=this.intakes();
     if(ins.length) return {mode:"real", why:"the code runs an intake ("+ins.join(", ")+")"};
     if(P.preload>0) return {mode:"real", why:"pre-loaded in the Shot tab"};
-    if(c.shooter) return {mode:"unlimited", why:"no intake in the code: a ball for every feed, as if fed by hand"};
-    return {mode:"none", why:"no intake and no shooter in the code"};
+    // an empty role the user chose is said as theirs, not the code's (Shots.chosenNone)
+    const code=(typeof Sim!=="undefined"&&Sim.code)||null, noIn=Shots.chosenNone("intake",code), noFly=Shots.chosenNone("shooter",code);
+    if(c.shooter) return {mode:"unlimited", why:(noIn||"no intake in the code")+": a ball for every feed, as if fed by hand"};
+    if(!noIn&&!noFly) return {mode:"none", why:"no intake and no shooter in the code"};
+    return {mode:"none", why:(noIn||"no intake in the code")+", and "+(noFly||"no shooter in the code")};
   },
   real(){ return this.supply().mode==="real"; },
   /* The alliance the team's robot plays for. */

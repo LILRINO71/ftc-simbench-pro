@@ -338,3 +338,24 @@ test('shot settings: after every kind of rebuild the selects show what is in eff
   reloadSim(R); agrees(R.code); initNow(R); agrees(R.code);
   assert.deepEqual([S.cfg.motorId, S.cfg.feeder], ['yj1150', null]);
 });
+
+// 36d08dd: an explicit none was right to stick, but the page and Payload said the code had no
+// flywheel, and Payload still charged the launcher for shots.
+test('shot settings: an empty role the user chose is said as the user\'s, and no flywheel is charged', () => {
+  S.cfg = null; select(B);
+  userPicks('shooter', '', B); userPicks('feeder', '', B);
+  select(C);
+  assert.deepEqual(E.Payload.flywheels(), [], 'no flywheel in effect: none pays for a shot');
+  assert.equal(E.Payload.supply().why, 'no intake in the code, and you chose no flywheel; this code has launcher');
+  assert.equal(S.chosenNone('shooter', C.code), 'you chose no flywheel; this code has launcher');
+  assert.equal(S.chosenNone('feeder', C.code), 'you chose no feeder; this code has kicker');
+  S.fire(pose, 'test');
+  assert.match(S.log[0].text, /^You chose no flywheel; this code has launcher/);
+  // from the code: nothing is the user's, and the words are the code's as before
+  userPicks('shooter', FROM_CODE, C); userPicks('feeder', FROM_CODE, C);
+  assert.equal(S.chosenNone('shooter', C.code), null);
+  assert.deepEqual(E.Payload.flywheels(), ['launcher']);
+  const none = { code: { devices: [{ name: 'arm', type: 'DcMotor' }] } };
+  S.cfg = null; S.adopt(none.code);
+  assert.equal(S.chosenNone('shooter', none.code), null, 'a code with no flywheel: nothing to say about a choice');
+});

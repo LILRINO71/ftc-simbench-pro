@@ -41,7 +41,8 @@ select holding your own choice has an accent edge. The intakes are chosen slot b
 the first slot the code's second intake, the second slot gets the code's first.
 
 The rig kept in the browser and the workspace file keep the choices (checked on the way in: known keys,
-names or null, at most 128 characters; anything else is dropped). Settings saved before the choices
+names or null, at most 128 characters; anything else is dropped). An empty role you chose is said as yours ("You chose no flywheel; this
+code has launcher"), and no flywheel is charged for shots while none is in effect. Settings saved before the choices
 existed have none, so the code decides again: that build saved whatever it had filled in, which is
 exactly the value that went stale. Settings `adopt` never fills (wheel, hood angle, exit height, supply,
 pre-load, roller, edges, which way is in) come back exactly as saved.
