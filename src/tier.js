@@ -22,15 +22,54 @@
    when a machine can't keep up. ?tier=0|1|2 or the saved choice overrides.
    ============================================================ */
 /* bump: the foam tiles' bump map; glass: the perimeter's reflection layer;
-   aoSamples: GTAO samples (0 = no AO pass); vignette: a slight darkening at the corners */
+   aoSamples: GTAO samples (0 = no AO pass), read from the scene's own depth (src/postfx.js);
+   aoHalf: the AO at half resolution; vignette: a slight darkening at the corners;
+   msaa: samples of the post buffer (it replaces SMAA); bloom: a glow on what is brighter than
+   white (the venue's lamps, emissive parts); grade: the last pass's colour grade;
+   crowd: the stands and the people in them (src/view3d.js buildVenue); minScale: the least
+   of the pixel ratio the dynamic resolution (dynResStep) may drop to */
 const TIER_BUDGETS=[
   {tier:0, shadows:0,    pixelRatio:1, lite:true,  substeps:2, ownTris:150000, otherTris:30000,
-   bump:false, glass:false, aoSamples:0,  vignette:false},
+   bump:false, glass:false, aoSamples:0,  aoHalf:true,  vignette:false, msaa:0, bloom:false, grade:false, crowd:false, minScale:0.75},
   {tier:1, shadows:1024, pixelRatio:1, lite:false, substeps:4, ownTris:600000, otherTris:100000,
-   bump:true,  glass:true,  aoSamples:8,  vignette:false},
+   bump:true,  glass:true,  aoSamples:8,  aoHalf:true,  vignette:false, msaa:4, bloom:true,  grade:true,  crowd:true,  minScale:0.67},
   {tier:2, shadows:4096, pixelRatio:2, lite:false, substeps:4, ownTris:Infinity, otherTris:Infinity,
-   bump:true,  glass:true,  aoSamples:16, vignette:true},
+   bump:true,  glass:true,  aoSamples:16, aoHalf:false, vignette:true,  msaa:4, bloom:true,  grade:true,  crowd:true,  minScale:0.6},
 ];
+/* ------------------------------------------------------------
+   DYNAMIC RESOLUTION — fewer pixels before a frame is late
+   ------------------------------------------------------------
+   Fed each frame with how long the GPU took (a timer query) or, where the browser
+   has none, how long the frame took, and the frame budget (the display's refresh
+   interval). Over 92% of the budget for most of ~20 frames drops the render scale a
+   step; it comes back a step only when the frame, scaled by the pixels it would add,
+   would still fit in 75% of the budget for ~3 s straight, so it never see-saws.
+   s: {scale, min, max, step, hot, cool}; returns true when s.scale changed. */
+function dynResInit(o){
+  o=o||{};
+  return {scale:o.scale||1, min:o.min||0.6, max:o.max||1, step:o.step||0.1, hot:0, cool:0, downAfter:o.downAfter||20, upAfter:o.upAfter||180};
+}
+function dynResStep(s,ms,budgetMs){
+  if(!(ms>0)||!(budgetMs>0)) return false;
+  const up=Math.min(s.max,s.scale+s.step), grow=(up/s.scale)*(up/s.scale);
+  if(ms>budgetMs*0.92){ s.hot++; s.cool=0; }
+  else{ s.hot=Math.max(0,s.hot-1); s.cool=up>s.scale+1e-6&&ms*grow<budgetMs*0.75?s.cool+1:0; }
+  if(s.hot>=s.downAfter&&s.scale>s.min+1e-6){
+    s.scale=Math.max(s.min,Math.round((s.scale-s.step)*100)/100); s.hot=0; s.cool=0; return true; }
+  if(s.cool>=s.upAfter){ s.scale=Math.round(up*100)/100; s.hot=0; s.cool=0; return true; }
+  return false;
+}
+/* The display's frame interval, from recent frame-to-frame times (ms): their 20th
+   percentile, snapped to the nearest common refresh rate, 30 to 240 Hz. */
+function refreshMs(intervals){
+  const v=(intervals||[]).filter(x=>x>2&&x<100).sort((a,b)=>a-b);
+  if(v.length<10) return 1000/60;
+  const p=v[Math.floor(v.length*0.2)];
+  const rates=[240,165,144,120,90,75,60,50,30];
+  let best=60, bd=Infinity;
+  for(const r of rates){ const d=Math.abs(1000/r-p); if(d<bd){ bd=d; best=r; } }
+  return 1000/best;
+}
 /* A phone or a tablet, from the user agent and the touch points. iPadOS
    Safari sends a Mac's user agent ("Macintosh; Intel Mac OS X"), so a
    "Mac" with a touch screen is an iPad: no Mac has one. */

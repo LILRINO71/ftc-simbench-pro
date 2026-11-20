@@ -46,7 +46,7 @@ const EXPORTS = [
   'FX_LEVELS', 'fxLevel', 'fxPool', 'fxEaseOut', 'fxHop', 'trailFade', 'trailWidth', 'fxPathAt', 'popupState', 'fxSpinRate', 'fxSpinAxis', 'fxShakeAmp', 'ShotFx',
   // the AI robots' and HUMAN PLAYERS' poses (src/figures.js)
   'figTrack', 'humanPose', 'throwBallPhase', 'mecanumTurns', 'FIG_GRAB', 'FIG_RELEASE', 'FIG_IDLE', 'FIG_THROW', 'FIG_PEOPLE',
-  'TOUR', 'statusOf', 'STATUS_RANK', 'deviceTier', 'tierMobile', 'TIER_BUDGETS',
+  'TOUR', 'statusOf', 'STATUS_RANK', 'deviceTier', 'tierMobile', 'TIER_BUDGETS', 'dynResInit', 'dynResStep', 'refreshMs',
   // phone controls and challenge cards
   'touchStick', 'touchPhone', 'touchModel', 'touchWrite', 'TOUCH_DEAD', 'TOUCH_BUTTONS', 'CHALLENGES', 'chalSnapshot', 'chalNext', 'chalMark', 'chalLoad', 'chalFar', 'chalFace', 'chalMove', 'chalPark',
 ];
