@@ -44,6 +44,27 @@ test('boxed ints: entries, iterators, var, fields, a team class of its own and O
   ['a=2', '3', '4', '3 1', '3', '5', '1.5', '3.0']);
 });
 
+test('a team generic class: the declared return type decides, double included; a type variable takes the type argument', () => {
+  assert.deepEqual(say(`Avg<Integer> avg = new Avg<>(); avg.add(2); avg.add(3);
+    say(avg.get() / 2); double half = avg.get() / 2; say(half); say("avg " + avg.get());
+    say(avg.peek() * 3 / 2); say(avg.next() / 2); say(avg.first() / 2); say(avg.count() / 2); say("n " + avg.count());
+    say(avg.poll() / 2);
+    Avg<Double> d = new Avg<>(); d.add(5.0); say(d.first() / 2);
+    Pair<Integer, Double> p = new Pair<>(7, 7.0); say(p.left() / 2 + " " + p.right() / 2 + " " + p.get() / 2);`,
+  `  static class Avg<T extends Number> {
+    final List<T> xs = new ArrayList<>();
+    void add(T x) { xs.add(x); }
+    double get() { double s = 0; for (T x : xs) s += x.doubleValue(); return s / xs.size(); }
+    double peek() { return 2.5; }
+    double next() { return 3; }
+    T first() { return xs.get(0); }
+    int count() { return xs.size(); }
+    Double poll() { return 4.0; }
+  }
+  static class Pair<A, B> { A a; B b; Pair(A a, B b) { this.a = a; this.b = b; } A left() { return a; } B right() { return b; } double get() { return 9; } }`),
+  ['1.25', '1.25', 'avg 2.5', '3.75', '1.5', '1', '1', 'n 2', '2.0', '2.5', '3 3.5 4.5']);
+});
+
 test('int arithmetic wraps at 32 bits like Java (JLS 15.17, 15.18, 15.15)', () => {
   assert.deepEqual(say(`int a = Integer.MAX_VALUE; a = a + 1; say(a);
     int b = 100000; say(b * b);

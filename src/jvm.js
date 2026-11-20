@@ -161,7 +161,10 @@ function jvParse(src,file){
     return args&&args.length?{name,dims,args}:{name,dims};
   }
   function tryType(){ const s=i; try{ return type(); }catch(e){ i=s; return null; } }
-  function typeParams(){ if(is("<")){ let d=0; do{ if(is("<")) d++; else if(is(">")) d--; i++; }while(d>0); } }
+  /* <T, U extends Number>: skipped, the variables' names kept */
+  function typeParams(){ const out=[]; if(is("<")){ let d=0; do{ if(is("<")) d++; else if(is(">")) d--; else if(d===1&&isId()&&(T[i-1].v==="<"||T[i-1].v===",")) out.push(pk().v); i++; }while(d>0); } return out; }
+  const tvars=[];               // the type variables of the classes being parsed, innermost last
+  const classTvar=n=>{ for(let k=tvars.length-1;k>=0;k--){ if(tvars[k].tv.indexOf(n)>=0) return true; if(tvars[k].cut) break; } return false; };
 
   /* ---- declarations ---- */
   function unit(){
@@ -184,13 +187,15 @@ function jvParse(src,file){
     else if(is("record")&&isId(1)){ i++; kind="record"; }
     else fail("expected a class but found '"+pk().v+"'");
     const d={kind,name:ident(),mods:m,ext:null,impls:[],members:[],consts:[],p,file};
-    typeParams();
+    const tv=typeParams(); if(tv.length) d.tparams=tv;
     if(kind==="record"){ want("("); d.recordParams=params(true); }
     if(eat("extends")){ if(kind==="interface"){ d.impls.push(type()); while(eat(",")) d.impls.push(type()); } else d.ext=type(); }
     if(eat("implements")){ d.impls.push(type()); while(eat(",")) d.impls.push(type()); }
     if(eat("permits")){ type(); while(eat(",")) type(); }
     if(is("permits")){ i++; type(); while(eat(",")) type(); }
-    classBody(d);
+    // a static nested class (an interface, an enum, a record) can't use its outer class's type variables
+    tvars.push({tv,cut:!!m.static||kind!=="class"});
+    try{ classBody(d); } finally { tvars.pop(); }
     return d;
   }
   function classBody(d){
@@ -212,7 +217,7 @@ function jvParse(src,file){
       const p=pk().p, m=mods();
       if(is("{")){ d.members.push({k:"init",static:!!m.static,body:block(),p}); continue; }
       if(is("class")||is("interface")||is("enum")||is("@interface")||(is("record")&&isId(1)&&!is("(",2))){ const t=typeDecl(m); t.nested=true; d.members.push({k:"type",decl:t,p}); continue; }
-      typeParams();
+      const mtv=typeParams();
       if(isId()&&pk().v===d.name&&is("(",1)){            // constructor
         i++; want("("); const ps=params();
         if(eat("throws")){ type(); while(eat(",")) type(); }
@@ -228,7 +233,11 @@ function jvParse(src,file){
         let body=null;
         if(is("{")) body=block();
         else { if(eat("default")) expr(); want(";"); }
-        d.members.push({k:"method",name,params:ps,ret:ty,body,mods:m,static:!!m.static,abstract:!body,p:np});
+        // a return type that is a type variable (T get()) says nothing about the value's kind by
+        // itself: "class" when it is the class's own (Box<Integer>.get() is an Integer), "method"
+        // when the method declares it (<T> T pick(...))
+        const rv=ty.dims||dims?null:mtv.indexOf(ty.name)>=0?"method":!m.static&&classTvar(ty.name)?"class":null;
+        d.members.push({k:"method",name,params:ps,ret:ty,body,mods:m,static:!!m.static,abstract:!body,p:np,retVar:rv});
         continue;
       }
       // fields: one type, any number of names
@@ -969,7 +978,9 @@ JVM.prototype.hasNativeBase=function(c){ for(let k=c;k;k=this.supOf(k)) if(k.nat
 /* Call a method on a receiver. */
 JVM.prototype.invoke=function*(self,name,args,node,startCls){
   if(self===null||self===undefined) throw this.jthrow("NullPointerException","called "+name+"() on null"+jvWhere(node));
-  if(self instanceof JvFn) return yield* this.callFn(self,args,name);
+  // what a lambda's body or a library method called on the way returned is not what this call
+  // returns (see setRk): only a method with source says that
+  if(self instanceof JvFn){ const r=yield* this.callFn(self,args,name); this.lastRk=undefined; return r; }
   if(typeof self==="string") return jvStringMethod(this,self,name,args);
   if(typeof self==="number"||typeof self==="boolean") return jvBoxMethod(self,name,args,node);
   if(Array.isArray(self)){ if(name==="clone") return self.slice(); if(name==="length") return self.length; if(name==="getClass") return {__c:this.opaqueClass("Class"),f:{},n:{name:"Array"}}; return this.opaqueVal("array"); }
@@ -979,12 +990,12 @@ JVM.prototype.invoke=function*(self,name,args,node,startCls){
   const m=this.findMethod(startCls||c,name,args);
   if(m&&m.body) return yield* this.run(m,self,args,this.ownerOf(m));
   const nm=this.nativeMethod(startCls||c,name);
-  if(nm){ const r=nm(this,self,args,node); return (r&&typeof r.next==="function"&&typeof r[Symbol.iterator]==="function")?yield* r:r; }
+  if(nm){ const r=nm(this,self,args,node); if(r&&typeof r.next==="function"&&typeof r[Symbol.iterator]==="function"){ const x=yield* r; this.lastRk=undefined; return x; } return r; }
   // Object's methods, and enum constants'
   const om=yield* this.objectMethod(self,name,args,node);
   if(om!==JV_NONE) return om;
   // a library builder: any setter records its value and hands the object back
-  for(let k=startCls||c, g=0; k&&g<30; k=this.supOf(k), g++) if(k.native&&k.native.any){ const r=k.native.any(this,self,name,args,node); return (r&&typeof r.next==="function"&&typeof r[Symbol.iterator]==="function")?yield* r:r; }
+  for(let k=startCls||c, g=0; k&&g<30; k=this.supOf(k), g++) if(k.native&&k.native.any){ const r=k.native.any(this,self,name,args,node); if(r&&typeof r.next==="function"&&typeof r[Symbol.iterator]==="function"){ const x=yield* r; this.lastRk=undefined; return x; } return r; }
   if(m&&!m.body){ throw this.jthrow("AbstractMethodError",c.name+"."+name+"() has no body"+jvWhere(node)); }
   // a library builder written in Java: a setter it doesn't spell out still chains
   if(this.builders&&this.isBuilder(c)){ this.note(c.name+"."+name); return self; }
@@ -1019,7 +1030,7 @@ JVM.prototype.invokeStatic=function*(c,name,args,node){
   yield* this.ready(c);
   if(c.native){
     const sm=jvOwn(c.native.s,name);
-    if(sm){ const r=sm(this,args,node); return (r&&typeof r.next==="function"&&typeof r[Symbol.iterator]==="function")?yield* r:r; }
+    if(sm){ const r=sm(this,args,node); if(r&&typeof r.next==="function"&&typeof r[Symbol.iterator]==="function"){ const x=yield* r; this.lastRk=undefined; return x; } return r; }
     if(c.kind==="enum"){ if(name==="values") return c.consts.slice(); if(name==="valueOf") return c.sf[args[args.length-1]]||null; }
     const s=this.supOf(c); if(s) return yield* this.invokeStatic(s,name,args,node);
     this.note(c.name+"."+name,c); return jvOpaqueResult(this,name,c.name,args);
@@ -1045,7 +1056,7 @@ JVM.prototype.run=function*(m,self,args,owner){
   const prevCls=this.curCls, prevM=this.curMeth; this.curCls=owner||(self&&self.__c)||prevCls; this.curMeth=m.name;
   try{
     const r=yield* this.exBlock(m.body.body,sc);
-    this.lastRk=jvTypeKind(m.ret);
+    this.lastRk=m.retK!==undefined?m.retK:jvRetK(m); this.lastM=m;
     if(r&&r.s===JV_RET) return m.ret?jvCoerce(r.v,m.ret):r.v;
     return undefined;
   } catch(e){ if(e&&typeof e==="object"&&!e.__where) e.__where=this.where(); throw e; }
@@ -1756,7 +1767,7 @@ JVM.prototype.call=function*(e,sc){
       }
       if(self||!m){
         const nm=this.nativeMethod(cls,e.name);
-        if(nm&&self&&this.isSub(self.__c,cls)){ const x=nm(this,self,args,e); r=(x&&typeof x.next==="function"&&typeof x[Symbol.iterator]==="function")?yield* x:x; done=true; break; }
+        if(nm&&self&&this.isSub(self.__c,cls)){ const x=nm(this,self,args,e); if(x&&typeof x.next==="function"&&typeof x[Symbol.iterator]==="function"){ r=yield* x; this.lastRk=undefined; } else r=x; done=true; break; }
         if(cls.native&&jvOwn(cls.native.s,e.name)){ r=yield* this.invokeStatic(cls,e.name,args,e); done=true; break; }
       }
       if(m&&!m.body&&self){ r=yield* this.invoke(self,e.name,args,e); done=true; break; }
@@ -1811,12 +1822,25 @@ JVM.prototype.call=function*(e,sc){
   if(typeof r==="number"&&(r>2147483647||r<-2147483648)&&this.nodeInfo.get(e).rk==="i"&&Number.isInteger(r)) r=r|0;
   return r;
 };
+/* What a method with source says about the kind of what it returns (JVM.run leaves it in
+   lastRk for setRk): "i", "l" or "c" for its declared integral type, "-" for any other declared
+   type (double, boolean, a class), "T" for a type variable of its class (the receiver's type
+   argument decides), "M" for one the method declares. Syntax only, so it is kept on the node. */
+function jvRetK(m){ return (m.retK=m.retVar==="class"?"T":m.retVar==="method"?"M":jvTypeKind(m.ret)||"-"); }
 /* Remember whether a call returned an int, for the / that uses it */
 JVM.prototype.setRk=function(e,r,sc){
   const ni=this.ni(e);
   if(ni.rk!==undefined) return;
-  // a method the team wrote: its declared return type
-  if(this.lastRk){ ni.rk=this.lastRk; return; }
+  // a method with source (the team's, a library's in Java): its declared return type decides,
+  // double included, unless that type is a type variable
+  const lk=this.lastRk;
+  if(lk!==undefined&&lk!=="T"&&lk!=="M"){ ni.rk=lk==="-"?null:lk; return; }
+  if(lk==="T"&&e.obj&&sc){
+    // Pair<Integer, Double>.second(): the receiver's type argument in the variable's place
+    const t=this.typeOf(e.obj,sc), m=this.lastM, own=m&&this.ownerOf(m);
+    const tv=own&&own.decl&&own.decl.tparams, j=tv?tv.indexOf(m.ret.name):-1;
+    if(t&&t.args&&!t.dims&&j>=0&&t.args.length===tv.length&&t.name.replace(/^.*\./,"")===own.name){ ni.rk=jvTypeKind(t.args[j]); return; }
+  }
   const on=e.obj&&e.obj.k==="name"?e.obj.name:null;
   if(e.name==="charAt"){ ni.rk="c"; return; }
   if(e.name==="signum"){ ni.rk=on==="Integer"||on==="Long"?"i":null; return; }
@@ -1826,7 +1850,7 @@ JVM.prototype.setRk=function(e,r,sc){
   if((on==="Math"||on==="StrictMath")&&/^(abs|max|min)$/.test(e.name)&&sc){ ni.rk=e.args.map(a=>this.kind(a,sc)).reduce((p,k)=>jvPromote(p,k),"i"); return; }
   if(on==="System"&&/^(currentTimeMillis|nanoTime)$/.test(e.name)){ ni.rk="l"; return; }
   // an element out of a collection declared with its type: List<Integer>.get() is an Integer
-  const el=e.obj&&sc?jvElemType(this.typeOf(e.obj,sc),e.name,e.args.length):null;
+  const el=e.obj&&sc&&lk!=="M"?jvElemType(this.typeOf(e.obj,sc),e.name,e.args.length):null;
   if(el){ ni.rk=jvTypeKind(el); return; }
   ni.rk=(JV_INT_METHODS.has(e.name)&&typeof r==="number"&&Number.isInteger(r))?(JV_LONG_METHODS.has(e.name)?"l":"i"):null;
 };
