@@ -35,6 +35,44 @@ statement it couldn't simulate and why, so nothing is skipped silently.
   - `return`/`break`/`continue` inside the loop
   - objects the bench doesn't model (vision, most third-party libraries)
 
+## The Java VM: where it behaves like the robot (`src/jvm.js`, `src/jvmlib.js`, `src/jvmrun.js`)
+
+Team code that the line reader can't follow, every headless run (`tools/run-opmode.mjs`) and
+most real TeleOps run on the bench's Java VM.
+
+- **Loop rate.** One pass of the loop per 20 ms tick. `opModeIsActive()`, `isStopRequested()`,
+  `idle()` and `Thread.yield()` are flag reads on the robot and cost no time here either: a loop
+  that checks `opModeIsActive()` three times or ends in `idle()` still runs at 50 Hz. A loop
+  that waits on a condition (`while (opModeIsActive() && motor.isBusy())`) takes a tick per
+  check, and a `sleep()` in the loop is the pass. A thread the OpMode starts loops at its own
+  rate. Not modelled: a loop inside the pass that reads a gate through a helper on every
+  iteration costs a tick per iteration.
+- **The clock** (`System.nanoTime`, `currentTimeMillis`, `getRuntime`, `ElapsedTime`) moves on
+  by about 25 ns a statement inside a pass, so two reads in one pass differ and a dt measured
+  pass to pass averages exactly 20 ms. Heavy computation is charged by the busy-wait guard
+  instead: 20 ms per 20,000 loop passes or calls, slower than a Control Hub.
+- **Numbers.** `int` arithmetic wraps at 32 bits and `long` at 64 (shifts and masks in 64-bit);
+  casts narrow as Java does; an `Integer` out of a `List<Integer>` or a `Map<…, Integer>`
+  divides as an int; `Integer.parseInt` is strict. Not exact: a `long` past 2^53 is the nearest
+  double, `float` is a `double`, and two boxed `Integer`s of the same value are `==`.
+- **Errors where the robot errors.** INIT throws `TargetPositionNotSetException` for
+  `RUN_TO_POSITION` before a target, `IllegalArgumentException` for a `RevHubOrientationOnRobot`
+  with the logo and USB on one axis, and, when the host knows the Robot Controller's
+  configuration (`robotConfig()`), for a `hardwareMap` name it lacks. An exception nothing
+  catches in a thread the OpMode started ends the run, as it ends the Robot Controller app
+  (`error.thread`).
+- **What it doesn't model** of the FTC SDK is listed apart from third-party stubs:
+  `JvProgram.unmodelled()` and `code.vm.unmodelled` (`{call, count, file, line, sdk}`).
+- **Limits.** Calls nest 200 deep (a robot takes thousands), then `StackOverflowError`; arrays
+  past 2^24 cells, collections past 2^23 items and strings past 2^24 characters throw
+  `OutOfMemoryError`; a regular expression with a repeat inside a repeat on a long string stops
+  as a `Hang`; a quarter second of the page's time in one tick ends the tick. All can be caught
+  as in Java except the hang.
+- **From the Autonomous to the TeleOp.** `new JvProgram(comp, host, {carry: auto.carry()})`
+  starts with the statics and `OpMode.blackboard` the auto left, for every class whose source
+  is the same (one Robot Controller session). `JvProgram.statics()` lists them as plain data.
+  The page and `tools/run-opmode.mjs` don't pass a carry yet.
+
 ## Road Runner 1.0 autos (`src/roadrunner.js`)
 
 Road Runner autos lean on classes in other files, so the bench keeps **helper classes**: any

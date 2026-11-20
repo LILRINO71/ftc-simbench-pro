@@ -209,7 +209,8 @@ check the live build by comparing its `SIMBENCH_BUILD` hash with a local ship bu
   drive check can't catch a wrong `setDirection`. The verdict says which it used.
 - **Team code runs on the bench's own Java VM, not a JDK.** FTC SDK, FTCLib, Road Runner and
   Pedro Pathing calls it knows are run; a library it doesn't know is absorbed as a no-op and
-  listed, and an OpMode built on one (Pedro's `Tuning` menu) doesn't run.
+  listed (a part of the FTC SDK it doesn't model is listed apart), and an OpMode built on one
+  (Pedro's `Tuning` menu) doesn't run. Calls nest 200 deep, far less than on a robot.
 - **Shipped code can be read.** The ship build strips comments, which is not encryption. Nothing
   secret belongs in a browser bundle.
 
