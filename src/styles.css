@@ -692,6 +692,19 @@ button.rmbtn{color:var(--label-3);} button.rmbtn:hover{color:var(--fail);}
 .odds{display:flex; align-items:center; gap:10px; padding:8px 10px; border-radius:10px; background:var(--card-2);}
 .odds .big{font-family:var(--mono); font-size:20px; font-weight:600; font-variant-numeric:tabular-nums; min-width:3.2em;}
 .odds.ok .big{color:var(--pass)} .odds.mid .big{color:var(--warn)} .odds.bad .big{color:var(--fail)}
+/* the pieces the team's robot holds (src/payload.js): four dots, filled for what is in */
+.pc-chip{display:inline-flex; align-items:center; gap:3px; font-family:var(--body); font-size:10.5px; color:var(--label-3); white-space:nowrap;}
+.pc-chip i{width:8px; height:8px; border-radius:50%; border:1px solid var(--label-3); box-sizing:border-box;}
+.pc-chip i.p{background:var(--warn); border-color:var(--warn);}
+.pc-chip i.n{background:var(--label-2); border-color:var(--label-2);}
+.pc-chip i.n.red{background:var(--red); border-color:var(--red);} .pc-chip i.n.blue{background:var(--blue); border-color:var(--blue);}
+.pc-chip i.n{border-radius:2px;}
+.pc-chip em{font-style:normal; margin-left:3px;}
+.pc-form{margin-top:10px;}
+.pc-rows{display:flex; flex-direction:column; gap:6px; margin-top:8px;}
+.pc-row{display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:4px 6px; align-items:center; font-size:12px; color:var(--label-2);}
+.pc-row code{grid-column:1/-1; justify-self:start; max-width:100%; font-size:11px; background:var(--fill-4); border-radius:4px; padding:0 4px; color:var(--label); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.pc-row select{width:100%; min-width:0;}
 .shot-pick{display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:10px;}
 .shot-pick label{display:flex; flex-direction:column; gap:3px; font-size:11px; font-weight:500; color:var(--label-3); min-width:0;}
 .hive-row{padding:8px 0; border-top:1px solid var(--sep-2);}

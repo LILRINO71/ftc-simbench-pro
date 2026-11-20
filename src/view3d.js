@@ -1804,7 +1804,8 @@ const View={
      state each frame; the staged elements the field was built with hide
      while a match is on, because the match moves them. */
   updateMatch(){
-    const live=typeof Match!=="undefined"&&Match.live();
+    // a match, or the team's robot alone among the staged pieces (Match.solo, src/payload.js)
+    const live=typeof Match!=="undefined"&&Match.pieces();
     if(this.matchShown!==live){
       this.matchShown=live;
       this.fieldG.traverse(o=>{ if(o.userData&&o.userData.staged) o.visible=!live; });
@@ -2086,7 +2087,7 @@ const View={
     this.cam.updateMatrixWorld();
     let camMoved=false; for(let i=0;i<16;i++) if(cs[i]!==camSig[i]){ camMoved=true; cs[i]=camSig[i]; }
     const ws=this.worldSig(), moved=ws!==this._ws; this._ws=ws;
-    const live=typeof Match!=="undefined"&&Match.live&&Match.live();
+    const live=typeof Match!=="undefined"&&Match.pieces&&Match.pieces();
     const flying=typeof Shots!=="undefined"&&Shots.flying&&Shots.flying.length>0;
     const rolling=this.ballsMoving(live);
     if(moved||live||flying||rolling||this.tipAnim) this.ren.shadowMap.needsUpdate=true;

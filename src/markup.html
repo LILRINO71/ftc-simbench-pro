@@ -136,6 +136,7 @@
           <button class="vp-tour" id="vpTour" type="button" hidden><i aria-hidden="true"></i>New here? Take the tour<span>1 min</span></button>
         </div>
         <div class="vp-readout">
+          <span class="pc-chip" id="pcChip" hidden></span>
           <span id="vpPose">—</span>
           <button class="btn-ghost rec-btn" id="recBtn" type="button" hidden><i aria-hidden="true"></i><span>Clip</span></button>
           <button class="btn-ghost rec-btn" id="vidBtn" type="button" hidden><i aria-hidden="true"></i><span>Save video</span></button>
@@ -220,6 +221,7 @@
         </button>
         <div class="menu match-menu panel-pop" id="matchMenu" hidden>
           <label class="mm-row"><input type="checkbox" id="matchOn"><span><b>AI robots and human players</b><small>A partner and two opponents the bench drives, and both alliances' human players</small></span></label>
+          <label class="mm-row"><input type="checkbox" id="piecesOn" checked><span><b>Game pieces without them</b><small>With the AI robots off, the staged POLLEN, the FLOWERs and the human players' NECTAR stay on the field for a robot with an intake</small></span></label>
           <label class="mm-row skill"><span><b>How good the AI teams are</b></span>
             <select class="match-skill" id="matchSkill" aria-label="AI skill"><option value="rookie">Rookie</option><option value="typical" selected>Typical</option><option value="elite">Elite</option></select></label>
           <label class="mm-row"><input type="checkbox" id="practice"><span><b>No time limit</b><small>Practice: the clock counts up and never stops the OpMode</small></span></label>
@@ -551,6 +553,20 @@
           <label>Feeder <select id="shotFeed" aria-label="Feeder"></select></label>
         </div>
         <p class="hint">A ball launches when the feeder leaves its rest position (a servo) or runs (a motor), at the speed your code gives the flywheel. Each shot wanders like a real one.</p>
+      </div>
+      <div class="sec card" data-sec="pieces">
+        <div class="sec-head"><h3>Game pieces</h3><span class="spacer"></span><span class="pc-chip" id="pcHead"></span></div>
+        <div class="shot-live" id="pcLive"></div>
+        <div class="form2 pc-form">
+          <span>Supply</span><div class="seg" id="pcSupply"><button data-sup="auto">auto</button><button data-sup="real">real</button><button data-sup="unlimited">unlimited</button></div>
+          <label for="pcIntake1">Intake</label><select id="pcIntake1"></select>
+          <label for="pcIntake2">Second intake</label><select id="pcIntake2"></select>
+          <label for="pcTransfer">Transfer</label><select id="pcTransfer"></select>
+          <label for="pcPreload">Pre-load</label><select id="pcPreload"><option value="">auto (4 in AUTO)</option><option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select>
+          <label for="pcRoller">Roller</label><div><input class="mini" id="pcRoller" type="number" step="1" min="10" max="150"> <span class="dim">mm across</span></div>
+        </div>
+        <div class="pc-rows" id="pcRows"></div>
+        <p class="hint">An intake running inward takes in a ball lying at its edge of the robot, four at most. It goes to the shooter and waits for the feeder; with no feeder it leaves once the shooter turns. Which way is in: the first way your code runs the intake on an empty robot, unless you set it.</p>
       </div>
       <div class="sec card" data-sec="hives">
         <div class="sec-head"><h3>HIVEs</h3><span class="spacer"></span><button class="btn-sm" id="fieldReset" type="button">Reset field</button></div>

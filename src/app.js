@@ -1317,15 +1317,85 @@ function renderShotSetup(){
   const wheels=Field.data.shooter.wheels;
   setHTML($("#wheelSel"),wheels.map(w=>`<option value="${w.diameterMm}|${esc(w.id)}"${w.diameterMm===cfg.wheelMm&&(!cfg.wheelId||cfg.wheelId===w.id)?" selected":""}>${esc(w.label)}</option>`).join(""));
   if(document.activeElement!==$("#gearIn")) $("#gearIn").value=cfg.gear;
+  renderPieceSetup();
   renderShotVerdict(); renderShotLive(); renderHives(); renderShotLog();
 }
 function shotChanged(){ ShotUI.dirty=true; ShotUI.t=0; saveRig(); renderShotSetup(); }
-/* Fire the robot's own shooter as it stands — no perfect test shots. */
+/* Fire the robot's own shooter as it stands — no perfect test shots. With real pieces it
+   launches the one waiting at the shooter, or says there is none (src/payload.js). */
 function shotFire(){
   if(!Field.ok||!Shots.cfg) return;
   if(!Shots.cfg.shooter) Shots.note("This OpMode has no flywheel — load one that shoots, or pick its motor in the Shot tab.");
+  else if(Payload.real()) Payload.release(Sim.chassis,"fired by hand");
   else Shots.fire(Sim.chassis,"fired by hand",Sim.vel);
   renderShotLog();
+}
+
+/* ---- game pieces through the robot (src/payload.js): the Shot tab's card and the readout's chip ---- */
+function pcCfg(){ const c=Shots.cfg; if(!c) return null; if(!c.payload||typeof c.payload!=="object") c.payload={}; return c.payload; }
+/* Four dots, filled for what the robot holds (POLLEN round, NECTAR square in its alliance's colour), and the supply. */
+function pieceChip(){
+  const S=Payload.supply();
+  if(S.mode==="none") return "";
+  if(S.mode==="unlimited") return `<em>unlimited supply</em>`;
+  const h=Payload.held, dots=[];
+  for(let i=0;i<MATCH_BOT.cap;i++){ const p=h[i]; dots.push(!p?"<i></i>":p.kind==="nectar"?`<i class="n ${p.color==="blue"?"blue":p.color==="red"?"red":""}"></i>`:`<i class="p"></i>`); }
+  return dots.join("")+`<em>${h.length} of ${MATCH_BOT.cap}</em>`;
+}
+function renderPieces(){
+  const S=Payload.supply(), html=pieceChip(), chip=$("#pcChip");
+  if(chip){ chip.hidden=!html||S.mode!=="real"; setIfChanged(chip,html); chip.title=S.mode==="real"?"Game pieces in the robot: "+S.why:""; }
+  const head=$("#pcHead"); if(head) setIfChanged(head,html||`<em>none</em>`);
+  const el=$("#pcLive"); if(!el||!paneVisible("shot")) return;
+  const out=[`<div>${S.mode==="real"?"Real pieces":S.mode==="unlimited"?"Unlimited supply":"No game pieces"}: ${esc(S.why)}.</div>`];
+  if(S.mode==="real"){
+    for(const m of Payload.mouths()){
+      const d=Payload.dirs[m.name]||{};
+      const way=d.sign?`<b>${d.sign>0?"positive":"negative"}</b> power is in (${esc(d.from==="pinned"?"set here":d.from==="first feed"?"its first run with the shooter up":"its first run on an empty robot")}${d.t!=null?" at "+d.t.toFixed(1)+" s":""})`
+        :"which way is in: its first run on an empty robot will say";
+      out.push(`<div><code>${esc(m.name)}</code> at the ${esc(m.edge)} edge (${esc(m.from)}); ${way}</div>`);
+    }
+    const st=Payload.stats||{}, tr=Payload.transfer(), g=Payload.gate();
+    out.push(`<div>${tr?`<code>${esc(tr)}</code> carries pieces to the shooter; `:""}${g?`<code>${esc(g)}</code> lets them out`:"no feeder: a piece leaves as soon as the shooter turns"}.</div>`);
+    out.push(`<div>This run: ${st.picked||0} picked up${st.fromFlowers?" ("+st.fromFlowers+" from FLOWERs)":""} · ${st.fired||0} launched · ${st.scored||0} in · ${st.ejected||0} put out</div>`);
+  }
+  setIfChanged(el,out.join(""));
+}
+function renderPieceSetup(){
+  const P=pcCfg(); if(!P||!$("#pcIntake1")) return;
+  const devs=((CODE&&CODE.devices)||[]).filter(d=>/DcMotor|CRServo/i.test(d.type||""));
+  const opt=(sel,none)=>[`<option value="">${none}</option>`].concat(devs.map(d=>`<option value="${esc(d.name)}"${d.name===sel?" selected":""}>${esc(d.name)}</option>`)).join("");
+  const ins=Payload.intakes();
+  setHTML($("#pcIntake1"),opt(ins[0],"— none —"));
+  setHTML($("#pcIntake2"),opt(ins[1],"— none —"));
+  setHTML($("#pcTransfer"),opt(Payload.transfer(),"— none —"));
+  $$("#pcSupply button").forEach(b=>b.classList.toggle("on",b.dataset.sup===(P.supply||"auto")));
+  $("#pcPreload").value=P.preload==null?"":String(P.preload);
+  if(document.activeElement!==$("#pcRoller")) $("#pcRoller").value=P.rollerMm||48;
+  const sel=(name,what,val,list)=>`<select data-pc="${what}" data-dev="${esc(name)}" aria-label="${esc(name)} ${what}">`+list.map(([v,l])=>`<option value="${v}"${v===(val||"auto")?" selected":""}>${l}</option>`).join("")+`</select>`;
+  setHTML($("#pcRows"),ins.map(n=>`<div class="pc-row"><code>${esc(n)}</code>`+
+    sel(n,"edge",P.edges&&P.edges[n],[["auto","edge: auto"],["front","front edge"],["back","back edge"]])+
+    sel(n,"dir",P.dirs&&P.dirs[n],[["auto","in: first use"],["positive","in: + power"],["negative","in: − power"]])+`</div>`).join(""));
+  renderPieces();
+}
+/* A setting changed: before START the pre-load and the pieces on the field follow it at once. */
+function pieceChanged(){
+  if(Sim.phase!=="running"){ Payload.primed=false; if(!Online.inMatch()) resetMatch(); }
+  shotChanged();
+}
+function wirePieces(){
+  const set=(id,f)=>$(id).addEventListener("change",e=>{ const P=pcCfg(); if(!P) return; f(P,e.target.value); pieceChanged(); });
+  const intake=(k)=>(P,v)=>{ const l=Payload.intakes().slice(); if(v) l[k]=v; else l.splice(k,1); P.intakes=l.filter((n,i)=>n&&l.indexOf(n)===i).slice(0,4); };
+  set("#pcIntake1",intake(0)); set("#pcIntake2",intake(1));
+  set("#pcTransfer",(P,v)=>{ P.transfer=v; });
+  set("#pcPreload",(P,v)=>{ P.preload=v===""?null:Math.max(0,Math.min(4,+v)); });
+  set("#pcRoller",(P,v)=>{ const n=parseFloat(v); if(isFinite(n)) P.rollerMm=Math.max(10,Math.min(150,n)); });
+  $("#pcSupply").addEventListener("click",e=>{ const b=e.target.closest("button"), P=pcCfg(); if(!b||!P) return; P.supply=b.dataset.sup; pieceChanged(); });
+  $("#pcRows").addEventListener("change",e=>{ const s=e.target.closest("select[data-pc]"), P=pcCfg(); if(!s||!P) return;
+    const k=s.dataset.pc==="edge"?"edges":"dirs", m=Object.assign({},P[k]||{});
+    if(s.value==="auto") delete m[s.dataset.dev]; else m[s.dataset.dev]=s.value;
+    P[k]=m; if(k==="dirs"&&Payload.dirs[s.dataset.dev]&&s.value==="auto") delete Payload.dirs[s.dataset.dev];
+    pieceChanged(); });
 }
 function wireShotTab(){
   $("#fireBtn").addEventListener("click",shotFire);
@@ -1345,6 +1415,7 @@ function wireShotTab(){
   $("#gearIn").addEventListener("change",e=>{ if(!Shots.cfg) return; const v=parseFloat(e.target.value); if(isFinite(v)&&v>0) Shots.cfg.gear=Math.max(0.25,Math.min(4,v)); shotChanged(); });
   $("#shotDev").addEventListener("change",e=>{ if(!Shots.cfg) return; Shots.cfg.shooter=e.target.value||null; Shots.cfg.motorId=nearestMotorId(Shots.deviceRpm()); shotChanged(); });
   $("#shotFeed").addEventListener("change",e=>{ if(!Shots.cfg) return; Shots.cfg.feeder=e.target.value||null; shotChanged(); });
+  wirePieces();
   // the drawn parts: which way the CAD faces, and whether to draw a base and a shooter
   const robotSeg=(id,apply)=>$(id).addEventListener("click",e=>{ const b=e.target.closest("button"); if(!b) return;
     apply(b); refitRobot(); syncOptionControls(); saveRig(); ShotUI.dirty=true; });
@@ -2715,7 +2786,7 @@ function frame(now){
     // innerHTML is a layout; a folded or hidden panel needs none)
     Graph.sample(); Graph.draw(); Graph.updateLegendValues();          // draw() skips itself off screen
     if(dsOn) setIfChanged($("#dsPanel"),renderDS());
-    updateClock(); updateConfigValues(); renderMatchHud();
+    updateClock(); updateConfigValues(); renderMatchHud(); renderPieces();
     const pip=$("#pip");
     if(pip&&!pip.hidden&&!pip.classList.contains("closed")){ const m=renderMech();
       if(m){ setIfChanged($("#mech"),m.svg); $("#pipDeg").textContent=m.deg+"° off level"; } }
@@ -3262,6 +3333,9 @@ function boot(){
   $("#matchOn").addEventListener("change",matchDot); matchDot();
   $("#matchSkill").value=store.get("ftcbench.matchSkill","typical");
   $("#matchOn").addEventListener("change",e=>{ store.set("ftcbench.match",e.target.checked?"1":"0"); if(Online.inMatch()) return; if(Sim.phase!=="running") resetMatch(); else { Match.on=e.target.checked; if(!Match.on) resetMatch(); } });
+  // the game pieces without the AI robots (src/payload.js): on or off at once, a match with AI robots left alone
+  $("#piecesOn").checked=store.get("ftcbench.pieces","1")==="1";
+  $("#piecesOn").addEventListener("change",e=>{ store.set("ftcbench.pieces",e.target.checked?"1":"0"); if(Online.inMatch()||Match.live()) return; resetMatch(); });
   $("#matchSkill").addEventListener("change",e=>{ store.set("ftcbench.matchSkill",e.target.value); if(Online.inMatch()) return; if(Sim.phase!=="running") resetMatch(); else Match.skill=e.target.value; });
   $("#practice").addEventListener("change",e=>{ store.set("ftcbench.practice",e.target.checked?"1":"0"); updateClock(); });
   NetUI.init(); SetupUI.init(); ImportFlow.init(); Recorder.init(); Sounds.init(); Results.init(); Minimap.init(); PathEdit.init(); KeyBinds.init();
