@@ -1643,17 +1643,8 @@ const View={
       if(g.userData.ghost!==ghost){ g.userData.ghost=ghost;
         // faint: at 22% the near player was a red cut-out over a corner of the field
         g.traverse(o=>{ if(o.material&&!o.userData.ball){ o.material.transparent=ghost; o.material.opacity=ghost?0.12:1; o.material.depthWrite=!ghost; o.material.needsUpdate=true; } }); }
-      const Hm=Match.humans[al], A=Hm.anim, k=A?Math.min(1,A.t/A.dur):0;
-      g.userData.arm.rotation.z=A?(k<0.55?-k/0.55*2.4:-2.4+(k-0.55)/0.45*2.0):0;
-      g.userData.tray.forEach((m,i)=>{ m.visible=i<Hm.tray-(A?1:0); });
-      const ball=g.userData.throwBall;
-      ball.visible=!!A;
-      if(A){
-        const from=g.position.clone().add(new THREE.Vector3(0,1.55,0));
-        if(k<0.55){ ball.position.copy(from); }
-        else{ const u=(k-0.55)/0.45, to=new THREE.Vector3(A.to.x,0.05,-A.to.y);
-          ball.position.lerpVectors(from,to,u); ball.position.y+=Math.sin(Math.PI*u)*0.45; }
-      }
+      // breathing, watching their robots, and the lob of each NECTAR (src/figures.js)
+      Figures.animHuman(this,g,al,dt);
     }
     // loose elements on the tiles: they arrive bouncing, roll where they're knocked, and get taken in
     const alive=new Set();
@@ -1689,16 +1680,9 @@ const View={
         const m=this.ball(e.kind,e.color); m.position.set(f.x,z*IN,-f.y); g.add(m); }
     });
   },
-  /* A stand-in robot to where it is: its wheels roll the distance it went, and it
-     rocks back a little when it fires. */
-  moveBot(g,x,y,h,dt){
-    const U=g.userData, px=U.px==null?x:U.px, py=U.py==null?y:U.py; U.px=x; U.py=y;
-    const fwd=(x-px)*Math.cos(h)+(y-py)*Math.sin(h);
-    for(const w of U.wheels||[]) w.rotateY(-fwd/0.048);
-    U.kick=Math.max(0,(U.kick||0)-dt*7);
-    const back=0.018*Math.sin(Math.min(1,U.kick)*Math.PI);
-    g.position.set(x-Math.cos(h)*back,0,-(y-Math.sin(h)*back)); g.rotation.y=h;
-  },
+  /* A stand-in robot to where it is: its mecanum wheels turn as that motion turns them,
+     and it kicks and rocks back a little when it fires (src/figures.js). */
+  moveBot(g,x,y,h,dt){ Figures.moveBot(g,x,y,h,dt); },
   /* A new element on the tiles comes from somewhere: the end of a missed shot
      (it bounces on from there), a CELL that just tipped (it falls out), or a hand
      or a bumper (a small hop). The match's first elements are simply there. */
@@ -1743,70 +1727,11 @@ const View={
     }
     this.picked=this.picked.filter(p=>!p.done);
   },
-  /* A generic FTC robot: a drive base in bumpers of its alliance colour, a
-     tower with a hooded shooter at the back, an intake roller at the front. */
-  buildBot(b){
-    const g=new THREE.Group(), col=b.al==="red"?FIELD_COL.red:FIELD_COL.blue;
-    const dark=this.mat(0x2b2e33,{metalness:0.4,roughness:0.5}), alu=this.mat(0xb9c0c8,{metalness:0.6,roughness:0.35});
-    const bump=this.mat(col,{roughness:0.8}), black=this.mat(0x151515,{roughness:0.9});
-    const bx=(w,h,d,x,y,z,m)=>{ const o=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),m); o.position.set(x,y,z); o.castShadow=true; g.add(o); return o; };
-    const L=2*(b.hx||MATCH_BOT.hx), W=2*(b.hy||MATCH_BOT.hy);
-    bx(L-0.06,0.05,W-0.06,0,0.07,0,dark);                                  // chassis plate
-    bx(L,0.07,0.035,0,0.06,W/2-0.0175,bump); bx(L,0.07,0.035,0,0.06,-W/2+0.0175,bump);   // bumpers
-    bx(0.035,0.07,W-0.07,L/2-0.0175,0.06,0,bump); bx(0.035,0.07,W-0.07,-L/2+0.0175,0.06,0,bump);
-    const wheels=[], spokes=this.mat(0x9aa3ad,{metalness:0.5,roughness:0.4});
-    for(const [x,z] of [[1,1],[1,-1],[-1,1],[-1,-1]]){
-      const wh=new THREE.Mesh(new THREE.CylinderGeometry(0.048,0.048,0.035,16),black);
-      wh.rotation.x=Math.PI/2; wh.position.set(x*(L/2-0.07),0.048,z*(W/2-0.06)); g.add(wh);
-      // a hub bar across the wheel, so a turn shows
-      const hub=new THREE.Mesh(new THREE.BoxGeometry(0.07,0.037,0.012),spokes); wh.add(hub);
-      wheels.push(wh);
-    }
-    bx(0.03,0.30,0.03,-0.13,0.24,0.11,alu); bx(0.03,0.30,0.03,-0.13,0.24,-0.11,alu);       // tower
-    const hood=bx(0.16,0.012,0.2,-0.08,0.40,0,alu); hood.rotation.z=0.5;
-    const fly=new THREE.Mesh(new THREE.CylinderGeometry(0.048,0.048,0.05,18),black);
-    fly.rotation.x=Math.PI/2; fly.position.set(-0.1,0.37,0); g.add(fly);
-    const roll=new THREE.Mesh(new THREE.CylinderGeometry(0.03,0.03,W-0.08,12),this.mat(0x2f8a4a,{roughness:0.8}));
-    roll.rotation.x=Math.PI/2; roll.position.set(L/2+0.02,0.05,0); g.add(roll);
-    // "AI" on the bumpers, so nobody mistakes it for the team's robot
-    const cv=document.createElement("canvas"); cv.width=256; cv.height=64;
-    const c2=cv.getContext("2d"), text=b.label||"AI "+b.id.slice(2);
-    fitFont(c2,text,240,44,18,"Inter, -apple-system, system-ui, Arial, sans-serif");
-    c2.fillStyle="#fff"; c2.textAlign="center"; c2.textBaseline="middle"; c2.fillText(text,128,34);
-    const lab=new THREE.Mesh(new THREE.PlaneGeometry(0.2,0.05),new THREE.MeshBasicMaterial({map:srgbTex(new THREE.CanvasTexture(cv)),transparent:true}));
-    lab.position.set(0,0.06,W/2+0.001); g.add(lab);
-    const lab2=lab.clone(); lab2.position.set(0,0.06,-W/2-0.001); lab2.rotation.y=Math.PI; g.add(lab2);
-    // a stripe on the flywheel and the roller, so they're seen to spin
-    const stripe=this.mat(0xe8c547,{roughness:0.6});
-    const fs=new THREE.Mesh(new THREE.BoxGeometry(0.096,0.052,0.012),stripe); fly.add(fs);
-    const rs=new THREE.Mesh(new THREE.BoxGeometry(0.062,W-0.09,0.008),stripe); roll.add(rs);
-    g.userData.held=[]; g.userData.holdKey=null; g.userData.wheels=wheels; g.userData.roll=roll; g.userData.fly=fly;
-    return g;
-  },
-  /* A HUMAN PLAYER behind the alliance wall, beside the LOADING ZONE, with the NECTAR tray. */
-  buildHuman(al){
-    const g=new THREE.Group(), s=al==="red"?-1:1, D=Field.data.field, z=D.loadingZones[al];
-    const shirt=this.mat(al==="red"?0xc6382f:0x2f6fd0,{roughness:0.85}), skin=this.mat(0xd9b08c,{roughness:0.8});
-    const pants=this.mat(0x2b2f38,{roughness:0.9}), shoe=this.mat(0x111111,{roughness:0.9});
-    const add=(geo,m,x,y,zz)=>{ const o=new THREE.Mesh(geo,m); o.position.set(x,y,zz); o.castShadow=true; g.add(o); return o; };
-    add(new THREE.CylinderGeometry(0.07,0.06,0.82,10),pants,0,0.41,0.1); add(new THREE.CylinderGeometry(0.07,0.06,0.82,10),pants,0,0.41,-0.1);
-    add(new THREE.BoxGeometry(0.16,0.06,0.12),shoe,0.03,0.03,0.1); add(new THREE.BoxGeometry(0.16,0.06,0.12),shoe,0.03,0.03,-0.1);
-    add(new THREE.BoxGeometry(0.24,0.6,0.42),shirt,0,1.12,0);
-    add(new THREE.SphereGeometry(0.11,16,12),skin,0,1.55,0);
-    add(new THREE.CylinderGeometry(0.045,0.04,0.58,8),shirt,0,1.1,-0.26).rotation.x=0.12;
-    // the throwing arm swings about the shoulder
-    const sh=new THREE.Group(); sh.position.set(0,1.38,0.26); g.add(sh);
-    const arm=new THREE.Mesh(new THREE.CylinderGeometry(0.045,0.04,0.58,8),shirt); arm.position.y=-0.29; arm.castShadow=true; sh.add(arm);
-    g.userData.arm=sh;
-    // the tray at their feet, the NECTAR still to enter
-    const tray=new THREE.Mesh(new THREE.BoxGeometry(0.5,0.05,0.13),this.mat(0x2a2926)); tray.position.set(0.25,0.4,-0.45); g.add(tray);
-    g.userData.tray=[0,1,2,3,4].map(i=>{ const b=this.ball("nectar",al); b.position.set(0.07+i*0.09,0.47,-0.45); g.add(b); return b; });
-    const tb=this.ball("nectar",al); tb.visible=false; this.matchG.add(tb); g.userData.throwBall=tb;
-    // just outside the wall, level with the middle of the LOADING ZONE, facing the field
-    g.position.set(s*(H_OF(D)+0.55),0,-((z.y0+z.y1)/2)*IN);
-    g.rotation.y=al==="red"?0:Math.PI;
-    return g;
-  },
+  /* An AI robot, or an online player's stand-in till their own CAD arrives: an 18-inch
+     mecanum robot with an intake, a hooded flywheel and its number (src/figures.js). */
+  buildBot(b){ return Figures.bot(this,b); },
+  /* A HUMAN PLAYER behind the alliance wall, beside the LOADING ZONE, with the NECTAR tray (src/figures.js). */
+  buildHuman(al){ return Figures.human(this,al); },
 
   /* Two cameras that ride with the robot (src/view3d.js followCamPose): "chase", above and
      behind it, turning as it turns, the way a driving game shows a car; "pov", on its front
