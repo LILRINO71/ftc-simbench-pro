@@ -2683,7 +2683,7 @@ const Perf={ema:16.7, t:0, pr:Math.min(devicePixelRatio||1,2), downAt:-1e9, quie
       else if(!View.postOn&&!this.postBack){ View.postOn=true; this.postBack=true; this.downAt=now; }
     }
   },
-  set(){ if(View.ren){ View.ren.setPixelRatio(this.pr); View.resize(); } }
+  set(){ if(View.ren){ if(View.setPixelRatio) View.setPixelRatio(this.pr); else { View.ren.setPixelRatio(this.pr); View.resize(); } } }
 };
 /* innerHTML only when the markup differs: an identical string still costs a layout */
 function setIfChanged(el,html){ if(el&&el.__html!==html){ el.__html=html; el.innerHTML=html; } }

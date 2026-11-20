@@ -7,15 +7,6 @@
 const FIELD_COL={tile:0x303336, seam:0x474b50, ground:0x0e0c09, alu:0xa9b0b8, rail:0x7c848d, poly:0xc9d8e3,
   red:0xe0453c, blue:0x2f7dea, redTape:0xd8372f, blueTape:0x2a6ad8, pollen:0xf2c230, flower:0xe4e7ea,
   arm:0x4a4f55, logo:0x1b1d20, honey:0xf2b230};
-/* A camera's slight fall-off toward the corners (makePost, tier 2): 12% at the very
-   corner, nothing over the middle two thirds of the frame. */
-const VIGNETTE={
-  uniforms:{tDiffuse:{value:null}, amount:{value:0.12}},
-  vertexShader:"varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }",
-  fragmentShader:"uniform sampler2D tDiffuse; uniform float amount; varying vec2 vUv;"+
-    "void main(){ vec4 c=texture2D(tDiffuse,vUv); vec2 d=vUv-0.5; float v=smoothstep(0.32,0.78,length(d*vec2(1.0,0.82)));"+
-    " gl_FragColor=vec4(c.rgb*(1.0-amount*v),c.a); }"
-};
 // the most triangles one material group of the robot gets edge lines for (see mkSolids)
 const VIEW_EDGE_TRIS=200000;
 // a shape with fewer copies than this is merged into its group's mesh rather than instanced (see applyInstanced)
@@ -82,72 +73,75 @@ const View={
     this.tier=this.readTier();
     const B=this.tier.budget;
     this.ren=new THREE.WebGLRenderer({antialias:B.tier>0, powerPreference:"high-performance", stencil:false});
-    this.ren.setPixelRatio(Math.min(devicePixelRatio,B.pixelRatio));
+    this.basePR=Math.min(devicePixelRatio||1,B.pixelRatio);
+    // dynamic resolution (src/tier.js dynResStep): a share of the pixel ratio, lowered before frames come late
+    this.dyn=dynResInit({min:B.minScale||0.7});
+    this.ren.setPixelRatio(this.basePR);
     this.ren.setClearColor(0x000000,0);
     this.ren.shadowMap.enabled=B.shadows>0;
     this.ren.shadowMap.type=THREE.PCFShadowMap;            // PCFSoft is gone in r186; the sun's radius softens PCF
-    // a camera's colour pipeline: light adds up in linear space, then Khronos PBR Neutral
-    // maps it to the screen. ACES pushed every colour toward orange and crushed the
-    // team's own part colours; AgX greyed them; Neutral keeps a goBILDA red red and
-    // only rolls off what would clip, the curve product renders use
+    // the shadow map is drawn only when something in it moved (render()): a still view costs no shadow pass
+    this.ren.shadowMap.autoUpdate=false; this.ren.shadowMap.needsUpdate=true;
+    // A camera's colour pipeline: light adds up in linear space, then Khronos PBR Neutral maps
+    // it to the screen. Compared side by side on this scene (?tm=agx|aces|neutral): AgX lifted
+    // the dark hall to a grey haze and took the colour out of the bumpers, ACES greyed the
+    // robot's metal; Neutral keeps a goBILDA red red, the hall dark and only rolls off what
+    // would clip. The grade in the last pass (src/postfx.js) adds the little contrast it lacks.
     this.ren.outputColorSpace=THREE.SRGBColorSpace;
-    this.ren.toneMapping=THREE.NeutralToneMapping||THREE.ACESFilmicToneMapping; this.ren.toneMappingExposure=1.0;
+    this.ren.toneMapping=this.toneFor(); this.ren.toneMappingExposure=this.ren.toneMapping===THREE.AgXToneMapping?1.15:1.0;
     el.appendChild(this.ren.domElement);
     // after three.js's own handler (added first, so it runs first)
     this.ren.domElement.addEventListener("webglcontextrestored",()=>this.contextRestored());
-    // Light in physical units (three r155+), as an event hall lights a field: one big
-    // overhead key a little off to the side (the shadows fall short and soft), a dim
-    // sky/floor bounce, a cool rim from the far side, and the studio environment (envMap)
-    // for reflections and the soft light from everywhere. The old even wash (a bright
-    // hemisphere plus a strong fill) lit every face the same and flattened the robot.
-    this.hemi=new THREE.HemisphereLight(0xf1f0ec,0x26231f,0.55); this.scene.add(this.hemi);
-    const sun=new THREE.DirectionalLight(0xfff4e8,4.2); this.sun=sun;
-    sun.position.set(-1.9,6.2,2.5); sun.castShadow=B.shadows>0;
+    // An arena's light, in physical units (three r155+). A venue lights a field from a grid
+    // of high-bay lamps overhead and stage lights on a truss: what a robot gets is a broad,
+    // soft light from above (the environment, envMap, which is that very hall pre-filtered),
+    // one dominant key a little off vertical that casts the shadows (warm, the stage
+    // lights), a cool rim from behind the camera's far side so a robot stands off the
+    // background, and almost no flat ambient: the old bright hemisphere lit every face
+    // the same and was most of why the robot looked flat.
+    this.hemi=new THREE.HemisphereLight(0xdfe6f2,0x1c1a17,0.12); this.scene.add(this.hemi);
+    const sun=new THREE.DirectionalLight(0xffeedd,3.1); this.sun=sun;
+    sun.position.set(-2.4,6.2,2.6); sun.castShadow=B.shadows>0;
     sun.shadow.mapSize.set(B.shadows||512,B.shadows||512);
     if(B.lite) this.lowGfx=true;             // the robot's light copy from the start
     // the shadow box follows what the camera looks at (render(), fitShadow()): 3.6 m around
     // the robot in the robot views, the whole field in the driver's and the top view
     const sc=sun.shadow.camera; sc.left=-1.8; sc.right=1.8; sc.top=1.8; sc.bottom=-1.8; sc.near=1; sc.far=14;
     this.fitShadow(1.8);
-    sun.shadow.radius=B.shadows>=4096?5:B.shadows>=2048?3:1.5;
+    // soft-edged, as a big overhead fixture makes them (PCF over a wider kernel on the bigger maps)
+    sun.shadow.radius=B.shadows>=4096?6:B.shadows>=2048?4:2;
     this.sunOff=sun.position.clone();
     this.scene.add(sun); this.scene.add(sun.target);
-    // a cool rim from the far side: what the key leaves in shade still shows its edges
-    const fill=new THREE.DirectionalLight(0xd4e0ff,0.9); fill.position.set(2.6,2.2,-2.8); this.scene.add(fill); this.fill=fill;
-    // everything reflects the same studio (envMap), so metal reads as metal
-    this.scene.environment=this.envMap()||null; this.scene.environmentIntensity=0.6;
+    // the rim: from behind what the camera looks at, high and cool (render() moves it with the camera)
+    const fill=new THREE.DirectionalLight(0xcadcff,1.5); fill.position.set(2.6,2.2,-2.8); this.scene.add(fill); this.scene.add(fill.target); this.fill=fill;
+    // and the other lamps of the rig, on the camera's side: the key is fixed in the hall, so seen
+    // from its far side a robot was all shadow; a venue lights a field from every side
+    const front=new THREE.DirectionalLight(0xf3f1ec,1.1); this.scene.add(front); this.scene.add(front.target); this.camLamp=front;
+    // everything reflects the hall it stands in (envMap), so metal reads as metal
+    this.scene.environment=this.envMap()||null; this.scene.environmentIntensity=0.75;
+    // the hall's haze: what is far off sinks into it (the stands, the far drapes), the field barely
+    this.scene.fog=new THREE.FogExp2(0x0b0c0f,0.034);
     this.world=new THREE.Group(); this.scene.add(this.world);
     this.ray=new THREE.Raycaster();
     this.theta=-0.7; this.phi=1.15; this.rad=0.95; this.size=0.5;
-    // the ambient-occlusion passes only where the tier can afford them (a tier-0 Chromebook draws plain)
-    this.post=B.tier>0?this.makePost():null; this.postOn=B.tier>0;
+    // the passes only where the tier can afford them (a tier-0 Chromebook draws straight to the screen)
+    this.post=B.tier>0?this.makePost():null; this.postOn=!!this.post;
     this.bind(); this.resize();
   },
-  /* Post-processing: ambient occlusion (GTAO) grounds the robot on the tiles and
-     darkens the gaps between parts, the way Onshape's viewport does; SMAA
-     smooths the edges the MSAA buffer can't once a pass is in the chain. Off
-     when the add-ons didn't load, and off when the frame-rate watchdog says so. */
+  /* ?tm=agx|neutral|aces, else Neutral; ?draw=all draws every frame (for measuring) */
+  toneFor(){
+    let q=null; try{ const u=new URLSearchParams(location.search); q=u.get("tm"); this.alwaysDraw=u.get("draw")==="all"; }catch(e){}
+    if(q==="agx"&&THREE.AgXToneMapping) return THREE.AgXToneMapping;
+    if(q==="aces") return THREE.ACESFilmicToneMapping;
+    return THREE.NeutralToneMapping||THREE.ACESFilmicToneMapping;
+  },
+  /* Post-processing (src/postfx.js): one multisampled scene draw, AO from its depth, bloom on
+     what is brighter than white, and one last pass for the tone curve, grade and vignette.
+     Off when the GPU can't draw into half floats, and off when the frame-rate watchdog says so. */
   makePost(){
-    const A=typeof window!=="undefined"&&window.THREE_ADDONS; if(!A||!A.EffectComposer) return null;
-    const B=(this.tier&&this.tier.budget)||{}, aoN=B.aoSamples==null?12:B.aoSamples;
-    try{
-      const mk=cam=>{
-        const c=new A.EffectComposer(this.ren);
-        const rp=new A.RenderPass(this.scene,cam); c.addPass(rp);
-        // a wider radius than the 6 cm it was: a robot sits IN the tiles' shade, not on top of them
-        let ao=null;
-        if(aoN>0){ ao=new A.GTAOPass(this.scene,cam,1,1); ao.output=A.GTAOPass.OUTPUT.Default; ao.blendIntensity=0.9;
-          ao.updateGtaoMaterial({radius:0.11, distanceExponent:1.4, thickness:0.03, scale:1.1, samples:aoN, distanceFallOff:1, screenSpaceRadius:false});
-          ao.updatePdMaterial({lumaPhi:10, depthPhi:2, normalPhi:3, radius:4, radiusExponent:1, rings:2, samples:16});
-          c.addPass(ao); }
-        const smaa=new A.SMAAPass(); c.addPass(smaa);
-        // a slight darkening toward the corners, in linear light before the tone curve
-        if(B.vignette&&A.ShaderPass) c.addPass(new A.ShaderPass(VIGNETTE));
-        c.addPass(new A.OutputPass());
-        return {c, rp, ao, smaa, cam};
-      };
-      return {mk, field:mk(this.cam), cad:null};
-    }catch(e){ console.warn("bench: post-processing off",e); return null; }
+    const B=(this.tier&&this.tier.budget)||{};
+    try{ return PostFX.create(this.ren,{msaa:B.msaa||4, ao:B.aoSamples||0, aoHalf:!!B.aoHalf, bloom:!!B.bloom, grade:!!B.grade, vignette:!!B.vignette}); }
+    catch(e){ console.warn("bench: post-processing off",e); return null; }
   },
   /* The sun's shadow box, half metres across, and its biases to match. The robot's
      shadow is cast by its light copy (buildLite), a few millimetres off the exact
@@ -165,9 +159,8 @@ const View={
   draw(cam){
     const P=this.post;
     if(!P||!this.postOn||this.lowGfx){ this.ren.render(this.scene,cam); return; }
-    let S=cam===this.cam?P.field:P.cad;
-    if(!S||S.cam!==cam){ S=P.mk(cam); if(cam===this.cam) P.field=S; else P.cad=S; S.c.setSize(this.el.clientWidth||1,this.el.clientHeight||1); }
-    S.c.render();
+    try{ P.render(this.scene,cam); }
+    catch(e){ console.warn("bench: post-processing off",e); try{ P.dispose(); }catch(_){} this.post=null; this.ren.setRenderTarget(null); this.ren.render(this.scene,cam); }
   },
   /* The machine, as the browser describes it: memory, cores, and the GPU's own
      name (asked of a throwaway WebGL context, so the real renderer can be built
@@ -229,11 +222,22 @@ const View={
     c.addEventListener("wheel",e=>{ if(cad()) return; e.preventDefault();
       this.rad=Math.max(0.12,Math.min(24,this.rad*(1+Math.sign(e.deltaY)*0.09))); },{passive:false});
     addEventListener("resize",()=>this.resize());
+    // anything done on the page can change what the view shows (a panel's setting, a key, a button):
+    // the next frames are drawn whatever render() thinks (see the idle skip there)
+    for(const ev of ["pointerdown","pointerup","keydown","keyup","input","change","wheel"]) addEventListener(ev,()=>this.invalidate(700),{capture:true, passive:true});
+    document.addEventListener("visibilitychange",()=>this.invalidate(500));
   },
   setCursor(k){ this.ren.domElement.style.cursor=k; },
+  // the post buffers follow the drawing buffer by themselves (src/postfx.js render)
   resize(){ const w=this.el.clientWidth,h=this.el.clientHeight; if(!w||!h) return;
-    this.cam.aspect=w/h; this.cam.updateProjectionMatrix(); this.ren.setSize(w,h,false);
-    const P=this.post; if(P) for(const S of [P.field,P.cad]) if(S) S.c.setSize(w,h); },
+    this.cam.aspect=w/h; this.cam.updateProjectionMatrix(); this.ren.setSize(w,h,false); this.invalidate(); },
+  /* The pixel ratio the frame-rate watchdog (Perf in src/app.js) allows; dynamic resolution
+     draws at a share of it (dyn.scale). */
+  setPixelRatio(pr){ this.basePR=pr; this.applyScale(); },
+  applyScale(){ const pr=Math.max(0.5,this.basePR*(this.dyn?this.dyn.scale:1));
+    if(Math.abs(this.ren.getPixelRatio()-pr)>1e-3){ this.ren.setPixelRatio(pr); this.resize(); } },
+  /* something changed that the next frame must show (render() skips frames where nothing did) */
+  invalidate(ms){ this.dirtyTo=Math.max(this.dirtyTo||0,(typeof performance!=="undefined"?performance.now():0)+(ms||300)); if(this.ren&&this.ren.shadowMap) this.ren.shadowMap.needsUpdate=true; },
   ndc(e){ const r=this.ren.domElement.getBoundingClientRect();
     return new THREE.Vector2(((e.clientX-r.left)/r.width)*2-1, -((e.clientY-r.top)/r.height)*2+1); },
   hitsRobot(e){
@@ -258,6 +262,7 @@ const View={
 
   load(cad){
     if(this.onLoad) this.onLoad();
+    this.invalidate(1500);
     this.loadN=(this.loadN||0)+1;                 // a new scene: whoever cached its objects (CadView.hid) looks again
     // another robot: the last one's exact surfaces go, GPU buffers and all, or a
     // hide click would redraw the old robot over this one
@@ -320,6 +325,7 @@ const View={
      from; a group with no exact geometry keeps its hull. */
   setExact(cad,res){
     if(this.onLoad) this.onLoad();
+    this.invalidate(1500);
     this.exact=res&&res.meshes&&res.meshes.length?{cad,res}:null;
     if(this.exact&&this.cad===cad) this.applyExact();
     return this.exact?this.exact.res.meshes.length:0;
@@ -333,6 +339,7 @@ const View={
      warnings; and the reflection map was drawn on the GPU, so it came back
      black and every metal part with it. */
   contextRestored(){
+    this.invalidate(1000);
     const seen=new Set(), old=this._env;
     const visit=x=>{
       if(!x||typeof x!=="object"||seen.has(x)) return; seen.add(x);
@@ -358,28 +365,39 @@ const View={
      believable highlights. Robot materials only; the field keeps its look. */
   envMap(){
     if(this._env!==undefined) return this._env;
-    // A photo studio built from boxes: a dim grey hall with a big overhead softbox, two
-    // tall strip lights at the sides, a warm low panel behind, and a mid-grey floor.
-    // Metal reflects light bands against darker surroundings, so aluminium reads as
-    // aluminium; three's RoomEnvironment is bright all round, and every metal part in it
-    // came out the same flat light grey.
+    // The hall the field stands in, as boxes of light, pre-filtered once (PMREM): a dark
+    // ceiling with a grid of high-bay lamps (the small bright highlights that walk across a
+    // metal part as it turns), a truss of warm stage lights round the field, dim stands on
+    // the long sides, a scoreboard at one end, the lit grey field below and dark floor
+    // round it. It is what buildVenue draws, so what metal reflects is what is there; the
+    // soft light from above it gives every upward face is most of the light in the scene.
+    // (three's RoomEnvironment is a white room: every metal part in it came out the same flat grey.)
     const A=typeof window!=="undefined"&&window.THREE_ADDONS;
     if(this.envKind==="room"&&A&&A.RoomEnvironment){ try{ const pm=new THREE.PMREMGenerator(this.ren); this._env=pm.fromScene(new A.RoomEnvironment(),0.04).texture; pm.dispose(); return this._env; }catch(e){} }
     try{
-      const pm=new THREE.PMREMGenerator(this.ren), room=new THREE.Scene(), box=new THREE.BoxGeometry(1,1,1);
-      const shell=new THREE.Mesh(box,new THREE.MeshBasicMaterial({color:0x767a82, side:THREE.BackSide}));
-      shell.scale.set(20,10,20); shell.position.y=4; room.add(shell);
-      const lamp=(x,y,z,sx,sy,sz,c)=>{ const m=new THREE.Mesh(box,new THREE.MeshBasicMaterial({color:c}));
-        m.position.set(x,y,z); m.scale.set(sx,sy,sz); room.add(m); };
-      const I=(i,r,g,b)=>new THREE.Color(i*(r||1),i*(g||1),i*(b||1));
-      lamp(0,-0.95,0, 19.8,0.1,19.8, 0x6e7175);           // the floor: grey tiles
-      lamp(0,8.9,0, 11,0.1,7, I(6.0,1,0.98,0.95));         // overhead softbox
-      lamp(-9.8,3.6,1.5, 0.1,6,2.2, I(4.0));               // strip light, key side
-      lamp(9.8,3.6,-2.5, 0.1,5,1.8, I(2.6,0.92,0.96,1));   // strip light, cool side
-      lamp(2,2.4,-9.8, 9,2.2,0.1, I(1.8,1,0.92,0.82));     // a low warm panel behind
-      lamp(-3,6,9.8, 6,3,0.1, I(1.4));                     // a panel in front
-      this._env=pm.fromScene(room,0.035).texture; pm.dispose();
-      room.traverse(o=>{ if(o.material) o.material.dispose(); }); box.dispose();
+      const pm=new THREE.PMREMGenerator(this.ren), room=new THREE.Scene(), box=new THREE.BoxGeometry(1,1,1), mats=[];
+      const M=c=>{ const m=new THREE.MeshBasicMaterial({color:c}); mats.push(m); return m; };
+      const I=(i,r,g,b)=>new THREE.Color(i*(r==null?1:r),i*(g==null?1:g),i*(b==null?1:b));
+      const shell=new THREE.Mesh(box,M(I(0.022,0.95,0.97,1.05))); shell.material.side=THREE.BackSide;
+      shell.scale.set(60,26,60); shell.position.y=11; room.add(shell);
+      const put=(x,y,z,sx,sy,sz,c)=>{ const m=new THREE.Mesh(box,c.isMaterial?c:M(c)); m.position.set(x,y,z); m.scale.set(sx,sy,sz); room.add(m); return m; };
+      put(0,23.8,0, 58,0.2,58, I(0.05,0.95,0.97,1.04));                 // the ceiling, dimly lit by its own lamps
+      const bay=M(I(24,1,1,1.02));                                        // high-bay lamps: 5000 K, small and bright
+      for(let i=-2;i<=2;i++) for(let j=-2;j<=2;j++) put(i*5.2,22.5,j*5.2, 1.1,0.15,1.1, bay);
+      const stage=M(I(9,1,0.88,0.72));                                    // the truss's stage lights, warm, aimed in from every side
+      for(const [x,z] of [[-5,-5],[5,-5],[-5,5],[5,5],[0,-6],[0,6],[-6,0],[6,0]]) put(x,7.5,z, 1.4,1.0,1.4, stage);
+      put(0,7.9,0, 13,0.25,0.25, I(0.12)); put(0,7.9,0, 0.25,0.25,13, I(0.12));   // the truss itself, catching the light
+      for(const s of [-1,1]){
+        put(0,3,s*13, 26,5,0.4, I(0.07,1,0.97,0.95));                     // the stands and the crowd in them
+        put(s*28,6,0, 0.4,12,50, I(0.03));                                 // the hall's end walls
+      }
+      put(0,8.5,-24, 9,4.5,0.3, I(1.4,0.85,0.95,1.2));                    // the scoreboard
+      put(0,-0.6,0, 3.66,0.05,3.66, I(0.2,1,1,0.98));                     // the field, lit
+      put(0,-0.65,0, 40,0.05,40, I(0.025,1,0.97,0.94));                   // the hall floor
+      put(0,0.4,9, 16,2.4,0.1, I(0.012)); put(0,0.4,-9, 16,2.4,0.1, I(0.012));   // black pipe-and-drape
+      put(9,0.4,0, 0.1,2.4,16, I(0.012)); put(-9,0.4,0, 0.1,2.4,16, I(0.012));
+      this._env=pm.fromScene(room,0.02,0.1,100,{size:256}).texture; pm.dispose();
+      for(const m of mats) m.dispose(); box.dispose();
     }catch(e){ this._env=null; }                    // no float render targets: plain lighting still works
     return this._env;
   },
@@ -644,6 +662,7 @@ const View={
     return {shapes, parts, pal};
   },
   buildLite(){
+    this.invalidate(600);
     if(!this.cad||!this.chassisG||typeof liteBuild!=="function") return;
     let L=null, Lshow=null;
     this.applyQuality(true);                             // read the robot as it really is, not its light copy
@@ -708,6 +727,7 @@ const View={
      light copy up close, or the exact robot still when it fits what that computer affords.
      With a light copy, the small one casts the shadow either way. */
   applyQuality(exactOnly){
+    this.invalidate();
     const has=!!(this.liteMeshes&&this.liteMeshes.length);
     const cad=typeof CadView!=="undefined"&&CadView.on;
     const far=this.mode==="field", fits=this.exactTris!=null&&this.exactTris<=this.showBudget;
@@ -762,6 +782,7 @@ const View={
   },
   /* The robot's own parts, grouped by the mechanism that moves them. */
   buildRobot(cad){
+    this.invalidate(600);
     const bb=cad.bbox, size=this.size, M=cad.mechs;
     const distSeg=(p,a,b)=>{
       const ab=[b[0]-a[0],b[1]-a[1],b[2]-a[2]];
@@ -907,6 +928,7 @@ const View={
   /* The footprint the collisions use, the drive base's forward, and the
      invisible box the pointer picks the robot up by. */
   buildFootprint(fp){
+    this.invalidate(600);
     if(this.footG){ this.chassisG.remove(this.footG); this.dispose(this.footG); }
     const g=new THREE.Group(), y=0.003;
     // the box sits (ox, oy) off the drivetrain centre, exactly as the collisions have it
@@ -958,6 +980,7 @@ const View={
   /* A goBILDA-style mecanum base: frame rails, cross members, four motors,
      four wheels whose rollers make the X a mecanum drive shows from above. */
   buildBase(base){
+    this.invalidate(600);
     if(this.baseG){ this.chassisG.remove(this.baseG); this.dispose(this.baseG); }
     this.baseG=null; this.wheels=[];
     if(!base) return;
@@ -1012,6 +1035,7 @@ const View={
   /* A hooded flywheel: the ball leaves at the Shot tab's exit height and
      launch angle, which is where the Shot Sim starts its flight. */
   buildShooter(mod){
+    this.invalidate(600);
     if(this.shooterG){ this.chassisG.remove(this.shooterG); this.dispose(this.shooterG); }
     this.shooterG=null; this.fly=null;
     const cfg=Shots.cfg; if(!mod||!cfg) return;
@@ -1112,9 +1136,13 @@ const View={
     const aniso=this.ren?Math.min(8,this.ren.capabilities.getMaxAnisotropy()):1;
     const tex=(cv,srgb)=>{ const t=new THREE.CanvasTexture(cv); if(srgb) srgbTex(t);
       t.wrapS=t.wrapT=THREE.RepeatWrapping; t.anisotropy=aniso; return t; };
-    const map=tex(paint("rgb(98,100,103)",0.2,9,["rgba(30,31,34,0.12)","rgba(26,27,30,0.42)"],null),true);
+    // FTC foam is a mid grey (about 45% reflectance as seen); the joints are a fine dark line
+    // with a little shade either side, not a drawn outline
+    const map=tex(paint("rgb(112,114,117)",0.22,10,["rgba(30,31,34,0.08)","rgba(28,29,32,0.32)"],null),true);
     const height=bump?tex(paint("rgb(150,150,150)",0.12,40,["rgba(60,60,60,0.35)","rgba(20,20,20,0.8)"],null),false):null;
-    return {map, height};
+    // where the foam is worn smooth it is a touch glossier: the grain as a roughness map (green channel)
+    const rough=bump?tex(paint("rgb(222,222,222)",0.35,22,["rgba(180,180,180,0.3)","rgba(255,255,255,0.6)"],null),false):null;
+    return {map, height, rough};
   },
   /* The 36 tiles as one draw: each its own faint shade of grey, as real tiles from
      different boxes are. */
@@ -1123,8 +1151,10 @@ const View={
     // painted once a page: every robot load rebuilds the field, and the paint is ~50 ms
     let mat=this._tileMat;
     if(!mat){ const M=this.tileMaps(tileIn,!!B.bump);
-      mat=this._tileMat=new THREE.MeshStandardMaterial({color:0xffffff, map:M.map, roughness:0.9, metalness:0, envMapIntensity:0.6});
+      // foam takes the overhead light as a broad soft sheen at a glancing angle, never a mirror
+      mat=this._tileMat=new THREE.MeshStandardMaterial({color:0xffffff, map:M.map, roughness:0.86, metalness:0, envMapIntensity:0.85});
       if(M.height){ mat.bumpMap=M.height; mat.bumpScale=1.2; }
+      if(M.rough) mat.roughnessMap=M.rough;
       mat.userData.shared=true; }
     const geo=new THREE.PlaneGeometry(T,T); geo.rotateX(-Math.PI/2);
     const inst=new THREE.InstancedMesh(geo,mat,n*n), m4=new THREE.Matrix4(), col=new THREE.Color();
@@ -1141,27 +1171,106 @@ const View={
      sphere of vertex colours (no shader, so tone mapping and every tier treat it like
      any other material) and one textured plane: two draws. */
   buildVenue(g){
+    const B=(this.tier&&this.tier.budget)||{};
+    // the hall floor: dark sealed concrete, brightest in the pool of light round the field
     const S=512, cv=document.createElement("canvas"); cv.width=cv.height=S;
-    const c=cv.getContext("2d"), gr=c.createRadialGradient(S/2,S/2,S*0.035,S/2,S/2,S/2);
-    gr.addColorStop(0,"rgb(20,20,21)"); gr.addColorStop(0.06,"rgb(15,15,16)"); gr.addColorStop(0.16,"rgb(8,8,9)");
-    gr.addColorStop(0.4,"rgb(4,4,5)"); gr.addColorStop(1,"rgb(3,3,4)");
+    const c=cv.getContext("2d"), gr=c.createRadialGradient(S/2,S/2,S*0.04,S/2,S/2,S/2);
+    gr.addColorStop(0,"rgb(46,45,44)"); gr.addColorStop(0.08,"rgb(38,37,36)"); gr.addColorStop(0.2,"rgb(22,22,22)");
+    gr.addColorStop(0.45,"rgb(10,10,11)"); gr.addColorStop(1,"rgb(6,6,7)");
     c.fillStyle=gr; c.fillRect(0,0,S,S);
     // matte with no specular at all (Lambert): at a glancing angle even a fully rough
     // standard material catches the key light, and the far floor became a grey band
     const floor=new THREE.Mesh(new THREE.PlaneGeometry(80,80),
       new THREE.MeshLambertMaterial({color:0xffffff, map:srgbTex(new THREE.CanvasTexture(cv))}));
     floor.rotation.x=-Math.PI/2; floor.position.y=-0.004; floor.receiveShadow=true; g.add(floor);
-    const geo=new THREE.SphereGeometry(39,48,24), P=geo.attributes.position, cols=new Float32Array(P.count*3);
+    // the hall beyond: a dark dome, a little lighter where the stands and walls are
+    const geo=new THREE.SphereGeometry(39,40,20), P=geo.attributes.position, cols=new Float32Array(P.count*3);
     const mix=(a,b,t)=>a.map((v,i)=>v+(b[i]-v)*t), ss=(a,b,x)=>{ const t=Math.max(0,Math.min(1,(x-a)/(b-a))); return t*t*(3-2*t); };
-    const below=[0.002,0.002,0.0024], hor=[0.008,0.0085,0.0098], wall=[0.024,0.026,0.031], top=[0.004,0.0043,0.005];
+    const below=[0.004,0.004,0.0045], hor=[0.016,0.017,0.02], wall=[0.032,0.034,0.04], top=[0.008,0.0085,0.01];
     for(let i=0;i<P.count;i++){
       const y=P.getY(i)/39;
-      const v=y<0?mix(hor,below,ss(0,0.08,-y)):y<0.16?mix(hor,wall,ss(0,0.16,y)):mix(wall,top,ss(0.16,0.75,y));
+      const v=y<0?mix(hor,below,ss(0,0.08,-y)):y<0.2?mix(hor,wall,ss(0,0.2,y)):mix(wall,top,ss(0.2,0.75,y));
       cols[3*i]=v[0]; cols[3*i+1]=v[1]; cols[3*i+2]=v[2];
     }
     geo.setAttribute("color",new THREE.BufferAttribute(cols,3));
     const dome=new THREE.Mesh(geo,new THREE.MeshBasicMaterial({vertexColors:true, side:THREE.BackSide, depthWrite:false, fog:false}));
     dome.renderOrder=-10; dome.frustumCulled=false; dome.userData.venue=true; g.add(dome);
+    // Built once a page and kept (every robot load rebuilds the field): the hall's fixtures
+    if(!this._venue) this._venue=this.venueParts(B);
+    for(const m of this._venue) g.add(m);
+  },
+  /* The hall's fixtures as a handful of draws, none of them casting shadows: the black
+     pipe-and-drape round the field (with its folds), the truss over it and the lamps on it
+     (brighter than white, so the bloom catches them), the high-bay lamps in the ceiling,
+     the stands on the long sides with people in them (tiers 1 and 2), and a scoreboard. */
+  venueParts(B){
+    const out=[], shared=o=>{ o.traverse(x=>{ if(x.geometry) x.geometry.userData.shared=true; if(x.material) x.material.userData.shared=true; }); o.userData.venue=true; out.push(o); return o; };
+    const merge=(list)=>{ const pos=[], nor=[], col=[], idx=[];
+      for(const [geo,mtx,cc] of list){ const p=geo.attributes.position, n=geo.attributes.normal, o=pos.length/3;
+        geo.applyMatrix4(mtx);
+        for(let i=0;i<p.count;i++){ pos.push(p.getX(i),p.getY(i),p.getZ(i)); nor.push(n.getX(i),n.getY(i),n.getZ(i)); col.push(cc[0],cc[1],cc[2]); }
+        if(geo.index) for(const k of geo.index.array) idx.push(k+o); else for(let i=0;i<p.count;i++) idx.push(i+o);
+        geo.dispose(); }
+      const G=new THREE.BufferGeometry();
+      G.setAttribute("position",new THREE.Float32BufferAttribute(pos,3)); G.setAttribute("normal",new THREE.Float32BufferAttribute(nor,3));
+      G.setAttribute("color",new THREE.Float32BufferAttribute(col,3)); G.setIndex(idx); G.computeBoundingSphere(); return G; };
+    const M4=(x,y,z,ry)=>new THREE.Matrix4().makeRotationY(ry||0).setPosition(x,y,z);
+    // pipe-and-drape: 7 m out from the field's centre, 2.4 m high, folds as a sine in the cloth
+    { const R=7, Hh=2.4, list=[];
+      for(let k=0;k<4;k++){ const pg=new THREE.PlaneGeometry(2*R,Hh,140,1), p=pg.attributes.position;
+        for(let i=0;i<p.count;i++) p.setZ(i,0.06*Math.sin(p.getX(i)*9)+0.03*Math.sin(p.getX(i)*23));
+        pg.computeVertexNormals();
+        const a=k*Math.PI/2; list.push([pg,M4(Math.sin(a)*R,Hh/2,Math.cos(a)*R,a+Math.PI),[0.035,0.035,0.04]]); }
+      shared(new THREE.Mesh(merge(list),new THREE.MeshStandardMaterial({vertexColors:true, roughness:0.95, metalness:0, side:THREE.DoubleSide, envMapIntensity:0.5}))); }
+    // the truss: a square of box truss 6 m up, with its lamps hanging under it
+    { const list=[], L=8.4, y=6, t=0.3, alu=[0.32,0.33,0.35];
+      for(const [x,z,ry] of [[0,-L/2,0],[0,L/2,0],[-L/2,0,Math.PI/2],[L/2,0,Math.PI/2]]){
+        for(const [dy,dz] of [[t/2,t/2],[t/2,-t/2],[-t/2,t/2],[-t/2,-t/2]]){
+          const cg=new THREE.CylinderGeometry(0.025,0.025,L+t,6); cg.rotateZ(Math.PI/2);
+          list.push([cg,M4(x+(ry?dz:0),y+dy,z+(ry?0:dz),ry),alu]); }
+        // the lamp housings, black cans
+        for(let i=-2;i<=2;i++){ const bg=new THREE.CylinderGeometry(0.12,0.15,0.34,10);
+          const along=i*1.6; list.push([bg,M4(ry?x:along,y-0.38,ry?along:z,0),[0.02,0.02,0.022]]); }
+      }
+      shared(new THREE.Mesh(merge(list),new THREE.MeshStandardMaterial({vertexColors:true, roughness:0.45, metalness:0.6})));
+      // the lamps' faces: warm, far brighter than white
+      const lens=[], k=6;
+      for(const [x,z,ry] of [[0,-L/2,0],[0,L/2,0],[-L/2,0,1],[L/2,0,1]]) for(let i=-2;i<=2;i++){ const along=i*1.6;
+        const dg=new THREE.CircleGeometry(0.11,14); dg.rotateX(Math.PI/2); lens.push([dg,M4(ry?x:along,y-0.56,ry?along:z,0),[k,k*0.86,k*0.66]]); }
+      shared(new THREE.Mesh(merge(lens),new THREE.MeshBasicMaterial({vertexColors:true, fog:false, side:THREE.DoubleSide})));
+    }
+    // the high-bay lamps in the ceiling, 11 m up
+    { const list=[], k=5;
+      for(let i=-3;i<=3;i++) for(let j=-3;j<=3;j++){ const dg=new THREE.CircleGeometry(0.35,16); dg.rotateX(Math.PI/2); list.push([dg,M4(i*5.2,11,j*5.2,0),[k*0.96,k,k*1.06]]); }
+      shared(new THREE.Mesh(merge(list),new THREE.MeshBasicMaterial({vertexColors:true, side:THREE.DoubleSide}))); }
+    // the scoreboard at the far end: a screen with the game's name on it
+    { const cv=document.createElement("canvas"); cv.width=512; cv.height=256; const c=cv.getContext("2d");
+      const gr=c.createLinearGradient(0,0,0,256); gr.addColorStop(0,"#10233f"); gr.addColorStop(1,"#081426"); c.fillStyle=gr; c.fillRect(0,0,512,256);
+      c.fillStyle="#f2c230"; c.font="800 72px Inter, system-ui, Arial, sans-serif"; c.textAlign="center"; c.textBaseline="middle"; c.fillText("BIOBUZZ",256,104);
+      c.fillStyle="#9fb6d6"; c.font="600 30px Inter, system-ui, Arial, sans-serif"; c.fillText("FTC SIMBENCH  2026-27",256,176);
+      const sb=new THREE.Mesh(new THREE.PlaneGeometry(6,3),new THREE.MeshBasicMaterial({map:srgbTex(new THREE.CanvasTexture(cv)), color:new THREE.Color(1.6,1.6,1.6)}));
+      sb.position.set(0,5,-14); shared(sb); }
+    // the stands on the long sides, rows rising away from the field, with people in them
+    if(B.crowd!==false){
+      const list=[], rows=9, seat=[0.05,0.055,0.065];
+      for(const s of [-1,1]) for(let r=0;r<rows;r++){
+        const bg=new THREE.BoxGeometry(16,0.42*(r+1),0.85); list.push([bg,M4(0,0.21*(r+1),s*(9.2+r*0.85),0),seat]); }
+      shared(new THREE.Mesh(merge(list),new THREE.MeshStandardMaterial({vertexColors:true, roughness:0.85, metalness:0.1})));
+      if(B.crowd){
+        let seed=21; const rnd=()=>((seed=(seed*16807)%2147483647)/2147483647);
+        const shirts=[[0.5,0.08,0.06],[0.07,0.2,0.55],[0.6,0.45,0.05],[0.15,0.15,0.16],[0.55,0.55,0.55],[0.08,0.35,0.12],[0.4,0.1,0.35],[0.7,0.25,0.05]];
+        const n=520, geo=new THREE.CapsuleGeometry(0.17,0.45,2,6), mat=new THREE.MeshStandardMaterial({roughness:0.9, metalness:0});
+        const inst=new THREE.InstancedMesh(geo,mat,n), m4=new THREE.Matrix4(), col=new THREE.Color(); let k=0;
+        for(let q=0;q<n*3&&k<n;q++){
+          const s=rnd()<0.5?-1:1, r=Math.floor(rnd()*rows), x=(rnd()-0.5)*15.4;
+          if(rnd()<0.25) continue;                 // empty seats
+          m4.makeTranslation(x,0.42*(r+1)+0.38+rnd()*0.05,s*(9.2+r*0.85)); inst.setMatrixAt(k,m4);
+          const sh=shirts[Math.floor(rnd()*shirts.length)], d=0.6+rnd()*0.5; inst.setColorAt(k,col.setRGB(sh[0]*d,sh[1]*d,sh[2]*d)); k++;
+        }
+        inst.count=k; inst.computeBoundingSphere(); shared(inst);
+      }
+    }
+    return out;
   },
   /* Boxes (field inches, centre and size [x, y, z]) as one geometry, so a whole
      perimeter of rails is a draw call or two rather than forty. */
@@ -1208,7 +1317,91 @@ const View={
     if(!this._ballMat[key]){ this._ballMat[key]=this.mat(c,{roughness:0.5, map:this.ballTex(c)}); this._ballMat[key].userData.shared=true; }
     const m=new THREE.Mesh(this._ballGeo[kind],this._ballMat[key]);
     m.castShadow=true; m.userData.ball=true;
+    // drawn through batchBalls (one instanced draw per kind and colour), not on its own
+    if(m.layers&&this.scene){ m.layers.set(1); (this._balls||(this._balls=new Set())).add(m); }
     return m;
+  },
+  /* Every ball in the scene (on the tiles, in a FLOWER or a CELL, in the air, in a robot,
+     in a HUMAN PLAYER's tray) as one instanced draw per kind and colour, shadow included:
+     a match's sixty-odd balls were sixty-odd draws, twice (the shadow map). Each ball stays
+     an object of its own, moved, scaled and hidden by whoever owns it; only its drawing
+     comes here. One out of the scene for 3 s is let go (and drawn on its own again if it
+     ever comes back). */
+  batchBalls(now){
+    const B=this._balls; if(!B) return;
+    const per=this._bb||(this._bb=new Map());
+    for(const e of per.values()) e.n=0;
+    for(const m of B){
+      let o=m, vis=true;
+      while(o&&o!==this.scene){ if(!o.visible) vis=false; o=o.parent; }
+      if(!o){ const U=m.userData; if(!U.offAt) U.offAt=now; else if(now-U.offAt>3000){ B.delete(m); m.layers.set(0); } continue; }
+      m.userData.offAt=0;
+      if(!vis) continue;
+      m.updateWorldMatrix(true,false);
+      const key=m.material.id+"|"+m.geometry.id;
+      let e=per.get(key);
+      if(!e||e.n>=e.cap){
+        const cap=e?e.cap*2:32, inst=new THREE.InstancedMesh(m.geometry,m.material,cap);
+        inst.castShadow=true; inst.receiveShadow=true; inst.frustumCulled=false; inst.userData.ballBatch=true;
+        if(e){ for(let i=0;i<e.n;i++){ e.inst.getMatrixAt(i,this._bm||(this._bm=new THREE.Matrix4())); inst.setMatrixAt(i,this._bm); } this.scene.remove(e.inst); e.inst.dispose(); }
+        e={inst, cap, n:e?e.n:0}; per.set(key,e); this.scene.add(inst);
+      }
+      e.inst.setMatrixAt(e.n++,m.matrixWorld);
+    }
+    for(const e of per.values()){ e.inst.count=e.n; e.inst.visible=e.n>0; if(e.n) e.inst.instanceMatrix.needsUpdate=true; }
+  },
+  /* The field's static meshes that look the same (one material, the same shadow flags) as
+     one geometry each: the perimeter, FLOWER pipes and rings, the HIVE's tubes were a draw
+     call apiece, twice with the shadow map. Only g's own children are merged, so a group
+     that moves (a HIVE arm) is merged within itself and still moves; balls, see-through
+     things and anything with children of its own are left as they are. */
+  mergeStatic(g){
+    if(!g||!g.children||!THREE.BufferGeometry) return 0;
+    const key=m=>[m.type,m.color&&m.color.getHex(),m.roughness,m.metalness,m.emissive&&m.emissive.getHex(),m.map&&m.map.id,m.side,m.envMapIntensity,!!m.vertexColors,m.polygonOffset].join();
+    const groups=new Map();
+    for(const o of g.children){
+      if(!o.isMesh||o.isInstancedMesh||o.children.length||o.userData.ball||o.userData.staged||o.userData.venue||o.userData.tiles) continue;
+      const m=o.material, geo=o.geometry;
+      // (a box or a cylinder's draw groups are dropped with it: under one material each was a draw of its own)
+      if(!m||Array.isArray(m)||!geo||!geo.attributes.position||!geo.attributes.normal) continue;
+      // see-through things are sorted one by one; the flat tape on the tiles may go together
+      if(m.transparent&&!(geo.type==="PlaneGeometry"&&!m.map&&m.depthWrite===false)) continue;
+      const k=key(m)+"|"+m.opacity+"|"+o.castShadow+"|"+o.receiveShadow+"|"+o.renderOrder+"|"+(m.map&&geo.attributes.uv?1:0);
+      let L=groups.get(k); if(!L) groups.set(k,L=[]); L.push(o);
+    }
+    let n=0;
+    for(const L of groups.values()){
+      if(L.length<2) continue;
+      const uv=!!(L[0].material.map&&L[0].geometry.attributes.uv);
+      let nv=0, ni=0;
+      for(const o of L){ const G=o.geometry; nv+=G.attributes.position.count; ni+=G.index?G.index.count:G.attributes.position.count; }
+      const pos=new Float32Array(nv*3), nor=new Float32Array(nv*3), uvs=uv?new Float32Array(nv*2):null, idx=nv>65535?new Uint32Array(ni):new Uint16Array(ni);
+      const v=new THREE.Vector3(), nm=new THREE.Matrix3();
+      let ov=0, oi=0;
+      for(const o of L){
+        o.updateMatrix(); nm.getNormalMatrix(o.matrix);
+        const G=o.geometry, P=G.attributes.position, N=G.attributes.normal, U=G.attributes.uv;
+        for(let i=0;i<P.count;i++){
+          v.fromBufferAttribute(P,i).applyMatrix4(o.matrix); pos[3*(ov+i)]=v.x; pos[3*(ov+i)+1]=v.y; pos[3*(ov+i)+2]=v.z;
+          v.fromBufferAttribute(N,i).applyMatrix3(nm).normalize(); nor[3*(ov+i)]=v.x; nor[3*(ov+i)+1]=v.y; nor[3*(ov+i)+2]=v.z;
+          if(uvs){ uvs[2*(ov+i)]=U?U.getX(i):0; uvs[2*(ov+i)+1]=U?U.getY(i):0; }
+        }
+        if(G.index){ const I=G.index.array; for(let i=0;i<I.length;i++) idx[oi+i]=I[i]+ov; oi+=I.length; }
+        else { for(let i=0;i<P.count;i++) idx[oi+i]=ov+i; oi+=P.count; }
+        ov+=P.count;
+      }
+      const geo=new THREE.BufferGeometry();
+      geo.setAttribute("position",new THREE.BufferAttribute(pos,3)); geo.setAttribute("normal",new THREE.BufferAttribute(nor,3));
+      if(uvs) geo.setAttribute("uv",new THREE.BufferAttribute(uvs,2));
+      geo.setIndex(new THREE.BufferAttribute(idx,1)); geo.computeBoundingSphere();
+      const f=L[0], mesh=new THREE.Mesh(geo,f.material);
+      mesh.castShadow=f.castShadow; mesh.receiveShadow=f.receiveShadow; mesh.renderOrder=f.renderOrder; mesh.userData.merged=L.length;
+      const mats=new Set();
+      for(const o of L){ g.remove(o); if(!o.geometry.userData.shared) o.geometry.dispose(); if(o.material!==f.material&&!o.material.userData.shared) mats.add(o.material); }
+      for(const m of mats) m.dispose();
+      g.add(mesh); n+=L.length-1;
+    }
+    return n;
   },
   /* POLLEN and NECTAR are 26-hole pickleball shells: rows of dark holes on the
      colour, so a ball that rolls or spins visibly does. */
@@ -1349,6 +1542,7 @@ const View={
       geo.computeVertexNormals();
       const m=new THREE.Mesh(geo,this.mat(FIELD_COL.logo,{side:THREE.DoubleSide,roughness:0.8})); m.castShadow=true; g.add(m);
     }
+    this.mergeStatic(g);
   },
 
   /* See-through volumes (a HIVE CELL, the best run's ghost) fade as the camera
@@ -1373,6 +1567,7 @@ const View={
   /* The two HIVE arms with their CELLs, for the current state. Each lives in
      a group at its pivot so a TIP can swing it. */
   buildHive(al){
+    this.invalidate(600);
     if(this.hiveG[al]){ this.world.remove(this.hiveG[al]); this.dispose(this.hiveG[al]); }
     this.dropZones("hive-"+al);
     const hm=Field.model(), h=hm.hives.filter(x=>x.alliance===al)[0];
@@ -1409,6 +1604,7 @@ const View={
       for(let k=0;k+1<mouth.length;k++) this.rod(inner,mouth[k],mouth[k+1],Field.data.field.hive.cell.ringThickness+0.15,ringM,6);
       if(up) this.fillCell(inner,cell,al);
     }
+    this.mergeStatic(inner);
     this.hiveG[al]=G;
   },
   /* What's in an up-CELL, resting on its floor against the back wall,
@@ -1437,7 +1633,7 @@ const View={
 
   /* A path in field inches, drawn as a line: solid for your shot, dashed for
      the best arc from here. */
-  setArc(path,color,dashed){ ShotFx.arc(this,path,color,dashed); },
+  setArc(path,color,dashed){ this.invalidate(); ShotFx.arc(this,path,color,dashed); },
 
   /* Turn each exact drive wheel at the speed its motor drives it. The sim's
      wheel is found by where its CAD wheel sits, so a changed front can't
@@ -1456,9 +1652,30 @@ const View={
       sw.G.rotateOnAxis(sw.av, sense*Sim.wheelCmd(dev,w.mount)*(s.spec.rpm||312)/60*2*Math.PI*dt);
     }
   },
+  /* Where this frame falls between the sim's steps: {ticked: a step happened since the last
+     frame, alpha: how far into the next 20 ms step the clock is (the main loop's leftover
+     time, acc in src/app.js)}. Sim.clock counts every step. */
+  simTick(){
+    const c=typeof Sim!=="undefined"&&Sim.clock||0, T=this._tick||(this._tick={clock:c, ticked:false, steps:0, alpha:1});
+    T.steps=Math.round((c-T.clock)/0.02); T.ticked=c!==T.clock; T.clock=c;
+    T.alpha=typeof acc==="number"&&typeof Sim!=="undefined"&&Sim.phase==="running"?Math.max(0,Math.min(1,acc/0.02)):1;
+    return T;
+  },
+  /* One joint value (rad or m), keyed by its mechanism, drawn between its last two steps; a
+     jump (more than one step in a frame, half a unit at once, a value set by hand) is drawn
+     where it is. */
+  lerpQ(M,id,q,T){
+    let S=M.get(id); if(!S){ S={a:q,b:q}; M.set(id,S); }
+    if(q!==S.b){ S.a=(T.ticked&&T.steps===1&&Math.abs(q-S.b)<0.5)?S.b:q; S.b=q; }
+    else if(T.ticked) S.a=S.b;
+    return S.a+(S.b-S.a)*T.alpha;
+  },
   update(){
     if(!this.cad) return;
     const now=performance.now(), dt=Math.min(0.1,(now-(this.lastT||now))/1000); this.lastT=now;
+    // the sim steps 50 times a second; the screen refreshes 60 to 240 times. The robots are
+    // drawn between steps by Interp (src/app.js); the mechanisms' joints here (simTick, lerpQ)
+    const T=this.simTick();
     const ch=Sim.chassis;
     this.chassisG.position.set(ch.x, 0, -ch.y);
     this.chassisG.rotation.y = ch.h;                     // CCW from +x, like the field frame
@@ -1494,10 +1711,12 @@ const View={
       return p.ang!=null?p.ang:(p.d!=null?p.d:null);
     });
     let refold=false;
+    const IQ=this._ipq||(this._ipq=new Map());
     for(const m of this.cad.mechs){
       if(!m._g) continue;
       let q=drawn.get(m.id); if(q==null) continue;
       if(m.couple&&!deviceOn(m.id)) q=mateClamp(m,q);
+      q=this.lerpQ(IQ,m.id,q,T);
       // a held joint drawn with the group above it has moved: draw it on its own from now on
       if(this.folded&&this.folded.has(m.id)&&Math.abs(q)>1e-3){ this.folded.delete(m.id); this.movingMechs(this.cad); this.moved.ids.add(m.id); refold=true; }
       if(normJointKind(m.kind)==="linear") m._g.position.copy(this.v3(m.pivot).add(this.vAxis(m.axis).multiplyScalar(q)));
@@ -1739,18 +1958,31 @@ const View={
   followCam(){
     const ch=Sim.chassis||{x:0,y:0,h:0}, fp=Sim.footprint||{hx:0.23}, top=(this.lift0||0.2)+(Sim.base?Sim.base.H:0);
     const P=followCamPose(this.mode,ch,{hx:fp.hx||0.23, size:this.size||0.45, top});
-    const pos=new THREE.Vector3(P.pos[0],P.pos[1],P.pos[2]), look=new THREE.Vector3(P.look[0],P.look[1],P.look[2]);
-    // the chase camera eases after the robot (a hard follow jitters with every bump); the robot's own camera doesn't
-    if(this.mode==="chase"&&this.followPos&&!this.followJump){ this.followPos.lerp(pos,0.12); this.followLook.lerp(look,0.2); }
-    else { this.followPos=pos; this.followLook=look; this.followJump=false; }
+    const pos=this._fp||(this._fp=new THREE.Vector3()), look=this._fl||(this._fl=new THREE.Vector3());
+    pos.set(P.pos[0],P.pos[1],P.pos[2]); look.set(P.look[0],P.look[1],P.look[2]);
+    // the chase camera eases after the robot (a hard follow jitters with every bump), at the same
+    // speed whatever the frame rate; the robot's own camera doesn't ease
+    if(!this.followPos){ this.followPos=new THREE.Vector3(); this.followLook=new THREE.Vector3(); this.followJump=true; }
+    if(this.mode==="chase"&&!this.followJump){ const dt=this._rdt||1/60; this.followPos.lerp(pos,easeK(0.12,dt)); this.followLook.lerp(look,easeK(0.2,dt)); }
+    else { this.followPos.copy(pos); this.followLook.copy(look); this.followJump=false; }
     this.cam.position.copy(this.followPos); this.cam.lookAt(this.followLook); ShotFx.shake(this.cam);
-    this.look=this.followLook.clone();
-    if(this.sun){ const L=this.look; this.sun.position.set(L.x+this.sunOff.x,this.sunOff.y,L.z+this.sunOff.z); this.sun.target.position.set(L.x,0,L.z); this.sun.target.updateMatrixWorld(); }
+    if(!this.look) this.look=new THREE.Vector3();
+    this.look.copy(this.followLook);
+    this.placeSun(this.look);
+  },
+  /* the key's shadow box over what the camera looks at, the rim behind it from the camera */
+  placeSun(L){
+    const s=this.sun; if(!s) return;
+    s.position.set(L.x+this.sunOff.x,this.sunOff.y,L.z+this.sunOff.z); s.target.position.set(L.x,0,L.z); s.target.updateMatrixWorld();
+    const f=this.fill; if(f){ const c=this.cam.position, dx=L.x-c.x, dz=L.z-c.z, d=Math.hypot(dx,dz)||1;
+      f.position.set(L.x+dx/d*3,L.y+2.6,L.z+dz/d*3); f.target.position.set(L.x,L.y,L.z); f.target.updateMatrixWorld();
+      // the front lamp: from the camera's side, well up and a little to its left
+      const r=this.camLamp; if(r){ r.position.set(L.x-dx/d*3+dz/d*1.2,L.y+3.4,L.z-dz/d*3-dx/d*1.2); r.target.position.set(L.x,L.y,L.z); r.target.updateMatrixWorld(); } }
   },
   /* The ghost of the best run (src/results.js): a see-through box of the robot's footprint at
      pose p (field metres and radians), with a stripe at its front; null hides it */
   setGhost(p,fp){
-    if(!p){ if(this.ghostG) this.ghostG.visible=false; return; }
+    if(!p){ if(this.ghostG&&this.ghostG.visible){ this.ghostG.visible=false; this.invalidate(); } return; }
     if(!this.scene) return;
     const hx=(fp&&fp.hx)||0.23, hy=(fp&&fp.hy)||0.23, h=Math.min(0.5,(fp&&fp.h)||0.35), key=[hx,hy,h].map(v=>v.toFixed(3)).join("|");
     if(!this.ghostG||this.ghostKey!==key){
@@ -1775,6 +2007,7 @@ const View={
   /* The path editor's path on the field (src/pathedit.js): pts [[x, y], ...] in field
      metres, a line just above the tiles; null takes it away */
   setPath(pts){
+    this.invalidate();
     if(this.pathLine){ this.pathLine.parent&&this.pathLine.parent.remove(this.pathLine); this.pathLine.geometry.dispose(); this.pathLine=null; }
     if(!pts||pts.length<2||!this.scene) return;
     const g=new THREE.BufferGeometry().setFromPoints(pts.map(p=>new THREE.Vector3(p[0],0.012,-p[1])));
@@ -1782,7 +2015,7 @@ const View={
     this.pathLine.renderOrder=5; this.scene.add(this.pathLine);
   },
   setView(v){
-    this.mode=v; this.applyQuality();
+    this.mode=v; this.applyQuality(); this.invalidate(800);
     if(v==="chase"||v==="pov"){ this.followJump=true; return; }
     if(v==="field"){
       // from behind the alliance's own wall, where the drivers stand
@@ -1800,27 +2033,106 @@ const View={
     // the model's edge lines: crisp in the CAD view, a soft crease line on the field,
     // where black outlines made the robot look drawn rather than built
     const em=this._edgeMat; if(em){ const op=cad?0.85:0.42; if(em.opacity!==op) em.opacity=op; }
-    if(cad){ CadView.render(); return; }
+    const now=performance.now(), rdt=Math.min(0.1,(now-(this._rt||now))/1000); this._rt=now; this._rdt=rdt||1/60;
+    this.frameClock(now);
+    if(cad){ for(const e of (this._bb||new Map()).values()) e.inst.visible=false; CadView.render(); this.lastDraw=now; return; }
     // the whole field in the shadow box from the driver's wall and above, 3.6 m round the robot otherwise
     this.fitShadow(this.mode==="field"||this.mode==="top"?2.05:1.8);
-    if(this.mode==="chase"||this.mode==="pov"){ this.followCam(); this.fadeZones(this.cam); this.draw(this.cam); return; }
-    // robot views follow the chassis as it drives; the field view holds still
-    const target=new THREE.Vector3(0,0,0);
-    if(this.mode==="field") target.set(this.alliance==="blue"?0.25:-0.25,0.3,0);
-    else if(this.chassisG){ target.copy(this.chassisG.position); target.y=(this.lift0||0.2)+(Sim.base?Sim.base.H:0); }
-    if(!this.look) this.look=target.clone();
-    if(!this.drag) this.look.lerp(target,0.18);          // hold still while the robot is being dragged
-    const r=this.rad;
-    this.cam.position.set(this.look.x+r*Math.sin(this.phi)*Math.cos(this.theta),
-                          this.look.y+r*Math.cos(this.phi),
-                          this.look.z+r*Math.sin(this.phi)*Math.sin(this.theta));
-    this.cam.lookAt(this.look);
-    // the sun's shadow box rides along with what the camera looks at
-    // the whole field's shadow box stays on the field's centre, so a robot dragged around
-    // doesn't drag the box (and the HIVE's shadow) with it
-    if(this.sun){ const L=this.shadowHalf>2?{x:0,z:0}:this.look; this.sun.position.set(L.x+this.sunOff.x,this.sunOff.y,L.z+this.sunOff.z); this.sun.target.position.set(L.x,0,L.z); this.sun.target.updateMatrixWorld(); }
+    if(this.mode==="chase"||this.mode==="pov") this.followCam();
+    else{
+      // robot views follow the chassis as it drives; the field view holds still
+      const target=this._tg||(this._tg=new THREE.Vector3());
+      target.set(0,0,0);
+      if(this.mode==="field") target.set(this.alliance==="blue"?0.25:-0.25,0.3,0);
+      else if(this.chassisG){ target.copy(this.chassisG.position); target.y=(this.lift0||0.2)+(Sim.base?Sim.base.H:0); }
+      if(!this.look) this.look=target.clone();
+      if(!this.drag) this.look.lerp(target,easeK(0.18,rdt));          // hold still while the robot is being dragged
+      const r=this.rad;
+      this.cam.position.set(this.look.x+r*Math.sin(this.phi)*Math.cos(this.theta),
+                            this.look.y+r*Math.cos(this.phi),
+                            this.look.z+r*Math.sin(this.phi)*Math.sin(this.theta));
+      this.cam.lookAt(this.look);
+      // the sun's shadow box rides along with what the camera looks at; the whole field's
+      // stays on the field's centre, so a robot dragged around doesn't drag the box (and the HIVE's shadow) with it
+      this.placeSun(this.shadowHalf>2?(this._zero||(this._zero=new THREE.Vector3())):this.look);
+    }
     this.fadeZones(this.cam);
+    // Draw only when the picture can have changed: the camera, anything that moves, a change
+    // something asked for (invalidate), and once a half second whatever happens. A still view
+    // (the robot parked, nobody touching anything) then costs the GPU almost nothing, and the
+    // shadow map is drawn again only when something in it moved.
+    const camSig=this.cam.matrixWorld.elements, cs=this._camSig||(this._camSig=new Float64Array(16));
+    this.cam.updateMatrixWorld();
+    let camMoved=false; for(let i=0;i<16;i++) if(cs[i]!==camSig[i]){ camMoved=true; cs[i]=camSig[i]; }
+    const ws=this.worldSig(), moved=ws!==this._ws; this._ws=ws;
+    const live=typeof Match!=="undefined"&&Match.live&&Match.live();
+    const flying=typeof Shots!=="undefined"&&Shots.flying&&Shots.flying.length>0;
+    if(moved||live||flying||this.tipAnim) this.ren.shadowMap.needsUpdate=true;
+    const running=typeof Sim!=="undefined"&&Sim.phase==="running";
+    const busy=moved||flying||this.tipAnim||this.fxBusy(now)||(this.picked&&this.picked.length)||running||(live&&Match.flying&&Match.flying.length)||
+      (typeof Recorder!=="undefined"&&Recorder.on);
+    // a match set up but not started: nothing moves but the HUMAN PLAYERS' idle sway, which reads
+    // the same at 30 frames a second; a still view otherwise is drawn twice a second
+    const every=live?33:500;
+    if(!busy&&!camMoved&&!this.alwaysDraw&&now>=(this.dirtyTo||0)&&now-(this.lastDraw||0)<every){ this.skipped=(this.skipped||0)+1; return; }
+    this.batchBalls(now);
+    this.gpuBegin();
     this.draw(this.cam);
+    this.gpuEnd();
+    this.lastDraw=now; this.drawn=(this.drawn||0)+1;
+  },
+  /* a shot effect (src/shotfx.js) still playing: sparks, dust, rings, popups, trails, a shake */
+  fxBusy(now){
+    if(typeof ShotFx==="undefined") return false;
+    const F=ShotFx, n=a=>!!(a&&a.length);
+    return n(F.liveT)||n(F.dying)||n(F.ringsLive)||n(F.popLive)||n(F.settles)||F.laterN>0||
+      !!(F.sparks&&!F.sparks.dead)||!!(F.dust&&!F.dust.dead)||now-(F.shakeT||-1e9)<1500||now-(F.kickT||-1e9)<1500;
+  },
+  /* A number that changes when anything the shadow map holds moves: the robot, its
+     mechanisms, the sun (it follows the camera), the balls lying on the tiles. */
+  worldSig(){
+    let s=0;
+    const c=this.chassisG; if(c) s+=c.position.x*1031+c.position.z*2063+c.rotation.y*3079;
+    for(const m of (this.cad&&this.cad.mechs)||[]){ const g=m._g; if(!g) continue;
+      const p=g.position, q=g.quaternion; s+=p.x*7+p.y*11+p.z*13+q.x*17+q.y*19+q.z*23+q.w*29; }
+    const sp=this.sun&&this.sun.position; if(sp) s+=sp.x*31+sp.z*37;
+    if(typeof Shots!=="undefined"&&Shots.landed) for(const b of Shots.landed) if(b.pos) s+=b.pos[0]*41+b.pos[1]*43+b.pos[2]*47;
+    return s;
+  },
+  /* Frame timing for the dynamic resolution: the display's refresh interval (from how fast
+     frames come when nothing holds them up), and each drawn frame's GPU time from a timer
+     query where the browser has one, else its frame-to-frame time. */
+  frameClock(now){
+    const F=this._fc||(this._fc={last:0, iv:[], refresh:1000/60, wasDrawn:false});
+    const iv=now-F.last; F.wasDrawn=F.last>0&&this.lastDraw===F.last; F.last=now;
+    if(iv>0&&iv<100){ F.iv.push(iv); if(F.iv.length>=90){ const r=refreshMs(F.iv); F.refresh=F.fixed?Math.min(F.refresh,r):r; F.fixed=true; F.iv.length=0; } }
+    const quiet=typeof Perf!=="undefined"&&now<Perf.quietTo;
+    const gpu=this._gq&&this._gq.ms;
+    if(!quiet&&this.dyn&&this.drawn>30){
+      let changed=false;
+      if(gpu>0){ changed=dynResStep(this.dyn,gpu,F.refresh); this._gq.ms=0; }
+      else if(F.wasDrawn&&!this._gq) changed=dynResStep(this.dyn,iv,F.refresh*1.5);
+      if(changed) this.applyScale();
+    }
+  },
+  /* GPU time of a frame (EXT_disjoint_timer_query_webgl2), read a few frames later */
+  gpuBegin(){
+    let Q=this._gq;
+    if(Q===undefined){ Q=null; try{ const gl=this.ren.getContext(), ext=gl.getExtension("EXT_disjoint_timer_query_webgl2"); if(ext&&gl.createQuery) Q={gl, ext, pend:[], ms:0}; }catch(e){} this._gq=Q; }
+    if(!Q||Q.cur||Q.pend.length>3) return;
+    const q=Q.gl.createQuery(); Q.gl.beginQuery(Q.ext.TIME_ELAPSED_EXT,q); Q.cur=q;
+  },
+  gpuEnd(){
+    const Q=this._gq; if(!Q) return;
+    const gl=Q.gl;
+    if(Q.cur){ gl.endQuery(Q.ext.TIME_ELAPSED_EXT); Q.pend.push(Q.cur); Q.cur=null; }
+    while(Q.pend.length){
+      const q=Q.pend[0];
+      if(!gl.getQueryParameter(q,gl.QUERY_RESULT_AVAILABLE)) break;
+      const disjoint=gl.getParameter(Q.ext.GPU_DISJOINT_EXT), ns=gl.getQueryParameter(q,gl.QUERY_RESULT);
+      gl.deleteQuery(q); Q.pend.shift();
+      if(!disjoint) Q.ms=ns/1e6;
+    }
   }
 };
 /* The renderer works in linear light and writes sRGB (View.init). three's colour
@@ -1849,6 +2161,10 @@ function deviceOn(mechId){
    2.2 turns through the chassis: a joint stops at the sweep a servo on it
    would get, a slide at its maxExt. */
 function H_OF(D){ return D.field.half*IN; }
+/* How much of the way to ease toward a target this frame: the share a per-frame lerp of
+   k60 gives at 60 frames a second, for a frame of dt seconds, so the camera follows at the
+   same speed on a 60 Hz and a 240 Hz screen. */
+function easeK(k60,dt){ return 1-Math.pow(1-k60,Math.max(0,dt)*60); }
 /* Where a camera that rides with the robot sits and looks, in the scene's frame (x, up, -y):
    ch the chassis pose (m, rad CCW from +x), o.hx its half length, o.size its size, o.top
    the height of its frame. "chase": behind and above, looking a little ahead of it;
