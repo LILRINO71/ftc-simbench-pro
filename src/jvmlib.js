@@ -25,8 +25,8 @@ function jvMapObj(vm,fqn){ return {__c:vm.classes.get(fqn||"java.util.HashMap"),
 function jvKey(k){ return typeof k==="number"||typeof k==="string"||typeof k==="boolean"?typeof k+":"+k:k; }
 function jvIdx(items,v){ for(let k=0;k<items.length;k++) if(jvEq(items[k],v)||(jvIsObj(items[k])&&items[k]===v)) return k; return -1; }
 const JV_LIST_M={
-  add(vm,o,a){ if(a.length===2) o.n.items.splice(jvNum(a[0]),0,a[1]); else o.n.items.push(a[0]); return true; },
-  addAll(vm,o,a){ const src=a[a.length-1]; const v=Array.isArray(src)?src:(src&&src.n&&src.n.items)||(src&&src.n&&src.n.map&&Array.from(src.n.map.keys()))||[]; if(a.length===2) o.n.items.splice(jvNum(a[0]),0,...v); else o.n.items.push(...v); return v.length>0; },
+  add(vm,o,a){ jvRoom(vm,o.n.items.length,1,JV_MAX_ITEMS,"a collection"); if(a.length===2) o.n.items.splice(jvNum(a[0]),0,a[1]); else o.n.items.push(a[0]); return true; },
+  addAll(vm,o,a){ const src=a[a.length-1]; const v=Array.isArray(src)?src:(src&&src.n&&src.n.items)||(src&&src.n&&src.n.map&&Array.from(src.n.map.keys()))||[]; jvRoom(vm,o.n.items.length,v.length,JV_MAX_ITEMS,"a collection"); if(a.length===2) o.n.items.splice(jvNum(a[0]),0,...v); else for(const x of v) o.n.items.push(x); return v.length>0; },
   get(vm,o,a){ const i=jvNum(a[0]); if(i<0||i>=o.n.items.length) throw vm.jthrow("IndexOutOfBoundsException","Index "+i+" out of bounds for length "+o.n.items.length); return o.n.items[i]; },
   set(vm,o,a){ const i=jvNum(a[0]); const old=o.n.items[i]; o.n.items[i]=a[1]; return old; },
   remove(vm,o,a){ const v=a[0];
@@ -44,16 +44,16 @@ const JV_LIST_M={
   *sort(vm,o,a){ yield* jvSort(vm,o.n.items,a[0]); },
   subList(vm,o,a){ return jvList(vm,o.n.items.slice(jvNum(a[0]),jvNum(a[1]))); },
   getFirst(vm,o){ return o.n.items[0]; }, getLast(vm,o){ return o.n.items[o.n.items.length-1]; },
-  addFirst(vm,o,a){ o.n.items.unshift(a[0]); }, addLast(vm,o,a){ o.n.items.push(a[0]); },
+  addFirst(vm,o,a){ jvRoom(vm,o.n.items.length,1,JV_MAX_ITEMS,"a collection"); o.n.items.unshift(a[0]); }, addLast(vm,o,a){ jvRoom(vm,o.n.items.length,1,JV_MAX_ITEMS,"a collection"); o.n.items.push(a[0]); },
   offerFirst(vm,o,a){ o.n.items.unshift(a[0]); return true; }, offerLast(vm,o,a){ o.n.items.push(a[0]); return true; },
   removeFirst(vm,o){ return o.n.items.shift(); }, removeLast(vm,o){ return o.n.items.pop(); },
   pollFirst(vm,o){ return o.n.items.length?o.n.items.shift():null; }, pollLast(vm,o){ return o.n.items.length?o.n.items.pop():null; },
   peekFirst(vm,o){ return o.n.items.length?o.n.items[0]:null; }, peekLast(vm,o){ return o.n.items.length?o.n.items[o.n.items.length-1]:null; },
   // a Deque/Stack pushes on the front (ArrayDeque) or the end (Stack)
-  push(vm,o,a){ if(o.__c.name==="Stack") o.n.items.push(a[0]); else o.n.items.unshift(a[0]); return a[0]; },
+  push(vm,o,a){ jvRoom(vm,o.n.items.length,1,JV_MAX_ITEMS,"a collection"); if(o.__c.name==="Stack") o.n.items.push(a[0]); else o.n.items.unshift(a[0]); return a[0]; },
   pop(vm,o){ return o.__c.name==="Stack"?o.n.items.pop():o.n.items.shift(); },
   peek(vm,o){ if(!o.n.items.length) return null; return o.__c.name==="Stack"?o.n.items[o.n.items.length-1]:o.n.items[0]; },
-  poll(vm,o){ return o.n.items.length?o.n.items.shift():null; }, offer(vm,o,a){ o.n.items.push(a[0]); return true; },
+  poll(vm,o){ return o.n.items.length?o.n.items.shift():null; }, offer(vm,o,a){ jvRoom(vm,o.n.items.length,1,JV_MAX_ITEMS,"a collection"); o.n.items.push(a[0]); return true; },
   element(vm,o){ return o.n.items[0]; }, empty(vm,o){ return !o.n.items.length; },
   stream(vm,o){ return jvList(vm,o.n.items.slice(),"java.util.stream.Stream"); },
   equals(vm,o,a){ return o===a[0]; }, hashCode(){ return 17; },
@@ -61,13 +61,20 @@ const JV_LIST_M={
 };
 const JV_SET_ADD=(vm,o,a)=>{ if(jvIdx(o.n.items,a[0])>=0) return false; o.n.items.push(a[0]); return true; };
 function* jvSort(vm,items,cmp){
-  const arr=items.slice(), key=[];
-  // insertion sort: the comparator may be Java (a generator), so no Array.sort
-  for(let i=1;i<arr.length;i++){ const v=arr[i]; let j=i-1;
-    while(j>=0){ const c=cmp?jvNum(yield* vm.callFn(cmp,[arr[j],v],"compare")):(arr[j]>v?1:arr[j]<v?-1:0); if(c<=0) break; arr[j+1]=arr[j]; j--; }
-    arr[j+1]=v; }
-  void key;
-  items.length=0; items.push(...arr);
+  // natural order: the engine's own stable sort. A Java comparator may block (a generator), so
+  // a stable merge sort that calls it n log n times (an insertion sort took n^2: 10^4 items
+  // were 5*10^7 calls)
+  if(!cmp){ const arr=items.slice().sort((x,y)=>jvIsObj(x)||jvIsObj(y)?0:(x>y?1:x<y?-1:0)); items.length=0; for(const v of arr) items.push(v); return; }
+  let a=items.slice(), b=new Array(a.length);
+  for(let w=1;w<a.length;w*=2){
+    for(let lo=0;lo<a.length;lo+=2*w){
+      const mid=Math.min(lo+w,a.length), hi=Math.min(lo+2*w,a.length); let i=lo,j=mid,k=lo;
+      while(i<mid&&j<hi) b[k++]=jvNum(yield* vm.callFn(cmp,[a[i],a[j]],"compare"))<=0?a[i++]:a[j++];
+      while(i<mid) b[k++]=a[i++]; while(j<hi) b[k++]=a[j++];
+    }
+    const t=a; a=b; b=t;
+  }
+  items.length=0; for(const v of a) items.push(v);
 }
 const JV_STREAM_M={
   *map(vm,o,a){ const r=[]; for(const v of o.n.items) r.push(yield* vm.callFn(a[0],[v])); return jvList(vm,r,"java.util.stream.Stream"); },
@@ -86,7 +93,7 @@ const JV_STREAM_M={
 ["mapToDouble","mapToInt","mapToObj","boxed"].forEach(k=>{ JV_STREAM_M[k]=k==="boxed"?(vm,o)=>o:JV_STREAM_M.map; });
 function jvOptional(vm,v){ return {__c:vm.classes.get("java.util.Optional"),f:Object.create(null),n:{v}}; }
 const JV_MAP_M={
-  put(vm,o,a){ const k=jvKey(a[0]); const old=o.n.map.has(k)?o.n.map.get(k)[1]:null; o.n.map.set(k,[a[0],a[1]]); return old; },
+  put(vm,o,a){ jvRoom(vm,o.n.map.size,1,JV_MAX_ITEMS,"a map"); const k=jvKey(a[0]); const old=o.n.map.has(k)?o.n.map.get(k)[1]:null; o.n.map.set(k,[a[0],a[1]]); return old; },
   get(vm,o,a){ const e=o.n.map.get(jvKey(a[0])); return e?e[1]:null; },
   getOrDefault(vm,o,a){ const e=o.n.map.get(jvKey(a[0])); return e?e[1]:a[1]; },
   containsKey(vm,o,a){ return o.n.map.has(jvKey(a[0])); },
@@ -183,7 +190,7 @@ const JV_KIND_CLASS={motor:JV_HW+"DcMotorImplEx",servo:JV_HW+"ServoImplEx",crser
 function* jvGetDevice(vm,kindName,name,clsName){
   name=String(name);
   const rt=vm.dev||(vm.dev=new Map());
-  const kind=JV_DEV_KIND[kindName]!==undefined?JV_DEV_KIND[kindName]:null;
+  const kind=jvOwn(JV_DEV_KIND,kindName)!==undefined?JV_DEV_KIND[kindName]:null;
   const key=name+"|"+(kind==="motor"||kind==="crservo"?"motor":kind);
   if(rt.has(key)){ const d=rt.get(key); vm.devUse(name,d.n.kind,clsName); return d; }
   // with the Robot Controller's configuration loaded (src/robotconfig.js), a name it doesn't
@@ -450,7 +457,7 @@ function jvNatives(){
     *join(vm,a){ const sep=a[0]; const items=a.length===2&&a[1]&&a[1].n&&a[1].n.items?a[1].n.items:(a.length===2&&Array.isArray(a[1])?a[1]:a.slice(1)); const out=[]; for(const x of items) out.push(yield* vm.str(x)); return out.join(sep); },
     copyValueOf(vm,a){ return a[0].map(c=>String.fromCharCode(c)).join(""); }}, ctor(){}});
   d("java.lang.StringBuilder",{ctor(vm,o,a){ o.n={s:typeof a[0]==="string"?a[0]:""}; },
-    m:{*append(vm,o,a){ o.n.s+=yield* vm.str(a[0],vm.argKind(0)); return o; }, toString(vm,o){ return o.n.s; }, length(vm,o){ return o.n.s.length; },
+    m:{*append(vm,o,a){ const t=yield* vm.str(a[0],vm.argKind(0)); jvRoom(vm,o.n.s.length,t.length,JV_MAX_CHARS,"a StringBuilder"); o.n.s+=t; return o; }, toString(vm,o){ return o.n.s; }, length(vm,o){ return o.n.s.length; },
       setLength(vm,o,a){ o.n.s=o.n.s.slice(0,a[0]); }, *insert(vm,o,a){ o.n.s=o.n.s.slice(0,a[0])+(yield* vm.str(a[1]))+o.n.s.slice(a[0]); return o; },
       reverse(vm,o){ o.n.s=o.n.s.split("").reverse().join(""); return o; }, deleteCharAt(vm,o,a){ o.n.s=o.n.s.slice(0,a[0])+o.n.s.slice(a[0]+1); return o; },
       charAt(vm,o,a){ return o.n.s.charCodeAt(a[0]); }, isEmpty(vm,o){ return !o.n.s.length; }}});
@@ -487,13 +494,13 @@ function jvNatives(){
   d("java.util.stream.Collectors",{s:{toList(){ return null; }, toSet(){ return null; }}});
   d("java.util.Arrays",{s:{asList(vm,a){ return jvList(vm,a.length===1&&Array.isArray(a[0])?a[0]:a.slice()); }, fill(vm,a){ if(a.length===2) a[0].fill(a[1]); else a[0].fill(a[3],a[1],a[2]); },
     *sort(vm,a){ if(a.length>=2&&a[1] instanceof JvFn) yield* jvSort(vm,a[0],a[1]); else a[0].sort((x,y)=>x-y); }, toString(vm,a){ return "["+(a[0]||[]).join(", ")+"]"; },
-    copyOf(vm,a){ const r=a[0].slice(0,a[1]); while(r.length<a[1]) r.push(0); return r; }, copyOfRange(vm,a){ return a[0].slice(a[1],a[2]); },
+    copyOf(vm,a){ jvRoom(vm,0,jvNum(a[1]),JV_MAX_ARRAY,"an array"); const r=a[0].slice(0,a[1]); while(r.length<a[1]) r.push(0); return r; }, copyOfRange(vm,a){ return a[0].slice(a[1],a[2]); },
     stream(vm,a){ return jvList(vm,a[0].slice(),"java.util.stream.Stream"); }, equals(vm,a){ return a[0]&&a[1]&&a[0].length===a[1].length&&a[0].every((v,k)=>jvEq(v,a[1][k])); }}});
   d("java.util.Collections",{s:{emptyList(vm){ return jvList(vm,[]); }, emptyMap(vm){ return jvMapObj(vm); }, emptySet(vm){ return jvList(vm,[],"java.util.HashSet"); },
     unmodifiableList(vm,a){ return a[0]; }, unmodifiableMap(vm,a){ return a[0]; }, unmodifiableSet(vm,a){ return a[0]; }, synchronizedList(vm,a){ return a[0]; },
     *sort(vm,a){ yield* jvSort(vm,a[0].n.items,a[1]||null); }, reverse(vm,a){ a[0].n.items.reverse(); },
     max(vm,a){ return a[0].n.items.reduce((x,y)=>y>x?y:x); }, min(vm,a){ return a[0].n.items.reduce((x,y)=>y<x?y:x); },
-    addAll(vm,a){ a[0].n.items.push(...a.slice(1)); return true; }, singletonList(vm,a){ return jvList(vm,[a[0]]); }, nCopies(vm,a){ return jvList(vm,new Array(a[0]).fill(a[1])); }}});
+    addAll(vm,a){ jvRoom(vm,a[0].n.items.length,a.length-1,JV_MAX_ITEMS,"a collection"); for(const x of a.slice(1)) a[0].n.items.push(x); return true; }, singletonList(vm,a){ return jvList(vm,[a[0]]); }, nCopies(vm,a){ jvRoom(vm,0,jvNum(a[0]),JV_MAX_ITEMS,"a collection"); return jvList(vm,new Array(a[0]).fill(a[1])); }}});
   d("java.util.Objects",{s:{equals(vm,a){ return jvEq(a[0],a[1])||a[0]===a[1]; }, requireNonNull(vm,a){ if(a[0]==null) throw vm.jthrow("NullPointerException",typeof a[1]==="string"?a[1]:"null"); return a[0]; },
     isNull(vm,a){ return a[0]==null; }, nonNull(vm,a){ return a[0]!=null; }, hash(){ return 1; }, hashCode(){ return 1; }, toString(vm,a){ return String(a[0]); }, requireNonNullElse(vm,a){ return a[0]!=null?a[0]:a[1]; }}});
   d("java.util.Random",{ctor(vm,o,a){ o.n={seed:(a.length?jvNum(a[0]):42)>>>0||1}; },
@@ -608,7 +615,7 @@ function jvNatives(){
     ctor(vm,o){ o.n={live:0,snap:{},edge:{}}; },
     has(n){ return JV_PAD_FIELDS.indexOf(n)>=0; },
     get(vm,o,n){ if(JV_PAD_FIELDS.indexOf(n)<0) return undefined; return jvPadRaw(vm,o,n); },
-    set(vm,o,n,v){ if(n==="trigger_threshold"){ o.n.thr=jvNum(v); return; } o.n.snap[JV_PAD_ALIAS[n]||n]=v; },
+    set(vm,o,n,v){ if(n==="trigger_threshold"){ o.n.thr=jvNum(v); return; } if(JV_PAD_FIELDS.indexOf(n)>=0) o.n.snap[jvOwn(JV_PAD_ALIAS,n)||n]=v; },
     m:{copy(vm,o,a){ const src=a[0]; if(!src||!src.n) return; const snap={}; for(const f of JV_PAD_FIELDS) snap[JV_PAD_ALIAS[f]||f]=jvPadRaw(vm,src,f); o.n.snap=snap; o.n.thr=src.n.thr; o.n.live=0; },
       fromByteArray(){}, toByteArray(){ return []; },
       rumble(vm,o,a){ if(vm.host&&vm.host.rumble) vm.host.rumble(o.n.live,"rumble",a.map(jvArg)); }, rumbleBlips(vm,o,a){ if(vm.host&&vm.host.rumble) vm.host.rumble(o.n.live,"rumbleBlips",a.map(jvArg)); },
