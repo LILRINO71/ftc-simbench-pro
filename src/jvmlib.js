@@ -411,10 +411,10 @@ function jvNatives(){
     if(vm.host&&vm.host.log) vm.host.log(t); else console.log("[java] "+t); };
   d("java.io.PrintStream",{m:{*println(vm,o,a){ yield* say(vm,a); }, *print(vm,o,a){ yield* say(vm,a); }, printf(){}, format(){}, flush(){}}});
   d("java.lang.Thread",{ctor(vm,o,a){ o.n={run:a[0]||null}; },
-    s:{sleep(vm,a){ return {__block:{sleep:jvArg(a[0])}}; }, currentThread(vm){ return vm.mk("java.lang.Thread",null,{main:true}); }, interrupted(){ return false; }, yield(vm){ return {__block:{gate:true}}; }, onSpinWait(){}},
+    s:{sleep(vm,a){ return {__block:{sleep:jvArg(a[0])}}; }, currentThread(vm){ return vm.mk("java.lang.Thread",null,{main:true}); }, interrupted(){ return false; }, yield(vm){ return jvGate(vm,()=>undefined); }, onSpinWait(){}},
     m:{*start(vm,o){ const self=o; const run=o.n.run;
         const g=run?(run instanceof JvFn?vm.callFn(run,[],"run"):vm.invoke(run,"run",[],null)):vm.invoke(self,"run",[],null);
-        (vm.threads||(vm.threads=[])).push({g,resumeAt:0}); },
+        (vm.threads||(vm.threads=[])).push({g,resumeAt:0,st:jvStrand()}); },
       isInterrupted(){ return false; }, interrupt(){}, join(){}, setDaemon(){}, setPriority(){}, isAlive(){ return true; }, setName(){}, getName(){ return "thread"; }, run(){}}});
   d("java.lang.Integer",{sf:{MAX_VALUE:2147483647,MIN_VALUE:-2147483648},s:jvBoxStatics(true)});
   d("java.lang.Long",{sf:{MAX_VALUE:9223372036854775807,MIN_VALUE:-9223372036854775808},s:jvBoxStatics(true)});
@@ -523,7 +523,8 @@ function jvNatives(){
       opModeInInit(vm){ const p=LIN(vm); return jvGate(vm,()=>!!(p&&!p.started&&!p.stopAsked)); },
       isStarted(vm){ const p=LIN(vm); return jvGate(vm,()=>!!(p&&p.started)); },
       isStopRequested(vm){ const p=LIN(vm); return jvGate(vm,()=>!!(p&&p.stopAsked)); },
-      idle(vm){ return {__block:{gate:true}}; },
+      // idle() is Thread.yield(): it lets other threads run and takes no robot time
+      idle(vm){ return jvGate(vm,()=>undefined); },
       sleep(vm,o,a){ return {__block:{sleep:jvArg(a[0])}}; },
       runOpMode(){}, waitOneFullHardwareCycle(vm){ return {__block:{gate:true}}; }}});
   // hardwareMap
@@ -630,10 +631,13 @@ function jvNatives(){
   return N;
 }
 function jvRand(n){ n.seed^=n.seed<<13; n.seed>>>=0; n.seed^=n.seed>>>17; n.seed^=n.seed<<5; n.seed>>>=0; return n.seed/4294967296; }
-/* A gate: opModeIsActive() and friends end a tick, once per run of code */
+/* A gate: opModeIsActive(), idle() and friends. Once a pass of a loop that reads one has run
+   since the code last waited (JVM.prototype.backEdge), the next gate ends the tick; any other
+   is a flag read that takes no time, as on the robot. */
 function jvGate(vm,value){
-  if(vm.steps===vm.gateMark) return value();
-  return {__block:{gate:true},then(){ vm.gateMark=vm.steps; return value(); }};
+  const s=vm.strand;
+  if(!s.passDone){ s.gates++; return value(); }
+  return {__block:{gate:true},then(){ jvWaited(s); s.gates++; return value(); }};
 }
 function jvDevMapItems(vm,kind){
   const out=[]; if(vm.dev) for(const [,d] of vm.dev) if(d&&d.n&&JV_DEV_KIND[kind]===d.n.kind) out.push(d);

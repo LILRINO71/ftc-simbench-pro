@@ -536,7 +536,10 @@ function JVM(units,natives){
   this.opaque=new Map();           // stub classes made up on the fly
   this.stubbed=new Map();          // "Class.method" -> count, what the stubs absorbed
   this.BUDGET=20000; this.budget=this.BUDGET;   // loop passes left before a forced tick (a busy-wait)
-  this.steps=0; this.gateMark=-1;   // statements run, and the count at the last gate
+  this.steps=0;                    // statements run
+  // where the running code is in its loop (see jvGate in src/jvmlib.js): one per thread of the
+  // team's code; JvProgram switches it when it runs a thread the OpMode started
+  this.strand=jvStrand();
   this.host=null;
   // what a run learns about a node of the parsed code (who owns a method, a field's
   // type, whether a call returns an int, an anonymous class). Parsed code is cached
@@ -1051,9 +1054,24 @@ JVM.prototype.exBlock=function*(list,sc){
   }
   return null;
 };
-JVM.prototype.tickCheck=function*(node){
+/* A thread of the team's code, as far as gates go. A pass of a loop that read a gate
+   (opModeIsActive(), idle(), isStopRequested()…) since the code last waited is one pass of
+   the robot's loop: the next gate ends the tick. Any other gate is a flag read and costs no
+   time, as on the robot, so a loop that checks opModeIsActive() three times still runs one
+   pass per tick (it used to take one tick per check). */
+function jvStrand(){ return {gates:0,yg:0,passDone:false}; }
+/* The code waited (a tick ended at a gate, a sleep, waitForStart, a forced gate) */
+function jvWaited(s){ s.passDone=false; s.yg=s.gates; }
+/* A loop's back-edge: w is that loop's window, the gate count at its last back-edge */
+JVM.prototype.backEdge=function(w){
+  const s=this.strand;
+  if(s.gates>(w.g>s.yg?w.g:s.yg)) s.passDone=true;
+  w.g=s.gates;
+};
+JVM.prototype.tickCheck=function*(node,w){
+  if(w) this.backEdge(w);
   // a loop with no gate in it (a busy-wait on isBusy(), say) still lets time pass
-  if(--this.budget<0){ this.budget=this.BUDGET; yield {gate:true,forced:true,at:node&&node.p}; }
+  if(--this.budget<0){ this.budget=this.BUDGET; jvWaited(this.strand); yield {gate:true,forced:true,at:node&&node.p}; }
 };
 JVM.prototype.ex=function*(st,sc){
   this.at=st.p; this.steps++;
@@ -1071,40 +1089,44 @@ JVM.prototype.ex=function*(st,sc){
       if(jvTruth(yield* this.ev(st.c,sc))) return yield* this.ex(st.th,new JvScope(sc));
       if(st.el) return yield* this.ex(st.el,new JvScope(sc));
       return null;
-    case "while":
+    case "while":{
+      const w={g:this.strand.gates};
       while(jvTruth(yield* this.ev(st.c,sc))){
         const r=yield* this.ex(st.body,new JvScope(sc));
-        if(r){ if(r.s===JV_BRK&&(!r.l||r.l===st.label)) break; if(r.s===JV_CONT&&(!r.l||r.l===st.label)){ yield* this.tickCheck(st); continue; } return r; }
-        yield* this.tickCheck(st);
+        if(r){ if(r.s===JV_BRK&&(!r.l||r.l===st.label)) break; if(r.s===JV_CONT&&(!r.l||r.l===st.label)){ yield* this.tickCheck(st,w); continue; } return r; }
+        yield* this.tickCheck(st,w);
       }
       return null;
-    case "do":
+    }
+    case "do":{
+      const w={g:this.strand.gates};
       do{
         const r=yield* this.ex(st.body,new JvScope(sc));
-        if(r){ if(r.s===JV_BRK&&(!r.l||r.l===st.label)) break; if(r.s===JV_CONT&&(!r.l||r.l===st.label)){ yield* this.tickCheck(st); continue; } return r; }
-        yield* this.tickCheck(st);
+        if(r){ if(r.s===JV_BRK&&(!r.l||r.l===st.label)) break; if(r.s===JV_CONT&&(!r.l||r.l===st.label)){ yield* this.tickCheck(st,w); continue; } return r; }
+        yield* this.tickCheck(st,w);
       }while(jvTruth(yield* this.ev(st.c,sc)));
       return null;
+    }
     case "for":{
-      const fs=new JvScope(sc);
+      const fs=new JvScope(sc), w={g:this.strand.gates};
       for(const x of st.init) yield* this.ex(x,fs);
       for(;;){
         if(st.c&&!jvTruth(yield* this.ev(st.c,fs))) break;
         const r=yield* this.ex(st.body,new JvScope(fs));
         if(r){ if(r.s===JV_BRK&&(!r.l||r.l===st.label)) break; if(!(r.s===JV_CONT&&(!r.l||r.l===st.label))) return r; }
         for(const u of st.upd) yield* this.ev(u,fs);
-        yield* this.tickCheck(st);
+        yield* this.tickCheck(st,w);
       }
       return null;
     }
     case "foreach":{
       const it=yield* this.ev(st.it,sc);
-      const items=yield* this.iterate(it,st);
+      const items=yield* this.iterate(it,st), w={g:this.strand.gates};
       for(const v of items){
         const bs=new JvScope(sc); bs.v[st.name]=jvCoerce(v,st.type); bs.t[st.name]=st.type;
         const r=yield* this.ex(st.body,bs);
         if(r){ if(r.s===JV_BRK&&(!r.l||r.l===st.label)) break; if(!(r.s===JV_CONT&&(!r.l||r.l===st.label))) return r; }
-        yield* this.tickCheck(st);
+        yield* this.tickCheck(st,w);
       }
       return null;
     }
@@ -1663,7 +1685,7 @@ JVM.prototype.call=function*(e,sc){
     else if(o&&o.__type&&o.classLit) r=jvClassMethod(o.__type,e.name,args);
     else r=yield* this.invoke(o,e.name,args,e);
   }
-  if(r&&r.__block){ const b=r.__block; yield b; r=r.then?r.then():undefined; }
+  if(r&&r.__block){ const b=r.__block, s=this.strand; yield b; if(!r.then) jvWaited(s); r=r.then?r.then():undefined; }
   this.setRk(e,r,sc);
   return r;
 };
