@@ -185,7 +185,10 @@ match-hours a day; past that it's the Workers Paid plan.
 For sites without rooms, or as WebRTC's fallback: Cloudflare Realtime TURN relays WebRTC through
 TCP port 443 when UDP is blocked. Create a TURN key in **Realtime → TURN**, then add two secrets
 to the Pages project: `TURN_KEY_ID` and `TURN_KEY_API_TOKEN`. `/room/turn` hands browsers
-short-lived credentials; the key never reaches the page. 1,000 GB a month is free.
+short-lived credentials, only on the site's own pages (a request with no `Origin` and no
+`Sec-Fetch-Site: same-origin` is refused); the key never reaches the page. That check keeps other
+sites and casual scripts out; it is not a rate limit, since a client outside a browser can write
+those headers. 1,000 GB a month is free.
 
 ## Shared leaderboard (optional, free)
 

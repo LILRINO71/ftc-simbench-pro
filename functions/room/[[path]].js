@@ -18,16 +18,30 @@
    ============================================================ */
 const NAME = /^[A-Za-z0-9_-]{1,64}$/;
 const ID = /^[A-Za-z0-9_-]{4,40}$/;
-const json = (obj, status = 200) => new Response(JSON.stringify(obj), { status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
+const json = (obj, status = 200) => new Response(JSON.stringify(obj), { status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } });
+
+/* Only this site's own pages may use its rooms and its TURN key; both are billed to the
+   site. A browser always says where a request comes from: a WebSocket and a POST carry
+   Origin, and a same-origin GET (EventSource, fetch), which carries no Origin, carries
+   Sec-Fetch-Site: same-origin. So a request must have an Origin of this site, or no
+   Origin and Sec-Fetch-Site: same-origin; and a Sec-Fetch-Site, when there is one, must
+   say same-origin. A request with neither header came from no page at all (curl, a bot,
+   a server) and is refused. A client outside a browser can still write both headers:
+   this keeps other sites and casual scripts out, it is not a rate limit. */
+export function fromOwnPage(request, url) {
+  const origin = request.headers.get('Origin'), site = request.headers.get('Sec-Fetch-Site');
+  if (site != null && site !== 'same-origin') return false;
+  if (origin != null) return origin === url.origin;
+  return site === 'same-origin';
+}
 
 export async function handle(request, env, fetchImpl = fetch) {
   const url = new URL(request.url);
   const route = url.pathname.replace(/^\/room\/?/, '');
-  // only this site's own pages may use its rooms: another site can't borrow them
-  const origin = request.headers.get('Origin');
-  if (origin && origin !== url.origin) return json({ error: 'origin' }, 403);
-
+  // whether the service is on costs nothing and tells nothing: anyone may ask
   if (route === 'health') return json({ ready: !!env.ROOMS, turn: !!(env.TURN_KEY_ID && env.TURN_KEY_API_TOKEN) });
+  if (!fromOwnPage(request, url)) return json({ error: 'origin' }, 403);
+
   if (route === 'turn') {
     if (!(env.TURN_KEY_ID && env.TURN_KEY_API_TOKEN)) return json({ iceServers: [{ urls: ['stun:stun.cloudflare.com:3478'] }], turn: false });
     const r = await fetchImpl('https://rtc.live.cloudflare.com/v1/turn/keys/' + encodeURIComponent(env.TURN_KEY_ID) + '/credentials/generate-ice-servers', {

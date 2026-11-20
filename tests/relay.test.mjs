@@ -75,28 +75,74 @@ test('room: the clock, and the lockstep ledger replayed to a player who comes ba
   assert.equal(rep.done, true);
 });
 
+/* What a browser on the site's own page sends: a WebSocket and a POST carry Origin; a
+   same-origin GET (EventSource, fetch) carries no Origin, only Sec-Fetch-Site. */
+const OWN = { WS: { Origin: 'https://sb.example', 'Sec-Fetch-Site': 'same-origin' }, GET: { 'Sec-Fetch-Site': 'same-origin' } };
+
 test('pages function: health, TURN, routing, and another site can\'t borrow the rooms', async () => {
   const req = (path, init) => new Request('https://sb.example' + path, init);
   let r = await handle(req('/room/health'), {});
   assert.deepEqual(await r.json(), { ready: false, turn: false });
-  r = await handle(req('/room/m-AAAAA/ws?id=abcd1234'), {});
+  r = await handle(req('/room/m-AAAAA/ws?id=abcd1234', { headers: OWN.WS }), {});
   assert.equal(r.status, 501, 'no rooms bound: the page keeps using WebRTC');
   const seen = [];
   const ROOMS = { idFromName: (n) => 'id:' + n, get: (id) => ({ fetch: (q) => { seen.push([id, new URL(q.url).pathname]); return new Response('ok'); } }) };
-  r = await handle(req('/room/m-AAAAA/ws?id=abcd1234'), { ROOMS });
+  r = await handle(req('/room/m-AAAAA/ws?id=abcd1234', { headers: OWN.WS }), { ROOMS });
   assert.deepEqual(seen, [['id:m-AAAAA', '/room/m-AAAAA/ws']]);
   r = await handle(req('/room/m-AAAAA/ws?id=abcd1234', { headers: { Origin: 'https://evil.example' } }), { ROOMS });
   assert.equal(r.status, 403);
-  r = await handle(req('/room/..%2Fx/ws?id=abcd1234'), { ROOMS });
+  r = await handle(req('/room/..%2Fx/ws?id=abcd1234', { headers: OWN.WS }), { ROOMS });
   assert.equal(r.status, 400);
-  r = await handle(req('/room/turn'), {});
+  r = await handle(req('/room/turn', { headers: OWN.GET }), {});
   assert.equal((await r.json()).turn, false);
   const fetchImpl = async (u, init) => { assert.match(u, /keys\/KEY\/credentials\/generate-ice-servers$/); assert.equal(init.headers.Authorization, 'Bearer TOK');
     return new Response(JSON.stringify({ iceServers: [{ urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.cloudflare.com:53'] }, { urls: ['turns:turn.cloudflare.com:443?transport=tcp', 'turn:turn.cloudflare.com:53?transport=udp'], username: 'u', credential: 'c' }] }), { status: 201 }); };
-  r = await handle(req('/room/turn'), { TURN_KEY_ID: 'KEY', TURN_KEY_API_TOKEN: 'TOK' }, fetchImpl);
+  r = await handle(req('/room/turn', { headers: OWN.GET }), { TURN_KEY_ID: 'KEY', TURN_KEY_API_TOKEN: 'TOK' }, fetchImpl);
   const j = await r.json();
   assert.equal(j.turn, true);
   assert.deepEqual(j.iceServers[1].urls, ['turns:turn.cloudflare.com:443?transport=tcp'], 'port 53 dropped, TURN over 443 kept');
+});
+
+/* TURN credentials and Durable Object time are billed to the site. The Origin check used to
+   run only when a request had one, so anything that left the header out (curl, a bot, a
+   server) got fresh TURN credentials and opened rooms (audit F3). Now a request must come
+   from the site's own page: an Origin of this site, or no Origin and Sec-Fetch-Site:
+   same-origin. A non-browser client can still forge both headers; this keeps the site's
+   rooms and TURN key from being used by another site or by a client that doesn't try. */
+test('pages function: TURN and rooms only for the site\'s own pages, not for a request with no Origin', async () => {
+  const req = (path, init) => new Request('https://sb.example' + path, init);
+  let minted = 0, opened = 0;
+  const fetchImpl = async () => { minted++; return new Response(JSON.stringify({ iceServers: [{ urls: ['turns:turn.cloudflare.com:443?transport=tcp'], username: 'u', credential: 'c' }] }), { status: 201 }); };
+  const ROOMS = { idFromName: (n) => n, get: () => ({ fetch: () => { opened++; return new Response('ok'); } }) };
+  const env = { TURN_KEY_ID: 'KEY', TURN_KEY_API_TOKEN: 'TOK', ROOMS };
+  const refused = [
+    ['no headers at all', {}],
+    ['another site', { Origin: 'https://evil.example' }],
+    ['another site, said by Sec-Fetch-Site', { 'Sec-Fetch-Site': 'cross-site' }],
+    ['a sibling subdomain', { 'Sec-Fetch-Site': 'same-site' }],
+    ['typed into the address bar', { 'Sec-Fetch-Site': 'none' }],
+    ['a sandboxed frame', { Origin: 'null' }],
+    ['this site over http', { Origin: 'http://sb.example' }],
+    ['own Origin, but the browser says cross-site', { Origin: 'https://sb.example', 'Sec-Fetch-Site': 'cross-site' }],
+  ];
+  for (const [what, headers] of refused) {
+    for (const [path, method] of [['/room/turn', 'GET'], ['/room/r1abcd/sse?id=bot1abcd', 'GET'], ['/room/r1abcd/ws?id=bot1abcd', 'GET'], ['/room/r1abcd/send?id=bot1abcd', 'POST']]) {
+      const r = await handle(req(path, { method, headers, body: method === 'POST' ? '[]' : undefined }), env, fetchImpl);
+      assert.equal(r.status, 403, `${what}: ${method} ${path}`);
+    }
+  }
+  assert.equal(minted, 0, 'no TURN credentials minted for any of them');
+  assert.equal(opened, 0, 'no room reached by any of them');
+  // the site's own page: an EventSource and fetch (no Origin), a WebSocket and a POST (Origin)
+  for (const [path, method, headers] of [['/room/turn', 'GET', OWN.GET], ['/room/r1abcd/sse?id=me1abcd', 'GET', OWN.GET],
+    ['/room/r1abcd/ws?id=me1abcd', 'GET', OWN.WS], ['/room/r1abcd/send?id=me1abcd', 'POST', { Origin: 'https://sb.example' }]]) {
+    const r = await handle(req(path, { method, headers, body: method === 'POST' ? '[]' : undefined }), env, fetchImpl);
+    assert.equal(r.status, 200, `own page: ${method} ${path}`);
+  }
+  assert.equal(minted, 1);
+  assert.equal(opened, 3);
+  // /room/health costs nothing and tells nothing secret: anyone may ask
+  assert.equal((await handle(req('/room/health'), env)).status, 200);
 });
 
 /* ---- the client, against rooms running in this process ----
