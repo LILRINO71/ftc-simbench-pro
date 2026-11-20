@@ -10,7 +10,6 @@
    page one at a time with a pause between them, on a copy of the sim, with a
    progress bar and Cancel; only the points target needs the worker.
    ============================================================ */
-const IN_PER_M=1/0.0254;
 const CALIB_KEY=name=>"ftcbench.calib."+(name||"robot");
 
 /* ---------- calibration ---------- */

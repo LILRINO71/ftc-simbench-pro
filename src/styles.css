@@ -345,7 +345,6 @@ input.mini{width:66px; text-align:right;}
 .load-btn:active{transform:scale(.98);}
 .load-btn.os{background:var(--accent-soft);}
 .load-btn.os svg{color:var(--accent-tx);}
-#mateUrl{width:100%; min-width:0; font:12px var(--mono); padding:7px 9px; border:1px solid var(--sep-2); border-radius:8px; background:var(--card-2); color:var(--label);}
 .joint-acts{display:flex; gap:6px; flex-wrap:wrap; margin:8px 0;}
 body.dragging .app::after{content:"Drop it anywhere"; position:fixed; inset:12px; border:2px dashed var(--accent); border-radius:20px;
   background:color-mix(in srgb, var(--bg) 70%, transparent); display:flex; align-items:center; justify-content:center;
@@ -379,7 +378,6 @@ kbd{display:inline-block; min-width:15px; padding:0 4px; border:1px solid var(--
 .ic-step > div > b{display:block; font-size:13px; font-weight:600; margin-bottom:2px;}
 .ic-step p{margin:0; color:var(--label-2); font-size:12px; line-height:1.5;}
 .ic-step p code{background:var(--fill-3); border-radius:4px; padding:0 4px; font-size:11px;}
-.ic-pic{display:block; width:100%; height:auto; margin:8px 0 0; border-radius:8px;}
 .ic-drop{margin-top:12px; border:1.5px dashed var(--label-4); border-radius:14px; padding:18px 16px; text-align:center; cursor:pointer; transition:border-color .15s, background .15s;}
 .ic-drop:hover,.ic-drop.armed{border-color:var(--accent); background:var(--accent-soft);}
 .ic-drop b{display:block; font-size:14px; font-weight:600;}
