@@ -60,9 +60,13 @@ most real TeleOps run on the bench's Java VM.
   with the logo and USB on one axis, and, when the host knows the Robot Controller's
   configuration (`robotConfig()`), for a `hardwareMap` name it lacks. An exception nothing
   catches in a thread the OpMode started ends the run, as it ends the Robot Controller app
-  (`error.thread`).
+  (`error.thread`). A crash in any thread stops every thread of the OpMode: nothing commands
+  the robot after it.
 - **What it doesn't model** of the FTC SDK is listed apart from third-party stubs:
   `JvProgram.unmodelled()` and `code.vm.unmodelled` (`{call, count, file, line, sdk}`).
+- **Recursion.** Recursion deeper than about 200 calls ends with a `StackOverflowError` here,
+  where a real robot allows thousands: a recursive flood fill over a 20 x 20 grid (up to 400
+  calls deep) fails on the bench and works on the robot. Write it with a loop and a queue.
 - **Limits.** Calls nest 200 deep (a robot takes thousands), then `StackOverflowError`; arrays
   past 2^24 cells, collections past 2^23 items and strings past 2^24 characters throw
   `OutOfMemoryError`; a quarter second of the page's time in one tick ends the tick. All can be
@@ -78,8 +82,14 @@ most real TeleOps run on the bench's Java VM.
   left: a pattern whose pieces fail slowly while the whole string matches at once
   (`(a+)+b` on thirty a's and a `b`).
 - **From the Autonomous to the TeleOp.** `new JvProgram(comp, host, {carry: auto.carry()})`
-  starts with the statics and `OpMode.blackboard` the auto left, for every class whose source
-  is the same (one Robot Controller session). `JvProgram.statics()` lists them as plain data.
+  starts with the statics and `OpMode.blackboard` the auto left (one Robot Controller
+  session). If any class both programs have changed its source, nothing is carried: new code
+  means a redeploy, and that restarts the app (`carried.dropped` says so, `carried.changed`
+  names the classes). A carried device is the new run's device of that name, wired to the
+  robot when the code first uses it; a name the robot's configuration lacks is `null`. The
+  wall clock (`System.nanoTime`, `currentTimeMillis`, `ElapsedTime`) goes on from where the
+  auto ended, so a match timer started at the auto's START reads its length at the TeleOp's;
+  `getRuntime()` and `time` start at 0. `JvProgram.statics()` lists the statics as plain data.
   The page and `tools/run-opmode.mjs` don't pass a carry yet.
 
 ## Road Runner 1.0 autos (`src/roadrunner.js`)
