@@ -23,8 +23,9 @@
                 (rig.gear): forward speed, and the encoder count per inch
      viscous    drivetrain drag in N per m/s (DYN_DEFAULTS.viscous): what takes
                 the speed down when the encoders already say the gearing is right
-     strafeEff  the share of the ideal sideways speed a mecanum base's rollers
-                deliver (DYN_DEFAULTS.strafeEff, see dynWheels): fitted to the
+     strafeEff  a mecanum base's strafe top speed over its forward top speed,
+                the rollers' effective angle (DYN_DEFAULTS.strafeEff, see
+                dynWheels): fitted to the
                 strafe speed measured with a tape, NOT the encoders, which count
                 the wheels' roll and so over-read a strafe on a real robot too.
                 A fit made before roller slip (when strafeEff was a force loss
@@ -46,7 +47,8 @@ const CAL_DT = 0.02;
 const CAL_BOUNDS = {
   gear: [0.25, 6], viscous: [1.2, 800], strafeEff: [0.05, 1], yawViscous: [0.08, 120]
 };
-/* what strafeEff means in a fit: 2 is the share of sideways speed (dynWheels' velocity row) */
+/* what strafeEff means in a fit: 2 is the strafe top speed over the forward one (the rollers'
+   effective angle, dynWheels' one row per wheel) */
 const CAL_STRAFE_MODEL = 2;
 const CAL_IN = 0.0254;
 

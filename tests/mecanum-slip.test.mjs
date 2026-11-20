@@ -1,8 +1,11 @@
-// The mecanum strafe loss is kinematic: rollers scrub and slip, so a real base strafes at about
-// 0.75-0.9 of its forward speed and its wheel encoders over-read a strafe (the reason Road Runner
-// has lateralInPerTick and Pedro a lateral multiplier). strafeEff (src/dynamics.js dynWheels) is
-// that share; it must slow the strafe at steady speed, not only its spin-up, leave forward driving
-// alone, and calibration (src/calibrate.js) must fit it from a measured strafe speed.
+// The mecanum strafe loss: real rollers scrub and slip, so a real base strafes at about 0.75-0.9 of
+// its forward speed and its wheel encoders over-read a strafe (the reason Road Runner has
+// lateralInPerTick and Pedro a lateral multiplier). The sim models the rollers as acting at an
+// EFFECTIVE angle (src/dynamics.js dynWheels): one row per wheel, [1, -k/s, -(y + k x/s)], for its
+// speed and for its force alike, s = strafeEff. That is an ordinary constraint, so it can neither
+// make nor lose energy; a strafe tops out at s of forward speed, the encoders over-read it by 1/s,
+// the force along the effective roller axis never passes mu N, and calibration (src/calibrate.js)
+// fits s from a measured strafe speed.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -21,6 +24,15 @@ function rig(extra = {}, withIk = false) {
   }, extra);
   if (withIk) R.drive = Object.assign({}, R.drive, { ik: E.ikMatrix('mecanum', wheels) });
   return R;
+}
+/* The reviewer's robot (12 kg, 96 mm wheels), for the ease-off and the P controller. */
+function rig12(extra = {}) {
+  const hx = 0.168, hy = 0.18, r = 0.048;
+  const wheels = [{ x: hx, y: hy, r, roller: 1 }, { x: hx, y: -hy, r, roller: -1 }, { x: -hx, y: hy, r, roller: -1 }, { x: -hx, y: -hy, r, roller: 1 }];
+  return Object.assign({
+    props: { kg: 12, com: { x: 0, y: 0, z: 0.08 }, comHeight: 0.08, Izz: 12 * (0.336 ** 2 + 0.36 ** 2) / 12 },
+    drive: { kind: 'mecanum', wheels }, motors: wheels.map(() => ({ stallNm: 2.38, rpm: 312 })), gear: 1,
+  }, extra);
 }
 const FWD = [1, 1, 1, 1], LEFT = [-1, 1, 1, -1];
 function drive(R, cmd, T) {
@@ -47,21 +59,37 @@ test('mecanum: by default the robot strafes at 0.75-0.9 of its forward speed, an
   }
 });
 
-test('mecanum: strafeEff sets the strafe top speed, and forward driving does not see it at all', () => {
-  const ideal = drive(rig({ strafeEff: 1 }), FWD, 2);
-  for (const s of [0.6, 0.8, 0.95]) {
-    const fwd = drive(rig({ strafeEff: s }), FWD, 2);
-    // the same to the solver's own convergence (a few 1e-8 m/s)
-    for (let i = 0; i < fwd.length; i++) {
-      assert.ok(Math.abs(fwd[i].vx - ideal[i].vx) < 1e-6, `forward at ${fwd[i].t} s: ${fwd[i].vx} vs ${ideal[i].vx}`);
-      assert.ok(Math.abs(fwd[i].st.wheelOmega[0] - ideal[i].st.wheelOmega[0]) < 1e-3, `forward wheel speed ${fwd[i].st.wheelOmega[0]} vs ${ideal[i].st.wheelOmega[0]}`);
+test('mecanum: one row per wheel, [1, -k/s, -(y + k x/s)], and the force a wheel puts on the chassis is that row times one number', () => {
+  for (const withIk of [false, true]) for (const s of [0.3, 0.6, 0.85, 1]) {
+    const R = rig({ strafeEff: s }, withIk);
+    const rows = E.Dyn.rimRows(R);
+    R.drive.wheels.forEach((w, i) => {
+      const k = w.roller, want = [1, -k / s, -(w.y + k * w.x / s)];
+      for (let j = 0; j < 3; j++) assert.ok(Math.abs(rows[i][j] - want[j]) < 1e-12, `s = ${s}, wheel ${i}: row ${rows[i]} vs ${want}`);
+    });
+    // strafing, turning, a diagonal, easing off, braking, coasting: every step, the chassis wrench is
+    // the sum of each wheel's force times the same row its speed is measured with
+    const plan = [[LEFT, 40], [[-1, 1, -1, 1], 20], [[1, 0, 0, 1], 20], [LEFT.map(c => c / 2), 20], [[0, 0, 0, 0], 20]];
+    let st = E.Dyn.reset(R);
+    for (const [cmd, n] of plan) for (let k = 0; k < n; k++) {
+      st = E.Dyn.step(st, cmd, R, 0.02, k % 2 ? [true, true, true, true] : null);
+      const sum = [0, 0, 0];
+      st.force.forEach((F, i) => { for (let j = 0; j < 3; j++) sum[j] += F * rows[i][j]; });
+      const got = [st.wrench.fx, st.wrench.fy, st.wrench.tz];
+      for (let j = 0; j < 3; j++) assert.ok(Math.abs(got[j] - sum[j]) <= 1e-9 * (1 + Math.abs(sum[j])), `s = ${s}: wrench ${got} vs rows x forces ${sum}`);
+      // and each wheel's slip is its rim against the ground speed through that same row
+      st.wheelOmega.forEach((o, i) => {
+        const r = rows[i], vn = r[0] * st.v.x + r[1] * st.v.y + r[2] * st.omega, w = R.drive.wheels[i];
+        const want = Math.max(-10, Math.min(10, (o * w.r - vn) / Math.max(Math.abs(vn), 0.05)));
+        assert.ok(Math.abs(st.slip[i] - want) < 1e-9, `s = ${s}, wheel ${i}: slip ${st.slip[i]} vs ${want}`);
+      });
+      assert.equal(st.rimShare, undefined, 'there is no second row to choose between');
     }
-    const st = last(drive(rig({ strafeEff: s }), LEFT, 3)).vy, full = last(drive(rig({ strafeEff: 1 }), LEFT, 3)).vy;
-    assert.ok(Math.abs(st / full - s) < 0.03, `strafeEff ${s}: strafe ${(st / full).toFixed(3)} of the ideal`);
   }
 });
 
-/* Kinetic energy of the chassis and the four wheels, J. */
+/* Kinetic energy of the chassis and the four wheels, J. The wheel inertia is the whole turning
+   inertia the dynamics carries per wheel (wheel, gearbox and rotor reflected), DYN_DEFAULTS.wheelInertia. */
 const J_WHEEL = 4.6e-4;
 function energy(R, st) {
   let e = 0.5 * R.props.kg * (st.v.x ** 2 + st.v.y ** 2) + 0.5 * R.props.Izz * st.omega ** 2;
@@ -79,84 +107,120 @@ function coast(R, st, mode, steps) {
   }
   return { st, es };
 }
-const STARTS = [['sliding sideways at 1 m/s', { x: 0, y: 1 }, 0], ['spinning at 3 rad/s', { x: 0, y: 0 }, 3], ['sliding and spinning', { x: 0.5, y: 1 }, 2]];
+const STARTS = [['sliding sideways at 1 m/s', { x: 0, y: 1 }, 0], ['sliding forward at 1.5 m/s', { x: 1.5, y: 0 }, 0], ['sliding along a diagonal', { x: 1, y: -1 }, 0],
+  ['sliding and spinning', { x: 0.5, y: 1 }, 2]];
 
 test('mecanum: with the motors off and no rolling or viscous loss, the rollers never add energy on any step', () => {
-  for (const mode of ['FLOAT', 'BRAKE']) for (const [label, v, w] of STARTS) for (const s of SHARES) {
+  for (const mode of ['FLOAT', 'BRAKE']) for (const [label, v, w] of STARTS) for (const s of SHARES) for (const wheels of ['still', 'rolling with the ground']) {
     const R = rig(Object.assign({ strafeEff: s }, NO_LOSS));
     const st = E.Dyn.reset(R); st.v = v; st.omega = w;
+    if (wheels !== 'still') {
+      const rows = E.Dyn.rimRows(R);
+      st.wheelOmega = rows.map((r, i) => (r[0] * v.x + r[1] * v.y + r[2] * w) / R.drive.wheels[i].r);
+    }
     const { es } = coast(R, st, mode, 300);
     for (let k = 1; k < es.length; k++)
-      assert.ok(es[k] <= es[k - 1] + 1e-9, `${mode}, ${label}, s = ${s}: ${es[k - 1].toFixed(4)} J -> ${es[k].toFixed(4)} J at step ${k}`);
-  }
-});
-
-test('mecanum: with the motors off, no roller share leaves more energy at the end of the stop than ideal rollers', () => {
-  for (const mode of ['FLOAT', 'BRAKE']) for (const [label, v, w] of STARTS) {
-    const left = SHARES.map(s => {
-      const R = rig(Object.assign({ strafeEff: s }, NO_LOSS));
-      const st = E.Dyn.reset(R); st.v = v; st.omega = w;
-      const { es } = coast(R, st, mode, 300);
-      return es[es.length - 1];
-    });
-    const ideal = left[SHARES.indexOf(1)];
-    SHARES.forEach((s, i) => assert.ok(left[i] <= ideal + 1e-6, `${mode}, ${label}: s = ${s} leaves ${left[i].toFixed(4)} J after 6 s, ideal rollers ${ideal.toFixed(4)} J`));
-  }
-});
-
-test('mecanum: a BRAKE stop from a full strafe is no shorter with slipping rollers than with ideal ones', () => {
-  // the same moment for every share: the ideal-roller robot at its full strafe (chassis and wheels)
-  const R1 = rig({ strafeEff: 1 });
-  let full = E.Dyn.reset(R1);
-  for (let k = 0; k < 150; k++) full = E.Dyn.step(full, LEFT, R1, 0.02);
-  const stop = (s) => {
-    const R = rig({ strafeEff: s });
-    let st = { v: { ...full.v }, omega: full.omega, wheelOmega: full.wheelOmega.slice() }, y = 0;
-    for (let k = 0; k < 300; k++) { st = E.Dyn.step(st, [0, 0, 0, 0], R, 0.02); y += st.v.y * 0.02; }
-    assert.ok(Math.abs(st.v.y) < 1e-6, `s = ${s} has stopped`);
-    return y;
-  };
-  const ideal = stop(1);
-  for (const s of [0.3, 0.6, 0.85]) {
-    const d = stop(s);
-    assert.ok(d >= ideal - 1e-9, `s = ${s} stops in ${d.toFixed(4)} m, ideal rollers in ${ideal.toFixed(4)} m`);
+      assert.ok(es[k] <= es[k - 1] + 1e-9, `${mode}, ${label}, wheels ${wheels}, s = ${s}: ${es[k - 1].toFixed(4)} J -> ${es[k].toFixed(4)} J at step ${k}`);
   }
 });
 
 test('mecanum: a powered strafe tops out at s of forward speed, and the encoders over-read it by 1/s', () => {
-  const ratios = (s) => {
-    const R = rig({ strafeEff: s });
-    const vf = last(drive(R, FWD, 3)).vx, sl = last(drive(R, LEFT, 3));
-    return { speed: sl.vy / vf, over: sl.enc / sl.y };
-  };
-  const ideal = ratios(1);                                       // the tyres' own slip (about 2%) is in both
-  for (const s of [0.6, 0.85]) {
-    const r = ratios(s);
-    assert.ok(Math.abs(r.speed - s) < 0.01, `s = ${s}: strafe ${r.speed.toFixed(4)} of forward`);
-    assert.ok(Math.abs(r.over / ideal.over * s - 1) < 0.01, `s = ${s}: encoders read ${(r.over / ideal.over).toFixed(4)} x the strafe, 1/s = ${(1 / s).toFixed(4)}`);
+  // with the default rolling and viscous drag (which load a slow strafe's motors a little less than
+  // forward's, so a low share strafes a hair faster than s), and with them off, where it is exact
+  for (const [losses, shares] of [[{}, [0.85, 0.95, 1]], [NO_LOSS, [0.3, 0.6, 0.85, 1]]]) for (const s of shares) {
+    const R = rig(Object.assign({ strafeEff: s }, losses));
+    const vf = last(drive(R, FWD, 3)).vx, sl = last(drive(R, LEFT, 4));
+    assert.ok(Math.abs(sl.vy / vf / s - 1) < 0.01, `s = ${s}${losses === NO_LOSS ? ', no drag' : ''}: strafe ${(sl.vy / vf).toFixed(4)} of forward`);
+    const over = sl.enc / sl.y;
+    assert.ok(Math.abs(over * s - 1) < 0.02, `s = ${s}: encoders read ${over.toFixed(4)} x the strafe, 1/s = ${(1 / s).toFixed(4)}`);
   }
 });
 
-test('mecanum: where power turns round in the rollers nothing chatters: a strafe cut from full to half power slows smoothly to the half-power speed', () => {
-  const R = rig(), HALF = LEFT.map(c => c / 2);
-  const fromRest = last(drive(R, HALF, 8)).vy;
+/* Full power for 2 s, then `lo` of it: how long until the speed is within 2% of where it settles,
+   and on how many steps a loaded wheel of a robot still moving carries no force at all. */
+function easeOff(R, dir, lo, axis) {
   let st = E.Dyn.reset(R);
-  const vs = [];
-  for (let k = 0; k < 550; k++) { st = E.Dyn.step(st, k < 150 ? LEFT : HALF, R, 0.02); vs.push(st.v.y); }
-  for (let k = 151; k < vs.length; k++) assert.ok(vs[k] <= vs[k - 1] + 1e-9, `the strafe sped up again at ${((k + 1) * 0.02).toFixed(2)} s: ${vs[k - 1]} -> ${vs[k]}`);
-  assert.ok(Math.abs(vs[vs.length - 1] - fromRest) < 1e-4, `settles at ${vs[vs.length - 1].toFixed(4)} m/s, a half-power strafe from rest at ${fromRest.toFixed(4)}`);
+  for (let k = 0; k < 100; k++) st = E.Dyn.step(st, dir, R, 0.02);
+  const v0 = st.v[axis], tr = [];
+  let idle = 0;
+  for (let k = 0; k < 300; k++) {
+    st = E.Dyn.step(st, dir.map(c => c * lo), R, 0.02);
+    tr.push(st.v[axis]);
+    if (Math.hypot(st.v.x, st.v.y) > 1e-3) st.force.forEach((F, i) => { if (st.loads[i] > 0 && F === 0) idle++; });
+  }
+  const vEnd = tr[tr.length - 1];
+  return { t: (tr.findIndex(v => Math.abs(v - vEnd) <= 0.02 * Math.abs(v0 - vEnd)) + 1) * 0.02, idle, vEnd };
+}
+
+test('mecanum: a strafe eased from full to half power settles about as fast as forward, every wheel gripping all the way', () => {
+  for (const s of [0.6, 0.85, 1]) for (const lo of [0.5, 0.8]) {
+    const R = rig12({ strafeEff: s });
+    const f = easeOff(R, FWD, lo, 'x'), st = easeOff(R, LEFT, lo, 'y');
+    assert.ok(st.t <= 1.3 * f.t, `s = ${s}, full -> ${lo}: strafe settles in ${st.t.toFixed(2)} s, forward in ${f.t.toFixed(2)} s`);
+    assert.equal(st.idle, 0, `s = ${s}, full -> ${lo}: ${st.idle} wheel-steps with no force while the robot slid`);
+  }
 });
 
-test('mecanum: forward driving is the same at every roller share, and other bases never see it', () => {
-  // the converged solve (32 sweeps) is the same to rounding; the default 6 sweeps to their own residual
-  for (const s of [0.3, 0.6, 0.85]) for (const sweeps of [32, undefined]) {
+test('mecanum: a P-controlled strafe to 1 m overshoots no more than 1.3 times the same controller driving forward', () => {
+  const go = (R, dir, axis, kP) => {
+    let st = E.Dyn.reset(R), p = 0, peak = 0;
+    for (let k = 0; k < 300; k++) {
+      const u = Math.max(-1, Math.min(1, kP * (1 - p)));
+      st = E.Dyn.step(st, dir.map(c => c * u), R, 0.02);
+      p += st.v[axis] * 0.02; peak = Math.max(peak, p);
+    }
+    return { over: Math.max(0, peak - 1), end: p };
+  };
+  for (const kP of [1.5, 3, 6]) for (const s of [0.6, 0.85, 1]) {
+    const R = rig12({ strafeEff: s });
+    const f = go(R, FWD, 'x', kP), st = go(R, LEFT, 'y', kP);
+    assert.ok(st.over <= 1.3 * f.over + 1e-4, `kP ${kP}, s = ${s}: strafe overshoots ${(st.over * 1000).toFixed(1)} mm, forward ${(f.over * 1000).toFixed(1)} mm`);
+    assert.ok(Math.abs(st.end - 1) < 0.02, `kP ${kP}, s = ${s}: strafe ends at ${st.end.toFixed(3)} m`);
+  }
+});
+
+test('mecanum: no launch puts more than mu N along the effective roller axis, and a full-power launch reaches it', () => {
+  for (const s of [0.3, 0.6, 0.85, 1]) for (const [label, cmd] of [['strafe', LEFT], ['forward', FWD], ['turn', [-1, 1, -1, 1]], ['diagonal', [1, 0, 0, 1]]]) {
+    const R = rig({ strafeEff: s }), mu = E.Dyn.defaults.mu;
+    const rows = E.Dyn.rimRows(R);
+    let st = E.Dyn.reset(R), peak = 0;
+    for (let k = 0; k < 50; k++) {
+      st = E.Dyn.step(st, cmd, R, 0.02);
+      st.force.forEach((F, i) => {
+        const ground = Math.abs(F) * Math.hypot(rows[i][0], rows[i][1]);
+        assert.ok(ground <= mu * st.loads[i] * (1 + 1e-9), `${label}, s = ${s}, step ${k}, wheel ${i}: ${ground.toFixed(3)} N along the roller, mu N = ${(mu * st.loads[i]).toFixed(3)}`);
+        peak = Math.max(peak, ground / (mu * st.loads[i]));
+      });
+    }
+    if (label === 'strafe' || label === 'forward') assert.ok(peak > 0.999, `${label}, s = ${s}: the launch uses ${peak.toFixed(3)} of the grip`);
+  }
+});
+
+test('mecanum: forward driving keeps its speed at every roller share, and other bases never see it', () => {
+  // inside the grip a forward launch is the same at every share, s = 1 being the ideal rollers the
+  // sim had before the strafe loss: to the solver's convergence at the default 6 sweeps, to rounding
+  // at 32 (the rows' sideways parts cancel between the wheels)
+  for (const [s, sweeps] of [[0.3, 32], [0.6, 32], [0.85, 32], [0.85, undefined], [0.95, undefined]]) {
     const tol = sweeps ? 1e-12 : 1e-6;
-    const a = drive(rig({ strafeEff: s, sweeps }), FWD, 2), b = drive(rig({ strafeEff: 1, sweeps }), FWD, 2);
+    const c = 0.2, cmd = [c, c, c, c];
+    const R = rig({ strafeEff: s, sweeps });
+    const a = drive(R, cmd, 2), b = drive(rig({ strafeEff: 1, sweeps }), cmd, 2);
+    const rows = E.Dyn.rimRows(R);
     for (let i = 0; i < a.length; i++) {
       assert.ok(Math.abs(a[i].vx - b[i].vx) <= tol && Math.abs(a[i].vy - b[i].vy) <= tol, `s = ${s}, sweeps ${sweeps || 6}: ${a[i].vx} vs ${b[i].vx} at ${a[i].t} s`);
       assert.ok(Math.abs(a[i].st.omega - b[i].st.omega) <= tol, `s = ${s}: turning ${a[i].st.omega}`);
+      a[i].st.force.forEach((F, j) => assert.ok(Math.abs(F) * Math.hypot(rows[j][0], rows[j][1]) < E.Dyn.defaults.mu * a[i].st.loads[j], 'inside the grip'));
     }
   }
+  // at full power the top speed is the same at every share
+  const top = last(drive(rig({ strafeEff: 1 }), FWD, 3)).vx;
+  for (const s of [0.3, 0.6, 0.85]) {
+    const v = last(drive(rig({ strafeEff: s }), FWD, 3)).vx;
+    assert.ok(Math.abs(v - top) < 1e-6, `s = ${s}: forward top speed ${v} vs ${top}`);
+  }
+  // at s = 1 the rows are the ideal mecanum rows the kinematics uses
+  const R1 = rig({ strafeEff: 1 }), ik = E.ikMatrix('mecanum', R1.drive.wheels);
+  assert.deepEqual(E.Dyn.rimRows(R1), ik);
   const hx = 0.168, hy = 0.18, r = 0.052, a45 = Math.PI / 4;
   const bases = {
     tank: [{ x: hx, y: hy, r }, { x: hx, y: -hy, r }, { x: -hx, y: hy, r }, { x: -hx, y: -hy, r }],
@@ -172,7 +236,17 @@ test('mecanum: forward driving is the same at every roller share, and other base
   }
 });
 
-test('sim: a wall that stops a full-speed strafe stops the wheels with it, through the rows the dynamics turned them with', () => {
+test('mecanum: a strafe cut from full to half power slows smoothly to the half-power speed', () => {
+  const R = rig(), HALF = LEFT.map(c => c / 2);
+  const fromRest = last(drive(R, HALF, 8)).vy;
+  let st = E.Dyn.reset(R);
+  const vs = [];
+  for (let k = 0; k < 550; k++) { st = E.Dyn.step(st, k < 150 ? LEFT : HALF, R, 0.02); vs.push(st.v.y); }
+  for (let k = 151; k < vs.length; k++) assert.ok(vs[k] <= vs[k - 1] + 1e-9, `the strafe sped up again at ${((k + 1) * 0.02).toFixed(2)} s: ${vs[k - 1]} -> ${vs[k]}`);
+  assert.ok(Math.abs(vs[vs.length - 1] - fromRest) < 1e-4, `settles at ${vs[vs.length - 1].toFixed(4)} m/s, a half-power strafe from rest at ${fromRest.toFixed(4)}`);
+});
+
+test('sim: a wall that stops a full-speed strafe stops the wheels with it, through the rows the dynamics turns them with', () => {
   for (const s of [0.6, 0.85, 1]) {
     const R = rig({ strafeEff: s });
     let st = E.Dyn.reset(R);

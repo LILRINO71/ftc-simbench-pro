@@ -62,7 +62,7 @@ was designed in, not the build order.
 
 | File | What it does |
 |---|---|
-| `dynamics.js` | The chassis as a rigid body on N contact patches: motor torque curves, load transfer, slip-limited friction, mecanum roller slip (`strafeEff`), a FLOAT wheel's gearmotor friction. |
+| `dynamics.js` | The chassis as a rigid body on N contact patches: motor torque curves, load transfer, slip-limited friction, mecanum rollers at an effective angle (`strafeEff`: one row per wheel for speed and force), a FLOAT wheel's gearmotor friction. |
 | `joltmech.js` | Solved mechanisms (Physics → Mechanisms → solved): the robot's joints in Jolt Physics (loaded on demand): CAD masses under gravity, motor curves as torque caps, reflected rotor inertia, limits, gear and rack constraints, followers, loops pinned closed. Posed (the default) needs none of it. |
 | `field.js` | The BIOBUZZ field: walls, HIVEs, FLOWERs, zones, start poses, collisions. |
 | `shots.js` | The running OpMode's shooter on the field, through the vendored shot engine. |
