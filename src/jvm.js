@@ -1893,16 +1893,58 @@ function jvOpaqueResult(vm,name,cls,args){
   void args;
   return vm.opaqueVal(cls+"."+name+"()");
 }
-/* A regular expression the page can run. A group that ends in a repeat, itself repeated
-   ((a+)+, (x*y?)*, (\w{2,})+), backtracks exponentially on a string that almost matches, in
-   Java as here, and a JS regex can't be stopped once it starts (30 a's took 47 s). Past a
-   short string that is a hang. */
+/* A regular expression the page can run, and the operation on it: op(re, string) is what the
+   code asked for (a match, a replace, a split). A group that ends in a repeat, itself repeated
+   ((a+)+, (x*y?)*, (\w{2,})+), can backtrack exponentially on a string that almost matches, in
+   Java as here, and a JS regex can't be stopped once it starts (30 a's took 47 s). Most such
+   patterns are harmless ((\s*,\s*)+ in a split), so the shape is only a reason to look: on a
+   string longer than JV_RE_SHORT the same operation is timed on growing pieces of it (its first
+   n characters, and its first ones with its last few kept, since a failure at the very end is
+   what backtracks). Only when the time keeps multiplying as the piece grows (two growths in a
+   row of at least 1.5x, both pieces over JV_RE_FLOOR_MS so the timer's noise can't do it) and
+   the growth projected to the whole string is over JV_RE_HANG_MS is the run stopped as a hang.
+   Otherwise the operation runs on the whole string and returns Java's result. dflt: the result
+   when the pattern isn't one JS can read. */
 const JV_NESTED_REPEAT=/\((?:[^()\\]|\\.)*(?:[+*?]|\{\d*,\d*\})\)(?:[+*]|\{\d*,\d*\})/;
-function jvRegex(vm,src,flags,input){
-  let re; try{ re=new RegExp(String(src),flags); }catch(e){ return null; }
-  if(String(input).length>24&&JV_NESTED_REPEAT.test(String(src))){
-    const e=new Error("a regular expression with a repeat inside a repeat ("+src+") on a "+String(input).length+"-character string: it can backtrack for minutes, and on the robot it would stall the loop"); e.jvHang=true; throw e; }
-  return re;
+const JV_RE_SHORT=16, JV_RE_FLOOR_MS=2, JV_RE_HANG_MS=2000, JV_RE_PROBE_MS=1000;
+const jvMs=typeof performance!=="undefined"&&performance&&typeof performance.now==="function"?()=>performance.now():()=>Date.now();
+function jvRegex(vm,src,flags,input,op,dflt){
+  let re; try{ re=new RegExp(String(src),flags); }catch(e){ return dflt; }
+  const s=String(input);
+  if(s.length>JV_RE_SHORT&&JV_NESTED_REPEAT.test(String(src))){
+    const v=jvRegexProbe(re,s,op);
+    if(v){
+      const sec=v.proj/1000, how=sec>=3600?"hours or more":sec>=120?Math.round(sec/60)+" minutes":Math.round(sec)+" s";
+      const e=new Error("a regular expression with a repeat inside a repeat ("+src+") on a "+s.length+"-character string: its time multiplied by "+v.f.toFixed(1)+
+        " with each character of it, so the whole string would take about "+how+"; on the robot it would stall the loop");
+      e.jvHang=true; throw e;
+    }
+  }
+  return op(re,s);
+}
+/* Time op on growing pieces of s: {f: the growth a character, proj: ms for the whole string}
+   when it backtracks exponentially, else null */
+function jvRegexProbe(re,s,op){
+  const len=s.length;
+  // one piece's time: the slower of its two forms, each the quicker of two runs while that is
+  // cheap (a pause of the page's own, a collection, a regex compiled on its first use, can only
+  // add time)
+  const time=x=>{ let t0=jvMs(); op(re,x); let t=jvMs()-t0; if(t<20){ t0=jvMs(); op(re,x); t=Math.min(t,jvMs()-t0); } return t; };
+  let prev=null, grew=0, flat=0, spent=0, f=1, proj=0;
+  for(let n=8;n<len;n+=Math.max(prev?2:1,n>>3)){
+    const k=Math.min(8,n>>1);
+    const t=Math.max(time(s.slice(0,n)),time(s.slice(0,n-k)+s.slice(len-k)));
+    spent+=t;
+    if(t<JV_RE_FLOOR_MS){ prev=null; grew=0; continue; }
+    if(prev){
+      f=Math.pow(t/prev.t,1/(n-prev.n)); proj=t*Math.pow(f,len-n);
+      if(t>=1.5*prev.t&&proj>JV_RE_HANG_MS){ flat=0; if(++grew>=2) return {f,proj}; }
+      else { grew=0; if(++flat>=2) return null; }
+    }
+    prev={n,t};
+    if(spent>JV_RE_PROBE_MS) return grew?{f,proj}:null;
+  }
+  return null;
 }
 /* Java's String.split(regex, limit), not JS's: a group's captures are not pieces, a zero-width
    match at the start gives no empty first piece, limit > 0 caps the pieces (the last keeps the
@@ -1941,13 +1983,13 @@ function jvStringMethod(vm,s,name,a){
     case "toLowerCase": return s.toLowerCase();
     case "trim": case "strip": return s.trim();
     case "replace": return s.split(typeof a[0]==="number"?String.fromCharCode(a[0]):String(a[0])).join(typeof a[1]==="number"?String.fromCharCode(a[1]):String(a[1]));
-    case "replaceAll": { const re=jvRegex(vm,a[0],"g",s); return re?s.replace(re,a[1]):s; }
-    case "split": { const re=jvRegex(vm,a[0],"g",s); return re?jvSplit(re,s,a.length>1?Math.trunc(jvNum(a[1])):0):[s]; }
+    case "replaceAll": return jvRegex(vm,a[0],"g",s,(re,x)=>x.replace(re,a[1]),s);
+    case "split": { const lim=a.length>1?Math.trunc(jvNum(a[1])):0; return jvRegex(vm,a[0],"g",s,(re,x)=>jvSplit(re,x,lim),[s]); }
     case "hashCode": { let h=0; for(let k=0;k<s.length;k++) h=(h*31+s.charCodeAt(k))|0; return h; }
     case "toString": case "intern": return s;
     case "compareTo": return s<a[0]?-1:s>a[0]?1:0;
     case "toCharArray": return s.split("").map(ch=>ch.charCodeAt(0));
-    case "matches": { const re=jvRegex(vm,"^(?:"+a[0]+")$","",s); return re?re.test(s):false; }
+    case "matches": return jvRegex(vm,"^(?:"+a[0]+")$","",s,(re,x)=>re.test(x),false);
     case "concat": return s+a[0];
     case "repeat": jvRoom(vm,0,s.length*Math.max(0,a[0]|0),JV_MAX_CHARS,"a String"); return s.repeat(Math.max(0,a[0]|0));
     case "format": case "formatted": return jvFormat(s,a);

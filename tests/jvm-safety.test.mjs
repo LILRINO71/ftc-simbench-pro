@@ -72,6 +72,27 @@ test('time: recursion with no loop and slow loop passes still let the world move
   assert.deepEqual(run('say("a1,b2,c3,d4,e5,f6,g7,h8,i9,j10".matches("([a-z]\\\\d+,)*[a-z]\\\\d+"));').prints, ['true']);
 });
 
+test('regex: a repeat inside a repeat is a reason to measure, not a verdict', () => {
+  // harmless on these strings (Java finishes at once): they used to stop the run as a Hang
+  const ok = run(`String line = "pose: 12.5 , 30.25 , 90.0 , 1 , 2";
+    String[] p = line.split("(\\\\s*,\\\\s*)+"); say(p.length + " " + p[4]);
+    say("Red Alliance Left Start Pos".matches("(\\\\w+\\\\s?)+"));
+    say("heading 123 deg, x 456 in, y 789 in".replaceAll("([0-9]{1,3})+", "#"));`);
+  assert.equal(ok.error, null, JSON.stringify(ok.error));
+  assert.deepEqual(ok.prints, ['5 2', 'true', 'heading # deg, x # in, y # in']);
+  // a short string runs whatever the pattern
+  assert.deepEqual(run('say("aaaaaaaaaaaa!".matches("(a+)+b"));').prints, ['false']);
+  // exponential on this string: stopped as the hang it is, long before it would end
+  for (const pat of ['(a+)+b', '(a+)+']) {
+    const t0 = Date.now();
+    const h = run(`say("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!".matches("${pat}"));`);
+    const ms = Date.now() - t0;
+    assert.equal(h.error && h.error.cls, 'Hang', pat);
+    assert.match(h.error.msg, /multiplied by [\d.]+ with each character/);
+    assert.ok(ms < 1000, pat + ': ' + ms + ' ms');
+  }
+});
+
 test('no way into the interpreter: Object.prototype names are not statics, a lambda has no fields', () => {
   const r = run(`Object x = Math.constructor(); say("" + x);
     Math.__defineGetter__("sqrt", null); say(Math.sqrt(16.0));

@@ -65,9 +65,18 @@ most real TeleOps run on the bench's Java VM.
   `JvProgram.unmodelled()` and `code.vm.unmodelled` (`{call, count, file, line, sdk}`).
 - **Limits.** Calls nest 200 deep (a robot takes thousands), then `StackOverflowError`; arrays
   past 2^24 cells, collections past 2^23 items and strings past 2^24 characters throw
-  `OutOfMemoryError`; a regular expression with a repeat inside a repeat on a long string stops
-  as a `Hang`; a quarter second of the page's time in one tick ends the tick. All can be caught
-  as in Java except the hang.
+  `OutOfMemoryError`; a quarter second of the page's time in one tick ends the tick. All can be
+  caught as in Java except the hang below.
+- **Regular expressions that backtrack.** A JS regex can't be stopped once it starts, so a
+  pattern with a repeat inside a repeat (`(a+)+`, `(\\s*,\\s*)+`) on a string over 16
+  characters is measured before it runs: `matches`, `split` or `replaceAll` is timed on growing
+  pieces of the string (its first characters, and its first ones with its last eight kept).
+  It stops the run as a `Hang` only when that time grows at least 1.5 times from one piece to
+  the next twice in a row, both pieces taking at least 2 ms, and the growth carried on to the
+  whole string comes to over 2 s (`(a+)+b` on thirty a's and a `!` stops in a fraction of a
+  second). Anything else runs on the whole string and gives Java's result. One false hang is
+  left: a pattern whose pieces fail slowly while the whole string matches at once
+  (`(a+)+b` on thirty a's and a `b`).
 - **From the Autonomous to the TeleOp.** `new JvProgram(comp, host, {carry: auto.carry()})`
   starts with the statics and `OpMode.blackboard` the auto left, for every class whose source
   is the same (one Robot Controller session). `JvProgram.statics()` lists them as plain data.
