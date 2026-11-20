@@ -464,12 +464,12 @@
       <!-- calibration and Monte Carlo (src/calibrate.js, src/montecarlo.js, src/mcui.js) -->
       <div class="sec card" data-sec="calib">
         <div class="sec-head"><h3>Calibrate to your robot</h3><span class="pill" id="calPill">not fitted</span></div>
-        <p class="hint">Run the real robot at full power for 2 seconds from a standstill and enter what you measured. Leave a box empty to skip it. Weigh it with its battery on.</p>
+        <p class="hint">Run the real robot at full power for 2 seconds from a standstill and enter what you measured. Leave a box empty to skip it. Weigh it with its battery on. Measure the strafe with a tape measure, not the encoders: mecanum rollers slip sideways, so the encoders over-read a strafe.</p>
         <div class="form2">
           <span>Units</span>
           <div class="seg" id="calUnit" title="Speeds in inches or metres per second"><button data-u="in">in/s</button><button data-u="m">m/s</button></div>
           <label for="calFwd">Forward speed</label><div><input class="mini" id="calFwd" type="number" min="0" step="any"> <span class="dim" data-calunit>in/s</span></div>
-          <label for="calStrafe">Strafe speed</label><div><input class="mini" id="calStrafe" type="number" min="0" step="any"> <span class="dim" data-calunit>in/s</span></div>
+          <label for="calStrafe">Strafe speed</label><div><input class="mini" id="calStrafe" type="number" min="0" step="any"> <span class="dim" data-calunit>in/s</span> <span class="dim">by tape measure</span></div>
           <label for="calTurn">Turn rate</label><div><input class="mini" id="calTurn" type="number" min="0" step="any"> <span class="dim">deg/s</span></div>
           <label for="calMass">Mass</label><div><input class="mini" id="calMass" type="number" min="0" step="any"> <span class="dim">kg</span></div>
           <label for="calTicks">Encoder ticks</label><div><input class="mini" id="calTicks" type="number" min="0" step="any"> <span class="dim">per inch (optional)</span></div>

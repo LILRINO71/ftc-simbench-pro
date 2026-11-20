@@ -60,7 +60,9 @@ const CalUI={
     if(box) box.checked=!c||c.on!==false;
     if(!c){ pill.textContent="not fitted"; pill.className="pill"; setHTML(res,""); setHTML($("#calNotes"),""); $("#calStatus").textContent=""; return; }
     this.fill(c.measured||{});
-    pill.textContent=c.on===false?"fitted, off":(c.ok?"fitted":"partly fitted"); pill.className="pill"+(c.ok&&c.on!==false?" pass":"");
+    // what the sim really takes from it (calOpts), and whether it needs fitting again
+    const ap=calApplied(c,this.kind());
+    pill.textContent=c.on===false?"fitted, off":(ap.refit?"fit again":(c.ok?"fitted":"partly fitted")); pill.className="pill"+(c.ok&&c.on!==false&&!ap.refit?" pass":"");
     const sp=this.unit==="in"?1/0.0254:1, conv=(r,v)=>v==null?"—":((r.key==="fwd"||r.key==="strafe")?v*sp:v);
     const f=(r,v)=>{ const x=conv(r,v); return x==="—"?x:(r.key==="turn"||r.key==="ticks"?x.toFixed(1):x.toFixed(2)); };
     const unitOf=r=>r.key==="fwd"||r.key==="strafe"?(this.unit==="in"?"in/s":"m/s"):r.unit;
@@ -68,14 +70,11 @@ const CalUI={
     const cell=(r,v,e)=>`<td class="num">${f(r,v)}<small>${pc(e)}</small></td>`;
     setHTML(res,`<table class="grid cal-grid"><thead><tr><th></th><th class="num">Measured</th><th class="num">Sim before</th><th class="num">Sim after</th></tr></thead><tbody>`+
       (c.rows||[]).map(r=>`<tr><td>${esc(r.label)}<small>${esc(unitOf(r))}</small></td><td class="num">${f(r,r.measured)}</td>${cell(r,r.before,r.errBefore)}${cell(r,r.after,r.errAfter)}</tr>`).join("")+`</tbody></table>`);
-    const p=c.params||{}, bits=[];
-    if(p.massKg) bits.push("mass "+p.massKg.toFixed(2)+" kg");
-    if(p.gear) bits.push("gearing "+p.gear.toFixed(2)+" motor turns per wheel turn");
-    if(p.viscous) bits.push("drivetrain drag "+p.viscous.toFixed(1)+" N per m/s");
-    if(p.strafeEff) bits.push("strafe efficiency "+p.strafeEff.toFixed(2));
-    if(p.yawViscous) bits.push("turn drag "+p.yawViscous.toFixed(2)+" N·m per rad/s");
+    const bits=ap.bits;
     const kin=OPTS.physics==="kinematic"?'<p class="hint">Chassis is set to kinematic, which ignores all of this. Switch it to rigid body above.</p>':"";
-    setHTML($("#calNotes"),kin+(bits.length?`<p class="hint">Changed in the sim: ${esc(bits.join(", "))}.</p>`:"")+(c.notes||[]).map(n=>`<p class="hint">${esc(n)}</p>`).join(""));
+    // a stale fit's "Sim after" column is what it did when it was fitted, not what the sim does now
+    const refit=ap.refit?`<p class="hint">${esc(ap.refit)}</p>`:"";
+    setHTML($("#calNotes"),kin+refit+(bits.length?`<p class="hint">Changed in the sim: ${esc(bits.join(", "))}.</p>`:"")+(c.notes||[]).map(n=>`<p class="hint">${esc(n)}</p>`).join(""));
     $("#calStatus").textContent="";
   },
   wire(){

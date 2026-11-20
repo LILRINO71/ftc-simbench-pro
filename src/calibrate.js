@@ -257,6 +257,18 @@ function calOpts(cal, kind) {
   return calCheck(cal, kind).opts;
 }
 
+/* What a saved calibration changes in the sim, in words, built from what calOpts really hands
+   it (never from the saved params), and the refit note when part of it is left out (calCheck). */
+function calApplied(cal, kind) {
+  const c = calCheck(cal, kind), o = c.opts || {}, bits = [];
+  if (o.massKg) bits.push("mass " + o.massKg.toFixed(2) + " kg");
+  if (o.gear) bits.push("gearing " + o.gear.toFixed(2) + " motor turns per wheel turn");
+  if (o.viscous) bits.push("drivetrain drag " + o.viscous.toFixed(1) + " N per m/s");
+  if (o.strafeEff) bits.push("strafe efficiency " + o.strafeEff.toFixed(2));
+  if (o.yawViscous) bits.push("turn drag " + o.yawViscous.toFixed(2) + " N·m per rad/s");
+  return { bits, refit: c.refit };
+}
+
 /* The measuring OpMode a team runs on its real robot: plain FTC SDK, three timed
    full-power runs of CAL_SECONDS, printed on the Driver Station. */
 function calJava() {

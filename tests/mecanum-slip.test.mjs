@@ -5,6 +5,7 @@
 // alone, and calibration (src/calibrate.js) must fit it from a measured strafe speed.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { loadEngine } from './load.mjs';
 
 const E = loadEngine();
@@ -234,6 +235,26 @@ test('calibrate: a mecanum fit made before roller slip hands the sim neither its
   assert.equal(E.calCheck({ params: fit.params }, 'mecanum').refit, null);
   const turn = E.calMeasure(E.calApplyToRig(R, E.calOpts({ params: fit.params }, 'mecanum'))).turn;
   assert.ok(Math.abs(turn / truth.turn - 1) < 0.01, `the refit robot turns at ${turn.toFixed(1)} deg/s, measured ${truth.turn.toFixed(1)}`);
+});
+
+test('calibrate: the Tune panel says what the sim really takes from a fit, and that the strafe is measured with a tape', () => {
+  const old = { params: { gear: 1.0612, strafeEff: 0.3245, yawViscous: 0.9509 }, measured: { fwd: 1.3433, strafe: 1.0869, turn: 197.547 } };
+  const a = E.calApplied(old);
+  assert.deepEqual(a.bits, ['gearing 1.06 motor turns per wheel turn'], 'nothing it no longer applies');
+  assert.match(a.refit, /fit the sim again/i);
+  const now = E.calApplied({ params: { gear: 1.0612, strafeEff: 0.8, yawViscous: 0.45, strafeModel: 2 } }, 'mecanum');
+  assert.deepEqual(now.bits, ['gearing 1.06 motor turns per wheel turn', 'strafe efficiency 0.80', 'turn drag 0.45 N·m per rad/s']);
+  assert.equal(now.refit, null);
+  // the panel (src/mcui.js) builds its text and its pill from calApplied, never from the saved params
+  const ui = fs.readFileSync(new URL('../src/mcui.js', import.meta.url), 'utf8');
+  assert.match(ui, /calApplied\(c,this\.kind\(\)\)/);
+  assert.doesNotMatch(ui, /p\.strafeEff/);
+  // the strafe box asks for a tape measure, as the measuring OpMode does
+  const html = fs.readFileSync(new URL('../src/markup.html', import.meta.url), 'utf8');
+  const sec = html.slice(html.indexOf('data-sec="calib"'), html.indexOf('data-sec="mc"'));
+  assert.match(sec, /strafe with a tape measure, not the encoders/);
+  assert.match(sec, /id="calStrafe"[^\n]*tape measure/);
+  assert.match(E.calJava(), /measure how far it went sideways with the tape/);
 });
 
 test('calibrate: a strafeEff fitted when it was a force loss is not handed to the sim', () => {
