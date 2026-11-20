@@ -644,13 +644,18 @@ const Match={
      plan sees it stuck. The same in both periods: no AI robot ends a move inside anything. */
   keepOnField(b){
     const s=this.autoSide(b), x0=b.x, y0=b.y, c=b.clear;
-    if(!s){ const box={x:b.x, y:b.y, h:b.h}; Field.collideBox(box,MATCH_BOT,this.obs||[]); b.x=box.x; b.y=box.y; }
-    else{
-      const r=this.settle(b.x,b.y,b.h,s);
-      if(!r.ok&&c){ b.x=c.x; b.y=c.y; b.h=c.h; b.vx=0; b.vy=0; return; }
-      b.x=r.x; b.y=r.y;
-      if(r.ok) b.clear={x:b.x, y:b.y, h:b.h};
+    let r=this.settle(b.x,b.y,b.h,s), h=b.h;
+    if(!r.ok&&c){
+      let q=c.h!==b.h?this.settle(b.x,b.y,c.h,s):null;            // the move without the turn
+      if(q&&q.ok){ r=q; h=c.h; }
+      else{
+        q=c.x!==b.x||c.y!==b.y?this.settle(c.x,c.y,b.h,s):null;    // the turn, on the spot
+        if(q&&q.ok) r=q;
+        else{ b.x=c.x; b.y=c.y; b.h=c.h; b.vx=0; b.vy=0; return; }
+      }
     }
+    b.x=r.x; b.y=r.y; b.h=h;
+    if(r.ok) b.clear={x:b.x, y:b.y, h:b.h};
     if(Math.abs(b.x-x0)>1e-6) b.vx=0;
     if(Math.abs(b.y-y0)>1e-6) b.vy=0;
   },

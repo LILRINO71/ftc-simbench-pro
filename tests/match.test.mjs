@@ -90,6 +90,30 @@ test('match: in AUTO an AI robot keeps its own side and still never ends a tick 
   }
 });
 
+test('match: in TELEOP too an AI robot never ends a tick inside a HIVE leg, a FLOWER or a wall', () => {
+  // elite seed 11: red ai1 turned under its HIVE where its box no longer fit between two legs and the
+  // foot bar, and ended the tick 19.0 mm into a leg (t=11.04 s)
+  const obs = E.Field.obstacles(0.46), MB = { hx: HX, hy: HX };
+  const runs = [];
+  for (const skill of ['rookie', 'typical', 'elite']) for (const seed of [1, 2]) runs.push([skill, seed]);
+  runs.push(['elite', 11]);
+  for (const [skill, seed] of runs) {
+    let worst = null;
+    play({ seed, skill, watch: (M) => {
+      for (const b of M.bots) {
+        const c = Math.abs(Math.cos(b.h)), s = Math.abs(Math.sin(b.h)), e = (c + s) * HX;
+        const wall = Math.max(Math.abs(b.x), Math.abs(b.y)) + e - H;
+        if (wall > 1e-4 && (!worst || wall > worst.p)) worst = { p: wall, t: M.t, id: b.id, what: 'wall' };
+        for (const o of obs) {
+          const d = E.capsulePush({ x: b.x, y: b.y, h: b.h }, MB, o), p = d ? Math.hypot(d[0], d[1]) : 0;
+          if (p > 1e-4 && (!worst || p > worst.p)) worst = { p, t: M.t, id: b.id, what: o.what };
+        }
+      }
+    } });
+    assert.equal(worst, null, worst && `${skill} seed ${seed}: ${worst.id} ${(worst.p * 1000).toFixed(1)} mm into a ${worst.what} at t=${worst.t.toFixed(2)} s`);
+  }
+});
+
 test('match: the score adds up the way the manual scores it', () => {
   const { M, S } = play({ seed: 5 });
   for (const al of ['red', 'blue']) {
