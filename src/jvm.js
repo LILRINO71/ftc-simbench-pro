@@ -49,9 +49,9 @@ function jvLex(src){
     if(id0(c)){ let j=i+1; while(j<n&&idc(src[j])) j++; const v=src.slice(i,j);
       T.push({t:JV_KW.has(v)?"kw":"id",v,p}); i=j; continue; }
     if((c>="0"&&c<="9")||(c==="."&&src[i+1]>="0"&&src[i+1]<="9")){
-      let j=i, v, isInt=true;
-      if(c==="0"&&/[xX]/.test(src[i+1])){ j=i+2; while(j<n&&/[0-9a-fA-F_]/.test(src[j])) j++; v=parseInt(src.slice(i+2,j).replace(/_/g,""),16); }
-      else if(c==="0"&&/[bB]/.test(src[i+1])){ j=i+2; while(j<n&&/[01_]/.test(src[j])) j++; v=parseInt(src.slice(i+2,j).replace(/_/g,""),2); }
+      let j=i, v, isInt=true, radix=false;
+      if(c==="0"&&/[xX]/.test(src[i+1])){ radix=true; j=i+2; while(j<n&&/[0-9a-fA-F_]/.test(src[j])) j++; v=parseInt(src.slice(i+2,j).replace(/_/g,""),16); }
+      else if(c==="0"&&/[bB]/.test(src[i+1])){ radix=true; j=i+2; while(j<n&&/[01_]/.test(src[j])) j++; v=parseInt(src.slice(i+2,j).replace(/_/g,""),2); }
       else{
         while(j<n&&/[0-9_]/.test(src[j])) j++;
         if(src[j]==="."&&/[0-9]/.test(src[j+1]||"")){ isInt=false; j++; while(j<n&&/[0-9_]/.test(src[j])) j++; }
@@ -61,7 +61,10 @@ function jvLex(src){
       }
       let suf="";
       if(/[lLfFdD]/.test(src[j]||"")){ suf=src[j].toLowerCase(); j++; if(suf==="f"||suf==="d") isInt=false; }
-      T.push({t:"num",v,isInt,p}); i=j; continue;
+      // 0xFFFFFFFF is an int: -1 (JLS 3.10.1); 1L, 0xFFL are longs
+      const long=isInt&&suf==="l";
+      if(radix&&isInt&&!long) v=v|0;
+      T.push({t:"num",v,isInt,long,p}); i=j; continue;
     }
     if(c==='"'){
       if(src.startsWith('"""',i)){                         // text block
@@ -448,7 +451,7 @@ function jvParse(src,file){
   }
   function primary(){
     const t=pk(), p=t.p;
-    if(t.t==="num"){ i++; return {k:"lit",v:t.v,ty:t.isInt?"i":"d",p}; }
+    if(t.t==="num"){ i++; return {k:"lit",v:t.v,ty:t.isInt?(t.long?"l":"i"):"d",p}; }
     if(t.t==="str"){ i++; return {k:"lit",v:t.v,ty:"s",p}; }
     if(t.t==="chr"){ i++; return {k:"lit",v:t.v,ty:"c",p}; }
     if(t.t==="kw"){
@@ -1259,7 +1262,9 @@ function jvHash(o){ if(!o.__h) o.__h=(Math.random()*0x7fffffff)|0; return o.__h;
 /* Java's String.valueOf for a number: ints plain, doubles with a ".0" */
 function jvNumStr(v,isInt){
   if(typeof v!=="number") return String(v);
-  if(isInt||!isFinite(v)) return isFinite(v)?String(Math.trunc(v)):(isNaN(v)?"NaN":v>0?"Infinity":"-Infinity");
+  // a long past 2^53 prints every digit of the double it is (String() would round to 16 digits)
+  // (Long.MAX_VALUE is 2^63 as a double, and no long is 2^63: it prints as MAX_VALUE)
+  if(isInt||!isFinite(v)) return isFinite(v)?(Math.abs(v)<9007199254740992?String(Math.trunc(v)):v>=JV_2_63?"9223372036854775807":BigInt(Math.trunc(v)).toString()):(isNaN(v)?"NaN":v>0?"Infinity":"-Infinity");
   if(Number.isInteger(v)&&Math.abs(v)<1e7) return v.toFixed(1);
   const a=Math.abs(v);
   if(a!==0&&(a<1e-3||a>=1e7)){ const s=v.toExponential(); const m=/^(-?[\d.]+)e([+-]\d+)$/.exec(s); if(m){ const man=m[1].indexOf(".")<0?m[1]+".0":m[1]; return man+"E"+(+m[2]); } }
@@ -1268,7 +1273,7 @@ function jvNumStr(v,isInt){
 JVM.prototype.str=function*(v,kind){
   if(v===null||v===undefined) return "null";
   if(typeof v==="string") return v;
-  if(typeof v==="number") return kind==="c"?String.fromCharCode(v):jvNumStr(v,kind==="i");
+  if(typeof v==="number") return kind==="c"?String.fromCharCode(v):jvNumStr(v,kind==="i"||kind==="l");
   if(typeof v==="boolean") return v?"true":"false";
   if(Array.isArray(v)) return "[array]";
   if(v instanceof JvFn) return "lambda";
@@ -1277,30 +1282,31 @@ JVM.prototype.str=function*(v,kind){
   const r=yield* this.invoke(v,"toString",[],null);
   return typeof r==="string"?r:String(r);
 };
-/* Is this expression an int in Java? (5/2 is 2, 5.0/2 is 2.5) */
+/* What Java type an expression has, as far as arithmetic and printing go (5/2 is 2, 5.0/2 is
+   2.5): "i" int (short, byte too), "l" long, "c" char, "d" double, "s" String, null unknown */
 JVM.prototype.kind=function(e,sc){
   switch(e.k){
-    case "lit": return e.ty==="i"?"i":e.ty==="c"?"c":e.ty==="d"?"d":e.ty;
+    case "lit": return e.ty;
     case "paren": return this.kind(e.e,sc);
-    case "cast": return JV_INTS.has(e.type.name)&&!e.type.dims?(e.type.name==="char"?"c":"i"):(e.type.name==="double"||e.type.name==="float"?"d":null);
+    case "cast": return !e.type.dims&&(e.type.name==="double"||e.type.name==="float")?"d":jvTypeKind(e.type);
     case "name":{ const s=sc.find(e.name); let t=s?s.t[e.name]:null;
       if(!s){ const fr=sc.fr; const c=fr&&fr.cls; t=c?this.fieldType(c,e.name):null; }
-      return t&&!t.dims?(t.name==="char"?"c":JV_INTS.has(t.name)?"i":null):null; }
+      return jvTypeKind(t); }
     case "field":{ if(e.name==="length") return "i";
-      if(/^(MAX|MIN)_VALUE$/.test(e.name)&&e.obj&&e.obj.k==="name"&&/^(Integer|Long|Short|Byte)$/.test(e.obj.name)) return "i";
-      const r=this.nodeInfo.get(e), t=r&&r.ftype; return t&&!t.dims?(t.name==="char"?"c":JV_INTS.has(t.name)?"i":null):null; }
-    case "index":{ const t=this.typeOf(e,sc); return t&&!t.dims?(t.name==="char"?"c":JV_INTS.has(t.name)?"i":null):null; }
+      if(/^(MAX|MIN)_VALUE$/.test(e.name)&&e.obj&&e.obj.k==="name"&&/^(Integer|Long|Short|Byte)$/.test(e.obj.name)) return e.obj.name==="Long"?"l":"i";
+      const r=this.nodeInfo.get(e), t=r&&r.ftype; return jvTypeKind(t); }
+    case "index": return jvTypeKind(this.typeOf(e,sc));
     case "call":{ const r=this.nodeInfo.get(e); return r&&r.rk||null; }
-    case "un": return e.op==="!"?null:this.kind(e.a,sc);
+    case "un":{ if(e.op==="!") return null; const k=this.kind(e.a,sc); return k==="c"?"i":k; }
     case "pre": case "post": return this.kind(e.a,sc);
     case "bin":{
       if(/^(==|!=|<|>|<=|>=|&&|\|\|)$/.test(e.op)) return null;
       const a=this.kind(e.a,sc), b=this.kind(e.b,sc);
       if(e.op==="+"&&(a==="s"||b==="s")) return "s";
-      if(e.op==="<<"||e.op===">>"||e.op===">>>") return "i";
-      return (a==="i"||a==="c")&&(b==="i"||b==="c")?"i":null;
+      if(e.op==="<<"||e.op===">>"||e.op===">>>") return a==="l"?"l":"i";
+      return jvPromote(a,b);
     }
-    case "cond": { const a=this.kind(e.a,sc), b=this.kind(e.b,sc); return a===b?a:null; }
+    case "cond": { const a=this.kind(e.a,sc), b=this.kind(e.b,sc); return a===b?a:jvPromote(a,b); }
     case "assign": return this.kind(e.t,sc);
   }
   return null;
@@ -1436,12 +1442,18 @@ JVM.prototype.ev=function*(e,sc){
     case "classlit":{ const c=this.typeIn(e.type,sc); return c?{__type:c,classLit:true}:{__type:this.opaqueClass(e.type),classLit:true}; }
     case "un":{
       const v=yield* this.ev(e.a,sc);
-      switch(e.op){ case "-": return -jvNum(v); case "+": return jvNum(v); case "!": return !jvTruth(v); case "~": return ~jvNum(v); }
+      switch(e.op){
+        case "-": { const k=this.kind(e.a,sc), x=jvNum(v); return k==="i"||k==="c"?(-x)|0:k==="l"?jvWrap64(-x):-x; }
+        case "+": return jvNum(v); case "!": return !jvTruth(v);
+        case "~": return this.kind(e.a,sc)==="l"?-jvNum(v)-1:~jvNum(v); }
       break;
     }
     case "pre": case "post":{
       const old=jvNum(yield* this.ev(e.a,sc));
-      const nv=e.op==="++"?old+1:old-1;
+      let nv=e.op==="++"?old+1:old-1;
+      // MAX_VALUE + 1 wraps; a byte, short or char wraps at its own width
+      const t=this.typeOf(e.a,sc), tn=t&&!t.dims?t.name:null;
+      if(tn&&JV_INTS.has(tn)) nv=jvNarrow(nv,jvPrimOf(tn),true);
       yield* this.store(e.a,nv,sc);
       return e.k==="pre"?nv:old;
     }
@@ -1453,13 +1465,22 @@ JVM.prototype.ev=function*(e,sc){
       const op=e.op.slice(0,-1);
       let r;
       if(op==="+"&&(typeof cur==="string"||typeof v==="string")) r=(yield* this.str(cur,this.kind(e.t,sc)))+(yield* this.str(v,this.kind(e.v,sc)));
-      else r=this.arith(op,cur,v,this.kind(e.t,sc)==="i"&&this.kind(e.v,sc)==="i",e);
+      else{
+        // x op= y is (T)(x op y) (JLS 15.26.2): the operation in the promoted type, then
+        // narrowed to x's type, wrapping from an integral result and saturating from a double
+        const kt=this.kind(e.t,sc), kv=this.kind(e.v,sc);
+        const k=op==="<<"||op===">>"||op===">>>"?(kt==="l"?"l":jvIntegral(kt)?"i":null):jvPromote(kt,kv);
+        r=this.arith(op,cur,v,k,e);
+        const t=this.typeOf(e.t,sc), tn=t&&!t.dims?t.name:null;
+        if(tn&&JV_INTS.has(tn)&&typeof r==="number") r=jvNarrow(r,jvPrimOf(tn),!!k);
+      }
       return yield* this.store(e.t,r,sc);
     }
     case "cast":{
       const v=yield* this.ev(e.a,sc), n=e.type.name;
       if(e.type.dims) return v;
-      if(n==="int"||n==="long"||n==="short"||n==="byte") return v&&v[JV_OPAQUE_TAG]?0:jvToInt(jvNum(v),n);
+      // from an int or a long the low bits are kept; from a double it saturates (JLS 5.1.3)
+      if(n==="int"||n==="long"||n==="short"||n==="byte") return v&&v[JV_OPAQUE_TAG]?0:jvNarrow(jvNum(v),n,jvIntegral(this.kind(e.a,sc))&&Number.isInteger(jvNum(v)));
       if(n==="char") return Math.trunc(jvNum(v))&0xffff;
       if(n==="double"||n==="float") return v&&v[JV_OPAQUE_TAG]?0:jvNum(v);
       if((n==="Integer"||n==="Double"||n==="Long")&&typeof v==="number") return v;
@@ -1483,9 +1504,10 @@ JVM.prototype.ev=function*(e,sc){
   throw JvError("expression "+e.k+" isn't supported",e.p);
 };
 function jvToInt(v,n){
-  if(!isFinite(v)) return isNaN(v)?0:(v>0?(n==="long"?9.2e18:2147483647):(n==="long"?-9.2e18:-2147483648));
+  if(!isFinite(v)) return isNaN(v)?0:(v>0?(n==="long"?9223372036854775807:2147483647):(n==="long"?-9223372036854775808:-2147483648));
   const t=Math.trunc(v);
   if(n==="int"){ if(t>2147483647) return 2147483647; if(t<-2147483648) return -2147483648; }
+  if(n==="long"){ if(t>=JV_2_63) return 9223372036854775807; if(t<-JV_2_63) return -9223372036854775808; }
   if(n==="short") return (t<<16)>>16;
   if(n==="byte") return (t<<24)>>24;
   return t;
@@ -1503,14 +1525,48 @@ JVM.prototype.instOf=function(v,tname,sc){
   const t=this.typeIn(tname,sc);
   return t?this.isSub(v.__c,t)||this.isSubName(v.__c,n):this.isSubName(v.__c,n);
 };
-JVM.prototype.arith=function(op,a,b,ints,node){
-  const x=jvNum(a), y=jvNum(b);
+/* A long's value is a JS double: exact to 2^53, and wrapped mod 2^64 past 2^63 (JLS 15.18.2).
+   Past 2^53 it is the nearest double, not the exact long. */
+const JV_2_63=9223372036854775808;
+function jvWrap64(v){ return v>=JV_2_63||v<-JV_2_63?(isFinite(v)?Number(BigInt.asIntN(64,BigInt(Math.trunc(v)))):0):v; }
+const jvBig=v=>BigInt(isFinite(v)?Math.trunc(v):0);
+/* long arithmetic that left the doubles' exact range: redo it in BigInt, mod 2^64 */
+function jvLongOp(op,x,y){
+  const X=jvBig(x), Y=jvBig(y), s=BigInt(Math.trunc(y)&63);
+  let r;
   switch(op){
-    case "+": return ints?jvToInt(x+y,"long"):x+y;
-    case "-": return ints?jvToInt(x-y,"long"):x-y;
-    case "*": return ints?jvToInt(x*y,"long"):x*y;
-    case "/": if(ints){ if(y===0) throw this.jthrow("ArithmeticException","/ by zero"+jvWhere(node)); return Math.trunc(x/y); } return x/y;
-    case "%": if(ints&&y===0) throw this.jthrow("ArithmeticException","% by zero"+jvWhere(node)); return x%y;
+    case "+": r=X+Y; break; case "-": r=X-Y; break; case "*": r=X*Y; break;
+    case "&": r=X&Y; break; case "|": r=X|Y; break; case "^": r=X^Y; break;
+    case "<<": r=X<<s; break; case ">>": r=BigInt.asIntN(64,X)>>s; break; case ">>>": r=BigInt.asUintN(64,X)>>s; break;
+  }
+  return Number(BigInt.asIntN(64,r));
+}
+/* One arithmetic operator. k is the operands' promoted kind: "i" int arithmetic, which wraps
+   at 32 bits like Java's; "l" long, which wraps at 64; anything else is double arithmetic */
+JVM.prototype.arith=function(op,a,b,k,node){
+  const x=jvNum(a), y=jvNum(b);
+  if(k==="i") switch(op){
+    case "+": return (x+y)|0;
+    case "-": return (x-y)|0;
+    case "*": return Math.imul(x,y);
+    case "/": if(y===0) throw this.jthrow("ArithmeticException","/ by zero"+jvWhere(node)); return Math.trunc(x/y)|0;
+    case "%": if(y===0) throw this.jthrow("ArithmeticException","% by zero"+jvWhere(node)); return x%y;
+    case ">>>": return (x>>>y)|0;
+  }
+  else if(k==="l") switch(op){
+    case "+": case "-": case "*": { const r=op==="+"?x+y:op==="-"?x-y:x*y;
+      return Math.abs(r)<9007199254740992?r:jvLongOp(op,x,y); }
+    case "/": if(y===0) throw this.jthrow("ArithmeticException","/ by zero"+jvWhere(node)); return jvWrap64(Math.trunc(x/y));
+    case "%": if(y===0) throw this.jthrow("ArithmeticException","% by zero"+jvWhere(node)); return x%y;
+    case "&": case "|": case "^": case "<<": case ">>": case ">>>":
+      if(typeof a!=="boolean") return jvLongOp(op,x,y);
+  }
+  switch(op){
+    case "+": return x+y;
+    case "-": return x-y;
+    case "*": return x*y;
+    case "/": return x/y;
+    case "%": return x%y;
     case "&": return typeof a==="boolean"?(a&&b):(x&y);
     case "|": return typeof a==="boolean"?(a||b):(x|y);
     case "^": return typeof a==="boolean"?(a!==b):(x^y);
@@ -1520,6 +1576,16 @@ JVM.prototype.arith=function(op,a,b,ints,node){
   }
   return 0;
 };
+/* A value narrowed to the integral type n (JLS 5.1.3): from a double it saturates, from an
+   integral value (fromInt) it keeps the low bits */
+const JV_UNBOX={Integer:"int",Long:"long",Short:"short",Byte:"byte",Character:"char"};
+const jvPrimOf=n=>JV_UNBOX[n]||n;
+function jvNarrow(v,n,fromInt){
+  if(n==="long") return fromInt?jvWrap64(v):jvToInt(v,"long");
+  if(n==="char") return (fromInt?v:jvToInt(v,"int"))&0xffff;
+  const i=fromInt?v|0:jvToInt(v,"int");
+  return n==="short"?(i<<16)>>16:n==="byte"?(i<<24)>>24:i;
+}
 JVM.prototype.binop=function*(e,sc){
   if(e.op==="&&") return jvTruth(yield* this.ev(e.a,sc))&&jvTruth(yield* this.ev(e.b,sc));
   if(e.op==="||") return jvTruth(yield* this.ev(e.a,sc))||jvTruth(yield* this.ev(e.b,sc));
@@ -1535,8 +1601,10 @@ JVM.prototype.binop=function*(e,sc){
       if(typeof a==="string"||typeof b==="string") return (yield* this.str(a,this.kind(e.a,sc)))+(yield* this.str(b,this.kind(e.b,sc)));
       break;
   }
-  const ka=this.kind(e.a,sc), kb=this.kind(e.b,sc);
-  return this.arith(e.op,a,b,(ka==="i"||ka==="c")&&(kb==="i"||kb==="c"),e);
+  const ka=this.kind(e.a,sc);
+  // a shift is the type of its left operand (JLS 15.19); the rest promote both
+  const k=e.op==="<<"||e.op===">>"||e.op===">>>"?(ka==="l"?"l":jvIntegral(ka)?"i":null):jvPromote(ka,this.kind(e.b,sc));
+  return this.arith(e.op,a,b,k,e);
 };
 JVM.prototype.store=function*(t,v,sc){
   if(t.k==="paren") return yield* this.store(t.e,v,sc);
@@ -1693,6 +1761,8 @@ JVM.prototype.call=function*(e,sc){
   }
   if(r&&r.__block){ const b=r.__block, s=this.strand; yield b; if(!r.then) jvWaited(s); r=r.then?r.then():undefined; }
   this.setRk(e,r,sc);
+  // an int a library computed past the int range (Math.abs(Integer.MIN_VALUE)) wraps like Java's
+  if(typeof r==="number"&&(r>2147483647||r<-2147483648)&&this.nodeInfo.get(e).rk==="i"&&Number.isInteger(r)) r=r|0;
   return r;
 };
 /* Remember whether a call returned an int, for the / that uses it */
@@ -1704,12 +1774,15 @@ JVM.prototype.setRk=function(e,r,sc){
   const on=e.obj&&e.obj.k==="name"?e.obj.name:null;
   if(e.name==="charAt"){ ni.rk="c"; return; }
   if(e.name==="signum"){ ni.rk=on==="Integer"||on==="Long"?"i":null; return; }
-  if((on==="Math"||on==="StrictMath")&&/^(abs|max|min)$/.test(e.name)&&sc){ ni.rk=e.args.every(a=>{ const k=this.kind(a,sc); return k==="i"||k==="c"; })?"i":null; return; }
-  if(on==="System"&&/^(currentTimeMillis|nanoTime)$/.test(e.name)){ ni.rk="i"; return; }
+  // Integer.valueOf("42"), Long.parseLong(s), Integer.max(a, b): the box's own type
+  if(/^(Integer|Long|Short|Byte)$/.test(on)&&/^(valueOf|parse[A-Z]\w*|sum|max|min|abs|reverse|highestOneBit|lowestOneBit|rotateLeft|rotateRight)$/.test(e.name)){ ni.rk=on==="Long"?"l":"i"; return; }
+  if(/^(Integer|Long)$/.test(on)&&/^(compare|bitCount|numberOfLeadingZeros|numberOfTrailingZeros)$/.test(e.name)){ ni.rk="i"; return; }
+  if((on==="Math"||on==="StrictMath")&&/^(abs|max|min)$/.test(e.name)&&sc){ ni.rk=e.args.map(a=>this.kind(a,sc)).reduce((p,k)=>jvPromote(p,k),"i"); return; }
+  if(on==="System"&&/^(currentTimeMillis|nanoTime)$/.test(e.name)){ ni.rk="l"; return; }
   // an element out of a collection declared with its type: List<Integer>.get() is an Integer
   const el=e.obj&&sc?jvElemType(this.typeOf(e.obj,sc),e.name,e.args.length):null;
   if(el){ ni.rk=jvTypeKind(el); return; }
-  ni.rk=(JV_INT_METHODS.has(e.name)&&typeof r==="number"&&Number.isInteger(r))?"i":null;
+  ni.rk=(JV_INT_METHODS.has(e.name)&&typeof r==="number"&&Number.isInteger(r))?(JV_LONG_METHODS.has(e.name)?"l":"i"):null;
 };
 /* The declared type of what `name` returns on a receiver of generic type t (List<Integer>,
    Map<String,Integer>, Map.Entry<K,V>, Iterator<T>, Optional<T>…), or null */
@@ -1725,12 +1798,16 @@ function jvElemType(t,name,argc){
   if(JV_ELEM_M.test(name)&&t.args.length===1) return t.args[0];
   return null;
 }
-/* The kind of a value of declared type t: "i" for the int types, "c" for char */
-function jvTypeKind(t){ return t&&!t.dims?(t.name==="char"||t.name==="Character"?"c":JV_INTS.has(t.name)?"i":null):null; }
+/* The kind of a value of declared type t: "i" for the int types, "l" long, "c" char */
+function jvTypeKind(t){ if(!t||t.dims) return null; const n=t.name; return n==="char"||n==="Character"?"c":n==="long"||n==="Long"?"l":JV_INTS.has(n)?"i":null; }
+const jvIntegral=k=>k==="i"||k==="c"||k==="l";
+/* binary numeric promotion of two integral kinds (JLS 5.6.2): long if either is, else int */
+const jvPromote=(a,b)=>jvIntegral(a)&&jvIntegral(b)?(a==="l"||b==="l"?"l":"i"):null;
 /* The kind of the current native call's i-th argument (see argCtx) */
 JVM.prototype.argKind=function(i){ const c=this.argCtx; return c&&c.args[i]?this.kind(c.args[i],c.sc):null; };
 const JV_INT_METHODS=new Set(["getCurrentPosition","getTargetPosition","size","length","ordinal","indexOf","lastIndexOf","intValue","longValue","parseInt","parseLong",
-  "round","getPortNumber","compareTo","floorDiv","floorMod","getTargetPositionTolerance","nextInt","hashCode","getAsInt","toIntExact","count"]);
+  "round","getPortNumber","compareTo","floorDiv","floorMod","getTargetPositionTolerance","nextInt","hashCode","getAsInt","toIntExact","count","getAsLong","nextLong"]);
+const JV_LONG_METHODS=new Set(["longValue","parseLong","round","count","getAsLong","nextLong"]);
 function jvClassMethod(c,name){
   if(name==="getSimpleName") return c.name;
   if(name==="getName"||name==="getCanonicalName"||name==="getTypeName") return c.fqn;

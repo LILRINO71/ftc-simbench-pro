@@ -416,10 +416,10 @@ function jvNatives(){
         const g=run?(run instanceof JvFn?vm.callFn(run,[],"run"):vm.invoke(run,"run",[],null)):vm.invoke(self,"run",[],null);
         (vm.threads||(vm.threads=[])).push({g,resumeAt:0,st:jvStrand()}); },
       isInterrupted(){ return false; }, interrupt(){}, join(){}, setDaemon(){}, setPriority(){}, isAlive(){ return true; }, setName(){}, getName(){ return "thread"; }, run(){}}});
-  d("java.lang.Integer",{sf:{MAX_VALUE:2147483647,MIN_VALUE:-2147483648},s:jvBoxStatics(true)});
-  d("java.lang.Long",{sf:{MAX_VALUE:9223372036854775807,MIN_VALUE:-9223372036854775808},s:jvBoxStatics(true)});
-  d("java.lang.Short",{sf:{MAX_VALUE:32767,MIN_VALUE:-32768},s:jvBoxStatics(true)});
-  d("java.lang.Byte",{sf:{MAX_VALUE:127,MIN_VALUE:-128},s:jvBoxStatics(true)});
+  d("java.lang.Integer",{sf:{MAX_VALUE:2147483647,MIN_VALUE:-2147483648},s:jvBoxStatics(true,32)});
+  d("java.lang.Long",{sf:{MAX_VALUE:9223372036854775807,MIN_VALUE:-9223372036854775808},s:jvBoxStatics(true,64)});
+  d("java.lang.Short",{sf:{MAX_VALUE:32767,MIN_VALUE:-32768},s:jvBoxStatics(true,16)});
+  d("java.lang.Byte",{sf:{MAX_VALUE:127,MIN_VALUE:-128},s:jvBoxStatics(true,8)});
   d("java.lang.Double",{sf:{MAX_VALUE:Number.MAX_VALUE,MIN_VALUE:Number.MIN_VALUE,POSITIVE_INFINITY:Infinity,NEGATIVE_INFINITY:-Infinity,NaN:NaN},s:jvBoxStatics(false)});
   d("java.lang.Float",{sf:{MAX_VALUE:3.4028235e38,MIN_VALUE:1.4e-45,POSITIVE_INFINITY:Infinity,NEGATIVE_INFINITY:-Infinity,NaN:NaN},s:jvBoxStatics(false)});
   d("java.lang.Number",{});
@@ -676,12 +676,22 @@ function jvMathStatics(){
     clamp(vm,a){ return Math.max(jvNum(a[1]),Math.min(jvNum(a[2]),jvNum(a[0]))); }, ulp(){ return 2.220446049250313e-16; }, toIntExact(vm,a){ return Math.trunc(jvNum(a[0])); },
     addExact(vm,a){ return jvNum(a[0])+jvNum(a[1]); }, multiplyExact(vm,a){ return jvNum(a[0])*jvNum(a[1]); }, negateExact(vm,a){ return -jvNum(a[0]); }, nextUp(vm,a){ return jvNum(a[0]); }};
 }
-function jvBoxStatics(isInt){
-  return {parseInt(vm,a){ const v=parseInt(a[0],a[1]||10); if(isNaN(v)) throw vm.jthrow("NumberFormatException","For input string: \""+a[0]+"\""); return v; },
-    parseLong(vm,a){ return parseInt(a[0],10); },
+/* Integer.parseInt and friends, as strict as Java: digits only (an optional sign), and in range */
+function jvParseIntStrict(vm,s,radix,bits){
+  const str=String(s), r=Math.trunc(jvNum(radix))||10, dig="0123456789abcdefghijklmnopqrstuvwxyz".slice(0,r);
+  const bad=()=>vm.jthrow("NumberFormatException",s==null?"Cannot parse null string: null":"For input string: \""+str+"\""+(r!==10?" under radix "+r:""));
+  if(s==null||!new RegExp("^[+-]?["+dig+"]+$","i").test(str)) throw bad();
+  if(bits===64&&r===10){ const B=BigInt(str.replace(/^\+/,"")); if(B>=2n**63n||B<-(2n**63n)) throw bad(); return Number(B); }
+  const v=parseInt(str,r), lim=Math.pow(2,bits-1);
+  if(v>=lim||v<-lim) throw bad();
+  return v;
+}
+function jvBoxStatics(isInt,bits){
+  return {parseInt(vm,a){ return jvParseIntStrict(vm,a[0],a[1],32); },
+    parseLong(vm,a){ return jvParseIntStrict(vm,a[0],a[1],64); }, parseShort(vm,a){ return jvParseIntStrict(vm,a[0],a[1],16); }, parseByte(vm,a){ return jvParseIntStrict(vm,a[0],a[1],8); },
     parseDouble(vm,a){ const v=parseFloat(a[0]); if(isNaN(v)&&String(a[0]).trim()!=="NaN") throw vm.jthrow("NumberFormatException","For input string: \""+a[0]+"\""); return v; },
     parseFloat(vm,a){ return parseFloat(a[0]); },
-    valueOf(vm,a){ return typeof a[0]==="string"?(isInt?parseInt(a[0],10):parseFloat(a[0])):a[0]; },
+    valueOf(vm,a){ return typeof a[0]==="string"?(isInt?jvParseIntStrict(vm,a[0],a[1],bits||32):parseFloat(a[0])):a[0]; },
     toString(vm,a){ return jvNumStr(jvNum(a[0]),isInt); }, compare(vm,a){ return a[0]<a[1]?-1:a[0]>a[1]?1:0; },
     max(vm,a){ return Math.max(a[0],a[1]); }, min(vm,a){ return Math.min(a[0],a[1]); }, sum(vm,a){ return a[0]+a[1]; }, signum(vm,a){ return Math.sign(a[0]); },
     abs(vm,a){ return Math.abs(a[0]); }, isNaN(vm,a){ return isNaN(a[0]); }, isInfinite(vm,a){ return !isFinite(a[0])&&!isNaN(a[0]); }, isFinite(vm,a){ return isFinite(a[0]); },
