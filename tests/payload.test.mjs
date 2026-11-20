@@ -68,7 +68,9 @@ public class Meet0Style extends LinearOpMode {
 
 // The full robot: two intakes and a gate in front of the shooter. RB shoots once the shooter has
 // had a second to spin up (the gate opens, then the intakes feed); X opens the gate by hand.
-const FULL = HEAD + `
+// late: the gate is first commanded a moment after START, as a VM thread may well do (a servo the
+// code hasn't sent anywhere yet reads 0.5 on the VM)
+const FULL_ = (late) => HEAD + `
 @TeleOp(name = "Full robot style")
 public class FullStyle extends LinearOpMode {
   public static double GATE_CLOSED = 0.9, GATE_OPEN = 0.1, GATE_SECONDS = 0.25, SPIN_UP_SECONDS = 1.0;
@@ -86,6 +88,7 @@ public class FullStyle extends LinearOpMode {
     ElapsedTime sinceChange = new ElapsedTime();
     ElapsedTime sinceGate = new ElapsedTime();
     waitForStart();
+    ElapsedTime sinceStart = new ElapsedTime();
     while (opModeIsActive()) {${DRIVE_LOOP}
       if (gamepad2.a) shooterOn = true;
       if (gamepad2.b) shooterOn = false;
@@ -98,7 +101,7 @@ public class FullStyle extends LinearOpMode {
       boolean feed = shoot && ready;
       boolean gateOpen = feed || gamepad2.x;
       if (gateOpen != gateWasOpen) { sinceGate.reset(); gateWasOpen = gateOpen; }
-      if (gate != null) gate.setPosition(gateOpen ? GATE_OPEN : GATE_CLOSED);
+      if (gate != null && ${late ? 'sinceStart.seconds() > 0.3' : 'true'}) gate.setPosition(gateOpen ? GATE_OPEN : GATE_CLOSED);
       boolean gateClear = gate == null || (gateOpen && sinceGate.seconds() >= GATE_SECONDS);
       boolean intakeIn = gamepad2.right_trigger > 0.1, intakeOut = gamepad2.left_trigger > 0.1;
       double in = 0;
@@ -110,6 +113,7 @@ public class FullStyle extends LinearOpMode {
     }
   }
 }`;
+const FULL = FULL_(false);
 
 // A kicker robot: a roller intake, a flywheel run by setPower, a kicker servo that flicks one ball.
 const KICKER = HEAD + `
@@ -283,19 +287,22 @@ test('payload: Meet 0 (no feeder, no gate): balls go straight through once the s
 });
 
 test('payload: a gate holds the pieces until it opens, then lets them through', () => {
-  bench(FULL);
-  assert.equal(E.Payload.gate(), 'gate');
-  pad('right_trigger', 1); run(E, 0.3);
-  ballAt('pollen'); run(E, 0.7); ballAt('pollen'); run(E, 2);
-  pad('right_trigger', 0);
-  pad('a', true); run(E, 3);
-  assert.equal(held(), 2, 'both in, the shooter up to speed');
-  assert.ok(E.Payload.waiting(), 'the first is at the shooter');
-  assert.equal(E.Shots.fired, 0, 'the gate is shut: nothing leaves');
-  pad('right_bumper', true);
-  run(E, 2);
-  assert.equal(E.Shots.fired, 2, 'RB opens the gate: both go');
-  assert.match(E.Shots.log.find((l) => /IN|Missed/.test(l.text)).text, /./);
+  for (const late of [false, true]) {
+    bench(FULL_(late));
+    assert.equal(E.Payload.gate(), 'gate');
+    pad('right_trigger', 1); run(E, 0.3);
+    ballAt('pollen'); run(E, 0.7); ballAt('pollen'); run(E, 2);
+    pad('right_trigger', 0);
+    pad('a', true); run(E, 3);
+    assert.equal(held(), 2, 'both in, the shooter up to speed');
+    assert.ok(E.Payload.waiting(), 'the first is at the shooter');
+    assert.equal(E.Shots.fired, 0, 'the gate is shut: nothing leaves' + (late ? ' (its rest is where the code first sent it, not the 0.5 it read before)' : ''));
+    assert.ok(!E.Shots.log.some((l) => /Nothing launched/.test(l.text)), 'and nothing was pulsed');
+    pad('right_bumper', true);
+    run(E, 2);
+    assert.equal(E.Shots.fired, 2, 'RB opens the gate: both go');
+    assert.match(E.Shots.log.find((l) => /IN|Missed/.test(l.text)).text, /./);
+  }
 });
 
 test('payload: run backward, the intake puts a piece out through its mouth onto the tiles', () => {

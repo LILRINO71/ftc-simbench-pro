@@ -240,7 +240,7 @@ const JV_SERVO_M={
     const n=o.n, p=jvClamp(jvArg(a[0]),0,1);
     n.pos=p;
     const phys=n.min+(n.max-n.min)*(n.rev?1-p:p);
-    jvS(o).cmd=phys;
+    jvS(o).cmd=phys; jvS(o).sent=true;                    // the code has put it somewhere (a feeder's rest, src/shots.js)
     if(vm.host&&vm.host.cmd) vm.host.cmd(n.name,"setPosition",phys);
   },
   getPosition(vm,o){ const n=o.n; if(n.pos!=null) return n.pos; const c=jvS(o).cmd; return c==null?0.5:c; },

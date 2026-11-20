@@ -269,10 +269,11 @@ const Shots={
     let pulse=false, away=false;
     if(f.kind==="servo"){
       if(real){
-        // its rest is where the code first puts it (a gate the code closes at START, a kicker it parks in INIT),
-        // and it is out of the way once it has been sent away and has got there
-        if(this.feedRest==null) this.feedRest=f.cmd;
-        away=Math.abs(f.act-this.feedRest)>=0.12&&Math.abs(f.cmd-this.feedRest)>=0.12;
+        // its rest is where the code first puts it (a gate the code closes at START, a kicker it parks in INIT;
+        // before that it hasn't moved, whatever it reads), and it is out of the way once it has been sent away
+        // and has got there
+        if(this.feedRest==null&&f.sent) this.feedRest=f.cmd;
+        away=this.feedRest!=null&&Math.abs(f.act-this.feedRest)>=0.12&&Math.abs(f.cmd-this.feedRest)>=0.12;
       }else away=Math.abs(f.act-(f.restPos==null?f.cmd:f.restPos))>=0.12;
       pulse=away&&!this.feedWas; this.feedWas=away;
     }else{

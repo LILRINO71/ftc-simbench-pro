@@ -257,7 +257,7 @@ const Sim={
            Physical direction — REVERSE and which way the motor is mounted —
            is applied only where a motor turns something: wheelCmd() for the
            drive wheels. */
-        if(st.op==="setPosition") s.cmd=clamp01(v);
+        if(st.op==="setPosition"){ s.cmd=clamp01(v); s.sent=true; }
         else if(st.op==="setVelocity"){ s.cmd=Math.max(-1,Math.min(1,v/((s.spec.rpm||300)/60*s.tpr))); s.vctl=true; }   // ticks/s → share of free speed
         else{ s.cmd=Math.max(-1,Math.min(1,v)); s.vctl=false; }
       }else if(st.kind==="pidnew"){
