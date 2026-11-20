@@ -43,7 +43,7 @@ const EXPORTS = [
   // calibration + Monte Carlo (src/calibrate.js, src/montecarlo.js)
   'CAL_FORMAT', 'CAL_SECONDS', 'CAL_BOUNDS', 'calCmd', 'calApplyToRig', 'calRun', 'calMeasure', 'calTicksPerIn', 'calGearFor', 'calSanitize', 'calSolve', 'calFit', 'calOpts', 'calJava',
   'MC_RANGES', 'MC_MAX_RUNS', 'mcRng', 'mcSeedFor', 'mcVariation', 'mcExtremes', 'mcPathEnd', 'mcRunOne', 'mcRun', 'mcSummary', 'mcCadForWorker', 'mcPlain', 'mcPrepare', 'mcHistogram', 'mcWorkerBody', 'mcSetup', 'mcJudge', 'mcNominal', 'mcTarget', 'mcSim', 'MC_KEYS', 'MC_AUTO_SECONDS', 'MC_DEFAULT_RUNS',
-  'FX_LEVELS', 'fxLevel', 'fxPool', 'fxEaseOut', 'fxHop', 'trailFade', 'trailWidth', 'fxPathAt', 'popupState', 'fxSpinRate', 'fxSpinAxis', 'fxShakeAmp', 'ShotFx',
+  'FX_LEVELS', 'fxLevel', 'fxPool', 'fxEaseOut', 'fxHop', 'trailFade', 'trailWidth', 'fxPathAt', 'popupState', 'popupSlot', 'fxSpinRate', 'fxSpinAxis', 'fxShakeAmp', 'ShotFx',
   // the AI robots' and HUMAN PLAYERS' poses (src/figures.js)
   'figTrack', 'humanPose', 'throwBallPhase', 'mecanumTurns', 'FIG_GRAB', 'FIG_RELEASE', 'FIG_IDLE', 'FIG_THROW', 'FIG_PEOPLE',
   'TOUR', 'statusOf', 'STATUS_RANK', 'deviceTier', 'tierMobile', 'TIER_BUDGETS', 'dynResInit', 'dynResStep', 'refreshMs',

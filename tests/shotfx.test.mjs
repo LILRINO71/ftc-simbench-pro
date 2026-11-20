@@ -78,6 +78,14 @@ describe('score popup', () => {
     E.popupState(0.5, 1, true, st); assert.equal(st.s, 1);
     for (let t = 0; t < 1; t += 0.05) { E.popupState(t, 1, false, st); assert.equal(st.s, 1); }
   });
+  test('popups at one goal stack in rows instead of covering each other; far ones keep row 0', () => {
+    const live = [];
+    for (let i = 0; i < 3; i++) { const k = E.popupSlot(live, 1, 2, 0.6); live.push({ x: 1 + i * 0.05, z: 2, k }); }
+    assert.deepEqual(live.map((p) => p.k), [0, 1, 2]);
+    assert.equal(E.popupSlot(live, 5, 5, 0.6), 0);
+    live.splice(0, 1);                       // the first one faded: its row is free again
+    assert.equal(E.popupSlot(live, 1, 2, 0.6), 0);
+  });
 });
 
 describe('ball in flight', () => {

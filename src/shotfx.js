@@ -84,6 +84,15 @@ function popupState(age,dur,pop,out){
   if(pop!==false){ const p=fxClamp01(age/0.14); out.s=p>=1?1:p<0.7?0.55+0.65*fxEaseOut(p/0.7):1.2-0.2*((p-0.7)/0.3); }
   return out;
 }
+/* The row a new floating score takes so it never covers one still showing near it: the lowest
+   row no live popup within r metres (across the floor, x and z) is using. Each row is one popup
+   height up on screen, so they stack from any camera distance. */
+function popupSlot(live,x,z,r){
+  let used=0;
+  for(const P of live) if(Math.hypot(P.x-x,P.z-z)<r) used|=1<<Math.min(30,P.k||0);
+  let k=0; while(used&(1<<k)) k++;
+  return k;
+}
 /* The ball's backspin in rad/s, from its speed. Slow enough to read at 60 fps (a real flywheel's
    100 turns a second is a blur and, drawn frame by frame, a flicker). */
 function fxSpinRate(speed){ return Math.max(12,Math.min(30,speed*3.2)); }
@@ -360,6 +369,7 @@ const ShotFx={
       tex=this.texCache[text]=srgbTex(new THREE.CanvasTexture(cv)); }
     const M=P.s.material; M.map=tex; M.needsUpdate=true;
     M.color.setRGB(Math.min(1,c[0]*0.4+0.7),Math.min(1,c[1]*0.4+0.6),Math.min(1,c[2]*0.4+0.6)); M.opacity=1;
+    P.k=popupSlot(this.popLive,x,z,0.6);
     P.s.position.set(x,y,z); P.x=x; P.y=y; P.z=z; P.t=0; P.dur=1.0; P.active=true; P.s.visible=true; this.popLive.push(P);
   },
 
@@ -390,7 +400,7 @@ const ShotFx={
     for(let i=this.popLive.length-1;i>=0;i--){
       const P=this.popLive[i]; P.t+=dt; const st=popupState(P.t,P.dur,L.pop,this._st);
       const dist=cam?cam.position.distanceTo(P.s.position):2, h=Math.max(0.05,dist*0.085)*st.s;
-      P.s.position.set(P.x,P.y+st.y,P.z); P.s.scale.set(h*2,h,1); P.s.material.opacity=st.a;
+      P.s.position.set(P.x,P.y+st.y+P.k*Math.max(0.05,dist*0.085)*1.1,P.z); P.s.scale.set(h*2,h,1); P.s.material.opacity=st.a;
       if(P.t>=P.dur){ P.s.visible=false; P.active=false; this.popups.release(P); this.popLive.splice(i,1); }
     }
     // a ball dropping into its CELL
