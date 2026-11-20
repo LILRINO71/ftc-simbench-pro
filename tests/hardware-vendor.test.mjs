@@ -120,3 +120,21 @@ test('hardware: a declared Torque or Speed servo picks that goBILDA variant', ()
   within(E.GENERIC.Torque.stallNm, SERVOS['2000-0025-0002'].stallNm, 0.02, 'GENERIC.Torque');
   within(E.GENERIC.Speed.sec60, SERVOS['2000-0025-0003'].sec60, 0.02, 'GENERIC.Speed');
 });
+
+test('hardware: a 5-turn servo in the CAD stays a 5-turn servo whichever flavour the code declares', () => {
+  const pick = (part, role) => E.specFor({ name: 'arm', type: 'Servo', declaredRole: role }, { part, partName: '' }, 'code');
+  // the 5-turn 2000s share their first ten characters (2000-0025-) with the standard ones
+  for (const [part, role, want] of [
+    ['2000-0025-0502', 'Torque', '2000-0025-0502'], ['2000-0025-0502', 'Speed', '2000-0025-0503'],
+    ['2000-0025-0503', 'Torque', '2000-0025-0502'], ['2000-0025-0503', 'Speed', '2000-0025-0503'],
+    ['2000-0025-0504', 'Torque', '2000-0025-0502'],
+    ['2000-0025-0002', 'Speed', '2000-0025-0003'], ['2000-0025-0003', 'Torque', '2000-0025-0002'],
+  ]) {
+    const s = pick(part, role);
+    assert.equal(s.part, want, `CAD ${part}, code says ${role}: got ${s.part} (${s.fam})`);
+    assert.equal(s.travelDeg, E.HW_PARTS[part].travelDeg, `CAD ${part}, code says ${role}: travel ${s.travelDeg} deg`);
+  }
+  // a part with no variant of that role and travel falls back to the generic servo of the role, as before
+  const rev = pick('REV-41-1097', 'Speed');
+  assert.equal(rev.fam, 'generic speed servo');
+});

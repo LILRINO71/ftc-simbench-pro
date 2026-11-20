@@ -181,13 +181,16 @@ function specDetect(dev, mech, trust){
     if(cadSpec && cadSpec.kind === "servo"){
       if(cadSpec.role === dev.declaredRole) return Object.assign({src:"code + CAD"}, cadSpec);
       // same family, the declared role: pick the variant nearest the typical
-      // figure for that role rather than whichever happens to be listed first
+      // figure for that role rather than whichever happens to be listed first.
+      // Only a servo with the CAD part's own travel: the 5-turn 2000s share the
+      // standard ones' first ten characters, and a 1800-degree servo in the CAD
+      // is not a 300-degree one whatever flavour the code declares
       const fam = (cadSpec.part||"").slice(0,10);
       const want = (GENERIC[dev.declaredRole]||GENERIC.Servo).stallNm;
       let bestP=null, bestD=1e9;
       for(const p in HW_PARTS){
         const c = HW_PARTS[p];
-        if(p.slice(0,10)!==fam || c.role!==dev.declaredRole) continue;
+        if(p.slice(0,10)!==fam || c.role!==dev.declaredRole || c.kind!=="servo" || c.travelDeg!==cadSpec.travelDeg) continue;
         const d=Math.abs(c.stallNm-want);
         if(d<bestD){ bestD=d; bestP=p; }
       }
