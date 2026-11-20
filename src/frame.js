@@ -96,9 +96,11 @@ function frameUp(solids,bbox,opts){
 }
 
 /* How much of the CAD lies under a floor at height `floor` along `up`: the share of the solids'
-   points more than FRAME_SUNK_M below it. A sprung odometry pod or a skid drawn a few millimetres
-   low is a handful of points; a floor taken from the wrong parts leaves a large share under it. */
-const FRAME_SUNK_M=0.010, FRAME_SUNK_SHARE=0.02;
+   points more than FRAME_SUNK_M below it. A sprung odometry pod drawn uncompressed, a skid or an
+   intake drawn through the tiles goes 10 to 15 mm under and must not count, on a small CAD
+   least of all (two pods are a real share of a ten-part drive base); a floor taken from the
+   wrong parts leaves a large share of the robot far under it. */
+const FRAME_SUNK_M=0.025, FRAME_SUNK_SHARE=0.02;
 function frameSunk(solids,up,floor){
   let n=0, under=0;
   for(const s of solids||[]){

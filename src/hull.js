@@ -146,8 +146,9 @@ function solidKind(name,pn){
   if(/^520[234]-/.test(p)||kindWord(s,/yellow ?jacket|gearmotors?|\bmotors?\b/g)) return "motor";
   if(/^2000-0025/.test(p)||kindWord(s,/\bservos?\b/g)) return "servo";
   if(kindWord(s,/mecanum|\bomni|wheels?|\bt[iy]res?\b|\btraction\b|gecko|\brollers?\b/g)) return "wheel";
-  // a hub with a name is electronics (REV's Control, Expansion and Servo Hubs); any other hub is a metal part on a shaft
-  if(/\bcontrollers?\b|\b(control|expansion|driver|servo|usb|power) hubs?\b|\b(power|distribution|interface|legacy) modules?\b|battery|switch|camera|limelight|sensor|webcam|\bled\b|pcb/.test(s)) return "electronics";
+  // a hub with a name is electronics (REV's Control and Expansion Hubs, its Servo Hub when REV is named);
+  // any other hub, goBILDA's servo hub among them, is a metal part on a shaft
+  if(/\bcontrollers?\b|\b(control|expansion|driver|usb|power) hubs?\b|\brev\b.*\bservo hubs?\b|\b(power|distribution|interface|legacy) modules?\b|battery|switch|camera|limelight|sensor|webcam|\bled\b|pcb/.test(s)) return "electronics";
   if(/polycarb|lexan|window|acrylic/.test(s)) return "clear";
   if(/print|\bpla\b|petg|tpu|nylon|onyx|3d/.test(s)) return "printed";
   // a "belt pulley" or a "chain sprocket" is the metal part, not the loop
