@@ -620,10 +620,20 @@ JVM.prototype.enumConst=function(fqn,name){
   if(!c.ready) jvDrain(this.ready(c));
   return c.sf[name]||null;
 };
-JVM.prototype.note=function(what){
+/* A call a stub absorbed. cls (a class, or a qualified name) says whose member it was: one of
+   the FTC SDK's (com.qualcomm…, org.firstinspires.ftc…) is a part of the robot the bench
+   doesn't model, and is listed apart (JvProgram.unmodelled) */
+JVM.prototype.note=function(what,cls){
   const e=this.stubbed.get(what);
   if(e){ e.n++; return; }
-  const w=this.where(); this.stubbed.set(what,{n:1,file:w.file,pos:w.pos});
+  const w=this.where(); this.stubbed.set(what,{n:1,file:w.file,pos:w.pos,sdk:cls?this.sdkOf(cls):null});
+};
+const JV_SDK_PKG=/^(com\.qualcomm\.|org\.firstinspires\.ftc\.)/;
+/* the FTC SDK class a stubbed member belongs to (the class or the SDK class it extends), or null */
+JVM.prototype.sdkOf=function(c){
+  if(typeof c==="string") return JV_SDK_PKG.test(c)?c:null;
+  for(let k=c,g=0;k&&g<40;k=this.supOf(k),g++) if(k.fqn&&JV_SDK_PKG.test(k.fqn)&&(k.native||k.opaque||this.isLib(k))) return k.fqn;
+  return null;
 };
 
 /* ---- type resolution ---- */
@@ -953,7 +963,7 @@ JVM.prototype.invoke=function*(self,name,args,node,startCls){
   if(Array.isArray(self)){ if(name==="clone") return self.slice(); if(name==="length") return self.length; if(name==="getClass") return {__c:this.opaqueClass("Class"),f:{},n:{name:"Array"}}; return this.opaqueVal("array"); }
   if(self.__type) return yield* this.invokeStatic(self.__type,name,args,node);
   const c=self.__c;
-  if(self[JV_OPAQUE_TAG]||c.opaque){ this.note(c.name+"."+name); return jvOpaqueResult(this,name,c.name,args); }
+  if(self[JV_OPAQUE_TAG]||c.opaque){ this.note(c.name+"."+name,c); return jvOpaqueResult(this,name,c.name,args); }
   const m=this.findMethod(startCls||c,name,args);
   if(m&&m.body) return yield* this.run(m,self,args,this.ownerOf(m));
   const nm=this.nativeMethod(startCls||c,name);
@@ -967,9 +977,9 @@ JVM.prototype.invoke=function*(self,name,args,node,startCls){
   // a library builder written in Java: a setter it doesn't spell out still chains
   if(this.builders&&this.isBuilder(c)){ this.note(c.name+"."+name); return self; }
   // the library classes here are partial: a member they don't spell out is a stub
-  if(this.isLib(c)){ this.note(c.name+"."+name); return jvOpaqueResult(this,name,c.name,args); }
+  if(this.isLib(c)){ this.note(c.name+"."+name,c); return jvOpaqueResult(this,name,c.name,args); }
   // a class that extends a library type nobody describes: its methods are stubs
-  if(this.hasNativeBase(c)){ this.note(c.name+"."+name); return jvOpaqueResult(this,name,c.name,args); }
+  if(this.hasNativeBase(c)){ this.note(c.name+"."+name,c); return jvOpaqueResult(this,name,c.name,args); }
   throw this.jthrow("NoSuchMethodError",c.name+" has no method "+name+"("+args.length+" args)"+jvWhere(node));
 };
 const JV_NONE={};
@@ -993,20 +1003,20 @@ JVM.prototype.objectMethod=function*(self,name,args,node){
   return JV_NONE;
 };
 JVM.prototype.invokeStatic=function*(c,name,args,node){
-  if(c.opaque){ this.note(c.name+"."+name); return jvOpaqueResult(this,name,c.name,args); }
+  if(c.opaque){ this.note(c.name+"."+name,c); return jvOpaqueResult(this,name,c.name,args); }
   yield* this.ready(c);
   if(c.native){
     const sm=c.native.s&&c.native.s[name];
     if(sm){ const r=sm(this,args,node); return (r&&typeof r.next==="function"&&typeof r[Symbol.iterator]==="function")?yield* r:r; }
     if(c.kind==="enum"){ if(name==="values") return c.consts.slice(); if(name==="valueOf") return c.sf[args[args.length-1]]||null; }
     const s=this.supOf(c); if(s) return yield* this.invokeStatic(s,name,args,node);
-    this.note(c.name+"."+name); return jvOpaqueResult(this,name,c.name,args);
+    this.note(c.name+"."+name,c); return jvOpaqueResult(this,name,c.name,args);
   }
   const m=this.findMethod(c,name,args);
   if(m&&m.body) return yield* this.run(m,null,args,this.ownerOf(m));
   if(c.kind==="enum"){ if(name==="values") return c.consts.slice(); if(name==="valueOf") return c.sf[args[args.length-1]]||null; }
   const s=this.supOf(c); if(s&&(s.native||s.opaque)) return yield* this.invokeStatic(s,name,args,node);
-  if(this.isLib(c)){ this.note(c.name+"."+name); return jvOpaqueResult(this,name,c.name,args); }
+  if(this.isLib(c)){ this.note(c.name+"."+name,c); return jvOpaqueResult(this,name,c.name,args); }
   throw this.jthrow("NoSuchMethodError",c.name+" has no static method "+name+jvWhere(node));
 };
 /* Run a method body. */
@@ -1048,7 +1058,7 @@ JVM.prototype.callFn=function*(fn,args,name){
 };
 /* Exceptions the VM raises, as Java objects a catch can match. */
 JVM.prototype.jthrow=function(cls,msg){
-  const c=this.classes.get("java.lang."+cls)||this.opaqueClass(cls);
+  const c=this.classes.get(cls.indexOf(".")>=0?cls:"java.lang."+cls)||this.opaqueClass(cls);
   const o={__c:c,f:Object.create(null),n:{isThrowable:true,msg:msg||null}};
   return new JvThrow(o);
 };
@@ -1656,8 +1666,8 @@ JVM.prototype.getField=function*(o,name,e,sc){
       if(k.native&&k.native.sget){ const r=k.native.sget(this,name); if(r!==undefined) return r; }
       for(const f of this.ifsOf(k)){ yield* this.ready(f); if(name in f.sf) return f.sf[name]; }
     }
-    if(c.opaque){ this.note(c.name+"."+name); return this.opaqueVal(c.fqn+"."+name); }
-    if(this.hasNativeBase(c)||this.isLib(c)){ this.note(c.name+"."+name); return this.opaqueVal(c.fqn+"."+name); }
+    if(c.opaque){ this.note(c.name+"."+name,c); return this.opaqueVal(c.fqn+"."+name); }
+    if(this.hasNativeBase(c)||this.isLib(c)){ this.note(c.name+"."+name,c); return this.opaqueVal(c.fqn+"."+name); }
     throw this.jthrow("NoSuchFieldError",c.name+"."+name+jvWhere(e));
   }
   if(typeof o==="string"||typeof o==="number"||typeof o==="boolean") return undefined;
@@ -1666,7 +1676,7 @@ JVM.prototype.getField=function*(o,name,e,sc){
   for(let k=o.__c;k;k=this.supOf(k)) if(k.native&&k.native.get){ const r=k.native.get(this,o,name); if(r!==undefined) return r; }
   // a static read through an instance
   for(let k=o.__c;k;k=this.supOf(k)) if(name in k.sf) return k.sf[name];
-  if(this.hasNativeBase(o.__c)||this.isLib(o.__c)){ this.note(o.__c.name+"."+name); return this.opaqueVal(name); }
+  if(this.hasNativeBase(o.__c)||this.isLib(o.__c)){ this.note(o.__c.name+"."+name,o.__c); return this.opaqueVal(name); }
   return null;
 };
 JVM.prototype.methodRef=function*(e,sc){
@@ -1715,14 +1725,14 @@ JVM.prototype.call=function*(e,sc){
       }
       if(m&&!m.body&&self){ r=yield* this.invoke(self,e.name,args,e); done=true; break; }
       // a library base (an OpMode) that the VM doesn't describe: its methods are stubs
-      if(self&&cls.opaque){ this.note(cls.name+"."+e.name); r=jvOpaqueResult(this,e.name,cls.name,args); done=true; break; }
+      if(self&&cls.opaque){ this.note(cls.name+"."+e.name,cls); r=jvOpaqueResult(this,e.name,cls.name,args); done=true; break; }
       if(self&&self.__outer){ self=self.__outer; cls=self.__c; continue; }
       if(cls.capture&&cls.capture.fr){ self=cls.capture.fr.self; cls=cls.capture.fr.cls; continue; }
       self=cls.isStatic?null:self; cls=cls.outer;
       if(!cls){
         // a supers chain ended in a stub
         const base=fr&&fr.cls&&this.hasNativeBase(fr.cls);
-        if(base&&base.opaque){ this.note(base.name+"."+e.name); r=jvOpaqueResult(this,e.name,base.name,args); done=true; }
+        if(base&&base.opaque){ this.note(base.name+"."+e.name,base); r=jvOpaqueResult(this,e.name,base.name,args); done=true; }
       }
     }
     if(!done){
@@ -1754,7 +1764,7 @@ JVM.prototype.call=function*(e,sc){
     else o=yield* this.ev(e.obj,sc);
     // the object may itself be a call (a.b().c()): this call's own facts again
     this.argCtx={args:e.args,sc}; this.lastRk=undefined;
-    if(o&&o.__pkg){ this.note(o.__pkg+"."+e.name); r=this.opaqueVal(o.__pkg+"."+e.name); }
+    if(o&&o.__pkg){ this.note(o.__pkg+"."+e.name,o.__pkg); r=this.opaqueVal(o.__pkg+"."+e.name); }
     else if(o&&o.__type&&!o.classLit) r=yield* this.invokeStatic(o.__type,e.name,args,e);
     else if(o&&o.__type&&o.classLit) r=jvClassMethod(o.__type,e.name,args);
     else r=yield* this.invoke(o,e.name,args,e);

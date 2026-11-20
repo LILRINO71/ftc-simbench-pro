@@ -106,7 +106,11 @@ import com.qualcomm.robotcore.hardware.ImuOrientationOnRobot;
 public class RevHubOrientationOnRobot implements ImuOrientationOnRobot {
   public enum LogoFacingDirection { UP, DOWN, FORWARD, BACKWARD, LEFT, RIGHT }
   public enum UsbFacingDirection { UP, DOWN, FORWARD, BACKWARD, LEFT, RIGHT }
-  public RevHubOrientationOnRobot(LogoFacingDirection logo, UsbFacingDirection usb){}
+  // the SDK refuses a logo and a USB port that face the same way or opposite ways
+  public RevHubOrientationOnRobot(LogoFacingDirection logo, UsbFacingDirection usb){
+    int a = logo.ordinal() / 2, b = usb.ordinal() / 2;
+    if (a == b) throw new IllegalArgumentException("The specified REV Hub orientation is physically impossible");
+  }
   public RevHubOrientationOnRobot(Object o){}
   public static Object xyzOrientation(double a, double b, double c){ return null; }
   public static Object zyxOrientation(double a, double b, double c){ return null; }

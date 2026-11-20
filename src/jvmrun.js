@@ -200,7 +200,10 @@ JvProgram.prototype.tick=function(){
     if(th.done||now<th.resumeAt) continue;
     vm.budget=vm.BUDGET; vm.strand=th.st||(th.st=jvStrand());
     try{ const r=th.g.next(); if(r.done) th.done=true; else if(r.value&&r.value.sleep!=null) th.resumeAt=now+r.value.sleep/1000; }
-    catch(e){ th.done=true; }
+    catch(e){ th.done=true;
+      // an exception nothing catches in a thread the OpMode started: Android ends the Robot
+      // Controller app (the SDK sets no handler of its own), and the robot stops
+      if(!(e&&e.jvStop)&&!this.error){ vm.strand=this.strand; this.fail(e); this.gen=null; this.error.thread=true; this.error.in=(this.error.in?this.error.in+", ":"")+"in a thread the OpMode started"; return; } }
   }
   vm.strand=this.strand;
   if(this.done) return;
@@ -240,6 +243,15 @@ JvProgram.prototype.stubs=function(){
   const srcs=this.comp.srcs||{};
   return Array.from(this.vm.stubbed.entries()).sort((a,b)=>b[1].n-a[1].n).map(([k,v])=>{
     const src=srcs[v.file]; return [k,v.n,v.file||null,src&&v.pos!=null?src.slice(0,v.pos).split("\n").length:null]; });
+};
+/* The part of those that is the FTC SDK's: members of SDK classes the bench does not model
+   (a field the bench's Gamepad lacks, a sensor it has no model of). On the robot they do
+   something; here they read as false, 0 or a stub, so whatever depends on them is not tested.
+   [{call, count, file, line, sdk: the SDK class}], most used first */
+JvProgram.prototype.unmodelled=function(){
+  const srcs=this.comp.srcs||{};
+  return Array.from(this.vm.stubbed.entries()).filter(([,v])=>v.sdk).sort((a,b)=>b[1].n-a[1].n).map(([k,v])=>{
+    const src=srcs[v.file]; return {call:k,count:v.n,file:v.file||null,line:src&&v.pos!=null?src.slice(0,v.pos).split("\n").length:null,sdk:v.sdk}; });
 };
 
 /* ---- a stand-in robot for the probes ---- */
@@ -282,9 +294,9 @@ function jvProbeRun(comp,pad1,pad2,ticks){
 const JV_STICKS={F:{left_stick_y:-1},S:{left_stick_x:1},T:{right_stick_x:1},R:{right_stick_y:-1},L2:{left_trigger:1},R2:{right_trigger:1}};
 /* What the OpMode does with the robot, found by running it. */
 function jvAnalyze(comp,isAuto){
-  const out={ok:false,devices:[],drive:null,error:null,stubs:[],mech:{},commanded:[],ranges:{},telemetry:[]};
+  const out={ok:false,devices:[],drive:null,error:null,stubs:[],unmodelled:[],mech:{},commanded:[],ranges:{},telemetry:[]};
   const base=jvProbeRun(comp,{},{},isAuto?150:6);
-  out.error=base.P.error; out.stubs=base.P.stubs();
+  out.error=base.P.error; out.stubs=base.P.stubs(); out.unmodelled=base.P.unmodelled();
   out.telemetry=base.H.tel;
   const devs=base.P.vm.devices?Array.from(base.P.vm.devices.values()):[];
   if(base.P.error&&!devs.length){ return out; }
@@ -468,7 +480,7 @@ function jvMaybe(out,raw,opts){
     // the line reader's constants, statements and fields stay as a static view of
     // the file (the math sheet reads gear ratios and gains from them); the VM runs it
     engine:"vm", devices:an.devices, hasLoop:!isAuto, hasWait:true,
-    vm:{comp:r.comp, an, error:an.error, stubs:an.stubs.slice(0,40)}, legacy:{devices:legacy.devices.length, skipped:cov?cov.skipped.length:null}
+    vm:{comp:r.comp, an, error:an.error, stubs:an.stubs.slice(0,40), unmodelled:an.unmodelled.slice(0,40)}, legacy:{devices:legacy.devices.length, skipped:cov?cov.skipped.length:null}
   });
   // which control moves what: probed once per code (r is memoized), never against the clock
   if(!r.bindings){ try{ r.bindings=isAuto?[]:jvMechProbe(r.comp,an); }catch(e){ r.bindings=[]; } }
