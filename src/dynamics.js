@@ -82,8 +82,8 @@ const DYN_DEFAULTS = {
   slipStiffness: 22,   // longitudinal force per unit slip ratio per unit load;
                        // peaks at kappa = mu/Cs, about 4% slip, which is where tread on tile does
   rollerMu: 0.28,      // an omni/mecanum roller along its own axis: it turns, so it barely resists
-  strafeEff: 0.85,     // see dynWheels(): the share of the ideal sideways speed (and force) a mecanum
-                       // wheel's rollers deliver; real bases strafe at about 0.75-0.9 of forward speed
+  strafeEff: 0.85,     // see dynWheels(): the share of the sideways power a mecanum wheel's rollers pass
+                       // (as speed); real bases strafe at about 0.75-0.9 of forward speed
   wheelInertia: 4.6e-4,// kg.m^2, a 104 mm mecanum wheel about its axle
   wheelRadius: 0.048,  // only used when the CAD gave no radius at all
   gear: 1,             // motor shaft revs per wheel rev, on top of the gearmotor's own box
@@ -416,17 +416,22 @@ function tractionLimit(load, mu, kind, dir) {
    the pit it strafes at about 0.75-0.9 of that, and a lateral encoder
    multiplier of 1.1-1.3 (Road Runner's lateralInPerTick) is what every team
    tunes. The ground speed under a patch is (vx - y w) forward and
-   (vy + x w) sideways; the rim turns for the forward part plus the
-   sideways part over s, so the chassis moves only s of the sideways
-   distance the wheels roll (strafing and the sideways share of turning
-   alike), and only s of the roller's sideways push reaches the chassis.
-   The lost motion and force are heat in the rollers (the power reaching
-   the chassis is s^2 of the ideal, never more); the GROUND still sees the
-   full force and the traction cap is applied there. Forward driving has
-   no sideways part, so s does not touch it. The loss was once on the
-   force row alone, which only slowed the spin-up: at steady speed, where
-   drag needs little force, the velocity row still held the strafe at the
-   rim speed, 0.99 of forward. */
+   (vy + x w) sideways. The rollers are a slipping coupling in the sideways
+   channel: they pass the push unchanged (`force` is the ideal row) and lose
+   SPEED in the direction power flows through them. While the wheel drives
+   the chassis sideways, its rim turns 1/s for each unit of sideways motion
+   (`vel`, the driving row), so a powered strafe tops out at s of forward
+   speed and the encoders over-read it by 1/s; while the chassis drives the
+   wheel (pushed, braking, coasting) the rim turns only s. Either way the
+   side that receives gets s of the power put in, never more; the rest is
+   heat in the rollers. Which way it flows is decided per wheel in the solve
+   (Dyn.step, `rollers`), and the share each rim used is `rimShare` in the
+   state. The GROUND still sees the full force and the traction cap is
+   applied there. Forward driving has no sideways part, so s does not touch
+   it. (The loss was once on the force row alone, which only slowed the
+   spin-up; then 1/s on the velocity row whichever way power flowed, which
+   made energy when the ground turned the wheels: a robot sliding sideways
+   with its motors off sped its wheels up 1/s^2 more than it slowed.) */
 function dynWheels(rig) {
   const drive = (rig && rig.drive) || {};
   const list = Array.isArray(drive.wheels) ? drive.wheels : [];
@@ -453,8 +458,8 @@ function dynWheels(rig) {
 
     let vel, force, dir, gain, lat = null;
     if (k) {
-      vel = [1, -k / eta, -(y + k * x / eta)];
-      force = [1, -k * eta, -(y + k * eta * x)];
+      vel = [1, -k, -(y + k * x)];                     // the ideal row; the slip is added below
+      force = [1, -k, -(y + k * x)];
       // the patch can only push along the roller normal, and because that
       // is 45 degrees off the rolling direction the ground force is
       // sqrt(2) times the rim force it came from
@@ -474,17 +479,17 @@ function dynWheels(rig) {
       lat = [-sa, ca, xl * ca + y * sa];
     }
     const row = ik[i];
-    if (row && row.length === 3) {
-      vel = [dynNum(row[0], vel[0]), dynNum(row[1], vel[1]), dynNum(row[2], vel[2])];
-      // a mecanum ik row is the ideal geometry: its sideways part (row[1], and row[1]*x of the
-      // turn) slips through the rollers the same way as above
-      if (k) vel = [vel[0], vel[1] / eta, vel[2] + vel[1] * x * (1 / eta - 1)];
-    }
+    if (row && row.length === 3) vel = [dynNum(row[0], vel[0]), dynNum(row[1], vel[1]), dynNum(row[2], vel[2])];
+    // a mecanum wheel's sideways part (row[1] of the strafe, and row[1]*x of the turn), which
+    // the rollers pass: the rim turns c of it, 1/s while the wheel drives that way, s while the
+    // chassis drives the wheel (rimRow)
+    const sidePart = k ? [0, vel[1], vel[1] * x] : null;
     const rolls = k !== 0 || kind === "x" || kind === "omni" || kind === "kiwi";
 
     out.push({
       x: x, y: y, r: r, roller: k, alpha: dynNum(w.alpha, 0), kind: kind,
-      vel: vel, force: force, dir: dir, gain: gain,
+      ideal: vel, sidePart: sidePart, eta: k ? eta : 1,
+      vel: rimRow({ ideal: vel, sidePart: sidePart }, k ? 1 / eta : 1), force: force, dir: dir, gain: gain,
       J: Math.max(DYN_MIN_J, dynPer(rig && rig.wheelInertia, i, DYN_DEFAULTS.wheelInertia)),
       gear: Math.max(1e-6, Math.abs(dynPer(rig && rig.gear, i, DYN_DEFAULTS.gear))),
       eff: dynClamp(dynPer(rig && rig.efficiency, i, DYN_DEFAULTS.efficiency), 0, 1),
@@ -495,6 +500,15 @@ function dynWheels(rig) {
     });
   }
   return out;
+}
+
+/* A wheel's velocity row when its rim turns c for each unit of the sideways motion its rollers
+   pass: the ideal row, plus (c - 1) of its sideways part. c = 1 is the ideal; a traction or omni
+   wheel has no sideways part and is always its ideal row. */
+function rimRow(w, c) {
+  const a = w.ideal, p = w.sidePart;
+  if (!p || c === 1) return a.slice();
+  return [a[0] + (c - 1) * p[0], a[1] + (c - 1) * p[1], a[2] + (c - 1) * p[2]];
 }
 
 /* A state object with the right shape and nothing but finite numbers in it. */
@@ -566,6 +580,18 @@ const Dyn = {
     return dynStill(n);
   },
 
+  /* Each wheel's velocity row (chassis twist -> rim speed, m/s) as the last step used it:
+     a mecanum wheel's rim turns `state.rimShare` of the sideways motion its rollers pass
+     (1/s, the driving share, when the state has none). What changes the chassis speed from
+     outside the step, a wall, moves the wheels through these. */
+  rimRows(rig, state) {
+    const share = state && Array.isArray(state.rimShare) ? state.rimShare : [];
+    return dynWheels(rig).map((w, i) => {
+      const c = dynNum(share[i], w.sidePart ? 1 / w.eta : 1);
+      return rimRow(w, w.sidePart ? dynClamp(c, w.eta, 1 / w.eta) : 1);
+    });
+  },
+
   /* One fixed step. `cmd` is the per-wheel motor command, -1..1, already
      produced by whatever ran the OpMode; this function only does physics.
      `coast`, optional, is per wheel: true for a motor set to
@@ -613,6 +639,16 @@ const Dyn = {
     const u = new Array(n), v = new Array(n), b0 = new Array(n), D = new Array(n),
       K = new Array(n), cap = new Array(n), tauW = new Array(n), kW = new Array(n), Jdt = new Array(n);
 
+    // a mecanum wheel's sideways motion at the start of the step, through its own rollers
+    // (bS, see rimRow), and whether its rim's share of that motion is decided in the solve
+    const bS = new Array(n).fill(0), sw = new Array(n).fill(false), v1 = new Array(n).fill(0);
+    for (let i = 0; i < n; i++) {
+      const p = W[i].sidePart;
+      if (!p) continue;
+      bS[i] = p[0] * vx + p[1] * vy + p[2] * om;
+      sw[i] = W[i].eta < 1;
+    }
+
     for (let i = 0; i < n; i++) {
       const w = W[i], row = w.vel;
       const rated = motors[i] || motors[0] || null;
@@ -648,30 +684,38 @@ const Dyn = {
         tauW[i] = -kW[i] * st.wheelOmega[i];                 // the drag's torque at the start of the step
       }
       Jdt[i] = w.J / dt;
-      b0[i] = (u[i] - v[i]) + tauW[i] * w.r / (Jdt[i] + kW[i]);
+      // b0 and D are taken against the IDEAL row (rimRow, c = 1); a mecanum wheel's slipped
+      // share is added in the solve, where it is decided
+      v1[i] = w.ideal[0] * vx + w.ideal[1] * vy + w.ideal[2] * om;
+      b0[i] = (u[i] - v1[i]) + tauW[i] * w.r / (Jdt[i] + kW[i]);
       K[i] = Cs * loads[i] / Math.max(Math.abs(v[i]), vEps);
     }
 
     // ---- the solver's rows: every wheel's rolling row (0..n-1), then the
     // sideways row of each traction wheel. side[i] is wheel i's sideways row.
-    const rows = W.map(w => ({ vel: w.vel, force: w.force }));
+    const rows = W.map(w => ({ vel: w.ideal, force: w.force }));
     const side = new Array(n).fill(-1);
     for (let i = 0; i < n; i++) if (W[i].lat) { side[i] = rows.length; rows.push({ vel: W[i].lat, force: W[i].lat }); }
     const nr = rows.length;
 
-    // ---- coupling: how much one newton on row q closes row p's slip gap
-    const A = [];
+    // ---- coupling: how much one newton on row q closes row p's slip gap (A, ideal rows),
+    // and how much it moves a mecanum wheel's sideways motion (S, through its sidePart)
+    const A = [], S = [];
     for (let p = 0; p < nr; p++) {
-      const a = rows[p].vel; A[p] = new Array(nr);
+      const a = rows[p].vel, sp = p < n && sw[p] ? W[p].sidePart : null;
+      A[p] = new Array(nr); S[p] = sp ? new Array(nr) : null;
       for (let q = 0; q < nr; q++) {
         const t = rows[q].force;
         A[p][q] = (a[0] * t[0] + a[1] * t[1]) / m + a[2] * t[2] / Izz;
+        if (sp) S[p][q] = (sp[0] * t[0] + sp[1] * t[1]) / m + sp[2] * t[2] / Izz;
       }
     }
-    for (let i = 0; i < n; i++) {
-      D[i] = W[i].r * W[i].r / (Jdt[i] + kW[i]) + dt * Math.max(0, A[i][i]);
-      if (!(D[i] > 0)) D[i] = W[i].r * W[i].r / (Jdt[i] + kW[i]);
-    }
+    const rimD = (i, c) => {
+      const own = W[i].r * W[i].r / (Jdt[i] + kW[i]);
+      const d = own + dt * Math.max(0, A[i][i] + (sw[i] ? (c - 1) * S[i][i] : 0));
+      return d > 0 ? d : own;
+    };
+    for (let i = 0; i < n; i++) D[i] = rimD(i, 1);
     // sideways there is no wheel to spin: only the chassis takes the newton
     const E = side.map(j => j < 0 ? 0 : Math.max(1e-9, dt * A[j][j]));
     // the sideways slip the step would end with and no contact force: the
@@ -690,9 +734,46 @@ const Dyn = {
     const f = new Array(nr).fill(0);
     for (let i = 0; i < n; i++) { f[i] = st.force[i]; if (side[i] >= 0) f[side[i]] = st.side[i]; }
     const bb = new Array(n).fill(0), cc = new Array(n).fill(0);
+    const ratio = W.map(w => w.sidePart ? 1 / w.eta : 1);    // the share each rim turns (rimRow)
     const gap = (p, g0) => { let off = 0; for (let q = 0; q < nr; q++) if (q !== p) off += A[p][q] * f[q]; return g0 - dt * off; };
+    /* A mecanum wheel's rollers, which way power flows through them. The chassis takes the
+       sideways part of the wheel's push at the wheel's sideways speed: that power is F * beta,
+       beta the sideways motion its rollers pass (sidePart . twist) at the END of the step, own
+       push included. While it is positive the wheel drives the chassis and the rim turns 1/s
+       per unit of that motion; while negative the chassis drives the wheel and the rim turns
+       s; either way the side that receives gets s of the power put in. The force is solved
+       with the driving row, then the driven one, and kept with the first whose force and
+       motion agree; when neither does, the rollers slip between the two and pass nothing that
+       step (F = 0, the rim at whatever share between s and 1/s it already turns). The rim
+       share only multiplies beta, so this is one monotone scalar problem per wheel with
+       exactly one answer: no switching back and forth, and F passes continuously through
+       zero where the direction changes. A wheel with no sideways motion (at rest, or driving
+       straight) counts as driving. */
+    const rollers = (i) => {
+      let offA = 0, offS = 0;
+      for (let q = 0; q < nr; q++) if (q !== i) { offA += A[i][q] * f[q]; offS += S[i][q] * f[q]; }
+      const g1 = b0[i] - dt * offA, bp = bS[i] + dt * offS, gam = dt * S[i][i];
+      const solve = (c) => {
+        const g = g1 - (c - 1) * bp, d = rimD(i, c);
+        let F = K[i] * g / (1 + K[i] * d);
+        F = Number.isFinite(F) ? dynClamp(F, -cap[i], cap[i]) : 0;
+        return { F: F, g: g, d: d, c: c, beta: bp + gam * F };
+      };
+      const eta = W[i].eta, drv = solve(1 / eta);
+      if (drv.F * drv.beta >= 0 || Math.abs(drv.beta) < 1e-9) return drv;
+      const dvn = solve(eta);
+      if (dvn.F * dvn.beta < 0) return dvn;
+      // between the two: the share at which this wheel's slip gap closes with no force
+      const c = Math.abs(bp) > 1e-12 ? dynClamp(1 + g1 / bp, eta, 1 / eta) : 1;
+      return { F: 0, g: 0, d: rimD(i, c), c: c, beta: bp };
+    };
     for (let s = 0; s < sweeps; s++) {
       for (let i = 0; i < n; i++) {
+        if (sw[i]) {
+          const r = rollers(i);
+          f[i] = r.F; bb[i] = r.g; D[i] = r.d; ratio[i] = r.c;
+          continue;
+        }
         const b = gap(i, b0[i]);
         bb[i] = b;
         let fi = K[i] * b / (1 + K[i] * D[i]);
@@ -782,14 +863,14 @@ const Dyn = {
       let o = (Jdt[i] * st.wheelOmega[i] + tauW[i] + kW[i] * st.wheelOmega[i] - F[i] * w.r) / (Jdt[i] + kW[i]);
       o = dynClamp(dynFin(o), -DYN_DEFAULTS.wheelOmegaMax, DYN_DEFAULTS.wheelOmegaMax);
       wo[i] = o;
-      const row = w.vel;
+      const row = rimRow(w, ratio[i]);
       const vn = row[0] * nvx + row[1] * nvy + row[2] * nom;
       slip[i] = dynClamp((o * w.r - vn) / Math.max(Math.abs(vn), vEps), -10, 10);
     }
 
     return {
       v: { x: nvx, y: nvy }, omega: nom,
-      wheelOmega: wo, slip: slip, loads: loads, force: F, side: Gs,
+      wheelOmega: wo, slip: slip, loads: loads, force: F, side: Gs, rimShare: ratio,
       accel: { x: lx, y: ly }, alpha: al,
       wrench: { fx: dynFin(Fx), fy: dynFin(Fy), tz: dynFin(Tz) }
     };

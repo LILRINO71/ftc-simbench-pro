@@ -212,8 +212,10 @@ public class T extends LinearOpMode {
 
 test('mecanum: strafing is real, and slower than driving forward', () => {
   const R = rig({ kind: 'mecanum', stallNm: 0.6 });
-  const f = drive(R, fwd, 0.6);
-  const s = drive(R, [1, -1, -1, 1], 0.6);                // the strafe pattern
+  // the rollers pass the push unchanged and lose speed (dynWheels), so a strafe spins up as briskly
+  // as driving forward and falls behind towards the top: compare the speeds it settles at
+  const f = drive(R, fwd, 3);
+  const s = drive(R, [1, -1, -1, 1], 3);                  // the strafe pattern
   assert.ok(Math.abs(s.v.y) > 0.3, `it strafes: ${s.v.y.toFixed(2)} m/s`);
   assert.ok(Math.abs(s.v.x) < 0.1, 'and barely creeps forward while doing it');
   assert.ok(Math.abs(s.v.y) < Math.abs(f.v.x) * 0.9,
