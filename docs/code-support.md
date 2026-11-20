@@ -142,7 +142,7 @@ meets the walls and the HIVEs, among the staged pieces ([game-pieces.md](game-pi
 field, adds loose balls (inches) and sets the Shot tab's settings. The result keeps every field above and
 adds `payload`: `supply` and `why`, `picked`, `ejected`, `fired`, `scored`, `fromFlowers`, `otherNectar`
 (G408), `preloaded`, `held` (`kind`, `color`), `intakes` (each one's `edge` and `edgeFrom`, `in`
-(`positive`/`negative`/null), `inFrom` and `decidedAt`), `transfer`, `gate`, `flywheels`. Without `field`
+(`positive`/`negative`/null), `inFrom` and `decidedAt`), `transfer`, `gate`, `flywheels`, `notTurning` (devices the code runs that the joint they are bound to holds still). Without `field`
 there is no `payload`.
 
 **A caller with its own robot** passes `host`, an object with any of the methods the VM asks of a

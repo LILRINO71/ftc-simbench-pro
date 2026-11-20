@@ -25,12 +25,14 @@
    CAD joint, the edge nearest the joint and the joint's own width. Two
    intakes nothing places are taken to be one at each end.
 
-   Which way is in: pinned by the user, else the first sustained command
-   (0.15 s above 20 % power) the code gives an intake while the robot holds
-   nothing (an empty robot has nothing to spit out) or while its flywheel is
-   up to speed (running the intake then feeds the shooter). The CAD can't
-   settle it: a roller's axis says nothing about which side of it the ball
-   passes. The opposite sign ejects.
+   Which way is in: pinned by the user, else the way the intake is running
+   (0.15 s above 20 % power) the first time a loose ball lies in its mouth:
+   an intake run at a ball is taking it in. Or the way it runs with pieces
+   inside while the flywheel is up (it is feeding the shooter: how an AUTO
+   with pre-loads decides). Not the first thing the driver pressed: a tap
+   of reverse on an empty robot says nothing. The CAD can't settle it: a
+   roller's axis says nothing about which side of it the ball passes. The
+   opposite sign ejects.
 
    Supply (Shots.cfg.payload.supply): "real" is all of the above;
    "unlimited" is the old bench, a ball from nowhere at every feeder pulse,
@@ -177,21 +179,47 @@ const Payload={
   world(X,lx,ly){ const c=Math.cos(X.h), s=Math.sin(X.h); return [X.x+lx*c-ly*s, X.y+lx*s+ly*c]; },
 
   /* ---------------- which way is in ---------------- */
-  learn(name,dt,any){
+  /* atBall: a loose ball (or a FLOWER's POLLEN) is in this intake's mouth right now. any: a transfer,
+     which only ever runs one way that matters. */
+  learn(name,dt,any,atBall){
     const P=this.cfg(), pin=P.dirs&&P.dirs[name];
     const st=this.dirs[name]||(this.dirs[name]={sign:0, from:null, run:0, want:0, t:null});
     if(pin==="positive"||pin==="negative"){ st.sign=pin==="positive"?1:-1; st.from="pinned"; return; }
     if(st.from==="pinned"){ st.sign=0; st.from=null; st.run=0; }
     if(st.sign) return;
     const s=Sim.dev[name]; if(!s) return;
-    const empty=!this.held.length&&!this.grips.length&&!this.fgrips.length;
-    const feeding=!!(Shots.cfg&&Shots.cfg.shooter)&&Shots.exitSpeed()>=1;
-    const ok=any||empty||feeding, sg=Math.abs(s.cmd)>INTAKE_ON?Math.sign(s.cmd):0;
-    if(ok&&sg&&sg===st.want) st.run+=dt; else { st.want=sg; st.run=ok&&sg?dt:0; }
-    if(st.run>=INTAKE_LEARN_S-1e-9){
-      st.sign=sg; st.from=any?"first use":empty?"first use":"first feed"; st.t=+(Sim.t||0).toFixed(2);
-      Shots.note(name+": "+(sg>0?"positive":"negative")+" power takes pieces in (its first "+(empty||any?"use":"feed")+")");
+    const sg=Math.abs(s.cmd)>INTAKE_ON?Math.sign(s.cmd):0;
+    // how long it has run one way, whatever is in front of it: a driver holds the intake on the way to a
+    // ball, and it has to count the moment the ball is there
+    if(sg&&sg===st.want) st.run+=dt; else { st.want=sg; st.run=sg?dt:0; }
+    if(!sg||st.run<INTAKE_LEARN_S-1e-9) return;
+    // pieces inside and the flywheel up: running the intake is feeding the shooter
+    const feeding=this.held.length>0&&!!(Shots.cfg&&Shots.cfg.shooter)&&Shots.exitSpeed()>=1;
+    const why=any?"first use":atBall?"first ball":feeding?"first feed":null;
+    if(!why) return;
+    st.sign=sg; st.from=why; st.t=+(Sim.t||0).toFixed(2);
+    Shots.note(name+": "+(sg>0?"positive":"negative")+" power takes pieces in ("+(why==="first ball"?"the way it ran at its first ball":why==="first feed"?"the way it ran with the shooter up":"its first use")+")");
+  },
+  /* Is there something for this mouth to take: a loose ball lying in it, or a FLOWER's POLLEN at it? */
+  atBall(m,X){
+    if(this.ballIn(m,X)) return true;
+    const fl=typeof Match!=="undefined"&&Match.pieces()?Match.flowers:[];
+    return fl.some(q=>q.stack.length&&q.stack[0].kind==="pollen"&&this.atOutlet(q,m,X));
+  },
+  /* The loose ball lying in a mouth (a strip just outside the edge, a ball radius deep), the one
+     nearest the edge: {e, p (in the box frame)}, or null. */
+  ballIn(m,X){
+    const F=this.loose(); if(!F) return null;
+    let best=null, bd=Infinity;
+    for(const e of F){
+      if(e.hold) continue;
+      const r=ballSpec(e.kind).r;
+      if(e.z!=null&&e.z>r+0.03) continue;
+      const p=this.local(X,e.x,e.y), d=p[0]*m.n[0]+p[1]*m.n[1]-m.e, lat=p[0]*m.t[0]+p[1]*m.t[1]-m.c;
+      if(d<-0.25*r||d>2*r||Math.abs(lat)>m.w) continue;
+      if(d<bd){ bd=d; best={e, p}; }
     }
+    return best;
   },
   /* A device that should be turning a roller or a wheel but is held still by the joint it is on (a
      slide at its stop, an arm at its limit: the wrong joint for it) picks nothing up and launches
@@ -234,11 +262,10 @@ const Payload={
     if(!this.primed) this.prime();
     if(sim.phase!=="running") return;
     this.t+=dt;
-    const ins=this.intakes(), tr=this.transfer();
-    for(const n of ins) this.learn(n,dt,false);
-    if(tr) this.learn(tr,dt,true);
+    const ins=this.intakes(), tr=this.transfer(), M=this.mouths(), X=this.box(), room=this.count()<MATCH_BOT.cap;
+    for(const m of M) this.learn(m.name,dt,false,room&&this.atBall(m,X));
+    if(tr) this.learn(tr,dt,true,false);
     this.stuckTick(dt,ins.concat(tr?[tr]:[],this.flywheels()));
-    const M=this.mouths(), X=this.box();
     this.gripTick(dt);
     this.flowerTick(dt,M,X);
     this.grab(M,X);
@@ -283,15 +310,7 @@ const Payload={
       if(this.count()>=MATCH_BOT.cap) return;
       if(this.inward(m.name)<=INTAKE_ON) continue;
       if(this.grips.some(g=>g.name===m.name)||this.fgrips.some(g=>g.name===m.name)) continue;
-      let best=null, bd=Infinity;
-      for(const e of F){
-        if(e.hold) continue;
-        const r=ballSpec(e.kind).r;
-        if(e.z!=null&&e.z>r+0.03) continue;
-        const p=this.local(X,e.x,e.y), d=p[0]*m.n[0]+p[1]*m.n[1]-m.e, lat=p[0]*m.t[0]+p[1]*m.t[1]-m.c;
-        if(d<-0.25*r||d>2*r||Math.abs(lat)>m.w) continue;
-        if(d<bd){ bd=d; best={e, p}; }
-      }
+      const best=this.ballIn(m,X);
       if(!best) continue;
       const e=best.e, dist=this.takeDist(e.kind);
       e.hold={id:"user", lx:best.p[0], ly:best.p[1], tx:best.p[0]-m.n[0]*dist, ty:best.p[1]-m.n[1]*dist, v:this.ballSpeed(m.name,dist)};

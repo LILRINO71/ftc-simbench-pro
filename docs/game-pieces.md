@@ -36,12 +36,18 @@ A ball is in the mouth when it lies on the tiles with its centre at most two rad
 
 ## Which way is in
 
-Set it per intake (in: + power / − power), or leave it on **first use**: the first command the code
-holds above 20 % power for 0.15 s while the robot holds nothing is "in" (a robot with nothing in it has
-nothing to spit out), or while its flywheel is up to speed (running the intake then feeds the shooter;
-this is how an AUTO with pre-loads decides). The other sign ejects. The CAD can't settle it: a roller's
-axis says nothing about which side of it the ball passes. What was decided, how, and when is in the
-Shot tab and in a headless run's `payload.intakes`.
+Set it per intake (in: + power / − power), or leave it to be found: **the way the intake is running the
+first time a loose ball lies in its mouth** (above 20 % power for 0.15 s) is "in", because an intake run
+at a ball is taking it in. A driver who holds the intake on the way to a ball has it decided the moment
+the ball is there. With pieces already inside (an AUTO's pre-loads) the way it runs while the flywheel
+is up to speed is "in": it is feeding the shooter. The other sign ejects. Running the intake with no
+ball near decides nothing, so a tap of reverse on an empty robot does no harm. The CAD can't settle it:
+a roller's axis says nothing about which side of it the ball passes. What was decided, how, and when is
+in the Shot tab and in a headless run's `payload.intakes` (`inFrom`: `first ball`, `first feed`, `pinned`).
+
+An intake or a flywheel the code runs but that cannot turn, because the joint it is bound to is at its
+stop (the wrong joint for it: a lift, an arm), is said once in the notes with the joint's name, and is
+listed in `payload.notTurning`.
 
 ## Picking up, holding, letting out
 

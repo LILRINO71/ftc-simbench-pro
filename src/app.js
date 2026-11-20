@@ -1351,8 +1351,8 @@ function renderPieces(){
   if(S.mode==="real"){
     for(const m of Payload.mouths()){
       const d=Payload.dirs[m.name]||{};
-      const way=d.sign?`<b>${d.sign>0?"positive":"negative"}</b> power is in (${esc(d.from==="pinned"?"set here":d.from==="first feed"?"its first run with the shooter up":"its first run on an empty robot")}${d.t!=null?" at "+d.t.toFixed(1)+" s":""})`
-        :"which way is in: its first run on an empty robot will say";
+      const way=d.sign?`<b>${d.sign>0?"positive":"negative"}</b> power is in (${esc(d.from==="pinned"?"set here":d.from==="first feed"?"the way it ran with the shooter up":d.from==="first ball"?"the way it ran at its first ball":"its first use")}${d.t!=null?" at "+d.t.toFixed(1)+" s":""})`
+        :"which way is in: the way it runs at its first ball will say";
       out.push(`<div><code>${esc(m.name)}</code> at the ${esc(m.edge)} edge (${esc(m.from)}); ${way}</div>`);
     }
     const st=Payload.stats||{}, tr=Payload.transfer(), g=Payload.gate();
@@ -1375,7 +1375,7 @@ function renderPieceSetup(){
   const sel=(name,what,val,list)=>`<select data-pc="${what}" data-dev="${esc(name)}" aria-label="${esc(name)} ${what}">`+list.map(([v,l])=>`<option value="${v}"${v===(val||"auto")?" selected":""}>${l}</option>`).join("")+`</select>`;
   setHTML($("#pcRows"),ins.map(n=>`<div class="pc-row"><code>${esc(n)}</code>`+
     sel(n,"edge",P.edges&&P.edges[n],[["auto","edge: auto"],["front","front edge"],["back","back edge"]])+
-    sel(n,"dir",P.dirs&&P.dirs[n],[["auto","in: first use"],["positive","in: + power"],["negative","in: − power"]])+`</div>`).join(""));
+    sel(n,"dir",P.dirs&&P.dirs[n],[["auto","in: at its first ball"],["positive","in: + power"],["negative","in: − power"]])+`</div>`).join(""));
   renderPieces();
 }
 /* A setting changed: before START the pre-load and the pieces on the field follow it at once. */

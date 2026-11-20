@@ -197,7 +197,7 @@ test('payload: a ball in the mouth comes in only while the intake runs inward, a
   run(E, 1);
   assert.equal(held(), 0, 'the intake is off: the ball just sits there');
   assert.ok(E.Match.floor.includes(b));
-  // first use: the code's first sustained command, with the robot empty, says which way is in
+  // the way the intake runs at its first ball says which way is in
   pad('right_trigger', 1);
   run(E, 0.12);
   assert.equal(held(), 0, 'not before the direction is known (0.15 s of command)');
@@ -216,12 +216,12 @@ test('payload: a ball in the mouth comes in only while the intake runs inward, a
   assert.ok(Math.abs(xs.length * DT - expect) <= 3 * DT, `in ${(xs.length * DT).toFixed(2)} s, physics says ${expect.toFixed(2)} s`);
   const s = E.Payload.summary();
   assert.equal(s.picked, 1);
-  assert.deepEqual(s.intakes.map((m) => [m.name, m.edge, m.in, m.inFrom]), [['intake', 'front', 'positive', 'first use']]);
+  assert.deepEqual(s.intakes.map((m) => [m.name, m.edge, m.in, m.inFrom]), [['intake', 'front', 'positive', 'first ball']]);
 });
 
 test('payload: an intake that stops before the ball is in lets it go; one running outward never grips', () => {
-  bench(MEET0());
-  pad('right_trigger', 1); run(E, 0.3); pad('right_trigger', 0); run(E, 0.2);   // direction learned on an empty robot
+  bench(MEET0(), { payload: { dirs: { intake: 'positive' } } });   // which way is in is known: RT
+  run(E, 0.2);
   const b = ballAt('pollen');
   pad('left_trigger', 1); run(E, 1); pad('left_trigger', 0);
   assert.equal(held(), 0, 'running out: nothing comes in');
@@ -348,20 +348,30 @@ test('payload: run backward, the intake puts a piece out through its mouth onto 
   assert.ok(e.x > X.x + E.Sim.footprint.hx + E.ballSpec('nectar').r, 'and rolled away from the robot');
 });
 
-test('payload: which way is in is the first sustained command on an empty robot; the user can pin it', () => {
+test('payload: which way is in is the way the intake runs at its first ball; the user can pin it', () => {
   // this robot takes balls in on NEGATIVE power
   bench(MEET0('-1.0'));
   pad('right_trigger', 1); run(E, 0.04); pad('right_trigger', 0); run(E, 0.2);
   assert.equal(E.Payload.dirs.intake.sign, 0, 'a blip is not a decision');
-  pad('right_trigger', 1); run(E, 0.3);
-  assert.equal(E.Payload.dirs.intake.sign, -1, 'negative is in');
-  assert.equal(E.Payload.dirs.intake.from, 'first use');
-  ballAt('pollen'); run(E, 1);
+  pad('right_trigger', 1); run(E, 0.5);
+  assert.equal(E.Payload.dirs.intake.sign, 0, 'nor is running it with no ball anywhere near');
+  ballAt('pollen'); run(E, 0.04);
+  assert.equal(E.Payload.dirs.intake.sign, -1, 'at a ball it is: negative is in, and at once (it was already running)');
+  assert.equal(E.Payload.dirs.intake.from, 'first ball');
+  run(E, 1);
   assert.equal(held(), 1, 'and it picks up');
   // with something inside, the opposite command is the eject, never a new decision
   pad('right_trigger', 0); pad('left_trigger', 1); run(E, 0.6); pad('left_trigger', 0);
   assert.equal(E.Payload.dirs.intake.sign, -1);
   assert.equal(E.Payload.summary().ejected, 1);
+  // a tap of reverse before anything else teaches it nothing (it once made reverse "in" for the whole run)
+  bench(MEET0());
+  pad('left_trigger', 1); run(E, 0.6); pad('left_trigger', 0); run(E, 0.2);
+  assert.equal(E.Payload.dirs.intake.sign, 0, 'reverse on an empty robot with no ball: no decision');
+  ballAt('pollen');
+  pad('right_trigger', 1); run(E, 1.2); pad('right_trigger', 0);
+  assert.equal(E.Payload.dirs.intake.sign, 1, 'RT at a ball: positive is in');
+  assert.equal(held(), 1, 'and the ball came in');
   // pinned the other way in the Shot tab: that wins
   bench(MEET0('-1.0'), { payload: { dirs: { intake: 'positive' } } });
   pad('left_trigger', 1); run(E, 0.3);

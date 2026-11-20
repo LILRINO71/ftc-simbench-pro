@@ -444,7 +444,7 @@ test('field: a run on the field adds `payload` (picked, ejected, fired, scored, 
   for (const k of Object.keys(plain)) if (k !== 'peaks' && k !== 'telemetry') assert.deepEqual(r[k], plain[k], k);
   assert.deepEqual(Object.keys(r.peaks).sort(), Object.keys(plain.peaks).sort());
   const p = r.payload;
-  assert.deepEqual(Object.keys(p).sort(), ['ejected', 'fired', 'flywheels', 'fromFlowers', 'gate', 'held', 'intakes', 'otherNectar', 'picked', 'preloaded', 'scored', 'supply', 'transfer', 'why'].sort());
+  assert.deepEqual(Object.keys(p).sort(), ['ejected', 'fired', 'flywheels', 'fromFlowers', 'gate', 'held', 'intakes', 'notTurning', 'otherNectar', 'picked', 'preloaded', 'scored', 'supply', 'transfer', 'why'].sort());
   assert.equal(p.supply, 'real'); assert.match(p.why, /intake/);
   assert.equal(p.picked, 1, 'picked up the ball in front of it');
   assert.equal(p.fired, 1, 'and launched it once the shooter turned');
@@ -452,7 +452,7 @@ test('field: a run on the field adds `payload` (picked, ejected, fired, scored, 
   assert.deepEqual(p.held, []);
   const at = p.intakes[0].decidedAt;
   assert.ok(at >= 0.14 && at <= 0.2, 'decided after 0.15 s of RT: ' + at);
-  assert.deepEqual(p.intakes, [{ name: 'intake', edge: 'front', edgeFrom: 'the default: the front edge', in: 'positive', inFrom: 'first use', decidedAt: at }]);
+  assert.deepEqual(p.intakes, [{ name: 'intake', edge: 'front', edgeFrom: 'the default: the front edge', in: 'positive', inFrom: 'first ball', decidedAt: at }]);
   assert.deepEqual(p.flywheels, ['outtake1', 'outtake2']);
   assert.equal(p.gate, null); assert.equal(p.transfer, null);
   // the same run again: the same answer
