@@ -12,13 +12,16 @@ const IN=0.0254;
 const START_CLEAR_IN=0.25;       // a start pose keeps this far from the LOADING ZONE and the FLOWER (G304)
 const TIP_GRAMS=190;             // EFSG 12.3: 174 g placed must not TIP, 199 g launched must
 const ELEMENT_G={pollen:24.9, nectar:41.3};
+const TIP_QUEUE_MAX=32;          // TIPs kept for a match to spill; a running match empties it every tick
 const FRONTS={"+x":0, "+y":-Math.PI/2, "-x":Math.PI, "-y":Math.PI/2};
 
 const Field={
   E:null, data:null, ok:false, version:0,
   hive:{red:-1, blue:1},          // side each HIVE's up-CELL faces: -1 audience, +1 far
   cells:{red:[], blue:[]},        // what sits in each up-CELL right now
-  tips:{red:0, blue:0}, lastTip:null,
+  // lastTip: the newest TIP. tipQueue: every TIP whose CELL a match hasn't spilled yet, oldest first
+  // (two can come between two Match ticks); Match.spill empties it
+  tips:{red:0, blue:0}, lastTip:null, tipQueue:[],
 
   init(engine,data){
     this.E=null; this.data=null; this.ok=false;
@@ -38,7 +41,7 @@ const Field={
     this.hive={red:s.red, blue:s.blue};
     this.cells={red:[], blue:[]};
     for(const al of ["red","blue"]) for(let i=0;i<3;i++) this.cells[al].push({kind:"nectar", color:al});
-    this.tips={red:0, blue:0}; this.lastTip=null;
+    this.tips={red:0, blue:0}; this.lastTip=null; this.tipQueue=[];
     this._hm=null; this._bs=null; this.version++;
   },
   half(){ return this.ok ? this.data.field.field.half*IN : 1.83; },
@@ -64,6 +67,8 @@ const Field={
     this.tips[al]++;
     // what was in the CELL falls out on the side it was up on (a match puts it on the tiles)
     this.lastTip={al, from, to:-from, n:this.tips[al], spilled, id:(this.lastTip?this.lastTip.id:0)+1};
+    // with no match on, nobody spills: keep only the last few so the queue can't grow without end
+    this.tipQueue.push(this.lastTip); if(this.tipQueue.length>TIP_QUEUE_MAX) this.tipQueue.shift();
     this.version++;
   },
 

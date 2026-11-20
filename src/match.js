@@ -160,12 +160,17 @@ const Match={
   },
 
   /* ---------------- a TIP: the CELL that was up spills on its side ---------------- */
+  /* Every TIP since the last tick, oldest first: two can come between ticks (an AI shot and the
+     team's in the same 20 ms, or both HIVEs), and each spills its own CELL. */
   spill(){
-    const L=Field.lastTip; if(!L||L.id===this.seenTip) return;
-    this.seenTip=L.id;
+    const Q=Field.tipQueue||[];
+    while(Q.length){ const L=Q.shift(); if(L.id>this.seenTip){ this.seenTip=L.id; this.spillOne(L); } }
+  },
+  spillOne(L){
     const hx=(Field.data.field.hive.hiveX||{})[L.al]!=null?Field.data.field.hive.hiveX[L.al]:(L.al==="red"?-12.75:12.75);
     // they tumble out of the mouth of the CELL as it swings down, on the side it was up on
-    const X=Field.E._internal, G=X.geometry(), sg=Field.hive[L.al], bc=G.b0+G.centroidB;
+    // (the HIVE as that TIP left it: it may have tipped again since)
+    const X=Field.E._internal, G=X.geometry(), sg=L.to!=null?L.to:Field.hive[L.al], bc=G.b0+G.centroidB;
     (L.spilled||[]).forEach((e,i)=>{
       const w=(this.rnd()*2-1)*(G.W2-2.2), a=-G.aOut-2.4-(i%2)*3.8;
       const p=X.bodyToWorld(w,a,bc,hx,sg), q=X.bodyToWorld(w,a-1,bc,hx,sg), d=Math.hypot(q[0]-p[0],q[1]-p[1],q[2]-p[2]);
@@ -173,7 +178,7 @@ const Match={
       this.drop(e.kind,e.color,p[0]*IN,p[1]*IN,{z:p[2]*IN, vx:(q[0]-p[0])/d*v, vy:(q[1]-p[1])/d*v, vz:(q[2]-p[2])/d*v});
     });
     const who=L.by?" by "+L.by:"";
-    this.note(L.al.toUpperCase()+" HIVE TIPPED"+who+" (TIP "+(Field.tips[L.al]-this.tips0[L.al])+") +"+MATCH_PTS.tip,L.al);
+    this.note(L.al.toUpperCase()+" HIVE TIPPED"+who+" (TIP "+((L.n!=null?L.n:Field.tips[L.al])-this.tips0[L.al])+") +"+MATCH_PTS.tip,L.al);
   },
 
   /* ---------------- one robot's brain and body ---------------- */

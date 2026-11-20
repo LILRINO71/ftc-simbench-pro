@@ -191,6 +191,28 @@ test('match: a ball in the air when its HIVE tips is not in the new up-CELL (AI 
   assert.equal(before, 3);
 });
 
+test('match: TIPs between two ticks each spill their CELL, so no element is ever lost', () => {
+  // the up-CELL "dumps its contents on that side" (game-brief.md HIVE); an AI shot and the team's can sink
+  // in the same 20 ms, so two TIPs (both HIVEs, or one HIVE twice) can come before the next Match.tick
+  E.Field.reset();
+  const M = E.Match, F = E.Field, sim = userAt(-61.5 * IN, 0);
+  M.on = true; M.reset({ period: 'TeleOp', user: 'red', userPose: sim.chassis, seed: 1 });
+  M.tick(0.02, sim);
+  const floor0 = M.floor.length;
+  for (let i = 0; i < 3; i++) F.addToCell('red', 'pollen');     // 3 NECTAR + 3 POLLEN = 198.6 g: TIP
+  for (let i = 0; i < 3; i++) F.addToCell('blue', 'pollen');
+  for (let i = 0; i < 8; i++) F.addToCell('red', 'pollen');     // 8 POLLEN = 199.2 g: the red HIVE again
+  assert.deepEqual(F.tips, { red: 2, blue: 1 });
+  assert.equal(F.lastTip.al, 'red', 'lastTip is still the newest');
+  M.tick(0.02, sim);
+  assert.equal(M.floor.length - floor0, 6 + 6 + 8, 'every element of all three CELLs is on the tiles');
+  const notes = M.events.map((e) => e.text).filter((t) => /TIPPED/.test(t)).reverse();
+  assert.deepEqual(notes, ['RED HIVE TIPPED (TIP 1) +20', 'BLUE HIVE TIPPED (TIP 1) +20', 'RED HIVE TIPPED (TIP 2) +20']);
+  const n = M.floor.length;
+  M.tick(0.02, sim);
+  assert.equal(M.floor.length, n, 'and each TIP spills once');
+});
+
 test('match: only the live sim plays the match; the drive probe\'s private copy never does', () => {
   const { cad, code, map, opts } = sampleBench(E);
   E.Field.reset();
