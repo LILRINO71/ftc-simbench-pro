@@ -254,6 +254,28 @@ function calCheck(cal, kind) {
   return { opts: Object.keys(o).length ? o : null, dropped, refit };
 }
 
+/* The kind of drive base the sim is about to build for this OpMode and CAD, worked out the way
+   Sim.load and buildRig (src/sim.js) work it out: the CAD put in the robot frame, the drive the
+   code runs (a Road Runner MecanumDrive, else the code's drivetrain), the front (given, else the
+   way the wheels roll), then the CAD's wheels, with mecanum code settling four parallel axles
+   the geometry can't tell apart. The Tune panel checks a saved calibration against this before
+   the sim is built, so the first build and every rebuild hand the sim the same thing (asking
+   the last-built sim, the first build had no kind at all). Null when the sim would build no
+   drive base. tests/calibrate-kind.test.mjs holds it to the rig Sim.load really builds. */
+function calDriveKind(code, cad, opts) {
+  if (!code || !cad) return null;
+  const o = opts || {};
+  if (typeof canonicalizeCAD === "function") canonicalizeCAD(cad, { up: o.up });
+  const rr = code.rr && code.rr.drive && code.rr.drive.devs && code.rr.drive.devs.length;
+  const dtn = rr ? { style: "mecanum", ok: true } : (typeof detectDrivetrain === "function" ? detectDrivetrain(code) : null);
+  if (!dtn || !dtn.ok) return null;
+  const front = o.front || (typeof frontFromWheels === "function" && frontFromWheels(cad)) || "+x";
+  const geo = typeof driveFromCAD === "function" ? driveFromCAD(cad, { front: front }) : null;
+  let kind = geo && geo.kind && geo.kind !== "unknown" ? geo.kind : (dtn.style === "mecanum" ? "mecanum" : "tank");
+  if (geo && geo.kind === "tank" && (geo.confidence || 0) < 0.5 && dtn.style === "mecanum") kind = "mecanum";
+  return kind;
+}
+
 /* The parameters a fit gave, as the opts.calib the sim's buildRig reads. */
 function calOpts(cal, kind) {
   return calCheck(cal, kind).opts;

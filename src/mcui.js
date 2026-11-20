@@ -23,9 +23,18 @@ const CalUI={
     if(this.keyApplied!==k){ this.keyApplied=k; this.cal=this.load(); if(typeof document!=="undefined"&&document.getElementById("calResult")) this.show(); }
     OPTS.calib=this.cal&&this.cal.on!==false?calOpts(this.cal,this.kind()):null;
   },
-  /* the drive base's kind, when the sim was last built from this robot: a fit made before mecanum
-     roller slip keeps its turn drag only off mecanum (calCheck) */
-  kind(){ return Sim.cad&&Sim.cad===CAD&&Sim.rig&&Sim.rig.drive?Sim.rig.drive.kind:null; },
+  /* the kind of drive base the sim is about to build from this robot and OpMode (calDriveKind, the
+     way Sim.load works it out), so the first build agrees with every rebuild: a fit made before
+     mecanum roller slip keeps its turn drag only off mecanum (calCheck). Remembered per CAD, code,
+     front and up, since apply runs on every build. */
+  kind(){
+    const code=typeof CODE!=="undefined"?CODE:null, key=[CAD,code,OPTS.front,OPTS.up,CAD&&CAD.driveSpec];
+    const m=this.kindMemo;
+    if(m&&m.key.length===key.length&&m.key.every((v,i)=>v===key[i])) return m.kind;
+    const kind=CAD&&code?calDriveKind(code,CAD,OPTS):null;
+    this.kindMemo={key,kind};
+    return kind;
+  },
   /* the rig as the sim builds it with no calibration: what "before" means */
   baseRig(){
     if(!CAD||!Sim.drivetrain||!Sim.drivetrain.ok) return null;
