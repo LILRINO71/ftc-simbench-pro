@@ -95,32 +95,17 @@ function frameUp(solids,bbox,opts){
                                  :"no wheels to go on, so Onshape's Top plane is taken as the floor"};
 }
 
-/* How much of the CAD lies under a floor at height `floor` along `up`: the share of the solids'
-   points more than FRAME_SUNK_M below it. A sprung odometry pod drawn uncompressed, a skid or an
-   intake drawn through the tiles goes 10 to 15 mm under and must not count, on a small CAD
-   least of all (two pods are a real share of a ten-part drive base); a floor taken from the
-   wrong parts leaves a large share of the robot far under it. */
-const FRAME_SUNK_M=0.025, FRAME_SUNK_SHARE=0.02;
-function frameSunk(solids,up,floor){
-  let n=0, under=0;
-  for(const s of solids||[]){
-    if(!s||!s.pts||s.kind==="game") continue;
-    for(const p of s.pts){ n++; if(frDot(p,up)<floor-FRAME_SUNK_M) under++; }
-  }
-  return {points:n, under, share:n?under/n:0};
-}
-
 /* Measure the frame. `cad` needs solids and a bbox; nothing is changed. */
 function robotFrame(cad,opts){
   const solids=(cad&&cad.solids)||[], bbox=cad&&cad.bbox;
-  let U=frameUp(solids,bbox,opts), R=FRAME_UP_ROWS[U.up];
-  let upv=R[2];
+  const U=frameUp(solids,bbox,opts), R=FRAME_UP_ROWS[U.up];
+  const upv=R[2];
   const rot=p=>[frDot(R[0],p),frDot(R[1],p),frDot(R[2],p)];
 
   // the drive wheels are the ones on the floor — exactly as the drivetrain
   // detector picks them, so the two agree on where the centre is
   let ws=dtOnFloor(frameWheels(solids),upv);
-  let origin, originWhy, floorWhy, sunkWhy=null;
+  let origin, originWhy, floorWhy;
   if(ws.length>=2){
     const c=[0,0,0]; for(const w of ws){ c[0]+=w.c[0]; c[1]+=w.c[1]; c[2]+=w.c[2]; }
     for(let k=0;k<3;k++) c[k]/=ws.length;
@@ -128,20 +113,7 @@ function robotFrame(cad,opts){
     const drop=frDot(c,upv)-r;                         // the floor, along up
     origin=[c[0]+(drop-frDot(c,upv))*upv[0], c[1]+(drop-frDot(c,upv))*upv[1], c[2]+(drop-frDot(c,upv))*upv[2]];
     originWhy="wheels"; floorWhy="the bottom of the drive wheels";
-    // A robot stands on its floor: next to nothing is under it. When a real share of the CAD is
-    // below these "wheels", they are not what it stands on (parts only shaped or named like
-    // wheels, half way up the robot), and a floor taken from them buries the robot.
-    const sunk=frameSunk(solids,upv,drop);
-    if(sunk.share>FRAME_SUNK_SHARE){
-      ws=[]; sunkWhy="the bottom of the CAD: "+Math.round(sunk.share*100)+"% of it lies more than "+Math.round(FRAME_SUNK_M*1000)+" mm below the wheel-shaped parts found, so they are not what the robot stands on";
-      // up was read off the same parts, so it goes too: what the CAD calls up, unless it was set by hand
-      if(!(opts&&FRAME_UP_ROWS[opts.up])){
-        U={up:"+z", why:"the wheel-shaped parts found are not what the robot stands on, so Onshape's Top plane is taken as the floor"};
-        R=FRAME_UP_ROWS[U.up]; upv=R[2];
-      }
-    }
-  }
-  if(ws.length<2){
+  }else{
     const b=bbox||{min:[0,0,0],max:[0,0,0]};
     const c=[0,1,2].map(k=>(b.min[k]+b.max[k])/2);
     // the lowest corner of the box along up is the floor
@@ -149,7 +121,7 @@ function robotFrame(cad,opts){
     for(let i=0;i<8;i++){ const q=[i&1?b.max[0]:b.min[0], i&2?b.max[1]:b.min[1], i&4?b.max[2]:b.min[2]]; lo=Math.min(lo,frDot(q,upv)); }
     const d=lo-frDot(c,upv);
     origin=[c[0]+d*upv[0], c[1]+d*upv[1], c[2]+d*upv[2]];
-    originWhy="bbox"; floorWhy=sunkWhy||"the bottom of the CAD";
+    originWhy="bbox"; floorWhy="the bottom of the CAD";
   }
   // the robot setup can move the centre (opts.shift: metres along the canonical x and y,
   // the drive base's middle as the team knows it), when no wheels in the CAD say where it is

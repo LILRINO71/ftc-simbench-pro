@@ -1,14 +1,14 @@
 // What a part is, read from its name (src/hull.js solidKind), decides its weight and whether it
 // may be a drive wheel, and the drive wheels decide where the floor is (src/drivetrain.js
 // dtOnFloor, src/frame.js robotFrame). The names were matched as substrings: "contROLLER" was a
-// wheel, so a 2016 robot's four electronics boxes, at four heights, became its drive base and
-// the robot ended 483 mm under its own floor; a roller chain weighed seven times too much as a
-// tyre. A name now counts by whole words, a word followed by "mount", "hub", "chain",
-// "controller" and the like only describes the part, a floor needs two wheels at one height,
-// and a floor that leaves a real share of the robot under it is not believed.
+// wheel, so a 2016 robot's four electronics boxes became its drive base and the robot ended
+// 483 mm under its own floor. A name now counts by whole words, and a word followed by "mount",
+// "hub", "chain", "controller" and the like only describes the part. The floor is the lowest
+// wheels, all of them when the lowest stands alone, unless that one is far smaller than the rest.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { loadEngine } from './load.mjs';
+import { buildRobot } from '../tools/stepgen.mjs';
 
 const E = loadEngine();
 
@@ -52,21 +52,32 @@ const box = (c, sx, sy, sz, n = 4) => {                         // a block, poin
 };
 const part = (name, pts) => ({ name, part: null, kind: E.solidKind(name, null), pts });
 const CORNERS = [[0.17, 0.19], [0.17, -0.19], [-0.17, 0.19], [-0.17, -0.19]];
-function frameOf(solids) {
+const bboxOf = (solids) => {
   const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
   for (const s of solids) for (const p of s.pts) for (let k = 0; k < 3; k++) { if (p[k] < min[k]) min[k] = p[k]; if (p[k] > max[k]) max[k] = p[k]; }
-  const F = E.robotFrame({ solids, bbox: { min, max } });
+  return { min, max };
+};
+function frameOf(solids) {
+  const F = E.robotFrame({ solids, bbox: bboxOf(solids) });
   // how much of the robot the frame leaves under its own floor
   let n = 0, under = 0, lowest = Infinity;
   for (const s of solids) for (const p of s.pts) { const q = F.toCanon(p); n++; if (q[2] < -0.010) under++; if (q[2] < lowest) lowest = q[2]; }
   return { F, share: under / n, lowest };
 }
+// the drive detector on the same parts, after the frame has been applied
+function driveOf(solids) {
+  const cad = { solids: JSON.parse(JSON.stringify(solids)), bbox: bboxOf(solids), points: [] };
+  E.canonicalizeCAD(cad);
+  return E.driveFromCAD(cad, {});
+}
 /* A drive base drawn 0.5 m above the CAD's origin: four wheels of radius R on the tiles, a body above them. */
 const R = 0.048, Z0 = 0.5;
-const base = (wheelName = 'Mecanum Wheel') => [
+const base = (wheelName = 'Mecanum Wheel', dz = [0, 0, 0, 0]) => [
   part('U-Channel Body', box([0, 0, Z0 + 0.20], 0.36, 0.36, 0.30)),
-  ...CORNERS.map(([x, y], i) => part(wheelName + ' ' + (i + 1), cyl([x, y, Z0 + R], R, 0.038))),
+  ...CORNERS.map(([x, y], i) => part(wheelName + ' ' + (i + 1), cyl([x, y, Z0 + R + dz[i]], R, 0.038))),
 ];
+const wheel = (x, y, z, r) => ({ c: [x, y, z], r });
+const UP = [0, 0, 1];
 
 test('floor: a drive base stands on its wheels, and the frame says so', () => {
   const { F, share } = frameOf(base());
@@ -75,31 +86,66 @@ test('floor: a drive base stands on its wheels, and the frame says so', () => {
   assert.equal(share, 0);
 });
 
-test('floor: one wheel-shaped part lower than the wheels is not the floor', () => {
-  // a guide roller drawn 12 mm under the tiles (a sprung pod, uncompressed): alone at its height
+test('floor: a drive wheel drawn 7 mm low is still a drive wheel', () => {
+  // alone at its height, but the size of the others: a wheel drawn a little off, not a skid
+  const ws = CORNERS.map(([x, y], i) => wheel(x, y, R + (i === 0 ? -0.007 : 0), R));
+  assert.equal(E.dtOnFloor(ws, UP).length, 4);
+  const { F } = frameOf(base('Mecanum Wheel', [-0.007, 0, 0, 0]));
+  assert.equal(F.originWhy, 'wheels');
+  assert.equal(F.wheels, 4, 'all four drive wheels, not the three level ones');
+  assert.ok(Math.abs(F.origin[2] - (Z0 - 0.007 / 4)) < 1e-6, `the floor under the four: ${((F.origin[2] - Z0) * 1000).toFixed(2)} mm`);
+  assert.equal(driveOf(base('Mecanum Wheel', [-0.007, 0, 0, 0])).wheels.length, 4, 'the drive detector agrees');
+});
+
+test('floor: a small guide roller drawn under the drive wheels is not one of them', () => {
+  // a 15 mm guide roller 12 mm under the tiles (a sprung pod, uncompressed): alone at its height and small
+  const ws = CORNERS.map(([x, y]) => wheel(x, y, R, R)).concat([wheel(0, 0, 0.015 - 0.012, 0.015)]);
+  const low = E.dtOnFloor(ws, UP);
+  assert.equal(low.length, 4); assert.ok(!low.includes(ws[4]), 'the roller is left out');
   const solids = base().concat([part('Guide Roller', cyl([0, 0, Z0 - 0.012 + 0.015], 0.015, 0.02))]);
   const { F } = frameOf(solids);
   assert.equal(F.originWhy, 'wheels');
-  assert.equal(F.wheels, 4, 'the four that share a height, not five');
+  assert.equal(F.wheels, 4, 'the four drive wheels, not five');
   assert.ok(Math.abs(F.origin[2] - Z0) < 1e-6, `the floor is still under the four wheels: ${(F.origin[2] - Z0) * 1000} mm off`);
+  const D = driveOf(solids);
+  assert.equal(D.wheels.length, 4);
+  assert.ok(D.why.some((w) => /^1 wheel-shaped part\(s\) reach 12 mm below the floor the drive wheels stand on, each alone at its height and under 60% of their size/.test(w)),
+    'the why says the part was left out BELOW the wheels: ' + D.why.join(' | '));
+  assert.ok(!D.why.some((w) => /clear of the floor/.test(w)), 'and does not call it a part riding clear above them');
 });
 
-test('floor: electronics boxes at four heights are not a drive base, whatever they are called', () => {
-  // the 2016 robot: no part named as a wheel, four controllers standing on edge up the side of the frame
-  const solids = [part('Frame', box([0, 0, 0.25], 0.40, 0.40, 0.50))].concat(
-    [0.15, 0.20, 0.26, 0.31].map((z, i) => part(i < 3 ? 'Core_Motor_Controller' : 'Core_Servo_Controller', box([CORNERS[i][0], CORNERS[i][1], z], 0.10, 0.03, 0.09))));
-  const { F, share, lowest } = frameOf(solids);
-  assert.equal(F.originWhy, 'bbox', 'no floor from them: the bottom of the CAD');
-  assert.equal(F.up, '+z');
-  assert.ok(share === 0 && lowest > -0.001, `nothing under the floor: ${(share * 100).toFixed(0)} % of points, lowest ${(lowest * 1000).toFixed(0)} mm (it was 43.9 % and -483 mm on the real file)`);
+test('floor: the wheels on the floor are never none of them', () => {
+  const sets = {
+    'two wheels 50 mm apart in height': [wheel(0.1, 0.19, R, R), wheel(0.1, -0.19, R + 0.05, R)],
+    'four boxes at four heights': [0.15, 0.20, 0.26, 0.31].map((z, i) => wheel(CORNERS[i][0], CORNERS[i][1], z, 0.05)),
+    'three small and one big, all apart': [wheel(0, 0, 0.01, 0.01), wheel(0.1, 0, 0.03, 0.012), wheel(0.2, 0, 0.06, 0.013), wheel(0.3, 0, 0.2, 0.05)],
+    'one wheel': [wheel(0, 0, R, R)],
+  };
+  for (const [name, ws] of Object.entries(sets)) {
+    const low = E.dtOnFloor(ws, UP);
+    assert.ok(low.length >= Math.min(2, ws.length), `${name}: ${low.length} of ${ws.length}`);
+  }
+  assert.deepEqual(E.dtOnFloor([], UP), []);
 });
 
-test('floor: wheels half way up a robot are not what it stands on', () => {
-  // intake wheels, rightly named, level with each other, in the middle of a robot whose drive wheels are not drawn
-  const solids = [part('Frame', box([0, 0, 0.25], 0.40, 0.40, 0.50))].concat(CORNERS.map(([x, y], i) => part('Compliant Wheel ' + (i + 1), cyl([x * 0.6, y * 0.6, 0.25], 0.036, 0.03))));
-  const { F, share, lowest } = frameOf(solids);
-  assert.equal(F.originWhy, 'bbox');
-  assert.match(F.floorWhy, /% of it lies more than 25 mm below the wheel-shaped parts found/);
-  assert.equal(F.up, '+z'); assert.equal(F.wheels, 0);
-  assert.ok(share === 0 && lowest > -0.001, `nothing under the floor: lowest ${(lowest * 1000).toFixed(0)} mm`);
+test('floor: controllers on edge half way up a robot whose wheels have no wheel names do not bury it', () => {
+  // the 2016 robot's trap on a robot with ground truth: every part is "Part N", so the drive wheels
+  // are found by their shape; four motor controllers stand on edge half way up, round enough in
+  // outline to pass for wheels. On main "contROLLER" made them wheels by name, they became the
+  // drive base, and the robot was buried to their height.
+  const { text, truth } = buildRobot('unnamed-wheels');
+  const solids = E.parseSTEP(text).solids.slice();
+  const mid = (truth.bbox.min[2] + truth.bbox.max[2]) / 2;
+  for (const [x, y] of [[0.08, 0.06], [0.08, -0.06], [-0.08, 0.06], [-0.08, -0.06]]) solids.push(part('Core_Motor_Controller', box([x, y, mid], 0.10, 0.03, 0.09)));
+  const { F, lowest } = frameOf(solids);
+  assert.equal(F.up, truth.up);
+  assert.equal(F.originWhy, 'wheels'); assert.equal(F.wheels, truth.drive.wheels);
+  const want = [truth.wheelCentroid[0], truth.wheelCentroid[1], truth.floorZ];
+  assert.ok(Math.hypot(...F.origin.map((v, k) => v - want[k])) < 0.002,
+    `the origin is the drive centre on the floor: ${F.origin.map((v) => (v * 1000).toFixed(1))} mm, truth ${want.map((v) => (v * 1000).toFixed(1))} mm`);
+  assert.ok(lowest > -0.002, `nothing under the floor: lowest ${(lowest * 1000).toFixed(0)} mm`);
+  const D = driveOf(solids);
+  assert.equal(D.wheels.length, truth.drive.wheels);
+  assert.ok(D.why.some((w) => /found by shape/.test(w)), 'the drive detector finds the same wheels by shape: ' + D.why.join(' | '));
+  assert.equal(solids.filter((s) => E.dtIsWheel(s)).length, 0, 'no part is a wheel by its name');
 });

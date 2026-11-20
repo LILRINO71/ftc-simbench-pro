@@ -321,20 +321,22 @@ function dtUniqueWheels(list,get){
 
 /* The wheels actually on the ground: bottom (centre along up, less radius)
    within a few millimetres of the lowest bottom. The tolerance covers a
-   drop-centre 6WD (~3 mm) and tread that isn't modelled perfectly round. */
+   drop-centre 6WD (~3 mm) and tread that isn't modelled perfectly round.
+   Never empty for a list that isn't. */
+// under this share of the median radius of the others, a lone lowest wheel is no drive wheel
+const DT_FLOOR_SMALL=0.6;
 function dtOnFloor(ws,up){
   if(ws.length<2) return ws.slice();
-  const bottom=ws.map(w=>dtDot(w.c,up)-w.r);
-  // A base stands on at least two wheels at one height. Take the lowest height that two or more
-  // share: a single part lower than the rest (a skid, or something only shaped like a wheel) is
-  // not the floor. With no two level there is no base to read a floor from: none, and the caller
-  // falls back on the bottom of the CAD. (It used to answer "all of them", and four electronics
-  // boxes at four heights put a robot 483 mm under its own floor.)
-  for(const i of bottom.map((b,k)=>k).sort((a,b)=>bottom[a]-bottom[b])){
-    const low=ws.filter((w,k)=>bottom[k]>=bottom[i]-1e-9&&bottom[k]<=bottom[i]+Math.max(0.006,0.08*w.r));
-    if(low.length>=2) return low;
-  }
-  return [];
+  const bottom=ws.map(w=>dtDot(w.c,up)-w.r), floor=Math.min.apply(null,bottom);
+  const low=ws.filter((w,i)=>bottom[i]<=floor+Math.max(0.006,0.08*w.r));
+  if(low.length>=2) return low;
+  // The lowest stands alone. A drive wheel drawn a few mm low is still a drive wheel, so all of
+  // them stay; but one far smaller than the rest is no drive wheel at all (a guide roller, a
+  // skid wheel, a sprung odometry pod drawn uncompressed): leave it out and decide on the rest.
+  const i=bottom.indexOf(floor), rs=ws.filter((w,k)=>k!==i).map(w=>w.r).sort((a,b)=>a-b);
+  const med=rs.length%2?rs[(rs.length-1)/2]:(rs[rs.length/2-1]+rs[rs.length/2])/2;
+  if(ws.length>=3&&ws[i].r<DT_FLOOR_SMALL*med) return dtOnFloor(ws.filter((w,k)=>k!==i),up);
+  return ws.slice();
 }
 
 function dtIsWheel(s){
@@ -687,10 +689,10 @@ function driveFromCAD(cad,opts){
   const low=dtOnFloor(ws,F.up);
   if(low.length>=2 && low.length<ws.length){
     const bot=w=>dtDot(w.c,F.up)-w.r, floor=Math.min.apply(null,low.map(bot));
-    const above=ws.filter(w=>low.indexOf(w)<0&&bot(w)>floor), below=ws.filter(w=>low.indexOf(w)<0&&bot(w)<=floor);
+    const above=ws.filter(w=>low.indexOf(w)<0&&bot(w)>floor), below=ws.filter(w=>low.indexOf(w)<0&&bot(w)<floor);
     if(above.length) why.push(above.length+" wheel-shaped part(s) ride "+((Math.min.apply(null,above.map(bot))-floor)*1000).toFixed(0)+" mm or more clear of the floor the drive wheels stand on, so they were read as intake or roller wheels, not part of the base.");
-    // a single part lower than every pair of wheels: not something a base stands on
-    if(below.length) why.push(below.length+" wheel-shaped part(s) reach "+((floor-Math.min.apply(null,below.map(bot)))*1000).toFixed(0)+" mm below the wheels the base stands on, alone at that height, so they were not read as drive wheels.");
+    // left out below: lower than every drive wheel, alone there, and far smaller than they are
+    if(below.length) why.push(below.length+" wheel-shaped part(s) reach "+((floor-Math.min.apply(null,below.map(bot)))*1000).toFixed(0)+" mm below the floor the drive wheels stand on, each alone at its height and under "+Math.round(DT_FLOOR_SMALL*100)+"% of their size, so they were read as a guide roller, skid wheel or odometry pod, not part of the base.");
     ws=low;
   }
 

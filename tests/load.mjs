@@ -25,7 +25,7 @@ const EXPORTS = [
   'AUTO_JAVA', 'coverage', 'lineAt', 'collectStaticFields',
   'parseRobotConfig', 'checkRobotConfig', 'configKind', 'codeKind', 'diffOpModes',
   // grader, path links, size rules, parts by number
-  'gradePath', 'GRADER_DEFAULTS', 'pathLinkEncode', 'pathLinkDecode', 'robotSize', 'ROBOT_SIZE_RULES', 'partsParse', 'partsLookup', 'partsWheel', 'partsOfCad', 'dtIsWheel',
+  'gradePath', 'GRADER_DEFAULTS', 'pathLinkEncode', 'pathLinkDecode', 'robotSize', 'ROBOT_SIZE_RULES', 'partsParse', 'partsLookup', 'partsWheel', 'partsOfCad', 'dtIsWheel', 'dtOnFloor',
   // Pro
   'MATERIALS', 'hullVolume', 'partMass', 'massProps', 'inertiaOf',
   'driveFromCAD', 'DRIVE_KINDS', 'ikMatrix', 'fkFromIk', 'wheelSpeeds', 'chassisFromWheels',
