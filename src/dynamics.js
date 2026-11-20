@@ -165,8 +165,9 @@ function motorTorque(spec, omega, cmd, opts) {
 
   const lim = dynNum(opts.currentLimit, 0);
   if (lim > 0) {
-    const iStall = dynNum(opts.stallAmps, dynMotorAmps(spec).stall);
-    const iFree = dynNum(opts.freeAmps, dynMotorAmps(spec).free);
+    // the rig's own figures first (rig.stallAmps / freeAmps), else the spec's, else the 5203's
+    const a = dynMotorAmps({ stallA: opts.stallAmps, freeA: opts.freeAmps, stallAmps: dynMotorAmps(spec).stall, freeAmps: dynMotorAmps(spec).free });
+    const iStall = a.stall, iFree = a.free;
     if (iStall > iFree) cap = Math.min(cap, stall * dynClamp((lim - iFree) / (iStall - iFree), 0, 1));
   }
   return dynClamp(stall * (c - w / wFree), -cap, cap);
@@ -174,12 +175,17 @@ function motorTorque(spec, omega, cmd, opts) {
 
 /* A spec's stall and free-running currents, amps: hardware.js gives them as
    stallA / freeA (older specs said stallAmps / freeAmps); a spec with
-   neither is taken for the goBILDA 5203 motor every FTC gearmotor shares. */
+   neither is taken for the goBILDA 5203 motor every FTC gearmotor shares.
+   A figure that is not a positive number (null, "", 0, a typo) is missing,
+   not zero: a motor draws current running free, and a zero would quietly
+   take a FLOAT wheel's friction away (gearmotorFriction). */
 function dynMotorAmps(spec) {
   spec = spec || {};
+  const pos = (v) => { v = (v === null || v === "") ? NaN : +v; return Number.isFinite(v) && v > 0 ? v : null; };
+  const pick = (a, b, d) => { const x = pos(a); if (x != null) return x; const y = pos(b); return y != null ? y : d; };
   return {
-    stall: dynNum(spec.stallA, dynNum(spec.stallAmps, DYN_DEFAULTS.stallAmps)),
-    free: dynNum(spec.freeA, dynNum(spec.freeAmps, DYN_DEFAULTS.freeAmps))
+    stall: pick(spec.stallA, spec.stallAmps, DYN_DEFAULTS.stallAmps),
+    free: pick(spec.freeA, spec.freeAmps, DYN_DEFAULTS.freeAmps)
   };
 }
 

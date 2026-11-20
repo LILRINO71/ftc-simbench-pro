@@ -66,3 +66,20 @@ test('FLOAT: the friction comes from the spec\'s own currents; BRAKE does not se
   assert.equal(b1.x, b2.x);
   assert.ok(b1.x < 0.3, 'BRAKE stops in ' + b1.x.toFixed(3) + ' m');
 });
+
+test('FLOAT: a current that is not a positive number (null, "", 0, negative, a typo) is missing, so the 5203\'s friction stays', () => {
+  const ref = coast(rig({ stallNm: 2.383, rpm: 312 }), true).x;                 // a spec with no currents: the 5203
+  for (const bad of [null, '', 0, -0.25, 'x', NaN, undefined]) {
+    for (const spec of [{ stallA: bad, freeA: bad }, { freeA: bad }, { stallAmps: bad, freeAmps: bad }]) {
+      const c = coast(rig(Object.assign({ stallNm: 2.383, rpm: 312 }, spec)), true);
+      assert.ok(Math.abs(c.x - ref) < 1e-9, `${JSON.stringify(spec)}: coasted ${c.x.toFixed(3)} m, a spec with no currents ${ref.toFixed(3)} m`);
+    }
+  }
+  // the other name still stands in when the first is missing
+  const old = coast(rig({ stallNm: 2.383, rpm: 312, freeA: 0, freeAmps: 0.5 }), true).x;
+  assert.ok(old < ref - 0.1, `freeA 0 with freeAmps 0.5: ${old.toFixed(3)} m, shorter than the 5203's ${ref.toFixed(3)} m`);
+  // and a current limit reads the same figures
+  const cap = (s) => E.motorTorque(Object.assign({ stallNm: 2.383, rpm: 312 }, s), 0, 1, { currentLimit: 5 });
+  assert.equal(cap({ stallA: 0, freeA: null }), cap({}));
+  assert.equal(E.motorTorque({ stallNm: 2.383, rpm: 312 }, 0, 1, { currentLimit: 5, stallAmps: null, freeAmps: '' }), cap({}));
+});
