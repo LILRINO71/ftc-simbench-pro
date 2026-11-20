@@ -30,10 +30,24 @@ function loadView() {
     Color: class { constructor(...a) { this.a = a; } },
     SphereGeometry: class { constructor() { this.userData = {}; } dispose() {} },
     RingGeometry: class { constructor() { this.userData = {}; } dispose() {} },
-    Vector3: class { constructor(x = 0, y = 0, z = 0) { this.x = x; this.y = y; this.z = z; } },
+    Vector3: class { constructor(x = 0, y = 0, z = 0) { this.x = x; this.y = y; this.z = z; } set(x, y, z) { this.x = x; this.y = y; this.z = z; return this; } },
+    Vector2: class { constructor(x = 0, y = 0) { this.x = x; this.y = y; } },
+    // what src/shotfx.js builds its pooled effects from: it only needs the scene graph and the attribute buffers
+    BufferAttribute: class { constructor(a, n) { this.array = a; this.itemSize = n; this.count = a.length / n; } setUsage() { return this; } },
+    BufferGeometry: class { constructor() { this.attributes = {}; this.userData = {}; } setAttribute(n, a) { this.attributes[n] = a; return this; } setIndex() {} dispose() {} },
+    ShaderMaterial: class { constructor(p) { Object.assign(this, p || {}); this.userData = {}; } dispose() {} },
+    LineBasicMaterial: class { constructor(p) { Object.assign(this, p || {}); this.color = color(); this.userData = {}; } dispose() {} },
+    Points: class extends Obj { constructor(g, m) { super(); this.geometry = g; this.material = m; } },
+    Line: class extends Obj { constructor(g, m) { super(); this.geometry = g; this.material = m; } },
+    Sprite: class extends Obj { constructor(m) { super(); this.material = m; } },
+    SpriteMaterial: class { constructor(p) { Object.assign(this, p || {}); this.color = { setRGB() {} }; this.userData = {}; } dispose() {} },
+    DynamicDrawUsage: 1, AdditiveBlending: 2, NormalBlending: 1, DoubleSide: 2,
   };
-  const src = fs.readFileSync(path.join(ROOT, 'src', 'view3d.js'), 'utf8');
-  const { View } = new Function('THREE', 'window', 'document', 'Field', 'IN', 'SHOT_STEP_S', src + '\nreturn { View };')(THREE, {}, {}, { ok: false }, 0.0254, 0.01);
+  THREE.MeshBasicMaterial = class { constructor(p) { Object.assign(this, p || {}); this.color = { setHex() { return this; }, setRGB() {}, convertSRGBToLinear() { return this; } }; this.userData = {}; } dispose() {} };
+  const fx = fs.readFileSync(path.join(ROOT, 'src', 'shotfx.js'), 'utf8');
+  const src = fx + '\n' + fs.readFileSync(path.join(ROOT, 'src', 'view3d.js'), 'utf8');
+  const { View, ShotFx } = new Function('THREE', 'window', 'document', 'Field', 'IN', 'SHOT_STEP_S', src + '\nreturn { View, ShotFx };')(THREE, {}, {}, { ok: false }, 0.0254, 0.01);
+  View.tier = { tier: 2 }; View.ShotFx = ShotFx;
   // the parts of a load that draw the field and the robot aren't what this is about
   View.buildPlainField = () => {}; View.buildRobot = () => {};
   View.world = new THREE.Group();
@@ -42,18 +56,26 @@ function loadView() {
 
 const CAD = { bbox: { min: [-0.2, -0.2, 0], max: [0.2, 0.2, 0.4] }, frame: {}, solids: [], mechs: [] };
 const inScene = (View, m) => { let o = m; while (o.parent) o = o.parent; return o === View.world; };
-const flight = [{ path: [[0, 0, 10], [10, 0, 20], [20, 0, 25]], t: 0.05, step: 0.01, kind: 'pollen' }];
+const flight = () => [{ path: [[0, 0, 10], [10, 0, 20], [20, 0, 25]], t: 0.05, dur: 0.02, step: 0.01, kind: 'pollen', al: 'red' }];
+// every object the shot effects made (src/shotfx.js)
+const fxObjects = (ShotFx) => [ShotFx.sparks.mesh, ...ShotFx.trPool.items.map((t) => t.mesh), ...ShotFx.rings.items.map((r) => r.m), ...ShotFx.popups.items.map((p) => p.s)];
 
 test('view: ball trails are drawn again after View.load', () => {
-  const View = loadView();
+  const View = loadView(), ShotFx = View.ShotFx;
   View.load(CAD);
-  View.trails(flight);
-  assert.ok(View.trailG.length >= 4 && View.trailG.every((m) => inScene(View, m)), 'trails in the scene to start with');
+  const f1 = flight();
+  View.flightFx(f1, 1000); View.trails(f1);
+  assert.equal(ShotFx.liveT.length, 1, 'a ball in the air has a trail');
+  assert.ok(fxObjects(ShotFx).every((m) => inScene(View, m)), 'the effects are in the scene to start with');
   View.load(CAD);                                   // a joint edit, a mate, a rig change...
-  View.trails(flight);
-  const shown = View.trailG.filter((m) => m.visible);
-  assert.ok(shown.length >= 4, 'a ball in the air still has its trail');
-  assert.ok(shown.every((m) => inScene(View, m)), 'and the trail meshes are in the scene that is drawn');
+  const f2 = flight();
+  View.flightFx(f2, 1100); View.trails(f2);
+  assert.equal(ShotFx.liveT.length, 1, 'a ball in the air still has its trail');
+  assert.ok(fxObjects(ShotFx).every((m) => inScene(View, m)), 'and the effect meshes are in the scene that is drawn');
+  // a ball already in the air when the scene is rebuilt gets a trail in the new one too
+  View.flightFx(f2, 1150); View.load(CAD); View.flightFx(f2, 1200);
+  assert.equal(ShotFx.liveT.length, 1, 'a flight that was under way when the scene changed');
+  assert.ok(ShotFx.liveT[0].mesh.visible && inScene(View, ShotFx.liveT[0].mesh));
 });
 
 /* A lost WebGL context that comes back (a driver reset; headless Chrome's
@@ -85,12 +107,16 @@ test('view: after a lost context comes back, old dispose handlers go and the ref
 });
 
 test('view: an effect from before View.load is not kept', () => {
-  const View = loadView();
+  const View = loadView(), ShotFx = View.ShotFx;
   View.load(CAD);
   View.fx('puff', { x: 0, y: 0, z: 0 }, 0xffffff);
-  assert.equal(View.fxs.length, 1);
+  const old = fxObjects(ShotFx), oldGroup = View.dynG;
+  assert.ok(old.length > 0 && old.every((m) => m.parent === oldGroup));
   View.load(CAD);
-  assert.equal(View.fxs.length, 0, 'the old scene\'s effects went with it');
+  View.fx('puff', { x: 0, y: 0, z: 0 }, 0xffffff);
+  assert.notEqual(View.dynG, oldGroup);
+  assert.ok(old.every((m) => m.parent !== View.dynG), 'the old scene\'s effects went with it');
+  assert.ok(fxObjects(ShotFx).every((m) => m.parent === View.dynG), 'new ones live in the new scene');
 });
 
 /* The material caches are keyed by colour (finishMat for the exact surfaces,

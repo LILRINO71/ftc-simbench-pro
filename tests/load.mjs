@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { buildRobot } from '../tools/stepgen.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const ENGINE = ['hardware', 'samples', 'step', 'hull', 'inertia', 'expr', 'jvm', 'jvmlib', 'jvmprelude', 'jvmrun', 'java', 'roadrunner', 'mapping', 'robotconfig', 'compare', 'analyze', 'drivetrain', 'frame', 'mates', 'onshapelink', 'onshapecad', 'meshfiles', 'urdf', 'jointspec', 'jointsheet', 'pedrogen', 'partsdb', 'grader', 'autorig-lib', 'autorig', 'robotcheck', 'bind', 'dynamics', 'joltmech', 'field', 'shots', 'match', 'robotlite', 'net', 'netrelay', 'controllers', 'session', 'mathdoc', 'gitimport', 'onboarding', 'challenges', 'touch', 'sim', 'calibrate', 'montecarlo', 'tier'];
+const ENGINE = ['hardware', 'samples', 'step', 'hull', 'inertia', 'expr', 'jvm', 'jvmlib', 'jvmprelude', 'jvmrun', 'java', 'roadrunner', 'mapping', 'robotconfig', 'compare', 'analyze', 'drivetrain', 'frame', 'mates', 'onshapelink', 'onshapecad', 'meshfiles', 'urdf', 'jointspec', 'jointsheet', 'pedrogen', 'partsdb', 'grader', 'autorig-lib', 'autorig', 'robotcheck', 'bind', 'dynamics', 'joltmech', 'field', 'shots', 'match', 'robotlite', 'net', 'netrelay', 'controllers', 'session', 'mathdoc', 'gitimport', 'onboarding', 'challenges', 'touch', 'sim', 'calibrate', 'montecarlo', 'tier', 'shotfx'];
 const EXPORTS = [
   'Field', 'Shots', 'IN', 'ELEMENT_G', 'TIP_GRAMS', 'FRONTS', 'footprintOf', 'capsulePush', 'nearestMotorId', 'SHOOTER_JAVA',
   'convexHull', 'boxCorners', 'solidTriangles', 'thinPoints', 'solidKind', 'sampleSolids', 'robotBase', 'makeRng',
@@ -43,6 +43,7 @@ const EXPORTS = [
   // calibration + Monte Carlo (src/calibrate.js, src/montecarlo.js)
   'CAL_FORMAT', 'CAL_SECONDS', 'CAL_BOUNDS', 'calCmd', 'calApplyToRig', 'calRun', 'calMeasure', 'calTicksPerIn', 'calGearFor', 'calSanitize', 'calSolve', 'calFit', 'calOpts', 'calJava',
   'MC_RANGES', 'MC_MAX_RUNS', 'mcRng', 'mcSeedFor', 'mcVariation', 'mcExtremes', 'mcPathEnd', 'mcRunOne', 'mcRun', 'mcSummary', 'mcCadForWorker', 'mcPlain', 'mcPrepare', 'mcHistogram', 'mcWorkerBody', 'mcSetup', 'mcJudge', 'mcNominal', 'mcTarget', 'mcSim', 'MC_KEYS', 'MC_AUTO_SECONDS', 'MC_DEFAULT_RUNS',
+  'FX_LEVELS', 'fxLevel', 'fxPool', 'fxEaseOut', 'fxHop', 'trailFade', 'trailWidth', 'fxPathAt', 'popupState', 'fxSpinRate', 'fxSpinAxis', 'fxShakeAmp', 'ShotFx',
   'TOUR', 'statusOf', 'STATUS_RANK', 'deviceTier', 'tierMobile', 'TIER_BUDGETS',
   // phone controls and challenge cards
   'touchStick', 'touchPhone', 'touchModel', 'touchWrite', 'TOUCH_DEAD', 'TOUCH_BUTTONS', 'CHALLENGES', 'chalSnapshot', 'chalNext', 'chalMark', 'chalLoad', 'chalFar', 'chalFace', 'chalMove', 'chalPark',

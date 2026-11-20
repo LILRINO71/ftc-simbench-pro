@@ -283,7 +283,7 @@ const View={
     this.dynG=new THREE.Group(); this.world.add(this.dynG);
     // everything that lived in the last dynG went with it: ball trails and effects too,
     // or the trails would keep moving meshes that are no longer in the scene
-    this.ballPool=[]; this.arcLine=null; this.trailG=[]; this.fxs=[];
+    this.ballPool=[];
     this.matchG=null; this.matchShown=null;
 
     // everything that drives around; the CAD sits in frontG, raised onto the base
@@ -1414,7 +1414,7 @@ const View={
   /* What's in an up-CELL, resting on its floor against the back wall,
      from the alliance's side inward. */
   fillCell(g,cell,al){
-    const list=Field.cells[al]; if(!list.length) return;
+    const list=Field.cells[al], fresh=ShotFx.cellsGrew(al,list.length); if(!list.length) return;
     const V=cell.vertices;
     const sub=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]], add=(a,b,k)=>[a[0]+b[0]*k,a[1]+b[1]*k,a[2]+b[2]*k];
     const len=a=>Math.hypot(a[0],a[1],a[2]), nrm=a=>{ const l=len(a)||1; return [a[0]/l,a[1]/l,a[2]/l]; };
@@ -1423,28 +1423,21 @@ const View={
     const mid=V.slice(0,5).reduce((s,p)=>[s[0]+p[0]/5,s[1]+p[1]/5,s[2]+p[2]/5],[0,0,0]);
     const toMid=sub(mid,V[0]); if(up[0]*toMid[0]+up[1]*toMid[1]+up[2]*toMid[2]<0) up=[-up[0],-up[1],-up[2]];
     const fromHigh=al==="blue";          // start on the alliance-area side
-    let u=0.4, row=0;
+    let u=0.4, row=0, ei=0;
     for(const e of list){
       const r=e.kind==="nectar"?1.81:1.4;
       if(u+2*r>wide-0.4){ u=0.4; row++; }
       const along=fromHigh?wide-u-r:u+r;
       const p=add(add(add(V[0],across,along),depth,0.3+r+row*3.4),up,r+0.2);
       const b=this.ball(e.kind,e.color); b.position.copy(this.fv(p)); g.add(b);
+      if(fresh&&++ei===list.length) ShotFx.settle(b,al);        // the ball that just went in drops in from the mouth (src/shotfx.js)
       u+=2*r+0.15;
     }
   },
 
   /* A path in field inches, drawn as a line: solid for your shot, dashed for
      the best arc from here. */
-  setArc(path,color,dashed){
-    if(this.arcLine){ this.dynG.remove(this.arcLine); this.arcLine.geometry.dispose(); this.arcLine.material.dispose(); this.arcLine=null; }
-    if(!path||path.length<2||!this.dynG) return;
-    const geo=new THREE.BufferGeometry().setFromPoints(path.map(p=>this.fv(p)));
-    const mat=dashed?new THREE.LineDashedMaterial({color,dashSize:0.06,gapSize:0.045,transparent:true,opacity:0.85})
-                    :new THREE.LineBasicMaterial({color,transparent:true,opacity:0.95});
-    const line=new THREE.Line(geo,mat); if(dashed) line.computeLineDistances();
-    this.arcLine=line; this.dynG.add(line);
-  },
+  setArc(path,color,dashed){ ShotFx.arc(this,path,color,dashed); },
 
   /* Turn each exact drive wheel at the speed its motor drives it. The sim's
      wheel is found by where its CAD wheel sits, so a changed front can't
@@ -1563,7 +1556,7 @@ const View={
       if(!m||m.userData.key!==key2){ if(m) this.dynG.remove(m); m=this.ball(b.kind,b.color); m.userData.key=key2; this.ballPool[i]=m; this.dynG.add(m); }
       const p=this.fv(b.pos);
       // in flight it spins (backspin off the flywheel); on the tiles it lies still
-      if(i<fl.length&&m.userData.lp){ const d=p.distanceTo(m.userData.lp); if(d>1e-4) m.rotateZ(d/0.036); }
+      if(i<fl.length) ShotFx.spinBall(m,p,fl[i]);
       m.userData.lp=p; m.position.copy(p);
     }
     this.trails(fl);
@@ -1575,55 +1568,15 @@ const View={
     }
     this.cellsSeen=cells;
   },
-  /* Each ball once as it leaves (a puff at the shooter, a kick to the robot
-     that fired it) and once as it lands (where a miss starts bouncing from). */
-  flightFx(fl,now){
-    this.seenFl=this.seenFl||new WeakSet(); this.liveFl=this.liveFl||new Set(); this.recentEnds=this.recentEnds||[];
-    const cur=new Set(fl);
-    for(const f of fl){
-      if(this.seenFl.has(f)) continue;
-      this.seenFl.add(f);
-      const p0=f.path&&f.path[0]; if(!p0) continue;
-      this.fx("puff",this.fv(p0),0xffffff);
-      const x=p0[0]*IN, y=p0[1]*IN;
-      for(const id in this.botG||{}){ const g=this.botG[id]; if(Math.hypot(g.position.x-x,-g.position.z-y)<0.5) g.userData.kick=1; }
-    }
-    for(const f of this.liveFl) if(!cur.has(f)&&f.pos) this.recentEnds.push({x:f.pos[0]*IN, y:f.pos[1]*IN, z:f.pos[2]*IN, t:now});
-    this.liveFl=cur;
-    this.recentEnds=this.recentEnds.filter(e=>now-e.t<700);
-  },
-  /* A short fading trail behind every ball in the air, from its own path. */
-  trails(fl){
-    this.trailG=this.trailG||[];
-    const n=fl.length*4;
-    while(this.trailG.length<n){ const m=new THREE.Mesh(this.fxGeo("dot"),new THREE.MeshBasicMaterial({color:0xffffff, transparent:true, depthWrite:false})); this.dynG.add(m); this.trailG.push(m); }
-    this.trailG.forEach((m,i)=>{
-      const f=fl[Math.floor(i/4)], k=i%4+1; m.visible=!!f; if(!f) return;
-      const step=f.step||SHOT_STEP_S, q=Math.max(0,Math.min(f.path.length-1,(f.t-0.03*k)/step)), a=f.path[Math.floor(q)], c=f.path[Math.min(f.path.length-1,Math.floor(q)+1)], u=q-Math.floor(q);
-      m.position.copy(this.fv([a[0]+(c[0]-a[0])*u, a[1]+(c[1]-a[1])*u, a[2]+(c[2]-a[2])*u]));
-      const sc=(f.kind==="nectar"?1.81:1.4)*IN*(1-k*0.17); m.scale.set(sc,sc,sc);
-      m.material.color.setHex(f.kind==="nectar"?(f.color==="blue"?0x6aa8ff:0xff7a5c):0xffe27a); m.material.opacity=0.42-k*0.09;
-    });
-  },
-  /* Short effects: a puff where a ball leaves, a flash where one goes in. */
-  fxGeo(k){ this._fxGeo=this._fxGeo||{};
-    if(!this._fxGeo[k]){ this._fxGeo[k]=k==="ring"?new THREE.RingGeometry(0.7,1,32):new THREE.SphereGeometry(1,12,8); this._fxGeo[k].userData.shared=true; }
-    return this._fxGeo[k]; },
-  fx(kind,pos,color){
-    this.fxs=this.fxs||[];
-    if(this.fxs.length>40) return;
-    const m=new THREE.Mesh(this.fxGeo(kind==="flash"?"ring":"dot"),new THREE.MeshBasicMaterial({color, transparent:true, opacity:0.7, depthWrite:false, side:THREE.DoubleSide}));
-    m.position.copy(pos); if(kind==="flash") m.lookAt(this.cam?this.cam.position:new THREE.Vector3(0,5,0));
-    this.dynG.add(m); this.fxs.push({m, kind, t0:performance.now(), dur:kind==="flash"?420:300});
-  },
-  stepFx(now){
-    for(const e of this.fxs||[]){
-      const k=Math.min(1,(now-e.t0)/e.dur), s=e.kind==="flash"?0.05+0.22*k:0.025+0.09*k;
-      e.m.scale.set(s,s,s); e.m.material.opacity=0.7*(1-k);
-      if(k>=1){ this.dynG.remove(e.m); e.m.material.dispose(); e.done=true; }
-    }
-    if(this.fxs) this.fxs=this.fxs.filter(e=>!e.done);
-  },
+  /* Each ball once as it leaves (a flash at the shooter, a kick to the robot that fired it) and
+     once as it lands (a score or a miss; where a miss starts bouncing from). All of it is
+     src/shotfx.js: pooled ribbons, particles, popups; nothing is allocated per frame. */
+  flightFx(fl,now){ ShotFx.flightFx(this,fl,now); },
+  /* A tapering ribbon behind every ball in the air, from its own path. */
+  trails(fl){ ShotFx.trails(this,fl); },
+  /* Short effects: a flash where a ball goes into an up-CELL (the flight that scored it has already made one). */
+  fx(kind,pos,color){ ShotFx.fx(this,kind,pos,color); },
+  stepFx(now){ ShotFx.step(this,now); },
 
   /* ---------------- the rest of the match (src/match.js) ----------------
      The AI robots, the HUMAN PLAYERS at the alliance walls, every loose
@@ -1865,7 +1818,7 @@ const View={
     // the chase camera eases after the robot (a hard follow jitters with every bump); the robot's own camera doesn't
     if(this.mode==="chase"&&this.followPos&&!this.followJump){ this.followPos.lerp(pos,0.12); this.followLook.lerp(look,0.2); }
     else { this.followPos=pos; this.followLook=look; this.followJump=false; }
-    this.cam.position.copy(this.followPos); this.cam.lookAt(this.followLook);
+    this.cam.position.copy(this.followPos); this.cam.lookAt(this.followLook); ShotFx.shake(this.cam);
     this.look=this.followLook.clone();
     if(this.sun){ const L=this.look; this.sun.position.set(L.x+this.sunOff.x,this.sunOff.y,L.z+this.sunOff.z); this.sun.target.position.set(L.x,0,L.z); this.sun.target.updateMatrixWorld(); }
   },
