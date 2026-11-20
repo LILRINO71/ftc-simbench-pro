@@ -3,7 +3,7 @@
 // options and its result when the engine underneath is rearranged.
 //
 //   node tools/run-opmode.mjs <folder or .java files…> --opmode MainTeleOp.java [--seconds 5]
-//                             [--gamepad script.json] [--init 0.4] [--compact]
+//                             [--gamepad script.json] [--init 0.4] [--compact] [--field]
 //                             [--runs 10 --seed 1 [--cad robot.step.gz --joints joints.json] [--within 2 --deg 5] [--min-rate 0.7]]
 //
 //   import { runOpMode } from '<this checkout>/tools/run-opmode.mjs';
@@ -155,6 +155,14 @@ function standIn(E, run, pose) {
  * opts.beforeTick   (run) before each pass, INIT's included (run.phase says which)
  * opts.afterTick    (run) after each pass: where a caller's robot moves by run.dt
  * opts.engine       an engine already loaded (tests/load.mjs loadEngine), else this file's own
+ * opts.field        run on the BIOBUZZ field instead: a plain 18 in robot (the bench's own sim, which drives,
+ *                   meets the walls and the HIVEs) with the game pieces in it (src/payload.js). true, or
+ *                   { alliance: 'red'|'blue', pieces: true (the staged POLLEN, FLOWERs and HUMAN PLAYERS),
+ *                     balls: [{ x, y, kind, color }] (more loose balls, inches on the field), payload: {…}
+ *                     (the Shot tab's game-piece settings: intakes, transfer, dirs, edges, preload, supply, rollerMm),
+ *                     shot: {…} (the Shot tab's shooter settings) }.
+ *                   The result then also has `payload`: the supply mode and why, picked, ejected, fired, scored,
+ *                   what is held at the end, each intake's mouth and which way is in (and how that was decided).
  *
  * Returns plain data, ready for JSON.stringify. `ok` means: it compiled, every file was read,
  * and the OpMode ran to the end of the time (or to its own end) without stopping on an error.
@@ -167,7 +175,7 @@ export function runOpMode(opts = {}) {
     base.monteCarlo = manyRuns(opts, base);
     return base;
   }
-  const E = opts.engine || engine();
+  const E = opts.engine || (opts.field ? fieldEngine() : engine());
   const files = readJava(opts.code);
   const main = pickOpMode(files, opts.opmode);
   const seconds = Number.isFinite(+opts.seconds) && +opts.seconds >= 0 ? +opts.seconds : 5;
@@ -193,7 +201,8 @@ export function runOpMode(opts = {}) {
   const pose = Object.assign({ x: 0, y: 0, h: 0 }, opts.startPose || {});
   const mine = standIn(E, run, pose);
   const theirs = typeof opts.host === 'function' ? opts.host(run) : opts.host;
-  const host = Object.assign({}, mine.host, theirs || {});
+  const field = opts.field ? onField(E, main, picked, opts, pose, run) : null;
+  const host = Object.assign({}, mine.host, field ? field.host : {}, theirs || {});
 
   // every device and every command, whoever's robot holds them
   const peaks = new Map();
@@ -234,6 +243,7 @@ export function runOpMode(opts = {}) {
     P.tick();
     if (failed()) return false;
     mine.move(DT);
+    if (field) field.step(DT);
     if (opts.afterTick) opts.afterTick(run);
     seen();
     return true;
@@ -252,6 +262,7 @@ export function runOpMode(opts = {}) {
   if (alive && !P.done) {
     if (opts.onStart) opts.onStart(run);
     run.phase = 'run'; run.t = 0; run.rt0 = 0;
+    if (field) field.start();
     sticks(0);
     P.start();
     alive = !failed();
@@ -279,7 +290,55 @@ export function runOpMode(opts = {}) {
   out.prints = run.log.slice();
   out.stubs = P.stubs().slice(0, 40).map(([call, count, file, line]) => ({ call, count, file: file === 'OpMode.java' ? main.file : file, line }));
   out.ok = !out.error && !out.compile.parseErrors.length;
+  if (field) out.payload = E.Payload.summary();
   return out;
+}
+
+/* ---- opts.field: the bench's own sim on the BIOBUZZ field, the runner's VM driving it ----
+   A plain 18 in box robot (no CAD: a drawn drive base under it) stands at the start pose; its devices are
+   the sim's, so motors slew, flywheels spin up, the chassis drives and meets the field, and the pieces go
+   through the robot (src/payload.js) exactly as on the page. */
+const BOX_ROBOT = () => ({ name: 'stand-in', units: 'METRE', pointCount: 0, parts: [], mechs: [], solids: [], placements: [],
+  bbox: { min: [-0.2286, -0.2286, 0], max: [0.2286, 0.2286, 0.35] } });
+function onField(E, main, picked, opts, pose, run) {
+  if (!E.Field || !E.Field.ok) throw new Error('field: this engine has no BIOBUZZ field (pass an engine from fieldEngine())');
+  const F = opts.field === true ? {} : opts.field, IN = 0.0254;
+  const al = F.alliance === 'blue' ? 'blue' : 'red';
+  const code = E.parseJava(main.src, { libs: picked.libs, engine: 'vm' });
+  const cad = BOX_ROBOT();
+  const simOpts = { payloadKg: 0.18, duty: 0.3, trust: 'code', front: '+x' };
+  const start = opts.startPose ? Object.assign({ x: 0, y: 0, h: 0 }, opts.startPose) : E.Field.startPose(al, E.footprintOf(cad, '+x'));
+  Object.assign(pose, start);
+  simOpts.startPose = Object.assign({}, start);
+  E.Field.reset();
+  E.Shots.cfg = null;
+  E.Sim.load(code, cad, {}, simOpts);
+  E.Sim.prog = null;                                     // the runner's own program drives the devices
+  E.Sim.phase = 'init'; E.Sim.t = 0;
+  E.Shots.reset(); E.Shots.alliance = al; E.Shots.adopt(code);
+  if (F.shot && typeof F.shot === 'object') Object.assign(E.Shots.cfg, F.shot);
+  if (F.payload && typeof F.payload === 'object') Object.assign(E.Shots.cfg.payload, F.payload);
+  E.Match.on = true;
+  E.Match.reset({ period: code.kind === 'Autonomous' ? 'Autonomous' : 'TeleOp', user: al, userPose: E.Sim.chassis, seed: 1, solo: true });
+  if (F.pieces === false) { E.Match.floor = []; for (const f of E.Match.flowers) f.stack = []; }
+  for (const b of Array.isArray(F.balls) ? F.balls : []) {
+    const kind = b && b.kind === 'nectar' ? 'nectar' : 'pollen';
+    if (b && Number.isFinite(+b.x) && Number.isFinite(+b.y)) E.Match.drop(kind, b.color === 'blue' ? 'blue' : 'red', +b.x * IN, +b.y * IN);
+  }
+  const S = E.Sim, sh = S.vmHost();
+  const host = {
+    dev: sh.dev, heading: sh.heading, omega: sh.omega, pose: sh.pose, vel: sh.vel, ray: sh.ray, color: sh.color, volts: sh.volts, touch: sh.touch,
+    world(dt) { run.clock += dt; S.stepDevices(dt); },
+  };
+  return {
+    host,
+    start() { S.phase = 'running'; S.t = 0; },
+    step(dt) {
+      S.t = run.phase === 'run' ? run.t : 0; S.clock = run.clock;
+      S.stepWorld(dt);
+      pose.x = S.chassis.x; pose.y = S.chassis.y; pose.h = S.chassis.h;
+    },
+  };
 }
 
 /* ---- Monte Carlo: opts.runs / opts.seed ----
@@ -357,6 +416,7 @@ function cli(argv) {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--compact') compact = true;
+    else if (a === '--field') o.field = true;
     else if (a === '-h' || a === '--help') return usage(0);
     else if (flags[a]) { if (i + 1 >= argv.length) return usage(2, a + ' needs a value'); o[flags[a]] = argv[++i]; }
     else if (a.startsWith('--')) return usage(2, 'unknown option ' + a);
@@ -381,7 +441,7 @@ function usage(code, why) {
   const say = code ? console.error : console.log;
   if (why) say('run-opmode: ' + why);
   say(`usage: node tools/run-opmode.mjs <folder or .java files…> --opmode <File.java> [--seconds 5]
-                                [--gamepad script.json] [--init 0.4] [--compact]
+                                [--gamepad script.json] [--init 0.4] [--compact] [--field]
                                 [--runs N --seed S [--cad robot.step.gz --joints joints.json --front +x]
                                  [--within 2 --deg 5] [--min-rate 0.7]]
   --opmode    the OpMode's file name, or the end of its path when two files share a name
@@ -390,7 +450,9 @@ function usage(code, why) {
               each step holds from its time (seconds after START) until the next
   --init      seconds the driver waits in INIT before START (default 0.4)
   --compact   the result on one line
-  --runs      run it N times (1 to 50), each with its own seed and a little variation; the batch comes back
+  --field     run on the BIOBUZZ field with the staged game pieces: the result adds "payload" (what the robot
+              picked up, ejected, fired and scored, and which way its intake takes pieces in)
+  --runs     run it N times (1 to 50), each with its own seed and a little variation; the batch comes back
               in "monteCarlo": per-run results and the success rate. With --cad the runs are the full
               rigid-body sim on that robot (friction, mass, battery, latency, start pose, field spread varied)
               and a run works when it ends within --within inches and --deg degrees of the path's end.

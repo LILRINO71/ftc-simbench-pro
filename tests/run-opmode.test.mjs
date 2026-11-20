@@ -409,3 +409,60 @@ test('runs: the command line takes --runs, --seed and --min-rate, and says what 
   }
   assert.match(cli('--help').stdout, /--runs/);
 });
+
+/* ---- field: the OpMode on the BIOBUZZ field, the game pieces through the robot (src/payload.js) ---- */
+// in the style of Team 7831's Meet 0 TeleOp: an intake pushing balls straight into two shooter rollers
+const MEET0 = HEAD + `
+import com.qualcomm.robotcore.hardware.DcMotorEx;
+import com.qualcomm.robotcore.hardware.DcMotorSimple;
+@TeleOp(name = "Meet0 style")
+public class Meet0Style extends LinearOpMode {
+    @Override public void runOpMode() {
+        DcMotorEx fl = hardwareMap.get(DcMotorEx.class, "FL"), bl = hardwareMap.get(DcMotorEx.class, "BL");
+        DcMotorEx fr = hardwareMap.get(DcMotorEx.class, "FR"), br = hardwareMap.get(DcMotorEx.class, "BR");
+        DcMotorEx intake = hardwareMap.get(DcMotorEx.class, "intake");
+        DcMotorEx outtake1 = hardwareMap.get(DcMotorEx.class, "outtake1"), outtake2 = hardwareMap.get(DcMotorEx.class, "outtake2");
+        intake.setDirection(DcMotorSimple.Direction.REVERSE);
+        boolean on = false;
+        waitForStart();
+        while (opModeIsActive()) {
+            double y = -gamepad1.left_stick_y;
+            fl.setPower(y); bl.setPower(y); fr.setPower(y); br.setPower(y);
+            if (gamepad2.a) on = true;
+            outtake1.setPower(on ? 1.0 : 0); outtake2.setPower(on ? 1.0 : 0);
+            intake.setPower(gamepad2.left_trigger > 0.1 ? -1.0 : (gamepad2.right_trigger > 0.1 ? 1.0 : 0.0));
+        }
+    }
+}`;
+test('field: a run on the field adds `payload` (picked, ejected, fired, scored, held, the intake\'s way in, the supply); nothing else changes', () => {
+  const code = [{ file: 'Meet0Style.java', src: MEET0 }];
+  const pad = [{ t: 0, gamepad2: { right_trigger: 1 } }, { t: 2.5, gamepad2: { right_trigger: 1, a: true } }];
+  const plain = runOpMode({ code, opmode: 'Meet0Style.java', seconds: 6, gamepad: pad });
+  assert.equal('payload' in plain, false, 'no field, no payload: the result you always got');
+  // the red start (x = -61.5 in, facing the field): a POLLEN just off the front edge of the 18 in robot
+  const r = runOpMode({ code, opmode: 'Meet0Style.java', seconds: 6, gamepad: pad, field: { alliance: 'red', pieces: false, balls: [{ x: -50.9, y: 0, kind: 'pollen' }] } });
+  for (const k of Object.keys(plain)) if (k !== 'peaks' && k !== 'telemetry') assert.deepEqual(r[k], plain[k], k);
+  assert.deepEqual(Object.keys(r.peaks).sort(), Object.keys(plain.peaks).sort());
+  const p = r.payload;
+  assert.deepEqual(Object.keys(p).sort(), ['ejected', 'fired', 'flywheels', 'fromFlowers', 'gate', 'held', 'intakes', 'otherNectar', 'picked', 'preloaded', 'scored', 'supply', 'transfer', 'why'].sort());
+  assert.equal(p.supply, 'real'); assert.match(p.why, /intake/);
+  assert.equal(p.picked, 1, 'picked up the ball in front of it');
+  assert.equal(p.fired, 1, 'and launched it once the shooter turned');
+  assert.equal(p.ejected, 0); assert.ok(p.scored === 0 || p.scored === 1);
+  assert.deepEqual(p.held, []);
+  const at = p.intakes[0].decidedAt;
+  assert.ok(at >= 0.14 && at <= 0.2, 'decided after 0.15 s of RT: ' + at);
+  assert.deepEqual(p.intakes, [{ name: 'intake', edge: 'front', edgeFrom: 'the default: the front edge', in: 'positive', inFrom: 'first use', decidedAt: at }]);
+  assert.deepEqual(p.flywheels, ['outtake1', 'outtake2']);
+  assert.equal(p.gate, null); assert.equal(p.transfer, null);
+  // the same run again: the same answer
+  assert.deepEqual(runOpMode({ code, opmode: 'Meet0Style.java', seconds: 6, gamepad: pad, field: { pieces: false, balls: [{ x: -50.9, y: 0 }] } }).payload, p);
+  // a robot with no intake: the unlimited supply, and says why
+  const shooterOnly = runOpMode({ code: ITD, opmode: 'sample_teleop.java', seconds: 0.5, field: true });
+  assert.equal(shooterOnly.payload.supply, 'none');
+  assert.equal(shooterOnly.ok, true);
+  // the command line: --field
+  const cli = spawnSync(process.execPath, [TOOL, ITD, '--opmode', 'sample_teleop.java', '--seconds', '0.4', '--field', '--compact'], { encoding: 'utf8' });
+  assert.equal(cli.status, 0, cli.stderr);
+  assert.equal(JSON.parse(cli.stdout).payload.supply, 'none');
+});
