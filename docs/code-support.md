@@ -169,6 +169,39 @@ In code: `runOpMode({ code, opmode, seconds: 30, runs: 10, seed: 1, cad, joints,
 `success` takes a whole definition (`{mode: 'points', points: 10}` counts the alliance's AUTO points) and
 `vary` (`{ friction: false }`) holds a factor at its nominal.
 
+### Every OpMode, on every push (`tools/check-code.mjs`)
+
+```
+node tools/check-code.mjs TeamCode/src/main/java [--seconds 3] [--skip Tuning.java] [--only Main.java] [--json] [--summary file.md]
+```
+
+Runs every OpMode the Driver Station would list (`@TeleOp` or `@Autonomous`, not `@Disabled`, not
+abstract) twice on the stand-in robot: once with the sticks at rest, and once with every stick,
+trigger and button of both gamepads worked in turn, so the code behind a button runs too. An
+OpMode that stops on an error fails, with the file and line; the exit code is 1 when any fails.
+An OpMode whose whole body is a library class the bench has no copy of (Pedro's `Tuning`) is
+listed as `n/a`, not as a failure. A pass means the code was read and ran without stopping on an
+error. It does not mean the robot does what you want.
+
+In a team's own repository, as `.github/workflows/simbench.yml`:
+
+```yaml
+name: simbench
+on: [push, pull_request]
+jobs:
+  opmodes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: git clone --depth 1 https://github.com/LILRINO71/ftc-simbench-pro.git ../ftc-simbench-pro
+      - uses: actions/setup-node@v4
+        with: { node-version: 24 }
+      - run: node ../ftc-simbench-pro/tools/check-code.mjs TeamCode/src/main/java --summary "$GITHUB_STEP_SUMMARY"
+```
+
+It needs nothing installed but Node. In code: `checkCode({ code, seconds, skip, only })` returns
+`{ok, passed, failed, unmodelled, skipped, opmodes: [{file, name, kind, ok, why, devices, stubs}], notRun}`.
+
 ## Seeing what was understood
 
 - **Java tab:** the parsed statements, and coverage. Each skipped line gives its reason.

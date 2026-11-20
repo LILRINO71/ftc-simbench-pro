@@ -14,6 +14,7 @@ Node scripts for building, testing and generating test robots. None of them ship
 | `sync-shot-sim.mjs` | Copies the BIOBUZZ Shot Sim engine and field data into `vendor/`, so the bench and the shot sim can't disagree about the field. |
 | `onshape-dev.mjs` | The built site on this computer **with the Onshape link working**: serves `dist/` and answers `/onshape/*` with the real relay, signed with your own API key (`--env`, `--keep`, `--log`). For watching a real import end to end before a change ships: [docs/onshape-app-store.md](../docs/onshape-app-store.md#watching-a-real-import-on-your-own-computer). |
 | `run-opmode.mjs` | The **headless entry** for other repos and their CI: runs one of a team's OpModes on the Java VM (`--opmode`, `--seconds`, `--gamepad`) and prints what it did as JSON; `--runs N --seed S` runs it N times with a little variation and reports how often it worked. Also a module (`runOpMode`). This one does ship as an interface: [docs/code-support.md](../docs/code-support.md#running-an-opmode-without-the-page-toolsrun-opmodemjs). |
+| `check-code.mjs` | **Every OpMode in a team's code**, for the team's own CI: each `@TeleOp` and `@Autonomous` is run on the Java VM with the sticks at rest and again with every control worked in turn; exit 1 when one stops on an error. [docs/code-support.md](../docs/code-support.md) has the workflow file to copy. |
 
 ```bash
 npm run build            # node tools/build.mjs

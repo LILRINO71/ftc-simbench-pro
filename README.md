@@ -106,6 +106,9 @@ Open **https://ftc-simbench-pro.pages.dev**. It loads GearGurus 7832's Into The 
 - **Without a browser:** `node tools/run-opmode.mjs <TeamCode folder> --opmode MainTeleOp.java --seconds 5`
   compiles and runs one OpMode on a stand-in robot and prints what every device was told, as JSON
   ([docs/code-support.md](docs/code-support.md)). It needs only Node and this checkout.
+- **In your own repository's CI:** `node tools/check-code.mjs TeamCode/src/main/java` runs every OpMode
+  with the sticks at rest and again with every control worked in turn, and fails the build when one stops
+  on an error. The workflow file to copy is in [docs/code-support.md](docs/code-support.md).
 - **Paths** (under the field) draws an auto and writes its Pedro Pathing code; **Run on the bench** drives it.
 - **Clip** records the field with the score on it; turn on **AI robots** in **Match** for a full match, the results card and your personal best. **Map**, **Chase** and **Robot cam** help when the field is hard to see.
 - No controller? The keyboard is one: pick **WASD** or move any control to any key under the controller button at the top.
