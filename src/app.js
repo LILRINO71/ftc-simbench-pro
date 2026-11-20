@@ -178,7 +178,7 @@ function reparseAll(){
   LIBRARY.forEach(parseEntry);
   if(entry(CURRENT_ID)) selectOpMode(CURRENT_ID); else { renderOpList(); renderOpSelect(); }
 }
-const isOpModeSource=t=>/@(TeleOp|Autonomous)\b/.test(stripComments(t))||/\bextends\s+(LinearOpMode|OpMode)\b/.test(t);
+const isOpModeSource=t=>javaIsOpMode(t);            // src/java.js: the same rule the headless tools use
 function initLibrary(){
   loadHelpers();
   LIBRARY=[
@@ -293,7 +293,9 @@ function selectOpMode(id){
   if(typeof McUI!=="undefined") McUI.sync();               // the Monte Carlo panel follows the selected OpMode (src/mcui.js)
 }
 function addOpModeFromText(file,text){
-  if(!isOpModeSource(text)&&/\bclass\s+\w+/.test(text)){
+  // a file that declares a type and is not an OpMode is a helper: a class, and an enum, an
+  // interface or a record just the same (an enum used to be listed as an OpMode of its own)
+  if(!isOpModeSource(text)&&javaDeclaresType(text)){
     USER_HELPERS=USER_HELPERS.filter(h=>h.file!==file).concat([{file, src:text}]);
     saveHelpers(); reparseAll();
     return;

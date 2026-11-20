@@ -30,9 +30,8 @@ let ENGINE = null;
 /** The bench's engine, loaded once for the process. */
 export function engine() { return ENGINE || (ENGINE = loadEngine()); }
 
-/* The app's own rule for "this file is an OpMode" (isOpModeSource in src/app.js). */
-const noComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\/\/[^\n]*/g, ' ');
-export const isOpModeSource = (src) => /@(TeleOp|Autonomous)\b/.test(noComments(src)) || /\bextends\s+(LinearOpMode|OpMode)\b/.test(src);
+/* "This file is an OpMode": the engine's javaIsOpMode (src/java.js), the rule the page uses too. */
+export const isOpModeSource = (src) => engine().javaIsOpMode(src);
 
 /**
  * The team's .java files. `code` is a folder (read to the bottom), a file, or a list of

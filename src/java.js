@@ -21,6 +21,56 @@ function stripComments(s){
 function maskStr(s){
   return s.replace(/"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/g,m=>m[0]+" ".repeat(m.length-2)+m[m.length-1]);
 }
+/* The source with its comments blanked and the insides of its string and char literals blanked,
+   the same length as the source, read in ONE pass: a "//" inside a string is not a comment and a
+   quote inside a comment opens no string (stripComments and maskStr each get one of those
+   wrong). It says where things are; a value is then read from the source at the same place. */
+function javaCodeMask(raw){
+  const s=String(raw||""), n=s.length; let out="", i=0;
+  while(i<n){
+    const c=s[i], d=s[i+1];
+    if(c==="/"&&d==="/"){ let j=i; while(j<n&&s[j]!=="\n") j++; out+=" ".repeat(j-i); i=j; }
+    else if(c==="/"&&d==="*"){ const e=s.indexOf("*/",i+2), j=e<0?n:e+2; out+=s.slice(i,j).replace(/[^\n]/g," "); i=j; }
+    else if(c==='"'||c==="'"){
+      let j=i+1; while(j<n&&s[j]!==c&&s[j]!=="\n"){ if(s[j]==="\\"&&j+1<n) j++; j++; }
+      if(j<n&&s[j]===c){ out+=c+" ".repeat(j-i-1)+c; i=j+1; } else { out+=s.slice(i,j); i=j; }   // never closed on its line: left as written
+    }
+    else{ out+=c; i++; }
+  }
+  return out;
+}
+/* What the Driver Station would list a file as: its first @TeleOp or @Autonomous that is code
+   (not in a comment or a string), with the arguments it gives as text. A ")" or a "//" inside
+   a quoted name is part of the name. {kind, name, group, preselect, disabled, cls}, or null for
+   a file with no such annotation. `name` is null when the annotation gives none (or gives a
+   constant, which can't be read here): the Driver Station then shows the class's own name, `cls`. */
+function javaOpModeTag(raw){
+  const s=String(raw||""), code=javaCodeMask(s);
+  const m=/@(TeleOp|Autonomous)\b/.exec(code);
+  if(!m) return null;
+  let i=m.index+m[0].length, from=-1, to=-1;
+  while(i<code.length&&/\s/.test(code[i])) i++;
+  if(code[i]==="("){ let depth=0, j=i; for(;j<code.length;j++){ if(code[j]==="(") depth++; else if(code[j]===")"&&--depth===0) break; } from=i+1; to=j; }
+  const arg=key=>{
+    if(from<0) return null;
+    const a=new RegExp("\\b"+key+"\\s*=\\s*\"").exec(code.slice(from,to));
+    if(!a) return null;
+    const q0=from+a.index+a[0].length, q1=code.indexOf('"',q0);            // the string's insides are blank in `code`
+    return q1<0?null:s.slice(q0,q1).replace(/\\(.)/g,"$1");
+  };
+  const c=/\bclass\s+([A-Za-z_$][\w$]*)/.exec(code.slice(m.index))||/\bclass\s+([A-Za-z_$][\w$]*)/.exec(code);
+  return {kind:m[1], name:arg("name"), group:arg("group"), preselect:arg("preselectTeleOp"), disabled:/@Disabled\b/.test(code), cls:c?c[1]:null};
+}
+/* Is this file an OpMode: annotated as one, or a class that extends LinearOpMode or OpMode (a parent
+   other OpModes build on)? One rule for the page (src/app.js) and the headless tools (tools/run-opmode.mjs). */
+function javaIsOpMode(raw){
+  return !!javaOpModeTag(raw)||/\bextends\s+(LinearOpMode|OpMode)\b/.test(javaCodeMask(raw));
+}
+/* Does this file declare a type of its own (a class, an enum, an interface, a record)? A file
+   that does and is not an OpMode is a helper, whatever kind of type it is. */
+function javaDeclaresType(raw){
+  return /(^|[^\w$.])(class|enum|interface|record)\s+[A-Za-z_$][\w$]*/.test(javaCodeMask(raw));
+}
 /* What the file being parsed declares, for the statement parser: constants a
    case label may name, enum types a local may have. parseJava sets it. */
 let JCTX=null;
@@ -441,11 +491,11 @@ function parseJava(raw,opts){
   const out = {opmode:null, kind:null, cls:null, devices:[], consts:{}, vars:{},
                stmts:[], inits:[], telemetry:[], hasLoop:false, hasWait:false, parseNotes:[]};
   let m;
-  if((m=/@TeleOp\s*\(([^)]*)\)/.exec(src))){ out.kind="TeleOp";
-    const n=/name\s*=\s*"([^"]*)"/.exec(m[1]); out.opmode=n?n[1]:"(unnamed)"; }
-  else if((m=/@Autonomous\s*\(([^)]*)\)/.exec(src))){ out.kind="Autonomous";
-    const n=/name\s*=\s*"([^"]*)"/.exec(m[1]); out.opmode=n?n[1]:"(unnamed)"; }
-  else if(/@TeleOp\b/.test(src)){ out.kind="TeleOp"; out.opmode="(unnamed)"; }
+  // The Driver Station lists an OpMode by the name its annotation gives, and by its class's own
+  // name when it gives none (@TeleOp alone, or with only a group). It used to read "(unnamed)"
+  // here, so two such OpModes could not be told apart, and a bare @Autonomous was no OpMode at all.
+  const tag=javaOpModeTag(raw);
+  if(tag){ out.kind=tag.kind; out.opmode=tag.name||tag.cls||"(unnamed)"; }
   if((m=/class\s+(\w+)\s+extends\s+(\w+)/.exec(src))){ out.cls=m[1]; out.base=m[2]; }
   out.hasWait=/waitForStart\s*\(\s*\)/.test(src);
   // FTCLib's PID controllers clamp the summed error to +-1 unless told otherwise
