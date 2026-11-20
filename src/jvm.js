@@ -699,9 +699,11 @@ JVM.prototype.findType0=function(name,ctx){
   if(this.classes.has("java.lang."+name)) return this.classes.get("java.lang."+name);
   const l=this.bySimple.get(name);
   if(l&&l.length){
-    // the team's own class first, then a library's
-    const own=l.filter(c=>c.decl&&!c.decl.lib);
-    return (own.length?own:l)[0];
+    // the team's own class first, then a library's; a top-level class before one nested in
+    // another (code with no imports means DcMotor, not HardwareMap.DeviceMapping.DcMotor)
+    const own=l.filter(c=>c.decl&&!c.decl.lib), pool=own.length?own:l;
+    const top=pool.filter(c=>!c.outer&&/(^|\.)[a-z_$][\w$]*\.[^.]+$|^[^.]+$/.test(c.fqn));
+    return (top.length?top:pool)[0];
   }
   return null;
 };
