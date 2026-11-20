@@ -433,14 +433,16 @@ const Sim={
       }
       if(s.kind!=="servo") continue;                        // sensors and the IMU don't move
       if(solved(s)){ s.stalled=false; continue; }          // Jolt drives it to its command, below
-      const rate=60/(s.sec60*s.travelDeg);
+      // the quoted figures are at 6 V; a hub's servo port gives 5 V (opts.servoVolts, src/hardware.js)
+      const at=servoScale(s.spec,servoVolts(this.opts));
+      const rate=60/(s.sec60*s.travelDeg)*at.speed;
       const err=s.cmd-s.act;
       const step=Math.sign(err)*Math.min(Math.abs(err), rate*dt);
       const want=s.act+step;
       s.stalled=false;
       if(s.mech&&s.mech.kind==="revolute-lift"&&leverOf(s.mech)>0&&s.spec.stallNm){
         const distal=this.opts.payloadKg+0.060+0.055;
-        const usable=s.spec.stallNm*this.opts.duty;
+        const usable=s.spec.stallNm*at.torque*this.opts.duty;
         const req=holdTorque(s.mech, armAngleDeg(s.mech,s.spec,want,s.restPos), distal);
         if(req>usable){ s.stalled=true; if(step>0) continue; }
       }

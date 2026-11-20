@@ -73,7 +73,9 @@ function analyze(code,cad,map,opts){
     const a0=armAngleDeg(mech,spec,rng.lo,rest), a1=armAngleDeg(mech,spec,rng.hi,rest);
     const wa=worstAngle(a0,a1);
     const req=holdTorque(mech,wa,distal);
-    const usable=spec.stallNm*duty;
+    // the servo's stall torque at the volts it runs at: a hub's 5 V port, or opts.servoVolts (src/hardware.js)
+    const at=servoScale(spec,servoVolts(opts)), stallV=spec.stallNm*at.torque;
+    const usable=stallV*duty;
     const ratio=usable/req;
     const sev=ratio<1?"fail":(ratio<1.35?"warn":"pass");
     const crosses=(Math.min(a0,a1)<=0&&Math.max(a0,a1)>=0);
@@ -86,7 +88,7 @@ sweep     ${a0.toFixed(0)}° → ${a1.toFixed(0)}°  off horizontal
 worst     ${wa.toFixed(0)}°${crosses?"  — sweeps through level":""}
 load      ${(distal*1000).toFixed(0)} g = ${(payload*1000).toFixed(0)} held + 60 servo + 55 link
 needed    ${req.toFixed(3)} N·m   m·g·r·cos θ
-usable    ${usable.toFixed(3)} N·m   ${spec.stallNm.toFixed(2)} stall × ${(duty*100).toFixed(0)}%
+usable    ${usable.toFixed(3)} N·m   ${stallV.toFixed(2)} stall at ${at.volts} V × ${(duty*100).toFixed(0)}%
 headroom  ${ratio.toFixed(2)}×${ratio<1?"  ◄ SHORT":""}`;
     if(sev==="fail")
       add("torque:"+d.name,"fail","The "+mlabel(mech).toLowerCase()+" servo cannot hold the load it's carrying",

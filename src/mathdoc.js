@@ -403,12 +403,18 @@ function mdTorqueSection(X) {
       note: "θ is the worst angle in the sweep " + mdNum(a0) + "° → " + mdNum(a1) + "° off horizontal, which is level whenever the joint passes through it",
       source: "CAD" });
 
-    const stall = mdNo(j.spec.stallNm) ? j.spec.stallNm : null;
-    if (!mdNo(stall)) { rows.push(mdMiss(nm + " — stall torque", "no published stall torque for " + (j.spec.fam || j.d.name))); continue; }
+    const quoted = mdNo(j.spec.stallNm) ? j.spec.stallNm : null;
+    if (!mdNo(quoted)) { rows.push(mdMiss(nm + " — stall torque", "no published stall torque for " + (j.spec.fam || j.d.name))); continue; }
+    // a servo's figure is quoted at 6 V; it runs at what its port gives (src/hardware.js servoScale)
+    const sv = j.spec.kind === "servo" ? servoScale(j.spec, servoVolts(X.opts)) : null;
+    const stall = sv ? quoted * sv.torque : quoted;
     rows.push({ label: nm + " — actuator stall torque", symbols: "τ_stall",
-      expr: "τ_stall = " + mdNum(stall) + " N·m  (" + (j.spec.fam || j.d.type || "actuator") + ")",
+      expr: sv && sv.torque !== 1
+        ? "τ_stall = " + mdNum(stall) + " N·m at " + mdNum(sv.volts) + " V  (" + (j.spec.fam || j.d.type || "actuator") + ", " + mdNum(quoted) + " N·m at " + mdNum(j.spec.ratedV || 6) + " V)"
+        : "τ_stall = " + mdNum(stall) + " N·m  (" + (j.spec.fam || j.d.type || "actuator") + ")",
       value: stall, unit: "N·m",
-      note: "stall is the most it can produce for an instant, not what it holds all match",
+      note: "stall is the most it can produce for an instant, not what it holds all match" +
+        (sv && sv.torque !== 1 ? "; the servo runs at " + mdNum(sv.volts) + " V (a hub's servo port gives 5 V, a Servo Power Module 6 V), taken between the vendor's 4.8 V and 6 V figures" : ""),
       source: j.spec.guess ? "assumption" : (j.spec.src === "code" ? "code" : "vendor spec") });
 
     const usable = stall * X.opts.duty;

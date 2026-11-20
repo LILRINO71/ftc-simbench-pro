@@ -15,7 +15,7 @@ const EXPORTS = [
   'Field', 'Shots', 'IN', 'ballWorld', 'ballSpec', 'ballSpawn', 'ballBackspin', 'BALL_K', 'BALL_HZ', 'shotBall', 'ELEMENT_G', 'TIP_GRAMS', 'FRONTS', 'footprintOf', 'capsulePush', 'nearestMotorId', 'SHOOTER_JAVA',
   'convexHull', 'boxCorners', 'solidTriangles', 'thinPoints', 'solidKind', 'sampleSolids', 'robotBase', 'makeRng',
   'padFromGamepad', 'padName', 'padFor', 'busiestPad', 'PAD_BUTTONS',
-  'HW_PARTS', 'GENERIC', 'hwFromPart', 'specFor', 'ticksPerRev',
+  'HW_PARTS', 'GENERIC', 'hwFromPart', 'specFor', 'ticksPerRev', 'servoVolts', 'servoScale',
   'SAMPLE_JAVA', 'DRIVE_JAVA', 'SAMPLE_CAD', 'synthGeometry',
   'splitStepRecords', 'parseSTEP', 'stepShapeUnits', 'classifyMechs', 'recomputeChain', 'rigCarries', 'rigRoots', 'mlabel',
   'JOINT_KINDS', 'leverOf', 'holdTorque', 'armAngleDeg',

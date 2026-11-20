@@ -10,8 +10,10 @@ const E = loadEngine();
 /* ---- the rig ----------------------------------------------------------
    Four goBILDA Yellow Jacket 435 rpm motors (13.7:1, 18.7 kg.cm = 1.8338436 N.m
    stall, goBILDA's page) on 96 mm wheels, 12.5 kg, and one unspecified servo
-   (the 25-2 Torque's 21.6 kg.cm = 2.1182364 N.m) on a lift pivot that rests
-   30 deg above horizontal. Those are the only inputs; everything else is derived. */
+   (the 25-2 Torque's 21.6 kg.cm = 2.1182364 N.m at 6 V, 17.2 kg.cm at 4.8 V) on a
+   lift pivot that rests 30 deg above horizontal. The servo runs on a hub's 5 V port:
+   17.2 + (21.6 - 17.2) x (5 - 4.8) / (6 - 4.8) = 17.933333 kg.cm = 1.7586592 N.m.
+   Those are the only inputs; everything else is derived. */
 const RIG_JAVA = `
 @TeleOp(name="Rig")
 public class Rig extends LinearOpMode {
@@ -216,18 +218,24 @@ test('holding torque takes the cosine in degrees, not radians', () => {
 });
 
 test('the safety margin derates the stall torque, it does not inflate the load', () => {
-  // n = 2.1182364 N.m * 0.30 / 0.5010757 = 0.6354709 / 0.5010757 = 1.268213
-  // applying the duty to the requirement instead would give 14.09
+  // the servo on the hub's 5 V port: n = 1.7586592 N.m * 0.30 / 0.5010757 = 0.5275978 / 0.5010757 = 1.052930
+  // applying the duty to the requirement instead would give 11.70
   const s = sec(E.mathReport(rigBench()), 'torque');
-  near(row(s, /stall torque/).value, 2.1182364, 1e-6, 'stall torque');
+  const st = row(s, /stall torque/);
+  near(st.value, 1.7586592, 1e-6, 'stall torque at 5 V');
+  assert.ok(/= 1\.76 N·m at 5 V/.test(st.expr) && /2\.12 N·m at 6 V/.test(st.expr), `the row says both voltages: "${st.expr}"`);
   const m = row(s, /safety margin/);
-  near(m.value, 1.268213, 1e-5, 'safety margin');
+  near(m.value, 1.052930, 1e-5, 'safety margin');
   assert.ok(!/cannot hold its load/.test(m.note), 'a margin over 1.0 is not called out');
-  // at a 20% duty: n = 2.1182364 * 0.20 / 0.5010757 = 0.845476, under 1.0
+  // at a 20% duty: n = 1.7586592 * 0.20 / 0.5010757 = 0.701954, under 1.0
   const low = sec(E.mathReport(rigBench({ opts: { payloadKg: 0.180, duty: 0.20, trust: 'code', mu: 0.90, batteryV: 12 } })), 'torque');
   const m2 = row(low, /safety margin/);
-  near(m2.value, 0.845476, 1e-5, 'safety margin at 20% duty');
+  near(m2.value, 0.701954, 1e-5, 'safety margin at 20% duty');
   assert.ok(/cannot hold its load/.test(m2.note), 'a margin under 1.0 should be called out');
+  // fed 6 V by a Servo Power Module it has the quoted 2.1182364 N.m: n = 0.6354709 / 0.5010757 = 1.268213
+  const spm = sec(E.mathReport(rigBench({ opts: { payloadKg: 0.180, duty: 0.30, trust: 'code', mu: 0.90, batteryV: 12, servoVolts: 6 } })), 'torque');
+  near(row(spm, /stall torque/).value, 2.1182364, 1e-6, 'stall torque at 6 V');
+  near(row(spm, /safety margin/).value, 1.268213, 1e-5, 'safety margin at 6 V');
 });
 
 /* ================================================ feedforward and PID ==== */

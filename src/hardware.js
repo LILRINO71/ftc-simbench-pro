@@ -8,9 +8,10 @@
    ratio, tpr (encoder counts per output turn), sec60 (a servo's seconds
    per 60 degrees, no load), travelDeg, stallA / freeA (stall and
    free-running current in amps at ratedV). Motors are quoted at 12 V;
-   servos at 6 V, the one column every servo vendor here publishes (on a
-   hub's 5 V servo port a servo has about 5/6 of that torque and speed;
-   goBILDA's own 4.8 V column is kept as at4v8).
+   servos at 6 V, the one column every servo vendor here publishes
+   (goBILDA's own 4.8 V column is kept as at4v8). A servo runs on a hub's
+   5 V servo port unless opts.servoVolts says a Servo Power Module's 6 V:
+   servoScale gives what it has of these figures there.
    tests/hardware-vendor.test.mjs holds every part to the vendor's table.
    ============================================================ */
 const G = 9.80665;
@@ -103,6 +104,29 @@ function motorFromComment(text){
   const g=GENERIC.Motor;
   return Object.assign({}, g, {src:"code", fam:rpm+" rpm motor", rpm, ratio:6000/rpm, tpr:28*6000/rpm,
     stallNm:g.stallNm*g.rpm/rpm, guess:false});
+}
+
+/* The volts a servo runs at. A REV Control or Expansion Hub's servo ports give 5 V, so that is
+   what a servo gets unless the team says a Servo Power Module feeds it (opts.servoVolts = 6). */
+const SERVO_VOLTS = 5;
+function servoVolts(opts){ const v=+(opts&&opts.servoVolts); return Number.isFinite(v)&&v>0?v:SERVO_VOLTS; }
+
+/* What a servo has of its quoted stall torque and speed at `volts`: multipliers on the spec's
+   own stallNm and on its speed (1/sec60), both 1 at ratedV. With the vendor's 4.8 V column
+   (at4v8) each figure is taken between the two columns in proportion to the voltage, outside
+   them the nearer column; a part quoted at one voltage only goes in proportion to it, never
+   above its quoted figure. 25-2 Torque at 5 V: 17.93 kg.cm (0.830) and 0.24 s/60 (0.833). */
+function servoScale(spec, volts){
+  spec=spec||{};
+  const V=Number.isFinite(+volts)&&+volts>0?+volts:SERVO_VOLTS;
+  const rV=+spec.ratedV>0?+spec.ratedV:6;
+  const nm=+spec.stallNm, sec=+spec.sec60, lo=spec.at4v8||null;
+  const prop=Math.min(1,V/rV);
+  if(!lo||!(rV>4.8)) return {torque:prop, speed:prop, volts:V};
+  const t=Math.max(0,Math.min(1,(V-4.8)/(rV-4.8)));
+  const torque=nm>0&&+lo.stallNm>0?(+lo.stallNm+t*(nm-lo.stallNm))/nm:prop;
+  const speed=sec>0&&+lo.sec60>0?(1/lo.sec60+t*(1/sec-1/lo.sec60))*sec:prop;
+  return {torque, speed, volts:V};
 }
 
 /* Encoder counts per OUTPUT revolution, what getCurrentPosition() counts
