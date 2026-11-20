@@ -244,3 +244,52 @@ test('match: only the live sim plays the match; the drive probe\'s private copy 
   assert.ok(Math.abs(E.Match.t - 0.2) < 1e-9, 'the live sim runs it, tick for tick');
   E.Match.on = false; E.Sim.stop();
 });
+
+test('match: no element is ever lost or made, with AI robots and the team\'s robot taking in and launching, both periods', () => {
+  // 40 POLLEN + 16 NECTAR (manual sec 9.8), counted every tick wherever they are: loose, in a robot, in the
+  // air, in a CELL, in a FLOWER, in a tray, or in a CELL that has TIPPED and not spilled yet
+  const H8 = 'package org.firstinspires.ftc.teamcode;\nimport com.qualcomm.robotcore.eventloop.opmode.*;\nimport com.qualcomm.robotcore.hardware.*;\n';
+  const DRV = 'DcMotorEx fl = hardwareMap.get(DcMotorEx.class, "FL"), bl = hardwareMap.get(DcMotorEx.class, "BL"), fr = hardwareMap.get(DcMotorEx.class, "FR"), br = hardwareMap.get(DcMotorEx.class, "BR");\n'
+    + 'DcMotorEx intake = hardwareMap.get(DcMotorEx.class, "intake"), outtake1 = hardwareMap.get(DcMotorEx.class, "outtake1");\n';
+  const TELE = H8 + '@TeleOp(name = "T") public class T extends LinearOpMode { @Override public void runOpMode() {' + DRV
+    + 'waitForStart(); while (opModeIsActive()) { double y = -gamepad1.left_stick_y, rx = gamepad1.right_stick_x;'
+    + ' fl.setPower(y + rx); bl.setPower(y + rx); fr.setPower(y - rx); br.setPower(y - rx);'
+    + ' outtake1.setPower(1.0); intake.setPower(gamepad2.left_trigger > 0.1 ? -1.0 : 1.0); } } }';
+  const AUTO = H8 + '@Autonomous(name = "A") public class A extends LinearOpMode { @Override public void runOpMode() {' + DRV
+    + 'waitForStart(); outtake1.setPower(1.0); sleep(1500); intake.setPower(1.0);'
+    + ' fl.setPower(0.3); bl.setPower(0.3); fr.setPower(0.3); br.setPower(0.3); sleep(2500);'
+    + ' fl.setPower(-0.3); bl.setPower(-0.3); fr.setPower(-0.3); br.setPower(-0.3); sleep(2500);'
+    + ' fl.setPower(0); bl.setPower(0); fr.setPower(0); br.setPower(0); sleep(30000); } }';
+  const BOX = { name: 'box', units: 'METRE', pointCount: 0, parts: [], mechs: [], solids: [], placements: [], bbox: { min: [-HX, -HX, 0], max: [HX, HX, 0.35] } };
+  const count = () => {
+    const M = E.Match, F = E.Field;
+    let n = M.floor.length + E.Payload.held.length + M.flying.length + E.Shots.flying.length + F.cells.red.length + F.cells.blue.length
+      + M.humans.red.tray + M.humans.blue.tray;
+    for (const b of M.bots) n += b.hold.length;
+    for (const f of M.flowers) n += f.stack.length;
+    for (const T of F.tipQueue) if (T.id > M.seenTip) n += T.spilled.length;
+    return n;
+  };
+  let fired = 0, picked = 0;
+  for (const period of ['Autonomous', 'TeleOp']) for (const seed of [1, 2, 3, 4]) {
+    const code = E.parseJava(period === 'Autonomous' ? AUTO : TELE, { engine: 'vm' });
+    assert.ok(code.vm, 'the OpMode runs on the Java VM');
+    E.Field.reset(); E.Shots.cfg = null; E.Sim.pad = { 1: {}, 2: {} };
+    E.Sim.reset(code, JSON.parse(JSON.stringify(BOX)), {}, { payloadKg: 0.18, duty: 0.3, trust: 'code', front: '+x', startPose: { x: -(H - HX), y: -0.3, h: 0 } });
+    E.Shots.reset(); E.Shots.alliance = 'red'; E.Shots.adopt(code);
+    const M = E.Match; M.on = true; M.reset({ period, user: 'red', userPose: E.Sim.chassis, seed });
+    for (let i = 0; i < M.len / 0.02; i++) {
+      const t = i * 0.02;
+      E.Sim.pad[1] = { left_stick_y: Math.sin(t * 0.7) * 0.6, right_stick_x: Math.sin(t * 0.31) * 0.3 };
+      E.Sim.pad[2] = { left_trigger: Math.floor(t / 6) % 5 === 4 ? 1 : 0 };
+      E.Sim.tick(0.02);
+      const n = count();
+      if (n !== 56) assert.fail(`${period} seed ${seed}: ${n} elements at t=${M.t.toFixed(2)} s`);
+      if (M.floor.length !== new Set(M.floor).size) assert.fail(`${period} seed ${seed}: a ball listed twice at t=${M.t.toFixed(2)} s`);
+    }
+    fired += E.Shots.fired; picked += E.Payload.stats.picked;
+    E.Sim.stop();
+  }
+  assert.ok(fired >= 40 && picked >= 30, `the team's robot really took in and launched pieces: ${picked} in, ${fired} out`);
+  E.Match.on = false;
+});
