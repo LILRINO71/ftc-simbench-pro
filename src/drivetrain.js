@@ -37,8 +37,13 @@ const DRIVE_KINDS={
    axles are the one case geometry genuinely cannot resolve. */
 const DT_CONF={name:0.92, nameOmni:0.90, swerveGeom:0.75, x:0.80, kiwi:0.80, tank2:0.65, tank6:0.55, mecPair:0.70, tank4:0.45};
 
-const DT_WHEEL=/mecanum|\bomni|\btraction\b|tread|wheel|\bt[iy]res?\b/i;        // whole words: "retraction", "entire"
-/* Things that match /wheel/ or turn like one but never carry the robot. */
+/* A name that says drive wheel, read the way solidKind reads names (src/hull.js kindSays): as words,
+   "FrontTire" and "4inOmni" too, by its head, and not when an accessory noun follows ("Wheel
+   Spacer", "Wheel Mount Plate"). Whole words: "retraction", "entire". Global, for kindWord. */
+const DT_WHEEL=/mecanum|\bomni|\btraction\b|tread|wheels?|\bt[iy]res?\b/g;
+/* Things that match /wheel/ or turn like one but never carry the robot. Matched on the name as
+   written: read as words, goBILDA's "am-2648_4inWheel8mmHub" (a 4 in wheel with an 8 mm hub) would
+   say "hub" and throw out a real drive wheel. */
 const DT_NOTWHEEL=/fly ?wheel|pulley|sprocket|\bgear\b|spool|idler|bearing|\bhub\b|guard|shield|tensioner|encoder|odometry|dead ?wheel|\bchains?\b|\bcontrollers?\b/i;
 
 const DT_AXES={"+x":[1,0,0],"-x":[-1,0,0],"+y":[0,1,0],"-y":[0,-1,0],"+z":[0,0,1],"-z":[0,0,-1]};
@@ -340,9 +345,9 @@ function dtOnFloor(ws,up){
 }
 
 function dtIsWheel(s){
-  const n=String((s&&s.name)||"")+" "+String((s&&s.part)||"");
+  const name=String((s&&s.name)||""), n=name+" "+String((s&&s.part)||"");
   if(DT_NOTWHEEL.test(n)) return false;
-  if((s&&s.kind)==="wheel" || DT_WHEEL.test(n)) return true;
+  if((s&&s.kind)==="wheel" || kindSays(name,DT_WHEEL)) return true;
   // a drive-sized wheel by its goBILDA or REV part number (src/partsdb.js), whatever the part is called
   const pw=typeof partsWheel==="function"?partsWheel((s&&s.part)||n):null;
   return !!pw&&(pw.dMm==null||pw.dMm>=48);
