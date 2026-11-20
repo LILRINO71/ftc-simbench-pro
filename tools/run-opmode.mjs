@@ -78,8 +78,10 @@ function pickOpMode(files, name) {
  */
 export function libsFor(E, files, main) {
   const rest = files.filter((f) => f !== main);
-  const helpers = rest.filter((f) => !isOpModeSource(f.src)).map((f) => ({ file: f.file, src: f.src }));
-  const others = rest.filter((f) => isOpModeSource(f.src)).map((f) => ({ file: f.file, src: f.src }));
+  // the rule of the engine the caller runs on, when it has one (an older engine has no javaIsOpMode)
+  const isOp = (src) => (typeof E.javaIsOpMode === 'function' ? E.javaIsOpMode(src) : isOpModeSource(src));
+  const helpers = rest.filter((f) => !isOp(f.src)).map((f) => ({ file: f.file, src: f.src }));
+  const others = rest.filter((f) => isOp(f.src)).map((f) => ({ file: f.file, src: f.src }));
   const siblings = E.jvSiblings(main.src, others);
   return { libs: helpers.concat(siblings), helpers, siblings };
 }

@@ -56,10 +56,34 @@ function javaOpModeTag(raw){
     const a=new RegExp("\\b"+key+"\\s*=\\s*\"").exec(code.slice(from,to));
     if(!a) return null;
     const q0=from+a.index+a[0].length, q1=code.indexOf('"',q0);            // the string's insides are blank in `code`
-    return q1<0?null:s.slice(q0,q1).replace(/\\(.)/g,"$1");
+    return q1<0?null:javaUnescape(s.slice(q0,q1));
   };
   const c=/\bclass\s+([A-Za-z_$][\w$]*)/.exec(code.slice(m.index))||/\bclass\s+([A-Za-z_$][\w$]*)/.exec(code);
-  return {kind:m[1], name:arg("name"), group:arg("group"), preselect:arg("preselectTeleOp"), disabled:/@Disabled\b/.test(code), cls:c?c[1]:null};
+  // a name of nothing but spaces is no name: the SDK shows the class's name for it too
+  const name=arg("name");
+  return {kind:m[1], name:name!=null&&name.trim()?name:null, group:arg("group"), preselect:arg("preselectTeleOp"), disabled:/@Disabled\b/.test(code), cls:c?c[1]:null};
+}
+/* The text a Java string literal stands for: \n, \t, \", \\, é, octal and the rest. */
+function javaUnescape(lit){
+  return String(lit).replace(/\\(u+[0-9a-fA-F]{4}|[0-3]?[0-7]{1,2}|[\s\S])/g,(all,e)=>{
+    if(e[0]==="u"&&e.length>1) return String.fromCharCode(parseInt(e.replace(/^u+/,""),16));
+    if(/^[0-7]/.test(e)) return String.fromCharCode(parseInt(e,8));
+    return ({b:"\b", t:"\t", n:"\n", f:"\f", r:"\r", s:" "})[e]||e;
+  });
+}
+/* A saved list of OpModes put right: an entry that is not an OpMode and declares a type (an enum
+   or an interface that an older page listed as an OpMode) belongs with the helpers. Returns
+   {opmodes, helpers, moved}; a helper already kept under that file name stays as it is. */
+function javaSortSaved(opmodes,helpers){
+  const ops=[], hs=(helpers||[]).slice(); let moved=0;
+  for(const e of opmodes||[]){
+    const src=e&&typeof e.source==="string"?e.source:null;
+    if(src!=null&&!javaIsOpMode(src)&&javaDeclaresType(src)){
+      moved++;
+      if(!hs.some(h=>h.file===e.file)) hs.push({file:e.file, src});
+    } else ops.push(e);
+  }
+  return {opmodes:ops, helpers:hs, moved};
 }
 /* Is this file an OpMode: annotated as one, or a class that extends LinearOpMode or OpMode (a parent
    other OpModes build on)? One rule for the page (src/app.js) and the headless tools (tools/run-opmode.mjs). */

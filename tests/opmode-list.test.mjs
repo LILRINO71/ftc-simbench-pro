@@ -31,11 +31,18 @@ test('opmode list: an OpMode with no name in its annotation is listed by its cla
 });
 
 test('opmode list: a name may hold a bracket, a slash or a quote; a comment or a string is not an annotation', () => {
+  // what the page showed for the team's "Tool - AprilTag Check (Limelight)": "(unnamed)"
+  assert.equal(E.parseJava(op('@TeleOp(name = "Drive (main)")')).opmode, 'Drive (main)', 'it used to stop at the first ")" and fall back to no name');
   const t = (src) => E.javaOpModeTag(src);
   assert.deepEqual(t(op('@Autonomous(name = "Leave (Red) // v2", group = "Meet 0", preselectTeleOp = "Drive (main)")')),
     { kind: 'Autonomous', name: 'Leave (Red) // v2', group: 'Meet 0', preselect: 'Drive (main)', disabled: false, cls: 'DriveCheck' });
-  assert.equal(E.parseJava(op('@TeleOp(name = "Drive (main)")')).opmode, 'Drive (main)', 'it used to stop at the first ")" and fall back to no name');
   assert.equal(t(op('@TeleOp(name = "Say \\"go\\"")')).name, 'Say "go"');
+  // a Java string's escapes are read as Java reads them
+  assert.equal(t(op('@TeleOp(name = "Caf\\u00e9 \\\\ tab\\there \\101")')).name, 'Café \\ tab\there A');
+  assert.equal(E.javaUnescape('a\\nb\\\'c\\"d\\\\e\\u0041\\uu0042\\60\\s.'), 'a\nb\'c"d\\eAB0 .');
+  // a name of nothing but spaces is no name
+  assert.equal(t(op('@TeleOp(name = "   ")')).name, null);
+  assert.equal(E.parseJava(op('@TeleOp(name = "   ")')).opmode, 'DriveCheck');
   assert.equal(t(op('@TeleOp(\n    name = "Two lines",\n    group = "B"\n)')).name, 'Two lines');
   assert.equal(t(op('@Disabled\n@TeleOp(name = "Old")')).disabled, true);
   // only code counts
@@ -77,4 +84,39 @@ test('opmode list: a project with enums beside its OpModes runs headless as befo
   const read = readJava(files), main = read.find((f) => f.file === 'Main.java');
   const { libs } = libsFor(engine(), read, main);
   assert.deepEqual(libs.map((l) => l.file), ['Alliance.java'], 'the enum comes along as a helper');
+});
+
+/* A browser that held a team's project before this fix has the enums saved in its list of OpModes
+   (ftcbench.library). They are moved to the helpers when the page starts, and when the file is
+   dropped again, or the wrong entries would stay for good. */
+test('opmode list: helpers an older page saved as OpModes are moved to the helpers', () => {
+  const ENUM = 'package x;\npublic enum Alliance { RED, BLUE }\n';
+  const saved = [{ id: 'u1', file: 'Alliance.java', source: ENUM }, { id: 'u2', file: 'Main.java', source: op('@TeleOp(name = "Main")', 'Main') },
+    { id: 'u3', file: 'Snippet.java', source: 'motor.setPower(1);' }];
+  const S = E.javaSortSaved(saved, [{ file: 'Util.java', src: 'class Util { }' }]);
+  assert.deepEqual(S.opmodes.map((e) => e.id), ['u2', 'u3'], 'the OpMode and the pasted fragment stay');
+  assert.deepEqual(S.helpers.map((h) => h.file), ['Util.java', 'Alliance.java']);
+  assert.equal(S.moved, 1);
+  // a helper already kept under that name is not replaced by the older copy from the list
+  const S2 = E.javaSortSaved(saved, [{ file: 'Alliance.java', src: '// newer\n' + ENUM }]);
+  assert.equal(S2.helpers.length, 1); assert.match(S2.helpers[0].src, /^\/\/ newer/);
+  assert.equal(E.javaSortSaved([saved[1]], []).moved, 0, 'nothing to move: nothing is saved again');
+  // the page does both (src/app.js cannot run here: no DOM)
+  const app = fs.readFileSync(path.join(ROOT, 'src', 'app.js'), 'utf8');
+  assert.match(app, /const S=javaSortSaved\(saved\.map/, 'initLibrary sorts what was saved');
+  assert.match(app, /LIBRARY=LIBRARY\.filter\(x=>x\.builtin\|\|x\.file!==file\)/, 'adding a helper removes the OpMode entry of the same file');
+});
+
+test('opmode list: the headless checker names OpModes as the page does', async () => {
+  const { opModeEntry } = await import('../tools/check-code.mjs');
+  for (const annotation of ['@TeleOp(name = "Tool - AprilTag Check (Limelight)", group = "Tools (bench)")', '@Autonomous(name = "Leave (Red) // v2", preselectTeleOp = "Drive (main)")', '@TeleOp', '@TeleOp(name = "  ")', '@Disabled\n@TeleOp(name = "Old")']) {
+    const src = op(annotation), page = E.parseJava(src), e = opModeEntry(src), tag = E.javaOpModeTag(src);
+    assert.equal(e.name, page.opmode, annotation);
+    assert.equal(e.kind, page.kind, annotation);
+    assert.equal(e.group, tag.group, annotation);
+    assert.equal(e.disabled, tag.disabled, annotation);
+  }
+  assert.equal(opModeEntry(op('@TeleOp(name = "Tool - AprilTag Check (Limelight)", group = "Tools (bench)")')).group, 'Tools (bench)', 'it used to cut the name at the first ")" and lose the group');
+  assert.equal(opModeEntry('public class Helper { }'), null);
+  assert.equal(opModeEntry(HEAD + '@TeleOp\npublic abstract class Base extends LinearOpMode { }\n').abstract, true);
 });

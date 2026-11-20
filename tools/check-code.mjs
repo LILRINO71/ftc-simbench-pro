@@ -17,19 +17,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { runOpMode, readJava, isOpModeSource } from './run-opmode.mjs';
+import { runOpMode, readJava, isOpModeSource, engine } from './run-opmode.mjs';
 
-const noComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\/\/[^\n]*/g, ' ');
-
-/** What the Driver Station would show for a file: {kind, name, group, disabled, abstract}, or null. */
+/** What the Driver Station would show for a file: {kind, name, group, class, disabled, abstract}, or null.
+    Read by the engine's own javaOpModeTag (src/java.js), the reader the page uses, so the two cannot disagree. */
 export function opModeEntry(src) {
-  const s = noComments(src);
-  const m = /@(TeleOp|Autonomous)\b\s*(\(([^)]*)\))?/.exec(s);
-  if (!m) return null;
-  const arg = (k) => { const a = new RegExp('\\b' + k + '\\s*=\\s*"((?:[^"\\\\]|\\\\.)*)"').exec(m[3] || ''); return a ? a[1] : null; };
-  const cls = /\bclass\s+([A-Za-z_$][\w$]*)/.exec(s);
-  return { kind: m[1], name: arg('name') || (cls && cls[1]) || null, group: arg('group'), class: cls ? cls[1] : null,
-    disabled: /@Disabled\b/.test(s), abstract: /\babstract\s+class\b/.test(s) };
+  const E = engine(), tag = E.javaOpModeTag(src);
+  if (!tag) return null;
+  return { kind: tag.kind, name: tag.name || tag.cls || null, group: tag.group, class: tag.cls,
+    disabled: tag.disabled, abstract: /\babstract\s+class\b/.test(E.javaCodeMask(src)) };
 }
 
 const BUTTONS = ['a', 'b', 'x', 'y', 'dpad_up', 'dpad_down', 'dpad_left', 'dpad_right', 'left_bumper', 'right_bumper',

@@ -188,8 +188,11 @@ function initLibrary(){
     {id:"sample-shooter", file:"ShooterTeleOp.java", source:SHOOTER_JAVA, builtin:true}
   ];
   try{
-    const saved=JSON.parse(store.get("ftcbench.library","[]"))||[];
-    for(const s of saved) if(s&&s.id&&s.source) LIBRARY.push({id:s.id, file:s.file||"OpMode.java", source:s.source, builtin:false});
+    const saved=(JSON.parse(store.get("ftcbench.library","[]"))||[]).filter(s=>s&&s.id&&s.source);
+    // a helper an older page kept as an OpMode (an enum, an interface) goes back with the helpers
+    const S=javaSortSaved(saved.map(s=>({id:s.id, file:s.file||"OpMode.java", source:s.source})),USER_HELPERS);
+    for(const s of S.opmodes) LIBRARY.push({id:s.id, file:s.file, source:s.source, builtin:false});
+    if(S.moved){ USER_HELPERS=S.helpers; saveHelpers(); saveLibrary(); }
   }catch(e){}
   LIBRARY.forEach(parseEntry);
 }
@@ -297,6 +300,9 @@ function addOpModeFromText(file,text){
   // interface or a record just the same (an enum used to be listed as an OpMode of its own)
   if(!isOpModeSource(text)&&javaDeclaresType(text)){
     USER_HELPERS=USER_HELPERS.filter(h=>h.file!==file).concat([{file, src:text}]);
+    // the same file may still sit in the list as an OpMode, from a page that filed it so
+    const n=LIBRARY.length; LIBRARY=LIBRARY.filter(x=>x.builtin||x.file!==file);
+    if(LIBRARY.length!==n) saveLibrary();
     saveHelpers(); reparseAll();
     return;
   }
