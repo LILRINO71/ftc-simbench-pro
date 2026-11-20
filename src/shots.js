@@ -32,7 +32,7 @@ const TRANSFER_NAME=/transfer|index|convey|belt|uptake|elevat|tunnel/i;
 const SHOT_FROM_CODE="@code";
 const PICK_DEVICES=["shooter","feeder","intake1","intake2","transfer"];
 const PICK_WHAT={shooter:"flywheel", feeder:"feeder", intake:"intake", intake1:"intake", intake2:"second intake", transfer:"transfer", motor:"motor"};
-const PICK_MAX=128;
+const PICK_MAX=512;                       // a Java identifier or a config name, generously; the workspace file's own string cap
 
 /* A small seeded random source, so a test or a replay sees the same shots. */
 function makeRng(seed){
@@ -162,7 +162,11 @@ const Shots={
     if(value===SHOT_FROM_CODE) delete pick[key];
     else if(key==="motor") pick.motor={id:value, for:this.cfg.shooter||null};
     else pick[key]=value===""||value==null?null:value;
-    this.cfg.pick=this.cleanPick(pick);
+    const kept=this.cleanPick(pick);
+    // a choice that can't be kept (a name too long, say) is said, not silently undone
+    if(value!==SHOT_FROM_CODE&&!Object.prototype.hasOwnProperty.call(kept,key))
+      this.note(`That choice for the ${PICK_WHAT[key]||key} can't be kept (a name of 1 to ${PICK_MAX} characters): it stays as it was.`);
+    this.cfg.pick=Object.prototype.hasOwnProperty.call(kept,key)||value===SHOT_FROM_CODE?kept:this.cleanPick(this.cfg.pick);
     this.adopt(code);
   },
   /* An empty role the user chose ("— none —", or "by hand" for the feeder) while the code has one:

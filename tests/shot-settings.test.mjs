@@ -197,7 +197,7 @@ test('shot settings: settings saved by the old build get the code\'s values, and
   assert.deepEqual(S.cfg.pick, { motor: { id: 'yj1150', for: 'flywheel' } });
   select(C); assert.equal(S.cfg.motorId, 'yj6000');
   select(A); assert.equal(S.cfg.motorId, 'yj1150');
-  mine.shot.pick = { shooter: 42, feeder: 'x'.repeat(500), motor: { id: 'yj1150' }, intake1: null, transfer: ['belt'], evil: 'y' };
+  mine.shot.pick = { shooter: 42, feeder: 'x'.repeat(513), motor: { id: 'yj1150' }, intake1: null, transfer: ['belt'], evil: 'y' };
   applyRigFromApp(A.code)(mine);
   assert.deepEqual(S.cfg.pick, { intake1: null }, 'malformed choices are dropped without an error');
 });
@@ -235,7 +235,7 @@ test('shot settings: the workspace file keeps the choices and drops malformed on
   assert.deepEqual(back.session.shots.cfg.pick, { feeder: null, intake2: 'leftFront', motor: { id: 'yj1150', for: 'flywheel' } });
   // a hostile or broken file: unknown keys, wrong types, a name far too long; the file still opens
   const raw = JSON.parse(file);
-  raw.shots.cfg.pick = { shooter: 42, feeder: 'x'.repeat(129), motor: { id: 'yj1150', for: 7 }, transfer: null, intake1: 'intake', __proto__x: 1, extra: 'z' };
+  raw.shots.cfg.pick = { shooter: 42, feeder: 'x'.repeat(513), motor: { id: 'yj1150', for: 7 }, transfer: null, intake1: 'intake', __proto__x: 1, extra: 'z' };
   const bad = E.unpackSession(JSON.stringify(raw));
   assert.equal(bad.ok, true, bad.error);
   assert.deepEqual(bad.session.shots.cfg.pick, { transfer: null, intake1: 'intake' });
@@ -358,4 +358,19 @@ test('shot settings: an empty role the user chose is said as the user\'s, and no
   const none = { code: { devices: [{ name: 'arm', type: 'DcMotor' }] } };
   S.cfg = null; S.adopt(none.code);
   assert.equal(S.chosenNone('shooter', none.code), null, 'a code with no flywheel: nothing to say about a choice');
+});
+
+// 36d08dd: a name over 128 characters was dropped without a word and the select snapped back.
+test('shot settings: a long device name is kept; one that can\'t be kept is said, and the last choice stays', () => {
+  const long = 'f'.repeat(300), tooLong = 'g'.repeat(513);
+  const L = { code: { devices: [{ name: long, type: 'DcMotorEx' }, { name: tooLong, type: 'DcMotorEx' }, { name: 'kicker', type: 'Servo' }] } };
+  S.cfg = null; S.adopt(L.code);
+  userPicks('shooter', long, L);
+  assert.equal(S.cfg.shooter, long);
+  assert.deepEqual(S.cfg.pick, { shooter: long });
+  S.log = [];
+  userPicks('shooter', tooLong, L);
+  assert.match(S.log[0] && S.log[0].text || '', /can't be kept.*512 characters/);
+  assert.deepEqual(S.cfg.pick, { shooter: long }, 'the last choice stays');
+  assert.equal(S.cfg.shooter, long);
 });
