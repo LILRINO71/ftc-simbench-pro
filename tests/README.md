@@ -1,6 +1,6 @@
 # tests/
 
-628 tests on Node's built-in runner (`node:test`). There's no browser, no mocks and no transpile
+1052 tests on Node's built-in runner (`node:test`). There's no browser, no mocks and no transpile
 step: the tests run the same engine code that ships.
 
 ```bash
@@ -39,6 +39,7 @@ pure, to test how joints are drawn.
 | `robot-setup.test.mjs` | **The robot setup's engine side**: a drive base set by numbers (mecanum, tank, X-drive) on a CAD with no wheels, clamped input, and moving the drive base's centre. |
 | `net.test.mjs` | **Online matches**: two or three benches, each its own engine as if on its own computer, over an in-process network. The lobby, places and the start, one clock across skewed computers, robots seeing and pushing each other, a guest's shot decided by the host, an AUTO to the same final score, alliance-only chat and marks, junk and lies from a stranger, the host leaving. |
 | `match.test.mjs` | **The match**: the manual's rules every tick (G402, G407, G408, G410, G418, G426/G427), the scoring, replay from a seed, skill levels, contact with the team's robot, the live sim only. |
+| `payload.test.mjs` | **Game pieces through the team's robot**, with Java OpModes in the style of Team 7831's own on the VM: roles from names, picking up only inward, let go, four at most, one note with nothing to launch, Meet 0 straight through, a gate, reverse, which way is in, back by name, a CAD joint's edge, AUTO pre-load, the unlimited supply unchanged, the flywheel's spin-up, dip and recovery against the Shot Sim, setVelocity, a FLOWER, G408, solo and its switch, the workspace file. |
 | `robotcheck.test.mjs` | **The robot check** on GearGurus 7832's robot and TeleOp: the hand-made joints are ready with nothing to ask; the finder's joints become questions in the team's device names, with likely answers; an answer closes its question; a frame rail put on the arm is named; an empty joint is asked about. |
 | `fourbar.test.mjs` | **Four-bar linkages**: the shared pin keeps both link lengths at every crank angle and stays on the branch it was drawn on; the zoo's four-bar is found and its coupler stays level; the editor's format and a saved session keep the linkage. |
 | `autorig-zoo.test.mjs` | The joint finder on **every kind of mechanism** (`tools/mechgen.mjs`): direct-drive, servo and Core Hex arms, a turret, gear and belt drives, a Viper slide, a rail and carriage, an intake roller, a four-bar, a wrist on an arm. Each has its part names and then none. Every joint and moving part has to be found, with nothing of the frame moved. |

@@ -104,5 +104,12 @@ Those files are free again; read the conventions below before changing them.
 - **Joint kinds**: compare through `normJointKind(k)`; `prismatic` and
   `linear-slide` are aliases of `linear`. Slide travel per tick is
   `slideMmPerTick(mech, tpr)`, shared by the sim and the view.
+- **Game pieces** (`src/payload.js`, [docs/game-pieces.md](docs/game-pieces.md)): what the team's robot
+  holds is `Payload.held`, never a count kept elsewhere. Roles come from `Shots.detect` (one naming
+  scheme: shooter, feeder, intake, transfer) and `Shots.cfg.payload`; a mouth is in the `footBox`
+  frame. A ball in a mouth is `e.hold = {id: "user", ...}`, which `Match.flights` leaves to Payload.
+  `Match.pieces()` means loose pieces on the field (a match or solo), `Match.live()` a match to score;
+  `Match.floor` is the one list of loose balls. Only motors Payload marks (`s.flyT`) leave `SLEW`.
+  The unlimited supply is the old bench exactly; online stays unlimited.
 - `npm test` runs every `tests/*.test.mjs`; `tests/anyrobot.test.mjs` is the
   any-robot corpus, and it must stay 14/14.

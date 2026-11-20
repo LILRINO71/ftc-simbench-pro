@@ -135,6 +135,16 @@ stands still on the field. That checks that code compiles, runs and commands wha
 doesn't follow a Road Runner trajectory (the builder calls land in `stubs`; the page follows them
 on the CAD robot) and a Pedro follower never arrives, because the pose never changes.
 
+**On the field, with the game pieces** (`field`, command line `--field`): the same VM drives the
+bench's own sim instead, a plain 18 in robot at the alliance's start (or `startPose`) that drives and
+meets the walls and the HIVEs, among the staged pieces ([game-pieces.md](game-pieces.md)).
+`field: { alliance, pieces: false, balls: [{ x, y, kind, color }], payload: {…}, shot: {…} }` empties the
+field, adds loose balls (inches) and sets the Shot tab's settings. The result keeps every field above and
+adds `payload`: `supply` and `why`, `picked`, `ejected`, `fired`, `scored`, `fromFlowers`, `otherNectar`
+(G408), `preloaded`, `held` (`kind`, `color`), `intakes` (each one's `edge` and `edgeFrom`, `in`
+(`positive`/`negative`/null), `inFrom` and `decidedAt`), `transfer`, `gate`, `flywheels`. Without `field`
+there is no `payload`.
+
 **A caller with its own robot** passes `host`, an object with any of the methods the VM asks of a
 robot (`pose`, `heading`, `omega`, `vel`, `touch`, `color`, `colorDist`, `ray`, `volts`, `rumble`,
 `dev`); the stand-in answers the rest. `beforeTick(run)` and `afterTick(run)` run around every

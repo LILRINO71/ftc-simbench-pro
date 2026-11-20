@@ -56,5 +56,5 @@ Open **Online** in the top bar.
 - **The host leaving ends the match.** It ends for everyone; nobody takes over as host.
 - **A player leaving mid-match.** Their robot leaves the field, and no AI robot takes their place.
 - **Other teams' robots are boxes.** They're drawn at their real size, not from their CAD.
-- **Unlimited balls.** Players' robots still launch from an endless supply, the same as on your own; only the AI robots have to pick elements up.
+- **Unlimited balls.** Players' robots still launch from an endless supply online; only the AI robots have to pick elements up. On your own bench a robot with an intake picks pieces up and launches what it holds ([game-pieces.md](game-pieces.md)).
 - **No voice chat.** Trystero can carry it, but SimBench doesn't use it yet.

@@ -37,8 +37,15 @@ Pick **Rookie**, **Typical** or **Elite** in the Match menu. The levels are cali
 strategy study's estimate for the best alliances: about 11 TIPs in TELEOP for an elite pair, about 7
 for a typical pair and about 3 for rookies.
 
+## Without the AI robots
+
+With **AI robots and human players** off and **Game pieces without them** on (the default), a robot
+whose code has an intake plays **solo**: the staged POLLEN, the FLOWERs and the HUMAN PLAYERS' NECTAR
+stay on the field, with no clock of its own and no scoreboard. A robot that only shoots keeps the
+unlimited supply and gets none. See [game-pieces.md](game-pieces.md).
+
 ## What it isn't
 
 - **Human-player scripts:** the AI robots don't coordinate with the team's robot. They avoid it and push it like anyone would.
-- **Your robot's supply:** it still launches from an endless supply; only the AI robots have to pick elements up.
+- **Your robot's supply:** with an intake in its code it picks pieces up, holds four at most and launches what it holds ([game-pieces.md](game-pieces.md)); a robot with a shooter and no intake still launches from an endless supply. Online matches are still the endless supply for everyone.
 - **Physics:** the AI robots are generic 18-inch robots with a flywheel and an intake. Their motion is planned, not simulated through motors the way the team's robot is.

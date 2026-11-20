@@ -57,6 +57,7 @@ project. There are four layers, from exact to automatic:
 | **Automatic joint finder** | Finds actuators, slide stacks and the parts each joint carries, straight from geometry, for any STEP. Runs by itself when a robot has no mates and no spec, and lists what a person should check. | ✅ `src/autorig.js`, from the measured prototypes in [research/autorig](research/autorig/README.md) |
 
 | **The match** | An alliance partner and two opponents the bench drives, and both alliances' human players, playing AUTO or TELEOP by the manual's rules, sharing the HIVEs with the team's robot, with a live scoreboard. | ✅ `src/match.js`, [docs/match.md](docs/match.md) |
+| **Game pieces** | The team's own robot picks POLLEN and NECTAR up with the intake its code runs, holds four at most, launches what it holds through its feeder or gate (or straight through), puts one out in reverse, takes POLLEN from a FLOWER, and its flywheel slows with each shot. The staged pieces stay on the field without the AI robots. | ✅ `src/payload.js`, [docs/game-pieces.md](docs/game-pieces.md) |
 | **The import card** | One card over the field says the one thing to do next: bring the robot (paste the Onshape link, or drop the export), add the code, then a review of what the bench worked out (up, front, drive base, mass, joints, device bindings) with the few questions only the team can answer, each with a "show me" that moves the part. Reading happens in a Web Worker, so the page never freezes. | ✅ `src/importflow.js`, `src/engineworker.js`, [docs/robot-setup.md](docs/robot-setup.md) |
 | **Online matches** | One match with other teams, each on their own computer with their own robot and code: Quick match, a room code or an invite link, alliance chat, marks on the field. Browsers connect directly; the host's bench keeps the score. | ✅ `src/net.js`, [docs/online.md](docs/online.md) |
 | **Driver practice** | Match clips with the score on them (● Clip, or every run), match sounds, a results card with the score line by line, a personal best per robot and OpMode, a see-through ghost of your best run to race, and a run report (distance, speed, time still, what you hit). Chase and Robot cam views, a minimap from your drivers' side, a WASD layout or any key on any control, and start spots to pick or save. | ✅ `src/recorder.js`, `src/sounds.js`, `src/results.js`, `src/minimap.js`, `src/keybinds.js` |
@@ -165,7 +166,7 @@ the page runs in a Web Worker to read CAD without freezing. The module map is in
 ```bash
 npm install            # dev dependency only: occt-import-js, for the geometry tests
 npm run build          # dev build  -> dist/index.html (open it, or serve dist/)
-npm test               # the whole suite: 858 tests
+npm test               # the whole suite: 1052 tests
 npm run build:ship     # what Cloudflare Pages builds: comments and layout stripped
 ```
 
