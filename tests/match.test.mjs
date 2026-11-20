@@ -90,6 +90,57 @@ test('match: in AUTO an AI robot keeps its own side and still never ends a tick 
   }
 });
 
+test('match: in AUTO no AI robot stands stuck: the same pose for 3 s with a plan and nothing being done', () => {
+  // typical seed 2: blue ai3 drove for a ball just past the centre line, slid along the line into the
+  // corner with a HIVE leg and stood there 14.6 s; typical seed 6: two blue robots jammed between the
+  // HIVE and a FLOWER. Picking up, lining up and firing are work, not stuck
+  const runs = [];
+  for (const skill of ['rookie', 'typical', 'elite']) for (const seed of [1, 2, 3, 4, 5]) runs.push([skill, seed]);
+  runs.push(['typical', 6], ['typical', 35]);
+  for (const [skill, seed] of runs) {
+    const last = {}, run = {}, work = {}; let worst = null;
+    play({ period: 'Autonomous', seed, skill, watch: (M) => {
+      for (const b of M.bots) {
+        const P = b.plan, w = (P ? (P.pick || 0) + (P.settled || 0) : 0) + 100 * b.fired, p = last[b.id];
+        const same = p && p[0] === b.x && p[1] === b.y && p[2] === b.h && P && P.kind !== 'park' && P.kind !== 'wait';
+        run[b.id] = same && work[b.id] === w ? (run[b.id] || 0) + 0.02 : 0;
+        if (!worst || run[b.id] > worst.s) worst = { s: run[b.id], id: b.id, t: M.t, kind: P && P.kind, x: b.x, y: b.y };
+        last[b.id] = [b.x, b.y, b.h]; work[b.id] = w;
+      }
+    } });
+    assert.ok(worst.s < 3, `${skill} seed ${seed}: ${worst.id} (${worst.kind}) stuck ${worst.s.toFixed(2)} s at (${(worst.x / IN).toFixed(1)}, ${(worst.y / IN).toFixed(1)}) in, t=${worst.t.toFixed(2)} s`);
+  }
+});
+
+test('match: AUTO plans only what a robot can reach from its own side', () => {
+  E.Field.reset();
+  const M = E.Match; M.on = true; M.reset({ period: 'Autonomous', user: 'red', userPose: { x: -61.5 * IN, y: 0, h: 0 }, seed: 1 });
+  M.obs = E.Field.obstacles(0.46); M.userBody = null;
+  // every cell the route grid offers: the box stands there at any heading, on its own side, clear of the HIVE and FLOWERs
+  for (const b of M.bots) {
+    const all = M.bots; M.bots = [b]; const g = M.grid(b); M.bots = all;
+    const s = M.autoSide(b);
+    for (let j = 0; j < g.N; j++) for (let i = 0; i < g.N; i++) {
+      if (g.block[j * g.N + i]) continue;
+      const x = -g.H + (i + 0.5) * g.C, y = -g.H + (j + 0.5) * g.C;
+      assert.ok(x * s >= HX, `${b.id}: a cell on the other side (${(x / IN).toFixed(1)} in)`);
+      for (let a = 0; a < 180; a += 5) for (const o of M.obs) {
+        const d = E.capsulePush({ x, y, h: a * Math.PI / 180 }, { hx: HX, hy: HX }, o);
+        assert.ok(!d || Math.hypot(d[0], d[1]) < 1e-5, `${b.id}: a cell (${(x / IN).toFixed(1)}, ${(y / IN).toFixed(1)}) in where the box at ${a} deg is in a ${o.what}`);
+      }
+    }
+  }
+  // a ball the robot could only take standing across the centre line is not a plan; one it can reach is
+  const b = M.bots.find((o) => o.al === 'blue'); b.x = 20 * IN; b.y = 40 * IN; b.h = Math.PI;
+  M.floor = []; M.flowers = []; b.hold = [];
+  const near = M.drop('pollen', null, 8.3 * IN, 7.8 * IN);
+  assert.equal(M.canTake(b, near), false, 'by the centre line, under the HIVE');
+  assert.equal(M.fetchPlan(b), null, 'nothing to fetch');
+  const far = M.drop('pollen', null, 40 * IN, 20 * IN);
+  assert.equal(M.canTake(b, far), true);
+  assert.equal(M.fetchPlan(b).el, far);
+});
+
 test('match: in TELEOP too an AI robot never ends a tick inside a HIVE leg, a FLOWER or a wall', () => {
   // elite seed 11: red ai1 turned under its HIVE where its box no longer fit between two legs and the
   // foot bar, and ended the tick 19.0 mm into a leg (t=11.04 s)

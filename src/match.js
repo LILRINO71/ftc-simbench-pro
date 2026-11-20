@@ -227,6 +227,7 @@ const Match={
       if(e.claim&&e.claim!==b.id) continue;
       if(b.skip.has(e.id)) continue;
       if(!this.own(b,e.kind,e.color)||!this.onSide(b,e.x)) continue;
+      if(this.autoSide(b)&&!this.canTake(b,e)) continue;
       let c=Math.hypot(e.x-b.x,e.y-b.y);
       if(this.inRect(e.x,e.y,this.garden(b.al))) c+=1.2;           // it scores 1 where it lies
       if(this.inRect(e.x,e.y,this.garden(b.al==="red"?"blue":"red"))) c-=0.3; // and 1 for them
@@ -245,18 +246,30 @@ const Match={
   },
   release(P){ if(P&&P.el&&P.el.claim) P.el.claim=null; if(P&&P.f&&P.f.claim) P.f.claim=null; },
 
+  /* Where the robot's centre goes to take e in from dir: the intake's reach short of it, kept where a
+     robot can be (a ball in a corner is taken off-centre). */
+  standFor(e,dir){
+    const reach=MATCH_BOT.hx+0.05, lim=Field.half()-MATCH_BOT.hx-0.01;
+    return {x:Math.max(-lim,Math.min(lim,e.x-dir[0]*reach)), y:Math.max(-lim,Math.min(lim,e.y-dir[1]*reach)), h:Math.atan2(dir[1],dir[0])};
+  },
+  /* AUTO: can b take e in at all, standing on its own side clear of the HIVE and the FLOWERs? A ball
+     just past the centre line, or tucked in by a HIVE leg there, is not a plan (it led robots into the
+     corner between the line and the leg, where they stuck). */
+  canTake(b,e){ return this.fits(this.standFor(e,this.approach(b,e)),this.autoSide(b)); },
   /* ---- fetching: drive the intake (the front edge) onto an element ---- */
   doCollect(b,P,dt){
     const e=P.el;
     if(this.floor.indexOf(e)<0||b.hold.length>=MATCH_BOT.cap){ this.letGo(e,b); this.release(P); P.done=true; return; }
     if(!P.dir) P.dir=this.approach(b,e);
-    const reach=MATCH_BOT.hx+0.05, th=Math.atan2(P.dir[1],P.dir[0]);
-    // where the robot's centre goes, kept where a robot can be (a ball in a corner is taken off-centre);
+    const th=Math.atan2(P.dir[1],P.dir[0]);
     // a ball that rolls is followed once it's 3 cm off, one in the rollers holds the robot where it is
-    const lim=Field.half()-MATCH_BOT.hx-0.01, held=e.hold&&e.hold.id===b.id;
+    const held=e.hold&&e.hold.id===b.id;
     if(!held&&(P.gx==null||Math.hypot(e.x-P.ex,e.y-P.ey)>0.03)){
       P.ex=e.x; P.ey=e.y;
-      P.gx=Math.max(-lim,Math.min(lim,e.x-P.dir[0]*reach)); P.gy=Math.max(-lim,Math.min(lim,e.y-P.dir[1]*reach));
+      const g=this.standFor(e,P.dir);
+      // AUTO: it rolled where the robot can't stand to take it: let it go
+      if(this.autoSide(b)&&!this.fits(g,this.autoSide(b))){ this.letGo(e,b); this.release(P); b.skip.set(e.id,this.t+12); P.done=true; return; }
+      P.gx=g.x; P.gy=g.y;
     }
     const d=this.drive(b,dt,P.gx,P.gy,th);
     if(this.giveUp(b,d)){ this.letGo(e,b); this.release(P); b.skip.set(e.id,this.t+12); P.done=true; return; }
@@ -384,13 +397,17 @@ const Match={
     const kind=b.hold.length&&b.hold[0].kind==="nectar"?"nectar":"pollen", S=this.spots(b.al,kind);
     if(!S.length) return {kind:"wait", until:1};
     const taken=this.bots.filter(o=>o!==b&&o.plan&&o.plan.kind==="shoot"&&o.plan.spot).map(o=>o.plan.spot);
+    // a spot it gave up on is not chosen again while nothing has changed: it hasn't got away from where
+    // it gave up, and the HIVE hasn't tipped
+    const G=b.gaveUp, out=sp=>G&&G.spot===sp&&G.hive===Field.hive[b.al]&&Math.hypot(b.x-G.x,b.y-G.y)<0.1;
     let best=null, bc=1e9;
     for(const sp of S){
-      if(taken.some(t=>Math.hypot(t.x-sp.x,t.y-sp.y)<0.6)) continue;
+      if(out(sp)||taken.some(t=>Math.hypot(t.x-sp.x,t.y-sp.y)<0.6)) continue;
       const c=Math.hypot(sp.x-b.x,sp.y-b.y)-sp.width*2;
       if(c<bc){ bc=c; best=sp; }
     }
-    if(!best) best=S[0];
+    if(!best) best=S.find(sp=>!out(sp));
+    if(!best) return {kind:"wait", until:1};
     return {kind:"shoot", spot:best, hive:Field.hive[b.al]};
   },
   doShoot(b,P,dt){
@@ -398,7 +415,7 @@ const Match={
     if(Field.hive[b.al]!==P.hive){ P.done=true; return; }             // it TIPPED: the up-CELL is on the other side now
     const sp=P.spot, m=this.mouth(b.al), aim=Math.atan2(m[1]*IN-b.y,m[0]*IN-b.x);
     const d=this.drive(b,dt,sp.x,sp.y,aim);
-    if(this.giveUp(b,d)){ P.done=true; return; }
+    if(this.giveUp(b,d)){ if(this.autoSide(b)) b.gaveUp={spot:sp, hive:P.hive, x:b.x, y:b.y}; P.done=true; return; }
     const still=Math.hypot(b.vx,b.vy)<0.08, aimed=Math.abs(wrapA(aim-b.h))<0.03;
     if(d<0.06&&still&&aimed){ P.settled=(P.settled||0)+dt; } else if(d>0.15) P.settled=0;
     if(d<0.06&&still&&aimed&&b.fire<=0&&(P.settled||0)>=this.sk().settle){
@@ -495,9 +512,10 @@ const Match={
   /* A path from a to t on a 9 cm grid of the field: A* round the HIVE's legs
      and foot bars, the FLOWERs, the walls and every other robot where it is
      now (the team's included), then cut down to the corners that matter.
-     Under the HIVE is open between the legs, so robots may cross there. */
-  routeTo(a,t,self){
-    const g=this.grid(self), C=g.C, N=g.N, idx=(i,j)=>j*N+i;
+     Under the HIVE is open between the legs, so robots may cross there.
+     bare: the field alone, no robots (AUTO's fallback when they close every way). */
+  routeTo(a,t,self,bare){
+    const g=this.grid(self,bare), C=g.C, N=g.N, idx=(i,j)=>j*N+i;
     const cell=p=>[Math.max(0,Math.min(N-1,Math.floor((p.x+g.H)/C))), Math.max(0,Math.min(N-1,Math.floor((p.y+g.H)/C)))];
     const free=(i,j)=>i>=0&&j>=0&&i<N&&j<N&&!g.block[idx(i,j)];
     let [si,sj]=cell(a), [gi,gj]=cell(t);
@@ -525,7 +543,9 @@ const Match={
         if(w<gs[nk]){ gs[nk]=w; came[nk]=k; push(nk,w+h(ni,nj)); }
       }
     }
-    if(!found) return [t];
+    // AUTO: no way round the robots near it as they stand now: plan past them (they move, and drive()
+    // steers round them) rather than straight at the goal, into the corner of a leg and the centre line
+    if(!found) return !bare&&self&&this.autoSide(self)?this.routeTo(a,t,self,true):[t];
     const cells=[]; for(let k=t0;k!==-1;k=came[k]) cells.unshift(k);
     const at=k=>{ const i=k%N, j=(k-i)/N; return {x:-g.H+(i+0.5)*C, y:-g.H+(j+0.5)*C}; };
     // keep only the corners: the next point is as far along as a straight, clear run reaches
@@ -547,8 +567,8 @@ const Match={
       if(i>=0&&j>=0&&i<N&&j<N&&g.block[j*N+i]) return false; }
     return true;
   },
-  /* The grid: the field's fixed things once, every robot but `self` each time. */
-  grid(self){
+  /* The grid: the field's fixed things once, every robot but `self` each time (bare: no robots). */
+  grid(self,bare){
     // a robot driving at an angle sticks its corners out: keep its centre a corner's reach off the HIVE and FLOWERs
     const C=0.09, H=Field.half(), N=Math.ceil(2*H/C), R0=MATCH_BOT.hx+0.03, RC=Math.hypot(MATCH_BOT.hx,MATCH_BOT.hy)+0.02;
     if(!this._fixed||this._fixedN!==N){
@@ -565,8 +585,8 @@ const Match={
     const side=self?this.autoSide(self):0;
     if(side) for(let j=0;j<N;j++) for(let i=0;i<N;i++){ const x=-H+(i+0.5)*C; if(x*side<MATCH_BOT.hx+0.02) block[j*N+i]=1; }
     // robots nearby, where they are now; ones far off will have moved by the time it gets there
-    let bodies=this.bots.filter(o=>o!==self).map(o=>({x:o.x, y:o.y, r:Math.hypot(MATCH_BOT.hx,MATCH_BOT.hy)*0.8}));
-    bodies.push(...this.people());
+    let bodies=bare?[]:this.bots.filter(o=>o!==self).map(o=>({x:o.x, y:o.y, r:Math.hypot(MATCH_BOT.hx,MATCH_BOT.hy)*0.8}));
+    if(!bare) bodies.push(...this.people());
     if(self) bodies=bodies.filter(o=>Math.hypot(o.x-self.x,o.y-self.y)<1.3);
     for(const o of bodies){
       const rr=o.r+R0, i0=Math.floor((o.x-rr+H)/C), i1=Math.floor((o.x+rr+H)/C), j0=Math.floor((o.y-rr+H)/C), j1=Math.floor((o.y+rr+H)/C);
@@ -745,15 +765,29 @@ const Match={
       if(!moved) break;
     }
     // a jam: two robots that still overlap after every push (each held by an obstacle, the centre
-    // line or a third robot) go back to where they stood when the tick began, which was clear
+    // line or a third robot). The one that moved more this tick goes back to where it stood when
+    // the tick began, which was clear; if that isn't enough, the other one too
     if(mine) for(let k=0;k<3;k++){
       let back=false;
       const undo=b=>{ const f=b.from; if(!f||(b.x===f.x&&b.y===f.y&&b.h===f.h)) return;
         b.x=f.x; b.y=f.y; b.h=f.h; b.vx=0; b.vy=0; b.clear={x:f.x, y:f.y, h:f.h}; back=true; };
+      const went=b=>{ const f=b.from; return f?Math.hypot(b.x-f.x,b.y-f.y)+0.2*Math.abs(wrapA(b.h-f.h)):0; };
       const jam=(P,Q)=>{ const m=boxPush(P,Q); return m&&Math.hypot(m[0],m[1])>MATCH_JAM; };
+      // only as much as it takes: its move without its turn, or its turn without its move, else both
+      const ease=(b,O)=>{ const f=b.from; if(!f) return;
+        for(const q of [{x:b.x, y:b.y, h:f.h}, {x:f.x, y:f.y, h:b.h}]){
+          if(q.h===b.h&&q.x===b.x&&q.y===b.y) continue;
+          if(this.fits(q,this.autoSide(b))&&!jam({x:q.x, y:q.y, h:q.h, hx:MATCH_BOT.hx, hy:MATCH_BOT.hy},O)){
+            if(q.x!==b.x||q.y!==b.y){ b.vx=0; b.vy=0; }
+            b.x=q.x; b.y=q.y; b.h=q.h; b.clear={x:q.x, y:q.y, h:q.h}; back=true; return; }
+        }
+        undo(b); };
       for(let i=0;i<this.bots.length;i++) for(let j=i+1;j<this.bots.length;j++){
-        const A=this.bots[i], B=this.bots[j]; if(jam(box(A),box(B))){ undo(A); undo(B); } }
-      if(me) for(const B of this.bots) if(jam(box(B),userBox())) undo(B);
+        const A=this.bots[i], B=this.bots[j]; if(!jam(box(A),box(B))) continue;
+        const first=went(A)>=went(B)?A:B, other=first===A?B:A; ease(first,box(other));
+        if(jam(box(A),box(B))) ease(other,box(first));
+      }
+      if(me) for(const B of this.bots) if(jam(box(B),userBox())) ease(B,userBox());
       if(!back) break;
     }
     if(me){ const u=userBox(); this.userBody={x:u.x, y:u.y, r:Math.hypot(fp.hx,fp.hy)*0.8}; }
