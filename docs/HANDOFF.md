@@ -497,6 +497,10 @@ The research behind the fixes is in
   strongest forward power, so a lift that follows the stick a little isn't one.
 - Busy-waits during INIT see the robot move (`Sim.stepDevices`, the host's
   `world(dt)`); an INIT that never returns stops with a `Hang` error.
+- One loop pass per tick however many gates it reads (each thread has its own
+  `strand`); the code's clock moves on inside a pass; int/long wrap; untrusted
+  code ends in `StackOverflowError`, `OutOfMemoryError` or a `Hang`, never a
+  frozen page. `docs/code-support.md` has the list.
 - The IMU reports the robot's heading with a real gyro's small noise
   (±0.017°). Before, `getRobotYawPitchRollAngles()` always read 0.
 - The sim (`src/sim.js`) runs the VM program live. Wheel mounting comes from
