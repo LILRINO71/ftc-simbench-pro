@@ -164,8 +164,19 @@ function jvCarryInto(P,carry){
     if(!jvIsObj(v)) return v;
     const c=v.__c;
     if(v[JV_OPAQUE_TAG]||c.opaque){ const o=nv.opaqueVal(c.fqn); memo.set(v,o); return o; }
-    // a device: the new run's own device of that name
-    if(v.n&&v.n.s&&v.n.kind&&v.n.name!=null&&JV_KIND_TYPE[v.n.kind]){ const d=jvDrain(jvGetDevice(nv,JV_KIND_TYPE[v.n.kind],v.n.name,c.name)); memo.set(v,d); return d; }
+    // a device: the new run's own device of that name, wired to its robot when the new run first
+    // uses it (so one it never touches isn't in its device list); a name this robot's
+    // configuration lacks is null
+    if(v.n&&v.n.s&&v.n.kind&&v.n.name!=null&&JV_KIND_TYPE[v.n.kind]){
+      const r=jvCarryDevice(nv,v,cls(c)), d=r&&r.o;
+      memo.set(v,d||null);
+      if(!d){ out.dropped.push("device \""+v.n.name+"\" (this robot's configuration has none)"); return null; }
+      if(r.fresh){   // its fields and its own state come along, as the object itself would
+        for(const k in v.f) d.f[k]=val(v.f[k]);
+        for(const k of Object.keys(v.n)) if(k!=="s"&&!(k in d.n)) d.n[k]=copyN(v.n[k]);
+      }
+      return d;
+    }
     const nc=cls(c);
     if(v.__en!==undefined&&nc&&!pairs.some(p=>p[0]===c)){
       // an enum whose class isn't carried: the new run's constant of that name
@@ -182,13 +193,35 @@ function jvCarryInto(P,carry){
     if(v.__cap) out.dropped.push(c.name+"'s captured locals");
     return o;
   }
+  // building a program never throws for a carried value: one that can't be made is dropped
+  const safe=(x,what)=>{ try{ return val(x); }catch(e){ out.dropped.push(what); return null; } };
   for(const [c,n] of pairs){
-    if(c.consts) n.consts=c.consts.map(val);
-    for(const k in c.sf) n.sf[k]=val(c.sf[k]);
+    if(c.consts) n.consts=c.consts.map((k,i)=>safe(k,c.name+" constant "+i));
+    for(const k in c.sf) n.sf[k]=safe(c.sf[k],c.name+"."+k);
     out.classes.push(n.fqn);
   }
-  if(old.blackboard){ nv.blackboard=val(old.blackboard); out.blackboard=true; }
+  if(old.blackboard){ nv.blackboard=safe(old.blackboard,"the blackboard"); out.blackboard=true; }
   return out;
+}
+/* A device the last run left in a static, as the new VM's device of the same name. Its state on
+   the new robot (n.s, through host.dev) and its place in the new run's device list are made on
+   first use, as hardwareMap.get would; a name the new robot's configuration lacks gives null.
+   {o, fresh: made now} */
+function jvCarryDevice(vm,v,nc){
+  const name=String(v.n.name), kind=v.n.kind, key=name+"|"+(kind==="motor"||kind==="crservo"?"motor":kind);
+  const rt=vm.dev||(vm.dev=new Map());
+  if(rt.has(key)) return {o:rt.get(key),fresh:false};
+  if(jvNotConfigured(vm,kind,name)) return null;
+  const c=nc||vm.classes.get(JV_KIND_CLASS[kind])||vm.opaqueClass(JV_KIND_CLASS[kind]||"Device");
+  const n={name,kind};
+  const wire=x=>{ Object.defineProperty(n,"s",{value:x,writable:true,enumerable:true,configurable:true}); return x; };
+  Object.defineProperty(n,"s",{configurable:true,enumerable:true,
+    get(){ const s=wire(vm.host?vm.host.dev(name,JV_KIND_TYPE[kind],kind):{}); vm.devUse(name,kind,c.name); return s; },
+    set(x){ wire(x); }});
+  const o={__c:c,f:Object.create(null),n};
+  if(v.__h) o.__h=v.__h;
+  rt.set(key,o);
+  return {o,fresh:true};
 }
 JvProgram.prototype.fail=function(e){
   if(e&&e.jvStop){ this.done=true; return; }

@@ -192,16 +192,12 @@ function* jvGetDevice(vm,kindName,name,clsName){
   const rt=vm.dev||(vm.dev=new Map());
   const kind=jvOwn(JV_DEV_KIND,kindName)!==undefined?JV_DEV_KIND[kindName]:null;
   const key=name+"|"+(kind==="motor"||kind==="crservo"?"motor":kind);
-  if(rt.has(key)){ const d=rt.get(key); vm.devUse(name,d.n.kind,clsName); return d; }
+  // (a device carried from the last run is wired to this robot on its first use: d.n.s)
+  if(rt.has(key)){ const d=rt.get(key); if(d.n){ void d.n.s; vm.devUse(name,d.n.kind,clsName); } return d; }
   // with the Robot Controller's configuration loaded (src/robotconfig.js), a name it doesn't
   // have, or has as another kind of device, throws in INIT as HardwareMap.get does
-  const cfg=kind&&kind!=="hub"&&kind!=="voltage"&&vm.host&&typeof vm.host.robotConfig==="function"?vm.host.robotConfig():null;
-  if(cfg&&Array.isArray(cfg.devices)){
-    const hit=cfg.devices.find(d=>d.name===name), TYPED={motor:1,servo:1,crservo:1,imu:1};
-    const want=kind==="bno"?"imu":kind, got=hit&&hit.kind;
-    if(!hit||(TYPED[want]&&TYPED[got]&&want!==got))
-      throw vm.jthrow("IllegalArgumentException","Unable to find a hardware device with name \""+name+"\" and type "+(clsName||kindName));
-  }
+  if(jvNotConfigured(vm,kind,name))
+    throw vm.jthrow("IllegalArgumentException","Unable to find a hardware device with name \""+name+"\" and type "+(clsName||kindName));
   if(!kind||kind==="opaque"){ vm.note("hardwareMap.get("+(clsName||kindName)+")",kind==="opaque"?JV_HW+"HardwareMap":null); const o=vm.opaqueVal(clsName||kindName); rt.set(key,o); return o; }
   const s=vm.host?vm.host.dev(name,JV_KIND_TYPE[kind]||kindName,kind):{};
   const cls=JV_KIND_CLASS[kind];
@@ -213,6 +209,14 @@ function* jvGetDevice(vm,kindName,name,clsName){
   rt.set(key,o);
   vm.devUse(name,kind,clsName);
   return o;
+}
+/* true when the host knows the robot's configuration and it has no device `name` of this kind */
+function jvNotConfigured(vm,kind,name){
+  const cfg=kind&&kind!=="hub"&&kind!=="voltage"&&vm.host&&typeof vm.host.robotConfig==="function"?vm.host.robotConfig():null;
+  if(!cfg||!Array.isArray(cfg.devices)) return false;
+  const hit=cfg.devices.find(d=>d.name===name), TYPED={motor:1,servo:1,crservo:1,imu:1};
+  const want=kind==="bno"?"imu":kind, got=hit&&hit.kind;
+  return !hit||!!(TYPED[want]&&TYPED[got]&&want!==got);
 }
 JVM.prototype.devUse=function(name,kind,cls){
   const u=this.devices||(this.devices=new Map());

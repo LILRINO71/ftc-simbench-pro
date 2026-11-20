@@ -82,3 +82,34 @@ test('carry: a class whose source changed between the runs starts afresh, as aft
   // PoseStore was edited: its statics are the new file's; the blackboard is the app's and stays
   assert.deepEqual(tele.log, ['static=0.0 blackboard=90.0 runs=5']);
 });
+
+test('carry: a device in a static is wired to the new robot only when the new run uses it, and never throws', () => {
+  const store = PKG + 'public class Store { public static DcMotor lift = null; public static double heading = 0; }';
+  const auto = PKG + '@Autonomous(name="A") public class A extends LinearOpMode { public void runOpMode() { Store.lift = hardwareMap.get(DcMotor.class, "lift"); waitForStart(); Store.heading = 90; } }';
+  const tele = (body) => PKG + `@TeleOp(name="T") public class T extends LinearOpMode { public void runOpMode() { waitForStart(); ${body} } }`;
+  const mk = (src, cfg, carry) => {
+    const H = E.jvProbeHost(); if (cfg) H.host.robotConfig = () => cfg;
+    H.host.log = (t) => H.tel.push(String(t)); H.tel = [];
+    const comp = E.jvCompile(src, [{ file: 'Store.java', src: store }]);
+    const P = new E.JvProgram(comp, H.host, carry ? { carry } : undefined);
+    P.init(); P.start(); for (let k = 0; k < 3 && !P.done; k++) { H.clock += 0.02; H.t += 0.02; P.tick(); }
+    return { H, P };
+  };
+  const a = mk(auto, { devices: [{ name: 'lift', kind: 'motor' }] });
+  assert.equal(a.P.error, null);
+  // the next robot's configuration has no "lift": no throw out of new JvProgram, the static is null
+  const t1 = mk(tele('System.out.println("heading " + Store.heading + " " + (Store.lift == null));'), { devices: [{ name: 'drive', kind: 'motor' }] }, a.P.carry());
+  assert.equal(t1.P.error, null, JSON.stringify(t1.P.error));
+  assert.deepEqual(t1.H.tel, ['heading 90.0 true']);
+  assert.ok(t1.P.carried.dropped.some((d) => /lift/.test(d)), JSON.stringify(t1.P.carried));
+  // no configuration, and the TeleOp never touches Store.lift: it gains no device
+  const t2 = mk(tele('System.out.println("heading " + Store.heading);'), null, a.P.carry());
+  assert.deepEqual(t2.H.tel, ['heading 90.0']);
+  assert.deepEqual([...t2.H.devs.keys()], []);
+  assert.equal(t2.P.vm.devices, undefined);
+  // one it does use is its device of that name, wired then
+  const t3 = mk(tele('Store.lift.setPower(0.5); System.out.println(Store.lift == hardwareMap.get(DcMotor.class, "lift"));'), null, a.P.carry());
+  assert.deepEqual(t3.H.tel, ['true']);
+  assert.equal(t3.H.devs.get('lift').cmd, 0.5);
+  assert.deepEqual([...t3.P.vm.devices.keys()], ['lift']);
+});
