@@ -24,6 +24,16 @@ const JV_INTS=new Set(["int","long","short","byte","char","Integer","Long","Shor
 const JV_MODS=new Set(["public","private","protected","static","final","abstract","native","synchronized","transient","volatile","strictfp","default","sealed","non-sealed"]);
 
 function JvError(msg,p){ const e=new Error(msg); e.jvPos=p; return e; }
+/* a native table's own entry, never one from Object.prototype (Math.constructor() once
+   reached the interpreter itself) */
+const jvOwn=(t,k)=>t&&Object.prototype.hasOwnProperty.call(t,k)?t[k]:undefined;
+/* What one program may hold: past these a Java OutOfMemoryError, before the page runs out
+   (int[2e9] used to kill the tab). Far above what an OpMode keeps; a Control Hub's heap
+   would refuse much the same. */
+const JV_MAX_ARRAY=1<<24, JV_MAX_ITEMS=1<<23, JV_MAX_CHARS=1<<24;
+function jvRoom(vm,have,more,max,what){
+  if(have+more>max) throw vm.jthrow("OutOfMemoryError","Java heap space: "+what+" of "+(have+more)+" is more than the bench holds ("+max+")");
+}
 /* a declared type with these dims, its type arguments kept (List<Integer> -> args [Integer]) */
 function jvTy(t,dims){ return t.args?{name:t.name,dims,args:t.args}:{name:t.name,dims}; }
 
@@ -1006,7 +1016,7 @@ JVM.prototype.invokeStatic=function*(c,name,args,node){
   if(c.opaque){ this.note(c.name+"."+name,c); return jvOpaqueResult(this,name,c.name,args); }
   yield* this.ready(c);
   if(c.native){
-    const sm=c.native.s&&c.native.s[name];
+    const sm=jvOwn(c.native.s,name);
     if(sm){ const r=sm(this,args,node); return (r&&typeof r.next==="function"&&typeof r[Symbol.iterator]==="function")?yield* r:r; }
     if(c.kind==="enum"){ if(name==="values") return c.consts.slice(); if(name==="valueOf") return c.sf[args[args.length-1]]||null; }
     const s=this.supOf(c); if(s) return yield* this.invokeStatic(s,name,args,node);
@@ -1023,9 +1033,13 @@ JVM.prototype.invokeStatic=function*(c,name,args,node){
 JVM.prototype.run=function*(m,self,args,owner){
   const sc=new JvScope(self&&self.__cap?self.__cap:null,{self,cls:owner||(self&&self.__c),meth:m});
   this.bindParams(m.params,args,sc);
-  this.depth=(this.depth||0)+1;
+  // a call counts toward the busy-wait guard like a loop pass: recursion with no loop in it
+  // (fib(32), 7 million calls) still lets time pass instead of holding the page for seconds
+  if(--this.budget<0||((this.budget&3)===0&&this.overWall())){ this.budget=this.BUDGET; jvWaited(this.strand); this.wall0=null; yield {gate:true,forced:true,at:m.p}; }
+  const st=this.strand;
+  st.depth=(st.depth||0)+1;
   // this frame never reaches the finally below, so it gives its level back itself
-  if(this.depth>400){ this.depth--; throw this.jthrow("StackOverflowError","calls nested too deep in "+m.name+"()"); }
+  if(st.depth>JV_MAX_DEPTH){ st.depth--; throw this.jthrow("StackOverflowError","calls nested more than "+JV_MAX_DEPTH+" deep in "+m.name+"(): the bench's stack is shallower than a robot's, which takes thousands"); }
   const prevCls=this.curCls, prevM=this.curMeth; this.curCls=owner||(self&&self.__c)||prevCls; this.curMeth=m.name;
   try{
     const r=yield* this.exBlock(m.body.body,sc);
@@ -1033,7 +1047,7 @@ JVM.prototype.run=function*(m,self,args,owner){
     if(r&&r.s===JV_RET) return m.ret?jvCoerce(r.v,m.ret):r.v;
     return undefined;
   } catch(e){ if(e&&typeof e==="object"&&!e.__where) e.__where=this.where(); throw e; }
-  finally { this.depth--; this.curCls=prevCls; this.curMeth=prevM; }
+  finally { st.depth--; this.curCls=prevCls; this.curMeth=prevM; }
 };
 /* Where the VM is: file and line, for a crash report */
 JVM.prototype.where=function(){
@@ -1088,9 +1102,17 @@ JVM.prototype.backEdge=function(w){
 };
 JVM.prototype.tickCheck=function*(node,w){
   if(w) this.backEdge(w);
-  // a loop with no gate in it (a busy-wait on isBusy(), say) still lets time pass
-  if(--this.budget<0){ this.budget=this.BUDGET; jvWaited(this.strand); yield {gate:true,forced:true,at:node&&node.p}; }
+  // a loop with no gate in it (a busy-wait on isBusy(), say) still lets time pass; and so does
+  // one whose passes are slow (a quarter second of the page's own time in one tick)
+  if(--this.budget<0||((this.budget&3)===0&&this.overWall())){ this.budget=this.BUDGET; jvWaited(this.strand); this.wall0=null; yield {gate:true,forced:true,at:node&&node.p}; }
 };
+/* The wall-clock watchdog: JvProgram sets wall0 when it starts running code for a tick */
+const JV_WALL_MS=250;
+JVM.prototype.overWall=function(){ return this.wall0!=null&&Date.now()-this.wall0>JV_WALL_MS; };
+/* The deepest the team's calls may nest. The interpreter's frames are generators on the page's
+   own stack (about 1 MB, and several JS frames a Java call), so it is far below a robot's
+   thousands; past it, and wherever the JS stack runs out first, Java's StackOverflowError. */
+const JV_MAX_DEPTH=200;
 JVM.prototype.ex=function*(st,sc){
   this.at=st.p; this.steps++;
   switch(st.k){
@@ -1200,8 +1222,17 @@ JVM.prototype.ex=function*(st,sc){
 /* A JS error inside the VM, seen by the team's catch as a Java exception. */
 JVM.prototype.wrapJs=function(e){
   if(e instanceof JvThrow) return e;
+  if(e&&e.jvHang) return null;                           // a hang is no exception the code can catch
+  const j=this.jsLimit(e); if(j) return j;
   const m=String(e&&e.message||e);
   return this.jthrow(/null|undefined/.test(m)?"NullPointerException":"RuntimeException",m);
+};
+/* The page's own limits, as the Java errors a robot gives at its limits */
+JVM.prototype.jsLimit=function(e){
+  const m=String(e&&e.message||e);
+  if(e instanceof RangeError&&/call stack/i.test(m)) return this.jthrow("StackOverflowError","the calls nested deeper than the bench's stack holds");
+  if(/Invalid (string|array|typed array) length|allocation failed|out of memory/i.test(m)) return this.jthrow("OutOfMemoryError","Java heap space: "+m);
+  return null;
 };
 JVM.prototype.catches=function(val,tname,st){
   const n=tname.replace(/^.*\./,"");
@@ -1360,7 +1391,7 @@ JVM.prototype.lookup=function(name,sc){
   // static imports
   const u=fr&&fr.cls&&this.unitOf(fr.cls);
   if(u) for(const im of u.imports) if(im.static){
-    if(im.star){ const c=this.findType(im.name,null); if(c&&(name in c.sf||(c.decl&&c.sinits.some(f=>f.name===name))||(c.native&&c.native.sf&&name in c.native.sf)||(c.native&&c.native.enumConsts&&c.native.enumConsts.indexOf(name)>=0)||(c.decl&&c.decl.kind==="enum"&&c.decl.consts.some(q=>q.name===name)))) return {k:"static",c}; }
+    if(im.star){ const c=this.findType(im.name,null); if(c&&(name in c.sf||(c.decl&&c.sinits.some(f=>f.name===name))||(c.native&&jvOwn(c.native.sf,name)!==undefined)||(c.native&&c.native.enumConsts&&c.native.enumConsts.indexOf(name)>=0)||(c.decl&&c.decl.kind==="enum"&&c.decl.consts.some(q=>q.name===name)))) return {k:"static",c}; }
     else if(im.name.endsWith("."+name)){ const c=this.findType(im.name.slice(0,im.name.length-name.length-1),null);
       // `import static a.B.Inner;` brings in a nested class, not a field
       if(c&&!(name in c.sf)&&!(c.decl&&c.sinits.some(f=>f.name===name))&&this.nestedOf(c,name)) continue;
@@ -1444,6 +1475,8 @@ JVM.prototype.ev=function*(e,sc){
     case "newarr":{
       if(e.init) return yield* this.arrInit(e.init,{name:e.type,dims:e.dims.length+e.extra},sc);
       const dims=[]; for(const d of e.dims) dims.push(Math.trunc(jvNum(yield* this.ev(d,sc))));
+      let cells=1; for(const n of dims){ if(n<0) throw this.jthrow("NegativeArraySizeException",String(n)); cells*=Math.max(1,n); }
+      jvRoom(this,0,cells,JV_MAX_ARRAY,"an array");
       const leaf=e.extra?null:jvDefault({name:e.type,dims:0});
       const mk=k=>{ const n=dims[k]; if(n<0) throw this.jthrow("NegativeArraySizeException",String(n)); const a=new Array(n); for(let q=0;q<n;q++) a[q]=k+1<dims.length?mk(k+1):leaf; return a; };
       return mk(0);
@@ -1474,7 +1507,7 @@ JVM.prototype.ev=function*(e,sc){
       const cur=yield* this.ev(e.t,sc), v=yield* this.ev(e.v,sc);
       const op=e.op.slice(0,-1);
       let r;
-      if(op==="+"&&(typeof cur==="string"||typeof v==="string")) r=(yield* this.str(cur,this.kind(e.t,sc)))+(yield* this.str(v,this.kind(e.v,sc)));
+      if(op==="+"&&(typeof cur==="string"||typeof v==="string")){ const x=yield* this.str(cur,this.kind(e.t,sc)), y=yield* this.str(v,this.kind(e.v,sc)); jvRoom(this,x.length,y.length,JV_MAX_CHARS,"a String"); r=x+y; }
       else{
         // x op= y is (T)(x op y) (JLS 15.26.2): the operation in the promoted type, then
         // narrowed to x's type, wrapping from an integral result and saturating from a double
@@ -1608,7 +1641,7 @@ JVM.prototype.binop=function*(e,sc){
     case "<=": return jvNum(a)<=jvNum(b);
     case ">=": return jvNum(a)>=jvNum(b);
     case "+":
-      if(typeof a==="string"||typeof b==="string") return (yield* this.str(a,this.kind(e.a,sc)))+(yield* this.str(b,this.kind(e.b,sc)));
+      if(typeof a==="string"||typeof b==="string"){ const x=yield* this.str(a,this.kind(e.a,sc)), y=yield* this.str(b,this.kind(e.b,sc)); jvRoom(this,x.length,y.length,JV_MAX_CHARS,"a String"); return x+y; }
       break;
   }
   const ka=this.kind(e.a,sc);
@@ -1656,6 +1689,7 @@ JVM.prototype.getField=function*(o,name,e,sc){
   if(o&&o.__pkg){ const q=o.__pkg+"."+name; const c=this.classes.get(q)||(/^[A-Z]/.test(name)?(this.findType(q,null)||(this.libLike(q)?this.opaqueClass(q):null)):null); return c?{__type:c}:{__pkg:q}; }
   if(o===null||o===undefined) throw this.jthrow("NullPointerException","read ."+name+" of null"+jvWhere(e));
   if(Array.isArray(o)){ if(name==="length") return o.length; return undefined; }
+  if(o instanceof JvFn){ this.note("lambda."+name); return null; }    // a lambda has no fields (nor the interpreter's)
   if(o.__type){
     const c=o.__type;
     if(name==="class") return {__type:c,classLit:true};
@@ -1692,7 +1726,7 @@ JVM.prototype.methodRef=function*(e,sc){
     if(nm==="new") return new JvFn(null,null,null,null,null,this,function*(v,a){ return yield* v.construct(c,a,null,null,null,e); });
     return new JvFn(null,null,null,null,null,this,function*(v,a){
       const sm=c.decl?v.methodsOf(c,nm).filter(m=>m.static):[];
-      if(sm.length||c.native&&c.native.s&&c.native.s[nm]) return yield* v.invokeStatic(c,nm,a,e);
+      if(sm.length||c.native&&jvOwn(c.native.s,nm)) return yield* v.invokeStatic(c,nm,a,e);
       if(a.length) return yield* v.invoke(a[0],nm,a.slice(1),e);
       return yield* v.invokeStatic(c,nm,a,e);
     });
@@ -1721,7 +1755,7 @@ JVM.prototype.call=function*(e,sc){
       if(self||!m){
         const nm=this.nativeMethod(cls,e.name);
         if(nm&&self&&this.isSub(self.__c,cls)){ const x=nm(this,self,args,e); r=(x&&typeof x.next==="function"&&typeof x[Symbol.iterator]==="function")?yield* x:x; done=true; break; }
-        if(cls.native&&cls.native.s&&cls.native.s[e.name]){ r=yield* this.invokeStatic(cls,e.name,args,e); done=true; break; }
+        if(cls.native&&jvOwn(cls.native.s,e.name)){ r=yield* this.invokeStatic(cls,e.name,args,e); done=true; break; }
       }
       if(m&&!m.body&&self){ r=yield* this.invoke(self,e.name,args,e); done=true; break; }
       // a library base (an OpMode) that the VM doesn't describe: its methods are stubs
@@ -1744,7 +1778,7 @@ JVM.prototype.call=function*(e,sc){
       const u=fr&&fr.cls&&this.unitOf(fr.cls);
       if(u) for(const im of u.imports) if(im.static&&(im.star||im.name.endsWith("."+e.name))){
         const c=this.findType(im.star?im.name:im.name.slice(0,im.name.length-e.name.length-1),null);
-        if(c&&(c.opaque||(c.native&&c.native.s&&c.native.s[e.name])||(c.decl&&this.methodsOf(c,e.name).length))){ r=yield* this.invokeStatic(c,e.name,args,e); done=true; break; }
+        if(c&&(c.opaque||(c.native&&jvOwn(c.native.s,e.name))||(c.decl&&this.methodsOf(c,e.name).length))){ r=yield* this.invokeStatic(c,e.name,args,e); done=true; break; }
       }
     }
     if(!done){
@@ -1833,6 +1867,17 @@ function jvOpaqueResult(vm,name,cls,args){
   void args;
   return vm.opaqueVal(cls+"."+name+"()");
 }
+/* A regular expression the page can run. A group that ends in a repeat, itself repeated
+   ((a+)+, (x*y?)*, (\w{2,})+), backtracks exponentially on a string that almost matches, in
+   Java as here, and a JS regex can't be stopped once it starts (30 a's took 47 s). Past a
+   short string that is a hang. */
+const JV_NESTED_REPEAT=/\((?:[^()\\]|\\.)*(?:[+*?]|\{\d*,\d*\})\)(?:[+*]|\{\d*,\d*\})/;
+function jvRegex(vm,src,flags,input){
+  let re; try{ re=new RegExp(String(src),flags); }catch(e){ return null; }
+  if(String(input).length>24&&JV_NESTED_REPEAT.test(String(src))){
+    const e=new Error("a regular expression with a repeat inside a repeat ("+src+") on a "+String(input).length+"-character string: it can backtrack for minutes, and on the robot it would stall the loop"); e.jvHang=true; throw e; }
+  return re;
+}
 /* ---- strings, boxed numbers ---- */
 function jvStringMethod(vm,s,name,a){
   switch(name){
@@ -1852,15 +1897,15 @@ function jvStringMethod(vm,s,name,a){
     case "toLowerCase": return s.toLowerCase();
     case "trim": case "strip": return s.trim();
     case "replace": return s.split(typeof a[0]==="number"?String.fromCharCode(a[0]):String(a[0])).join(typeof a[1]==="number"?String.fromCharCode(a[1]):String(a[1]));
-    case "replaceAll": try{ return s.replace(new RegExp(a[0],"g"),a[1]); }catch(e){ return s; }
-    case "split": try{ return s.split(new RegExp(a[0])); }catch(e){ return [s]; }
+    case "replaceAll": { const re=jvRegex(vm,a[0],"g",s); return re?s.replace(re,a[1]):s; }
+    case "split": { const re=jvRegex(vm,a[0],"",s); return re?s.split(re):[s]; }
     case "hashCode": { let h=0; for(let k=0;k<s.length;k++) h=(h*31+s.charCodeAt(k))|0; return h; }
     case "toString": case "intern": return s;
     case "compareTo": return s<a[0]?-1:s>a[0]?1:0;
     case "toCharArray": return s.split("").map(ch=>ch.charCodeAt(0));
-    case "matches": try{ return new RegExp("^(?:"+a[0]+")$").test(s); }catch(e){ return false; }
+    case "matches": { const re=jvRegex(vm,"^(?:"+a[0]+")$","",s); return re?re.test(s):false; }
     case "concat": return s+a[0];
-    case "repeat": return s.repeat(Math.max(0,a[0]|0));
+    case "repeat": jvRoom(vm,0,s.length*Math.max(0,a[0]|0),JV_MAX_CHARS,"a String"); return s.repeat(Math.max(0,a[0]|0));
     case "format": case "formatted": return jvFormat(s,a);
   }
   vm.note("String."+name);

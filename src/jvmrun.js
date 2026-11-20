@@ -102,7 +102,10 @@ JvProgram.prototype.fail=function(e){
   if(e&&e.jvStop){ this.done=true; return; }
   const vm=this.vm;
   let msg, cls=null;
-  if(e instanceof JvThrow){ const v=e.value; cls=v&&v.__c?v.__c.name:"exception"; msg=(v&&v.n&&v.n.msg)||(v&&v.f&&v.f.message)||""; }
+  // the page's own limits (its stack, its memory) as the Java errors the robot would give
+  if(!(e instanceof JvThrow)&&!(e&&e.jvHang)){ const j=vm.jsLimit(e); if(j){ j.__where=e&&e.__where; e=j; } }
+  if(e&&e.jvHang){ cls="Hang"; msg=e.message; }
+  else if(e instanceof JvThrow){ const v=e.value; cls=v&&v.__c?v.__c.name:"exception"; msg=(v&&v.n&&v.n.msg)||(v&&v.f&&v.f.message)||""; }
   else msg=String(e&&e.message||e);
   const w=(e&&e.__where)||vm.where(), src=this.comp.srcs&&this.comp.srcs[w.file];
   const line=src&&w.pos!=null?src.slice(0,w.pos).split("\n").length:null;
@@ -113,7 +116,7 @@ JvProgram.prototype.fail=function(e){
 JvProgram.prototype.step=function(){
   if(this.done||!this.gen) return;
   const vm=this.vm;
-  vm.budget=vm.BUDGET; vm.strand=this.strand; jvTickStart(vm);
+  vm.budget=vm.BUDGET; vm.strand=this.strand; vm.wall0=Date.now(); jvTickStart(vm);
   try{
     for(let guard=0;guard<1e6;guard++){
       const r=this.gen.next();
@@ -130,10 +133,10 @@ JvProgram.prototype.drain=function(g){
   // after a fixed amount of work and say where it was going round
   const vm=this.vm, limit=vm.steps+1e6;
   const host=vm.host;
-  vm.strand=this.strand; jvTickStart(vm);
+  vm.strand=this.strand; vm.wall0=Date.now(); jvTickStart(vm);
   try{ for(let n=0;n<2e5;n++){ const r=g.next(); if(r.done) return r.value;
     // a busy-wait (a forced gate): the robot keeps moving meanwhile, as it would
-    if(r.value&&r.value.forced&&host&&host.world) host.world(0.02);
+    if(r.value&&r.value.forced){ vm.wall0=Date.now(); if(host&&host.world) host.world(0.02); }
     if(vm.steps>limit){ const at=vm.where(); this.error={cls:"Hang",msg:"INIT never finishes: a loop keeps going without waiting for anything",file:at&&at.file,line:at&&at.line,in:at&&at.in};
       this.done=true; return undefined; } } }catch(e){ this.fail(e); }
   return undefined;
@@ -198,7 +201,7 @@ JvProgram.prototype.tick=function(){
   jvTickStart(vm);
   if(vm.threads) for(const th of vm.threads.slice()){
     if(th.done||now<th.resumeAt) continue;
-    vm.budget=vm.BUDGET; vm.strand=th.st||(th.st=jvStrand());
+    vm.budget=vm.BUDGET; vm.wall0=Date.now(); vm.strand=th.st||(th.st=jvStrand());
     try{ const r=th.g.next(); if(r.done) th.done=true; else if(r.value&&r.value.sleep!=null) th.resumeAt=now+r.value.sleep/1000; }
     catch(e){ th.done=true;
       // an exception nothing catches in a thread the OpMode started: Android ends the Robot
@@ -217,7 +220,7 @@ JvProgram.prototype.tick=function(){
   if(now<this.resumeAt) return;
   if(!this.gen) this.gen=vm.invoke(this.self,"loop",[],null);
   // an iterative loop() runs to its end each tick; a sleep inside it holds the next one
-  vm.budget=vm.BUDGET;
+  vm.budget=vm.BUDGET; vm.wall0=Date.now();
   try{
     for(let guard=0;guard<1e5;guard++){
       const r=this.gen.next();
