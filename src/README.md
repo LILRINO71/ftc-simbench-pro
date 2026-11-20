@@ -18,11 +18,11 @@ was designed in, not the build order.
 
 | File | What it does |
 |---|---|
-| `hardware.js` | The actuator database: goBILDA / REV motors and servos by part number (ratio, rpm, stall torque, servo range), and the spec a device ends up with. |
+| `hardware.js` | The actuator database: goBILDA / REV motors and servos by part number (ratio, rpm, stall torque, servo speed and range, stall and free current), each with its vendor page (`source`) and the voltage it is quoted at (`ratedV`), and the spec a device ends up with. |
 | `samples.js` | The built-in sample robot and sample OpModes (`?robot=sample`). |
 | `step.js` | STEP (AP203/214/242) parser: records, the assembly tree, placements, one solid per part, part kinds, the occurrence list, and the old nearest-mechanism guess (`classifyMechs`). Canonicalises the frame once parsing is done. |
 | `hull.js` | Convex hulls, so every part is a solid. |
-| `inertia.js` | Mass, centre of mass and inertia from part shapes, materials and vendor figures. |
+| `inertia.js` | Mass, centre of mass and inertia from part shapes, materials and vendor figures (part weights come from `partsdb.js`'s one table). |
 | `frame.js` | The robot frame: +z up, origin at the drivetrain centre on the floor. `robotToWorld` is the one placement contract for physics, collisions and the view. |
 | `drivetrain.js` | Wheels, drivetrain type (mecanum, tank, swerve, kiwi, X), each motor's mounting sign, and the inverse and forward kinematics. |
 
@@ -62,7 +62,7 @@ was designed in, not the build order.
 
 | File | What it does |
 |---|---|
-| `dynamics.js` | The chassis as a rigid body on N contact patches: motor torque curves, load transfer, slip-limited friction. |
+| `dynamics.js` | The chassis as a rigid body on N contact patches: motor torque curves, load transfer, slip-limited friction, mecanum roller slip (`strafeEff`), a FLOAT wheel's gearmotor friction. |
 | `joltmech.js` | Solved mechanisms (Physics → Mechanisms → solved): the robot's joints in Jolt Physics (loaded on demand): CAD masses under gravity, motor curves as torque caps, reflected rotor inertia, limits, gear and rack constraints, followers, loops pinned closed. Posed (the default) needs none of it. |
 | `field.js` | The BIOBUZZ field: walls, HIVEs, FLOWERs, zones, start poses, collisions. |
 | `shots.js` | The running OpMode's shooter on the field, through the vendored shot engine. |

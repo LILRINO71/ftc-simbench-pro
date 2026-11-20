@@ -100,6 +100,11 @@ Those files are free again; read the conventions below before changing them.
   joint's own axis, so it carries the sign between the two axes.
 - **A servo's starting position** (`src/sim.js`): its `restPos` (the joint spec's, else the
   code's), so a joint starts as drawn. `cmd === 0.5` no longer means "never commanded".
+- **Actuator specs** (`src/hardware.js`): every figure is the vendor page's (`source`), quoted at
+  `ratedV` (12 V motors, 6 V servos; goBILDA's 4.8 V servo column is `at4v8`). Every motor spec
+  `specFor` can return carries `stallA` and `freeA`, amps at `ratedV`; the current and battery
+  models read those two names. `tests/hardware-vendor.test.mjs` holds each part to the vendor.
+  Part weights live in one table, `src/partsdb.js` `PARTS_G`; `src/inertia.js` reads it.
 - **Joint kinds**: compare through `normJointKind(k)`; `prismatic` and
   `linear-slide` are aliases of `linear`. Slide travel per tick is
   `slideMmPerTick(mech, tpr)`, shared by the sim and the view.
