@@ -61,11 +61,18 @@ test('match: AUTO keeps each robot on its own side, earns LEAVE, TIPs with the p
   assert.ok(parks >= 5, 'the blue robots PARK in the LOADING ZONE at the end (all but one of 6 at most): ' + parks);
 });
 
-test('match: in AUTO an AI robot keeps its own side and still never ends a tick inside a HIVE leg or a FLOWER', () => {
+test('match: in AUTO an AI robot keeps its own side and still never ends a tick inside a HIVE leg or a FLOWER, or another robot', () => {
+  // elite seed 12: a red and a blue robot met across the centre line, and the push that should part them
+  // was undone (15.9 mm overlap at t=25.16 s)
   const obs = E.Field.obstacles(0.46), MB = { hx: HX, hy: HX };
-  for (const skill of ['rookie', 'typical', 'elite']) for (const seed of [1, 2, 3, 4, 5]) {
-    let worst = null;
-    play({ period: 'Autonomous', seed, skill, watch: (M) => {
+  const runs = [];
+  for (const skill of ['rookie', 'typical', 'elite']) for (const seed of [1, 2, 3, 4, 5]) runs.push([skill, seed]);
+  runs.push(['elite', 12]);
+  for (const [skill, seed] of runs) {
+    let worst = null, over = null;
+    play({ period: 'Autonomous', seed, skill, watch: (M, sim) => {
+      const boxes = M.bots.map((b) => ({ id: b.id, x: b.x, y: b.y, h: b.h, hx: HX, hy: HX }));
+      boxes.push({ id: 'the team\'s robot', ...E.footBox(sim.chassis, sim.footprint) });
       for (const b of M.bots) {
         assert.ok(b.x * (b.al === 'red' ? -1 : 1) >= HX - 1e-9, 'G402: own side in AUTO');
         for (const o of obs) {
@@ -73,8 +80,13 @@ test('match: in AUTO an AI robot keeps its own side and still never ends a tick 
           if (p > 1e-4 && (!worst || p > worst.p)) worst = { p, t: M.t, id: b.id, what: o.what };
         }
       }
+      for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
+        const m = E.boxPush(boxes[i], boxes[j]), p = m ? Math.hypot(m[0], m[1]) : 0;
+        if (p > 1e-3 && (!over || p > over.p)) over = { p, t: M.t, a: boxes[i].id, b: boxes[j].id };
+      }
     } });
     assert.equal(worst, null, worst && `${skill} seed ${seed}: ${worst.id} ${(worst.p * 1000).toFixed(1)} mm into a ${worst.what} at t=${worst.t.toFixed(2)} s`);
+    assert.equal(over, null, over && `${skill} seed ${seed}: ${over.a} and ${over.b} overlap ${(over.p * 1000).toFixed(1)} mm at t=${over.t.toFixed(2)} s`);
   }
 });
 

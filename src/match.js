@@ -47,6 +47,8 @@ const FLOWER_CAP=6;
    The bottom POLLEN sits on the tile through the bottom ring's 2.79 in hole; a NECTAR can't pass it
    and rests on the 0.43 in ring (EFSG 11.2, sec 9.7). */
 const FLOWER_MID_IN=3.55, FLOWER_TOP_IN=21.5, FLOWER_RING_IN=0.43;
+/* Two robots still overlapping by more than this (m) after every push are jammed (separate()). */
+const MATCH_JAM=5e-4;
 const wrapA=a=>{ while(a>Math.PI) a-=2*Math.PI; while(a<-Math.PI) a+=2*Math.PI; return a; };
 
 const Match={
@@ -152,6 +154,7 @@ const Match={
     this.t+=dt;
     if(!this.obs) this.obs=Field.obstacles(0.46);
     this.spill();
+    for(const b of this.bots) b.from={x:b.x, y:b.y, h:b.h};
     for(const b of this.bots) this.think(b,dt);
     this.separate(sim);
     this.flights(dt,sim);
@@ -614,26 +617,67 @@ const Match={
     this.keepOnField(b);
     return Math.hypot(tx-b.x,ty-b.y);
   },
-  /* The walls, the HIVE and the FLOWERs hold a robot; in AUTO so does the centre line (G402).
-     Out of an obstacle, then back onto the own side, and again until both hold. Where they
-     can't both hold (an obstacle pushes it over the line and the line pushes it back in), the
-     move doesn't happen: it stays where it last stood clear, and its plan sees it stuck. */
-  keepOnField(b){
-    const box={x:b.x, y:b.y, h:b.h}, x0=b.x, y0=b.y, s=this.autoSide(b), obs=this.obs||[], lim=MATCH_BOT.hx;
-    let ok=!s;
-    if(!s) Field.collideBox(box,MATCH_BOT,obs);
-    else for(let k=0;k<6&&!ok;k++){
-      Field.collideBox(box,MATCH_BOT,obs);
-      if(box.x*s>=lim-1e-9){ ok=true; break; }
-      box.x=s*lim;
-      ok=!obs.some(o=>{ const d=capsulePush(box,MATCH_BOT,o); return d&&Math.hypot(d[0],d[1])>1e-5; });
+  /* Can a robot's box stand at box {x, y, h}: inside the walls, clear of the HIVE and the FLOWERs and,
+     in AUTO (s: the own side's sign), with its centre half a robot off the centre line (G402)? */
+  fits(box,s){
+    const H=Field.half(), c=Math.abs(Math.cos(box.h)), sn=Math.abs(Math.sin(box.h)), e=c*MATCH_BOT.hx+sn*MATCH_BOT.hy;
+    if(Math.abs(box.x)>H-e+1e-9||Math.abs(box.y)>H-e+1e-9) return false;
+    if(s&&box.x*s<MATCH_BOT.hx-1e-9) return false;
+    for(const o of this.obs||[]){ const d=capsulePush(box,MATCH_BOT,o); if(d&&Math.hypot(d[0],d[1])>1e-5) return false; }
+    return true;
+  },
+  /* The nearest place to (x, y), at heading h, where the box stands (fits): out of the obstacles, then
+     back onto the own side in AUTO, and again until both hold. ok false: no such place near (wedged
+     between two legs, or a leg pushing it over the line and the line pushing it back in). */
+  settle(x,y,h,s){
+    const box={x, y, h}, st={clear:false}, lim=MATCH_BOT.hx, obs=this.obs||[];
+    for(let k=0;k<6;k++){
+      Field.collideBox(box,MATCH_BOT,obs,st);
+      if(s&&box.x*s<lim-1e-9){ box.x=s*lim; if(this.fits(box,s)) return {x:box.x, y:box.y, ok:true}; }
+      else if(st.clear||this.fits(box,s)) return {x:box.x, y:box.y, ok:true};
     }
-    if(!ok&&b.clear){ b.x=b.clear.x; b.y=b.clear.y; b.h=b.clear.h; b.vx=0; b.vy=0; return; }
-    if(!ok&&box.x*s<lim) box.x=s*lim;
-    b.x=box.x; b.y=box.y;
-    if(s&&ok) b.clear={x:b.x, y:b.y, h:b.h};
+    return {x:box.x, y:box.y, ok:false};
+  },
+  /* A robot's own move (drive): the walls, the HIVE and the FLOWERs hold it, and in AUTO the centre
+     line (G402). Where the move as driven can't stand, it keeps its old heading (a turn that wedges
+     the box between two things), else turns on the spot, else stays where it last stood clear; its
+     plan sees it stuck. The same in both periods: no AI robot ends a move inside anything. */
+  keepOnField(b){
+    const s=this.autoSide(b), x0=b.x, y0=b.y, c=b.clear;
+    if(!s){ const box={x:b.x, y:b.y, h:b.h}; Field.collideBox(box,MATCH_BOT,this.obs||[]); b.x=box.x; b.y=box.y; }
+    else{
+      const r=this.settle(b.x,b.y,b.h,s);
+      if(!r.ok&&c){ b.x=c.x; b.y=c.y; b.h=c.h; b.vx=0; b.vy=0; return; }
+      b.x=r.x; b.y=r.y;
+      if(r.ok) b.clear={x:b.x, y:b.y, h:b.h};
+    }
     if(Math.abs(b.x-x0)>1e-6) b.vx=0;
     if(Math.abs(b.y-y0)>1e-6) b.vy=0;
+  },
+  /* A push from another robot: b goes (dx, dy) as far as the walls, the HIVE, the FLOWERs and in AUTO
+     the centre line let it (all of it, else half, else a quarter, else none), and is never sent back
+     to an earlier pose. a: how far it went along the push; full: exactly as asked. */
+  shove(b,dx,dy){
+    const L=Math.hypot(dx,dy), s=this.autoSide(b), x0=b.x, y0=b.y;
+    if(!(L>0)) return {a:0, full:true};
+    for(const f of [1,0.5,0.25]){
+      const tx=x0+dx*f, ty=y0+dy*f, r=this.settle(tx,ty,b.h,s);
+      if(!r.ok) continue;
+      b.x=r.x; b.y=r.y; b.clear={x:b.x, y:b.y, h:b.h};
+      if(Math.abs(b.x-tx)>1e-6) b.vx=0;
+      if(Math.abs(b.y-ty)>1e-6) b.vy=0;
+      return {a:((b.x-x0)*dx+(b.y-y0)*dy)/L, full:f===1&&b.x===tx&&b.y===ty};
+    }
+    return {a:0, full:false};
+  },
+  /* Two AI robots overlapping by m (A's way out of B): half each, and what one of them can't take
+     (an obstacle or the centre line behind it), the other takes. */
+  part(A,B,m){
+    const L=Math.hypot(m[0],m[1]), ux=m[0]/L, uy=m[1]/L;
+    const a=this.shove(A,m[0]/2,m[1]/2), need=a.full?L/2:Math.max(0,L-a.a);
+    const b=a.full?this.shove(B,-m[0]/2,-m[1]/2):this.shove(B,-ux*need,-uy*need);
+    const rest=need-b.a;
+    if(rest>1e-6) this.shove(A,ux*rest,uy*rest);
   },
   /* The robots people drive, as circles: the team's own and, online, everyone else's. */
   people(){
@@ -647,8 +691,10 @@ const Match={
     return out.concat(this.people());
   },
   /* Robots can't share a spot: two boxes that overlap are pushed apart along
-     the shallowest way out (exact for rotated boxes), half each. The team's
-     robot takes its half too; the walls and the HIVE still hold it after.
+     the shallowest way out (exact for rotated boxes), half each. A push is
+     never undone: where the walls, the HIVE, a FLOWER or (AUTO) the centre
+     line stop one robot taking its half, the other takes the rest. The team's
+     robot takes its half too, and the walls and the HIVE hold it the same way.
      Online, another driver's robot moves only on its own computer: against
      it, this bench moves its own robots its half of the way, once a tick,
      and that computer does the other half. A mirror moves no AI robot. */
@@ -662,7 +708,7 @@ const Match={
     for(const P of this.players){
       if(mine) for(const B of this.bots){
         const m=boxPush(box(B),P); if(!m) continue;
-        B.x+=m[0]/2; B.y+=m[1]/2; const l=Math.hypot(m[0],m[1])||1; stopInto(B,m[0]/l,m[1]/l);
+        this.shove(B,m[0]/2,m[1]/2); const l=Math.hypot(m[0],m[1])||1; stopInto(B,m[0]/l,m[1]/l);
       }
       if(me){ const m=boxPush(userBox(),P); if(m){ ch.x+=m[0]/2; ch.y+=m[1]/2; } }
     }
@@ -671,19 +717,39 @@ const Match={
       if(mine) for(let i=0;i<this.bots.length;i++) for(let j=i+1;j<this.bots.length;j++){
         const A=this.bots[i], B=this.bots[j], m=boxPush(box(A),box(B));
         if(!m) continue;
-        moved=true; A.x+=m[0]/2; A.y+=m[1]/2; B.x-=m[0]/2; B.y-=m[1]/2;
+        moved=true; this.part(A,B,m);
         const l=Math.hypot(m[0],m[1])||1; stopInto(A,m[0]/l,m[1]/l); stopInto(B,-m[0]/l,-m[1]/l);
       }
       if(me) for(const B of this.bots){
         const m=boxPush(box(B),userBox());
         if(!m) continue;
-        if(mine){ moved=true; B.x+=m[0]/2; B.y+=m[1]/2; ch.x-=m[0]/2; ch.y-=m[1]/2;
-          const l=Math.hypot(m[0],m[1])||1; stopInto(B,m[0]/l,m[1]/l); }
+        if(mine){
+          moved=true;
+          const L=Math.hypot(m[0],m[1]), ux=m[0]/L, uy=m[1]/L, a=this.shove(B,m[0]/2,m[1]/2);
+          // the team's robot: its half and whatever the AI robot couldn't take; what it can't, the AI robot does
+          const need=a.full?L/2:Math.max(0,L-a.a), px=ch.x, py=ch.y;
+          if(a.full){ ch.x-=m[0]/2; ch.y-=m[1]/2; } else { ch.x-=ux*need; ch.y-=uy*need; }
+          if(Field.ok) Field.collide(ch,fp,sim.obstacles||[]);
+          const rest=need-((px-ch.x)*ux+(py-ch.y)*uy);
+          if(rest>1e-6) this.shove(B,ux*rest,uy*rest);
+          stopInto(B,ux,uy);
+        }
         else if(pass===0){ ch.x-=m[0]/2; ch.y-=m[1]/2; }       // the host moves the AI robot its half
       }
-      if(mine) for(const B of this.bots) this.keepOnField(B);
       if(me&&Field.ok) Field.collide(ch,fp,sim.obstacles||[]);
       if(!moved) break;
+    }
+    // a jam: two robots that still overlap after every push (each held by an obstacle, the centre
+    // line or a third robot) go back to where they stood when the tick began, which was clear
+    if(mine) for(let k=0;k<3;k++){
+      let back=false;
+      const undo=b=>{ const f=b.from; if(!f||(b.x===f.x&&b.y===f.y&&b.h===f.h)) return;
+        b.x=f.x; b.y=f.y; b.h=f.h; b.vx=0; b.vy=0; b.clear={x:f.x, y:f.y, h:f.h}; back=true; };
+      const jam=(P,Q)=>{ const m=boxPush(P,Q); return m&&Math.hypot(m[0],m[1])>MATCH_JAM; };
+      for(let i=0;i<this.bots.length;i++) for(let j=i+1;j<this.bots.length;j++){
+        const A=this.bots[i], B=this.bots[j]; if(jam(box(A),box(B))){ undo(A); undo(B); } }
+      if(me) for(const B of this.bots) if(jam(box(B),userBox())) undo(B);
+      if(!back) break;
     }
     if(me){ const u=userBox(); this.userBody={x:u.x, y:u.y, r:Math.hypot(fp.hx,fp.hy)*0.8}; }
   },

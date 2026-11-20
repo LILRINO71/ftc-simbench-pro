@@ -223,20 +223,22 @@ const Field={
     ch.x=box.x-dx; ch.y=box.y-dy;
     return hit;
   },
-  collideBox(ch,fp,obs){
-    let hit=null;
-    for(let pass=0; pass<3; pass++){
+  /* st (optional): st.clear is set true when the box ends clear of the walls and every obstacle,
+     false when three passes weren't enough to be sure (wedged between two things). */
+  collideBox(ch,fp,obs,st){
+    let hit=null, moved=true;
+    for(let pass=0; pass<3&&moved; pass++){
       const H=this.half(), c=Math.abs(Math.cos(ch.h)), s=Math.abs(Math.sin(ch.h));
       const ex=c*fp.hx+s*fp.hy, ey=s*fp.hx+c*fp.hy;
       const nx=Math.max(-H+ex,Math.min(H-ex,ch.x)), ny=Math.max(-H+ey,Math.min(H-ey,ch.y));
       if(nx!==ch.x||ny!==ch.y){ ch.x=nx; ch.y=ny; hit=hit||"wall"; }
-      let moved=false;
+      moved=false;
       for(const o of obs||[]){
         const d=capsulePush(ch,fp,o);
         if(d){ ch.x+=d[0]; ch.y+=d[1]; hit=hit||o.what; moved=true; }
       }
-      if(!moved) break;
     }
+    if(st) st.clear=!moved;
     return hit;
   },
 
