@@ -65,6 +65,12 @@ function jvSiblings(raw,pool){
     left.push({p,re:new RegExp("(?:^|[^\\w$])(?:"+names.map(n=>n.replace(/\$/g,"\\$")).join("|")+")(?![\\w$])")});
   }
   const queue=[raw];
+  // an Autonomous also brings the TeleOp it preselects: the same robot, whose sticks say how the
+  // drive motors are mounted (jvAutoDrive), whether or not the auto's code names it
+  const me=jvOpModeTag(raw);
+  if(me&&me.kind==="Autonomous"&&me.preselect)
+    for(let i=0;i<left.length;i++){ const t=jvOpModeTag(left[i].p.src);
+      if(t&&t.kind==="TeleOp"&&t.name===me.preselect){ out.push(left[i].p); queue.push(left[i].p.src); left.splice(i--,1); } }
   while(queue.length&&left.length){
     const text=stripComments(queue.shift());
     for(let i=0;i<left.length;i++) if(left[i].re.test(text)){ out.push(left[i].p); queue.push(left[i].p.src); left.splice(i--,1); }
@@ -410,12 +416,56 @@ function jvAnalyze(comp,isAuto){
   out.commanded=Array.from(cmdOf.keys());
   for(const [n,l] of cmdOf){ const p=l.filter(x=>x[0]==="setPosition").map(x=>x[1]); if(p.length) out.ranges[n]={lo:Math.min(...p),hi:Math.max(...p),n:p.length}; }
   if(!isAuto) out.drive=jvDriveFrom(runs,devs);
+  else out.drive=jvAutoDrive(comp,base,devs);
   // given power while still in STOP_AND_RESET_ENCODER: on the robot that motor
   // stays off (the SDK removes power in that mode until another mode is set)
   out.heldByReset=[];
   for(const k in runs) for(const [n,m] of Object.entries(runs[k].motors))
     if(m.mode==="reset"&&m.cmd&&out.heldByReset.indexOf(n)<0) out.heldByReset.push(n);
   return out;
+}
+/* What the Driver Station would call an OpMode source: {kind, name, preselect}, or null. */
+function jvOpModeTag(src){
+  const s=stripComments(String(src||"")), m=/@(TeleOp|Autonomous)\b\s*(?:\(([^)]*)\))?/.exec(s);
+  if(!m) return null;
+  const arg=k=>{ const a=new RegExp("\\b"+k+"\\s*=\\s*\"((?:[^\"\\\\]|\\\\.)*)\"").exec(m[2]||""); return a?a[1]:null; };
+  const cls=/\bclass\s+([A-Za-z_$][\w$]*)/.exec(s);
+  return {kind:m[1], name:arg("name")||(cls?cls[1]:null), preselect:arg("preselectTeleOp")};
+}
+/* An Autonomous has no stick to read its drive from, so it used to get none, and the rig fell back
+   on a "standard build" (left motors mirrored). A robot whose code sets all four wheels REVERSE,
+   which is right on that robot, then ran one side backward and turned on the spot instead of leaving
+   its wall. But an auto is the same robot as the team's TeleOp: how its motors are mounted is what
+   the TeleOp's sticks show. So: the TeleOp this auto preselects, when it was handed over with it
+   (jvSiblings does that), else any TeleOp there that drives these same motors. With no TeleOp to
+   learn from, the auto's own setDirection calls are read the way every drive code means them:
+   positive power on a drive motor is forward. `from` says which it was. */
+function jvAutoDrive(comp,base,devs){
+  const srcs=comp.srcs||{}, own=new Set(devs.filter(d=>d.kind==="motor").map(d=>d.name));
+  const me=jvOpModeTag(srcs["OpMode.java"])||{}, cands=[];
+  for(const f in srcs){ if(f==="OpMode.java") continue;
+    const t=jvOpModeTag(srcs[f]); if(!t||t.kind!=="TeleOp") continue;
+    cands.push({file:f, src:srcs[f], pre:!!me.preselect&&t.name===me.preselect}); }
+  cands.sort((a,b)=>(b.pre?1:0)-(a.pre?1:0));
+  for(const c of cands){
+    let d=null;
+    try{
+      // that TeleOp as the OpMode, with every other file it was read beside (the auto among them)
+      const libs=Object.keys(srcs).filter(f=>f!==c.file).map(f=>({file:f==="OpMode.java"?"TheAuto.java":f, src:srcs[f]}));
+      const r=jvCodeFor(c.src,libs,false);
+      d=r&&r.an&&r.an.drive;
+    }catch(e){ d=null; }
+    if(!d||!d.ok||!d.wheels.every(w=>own.has(w.dev))) continue;       // a TeleOp for another drive base says nothing here
+    return Object.assign({},d,{wheels:d.wheels.map(w=>Object.assign({},w)), from:"teleop", teleop:c.file});
+  }
+  const wheels=[];
+  for(const d of devs){
+    if(d.kind!=="motor"||typeof isWheelName!=="function"||!isWheelName(d.name)) continue;
+    const m=base.motors[d.name]; if(!m) continue;
+    wheels.push(Object.assign({dev:d.name},wheelCorner(d.name),{sense:m.reversed?-1:1}));
+  }
+  if(wheels.length<2) return null;
+  return {wheels, style:wheels.length>=4?"mecanum":"tank", ok:wheels.some(w=>w.left)&&wheels.some(w=>w.right), fromCode:true, from:"directions"};
 }
 /* The drive base, read off what the motors do when the sticks move.
    Assume the code is right on its own robot: stick up rolls every wheel
@@ -582,7 +632,7 @@ function jvMaybe(out,raw,opts){
   v.bindings=r.bindings.slice();
   for(const b of v.bindings) if(an.commanded.indexOf(b.dev)<0) an.commanded.push(b.dev);
   // drive bindings: the sticks feed the wheels
-  if(an.drive) for(const w of an.drive.wheels) for(const ax of ["left_stick_y","left_stick_x","right_stick_x"])
+  if(an.drive&&!isAuto) for(const w of an.drive.wheels) for(const ax of ["left_stick_y","left_stick_x","right_stick_x"])
     v.bindings.push({pad:1,btn:ax,cond:null,dev:w.dev,op:"setPower",expr:"",axes:["gamepad1."+ax],analog:true,vm:true});
   return v;
 }

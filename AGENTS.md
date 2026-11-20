@@ -57,7 +57,11 @@ Those files are free again; read the conventions below before changing them.
 - **Wheel mounting** (`buildRig` in `src/sim.js`): which way positive power rolls a wheel comes
   from the CAD when `dtMounts` measured it (`mountHow` `direct` or `chain`), else from the
   code's own forward (`sense`, src/jvmrun.js), else the standard build. An `assumed` mount is
-  never reported as "from the CAD"; each wheel's `mountFrom` says which it was.
+  never reported as "from the CAD"; each wheel's `mountFrom` says which it was. The code's
+  forward is its own sticks for a TeleOp. An Autonomous has no sticks: it takes the drive of the
+  TeleOp it preselects (`jvSiblings` brings that file, `jvAutoDrive` reads it), else of a TeleOp
+  read with it that drives the same motors, else its own `setDirection` calls as "positive power
+  is forward". `mountVia` (`sticks`, `teleop`, `directions`) says which.
 - **Robot frame** (`src/frame.js`): +z up, origin at the drivetrain centre on
   the floor, placement only through `robotToWorld`.
 - **What an OpMode is read with** (`libsFor` in `src/app.js`): the helper classes plus

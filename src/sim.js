@@ -708,7 +708,7 @@ function driveProbe(code,cad,map,opts){
     res={style:dtn.style, up:push({left_stick_y:-1}), turnR:push({right_stick_x:1}),
          strafeR:dtn.style==="mecanum"?push({left_stick_x:1}):null};
     res.front=P.opts.front;
-    res.mounts=P.rig?P.rig.drive.wheels.map((w,i)=>({dev:P.rig.devs[i], corner:w.corner, mount:w.mount, from:w.mountFrom})):[];
+    res.mounts=P.rig?P.rig.drive.wheels.map((w,i)=>({dev:P.rig.devs[i], corner:w.corner, mount:w.mount, from:w.mountFrom, via:w.mountVia||null})):[];
     res.reversed=Object.keys(P.dev).filter(n=>P.dev[n].reversed);
   }catch(e){ res=null; }
   PROBE_CACHE.set(code,{cad,key,res});
@@ -887,7 +887,10 @@ function buildRig(cad,dtn,base,dev,opts){
     const mount=measured?g.mount:pm(w.sense)?w.sense:(g&&pm(g.mount))?g.mount:(kind==="swerve"?1:(w.left?-1:1));
     // c: the CAD wheel's centre in the canonical frame, for the view to turn its parts
     const mountFrom=measured?"cad":pm(w.sense)?"code":"assumed";
-    wheels.push({x, y, z:0, r, roller, alpha, mount, mountFrom, corner:corner.length===2?corner:null, c:g&&g.c?g.c.slice():null});
+    // how the code said it: its own sticks, the TeleOp an Autonomous goes with, or an Autonomous's own
+    // setDirection calls (src/jvmrun.js jvAutoDrive)
+    const mountVia=mountFrom==="code"?(dtn.from||"sticks"):null;
+    wheels.push({x, y, z:0, r, roller, alpha, mount, mountFrom, mountVia, corner:corner.length===2?corner:null, c:g&&g.c?g.c.slice():null});
     devs.push(w.dev);
     const sd=dev&&dev[w.dev];
     motors.push((sd&&sd.spec)||null);
