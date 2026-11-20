@@ -236,6 +236,31 @@ test('payload: an intake that stops before the ball is in lets it go; one runnin
   assert.ok(!c.hold && !b.hold, 'and let go: a loose ball again');
 });
 
+test('payload: an intake held still by the joint it is on says so once, with the joint', () => {
+  // The team's code on another robot's CAD: "intake" got bound to that robot's lift, which ran to
+  // its stop and held the motor at zero. Nothing was picked up and nothing said why.
+  bench(MEET0());
+  run(E, 0.3);
+  const note = () => E.Shots.log.filter((l) => /isn't turning/.test(l.text));
+  // free to turn: no such note, however long it runs
+  pad('right_trigger', 1); run(E, 1.5); pad('right_trigger', 0); run(E, 0.2);
+  assert.equal(note().length, 0, 'a free intake is not called stuck: ' + JSON.stringify(E.Shots.log.map((l) => l.text)));
+  assert.deepEqual(E.Payload.summary().notTurning, []);
+  // on a joint with a few thousandths of a radian of travel: it reaches the stop at once
+  bench(MEET0());
+  E.Sim.dev.intake.mech = { id: 'lift', label: 'Lift (vertical slides)', kind: 'revolute', limits: [0, 0.001], gear: 1, dir: 1 };
+  run(E, 0.3);
+  const b = ballAt('pollen');
+  pad('right_trigger', 1); run(E, 2);
+  assert.ok(Math.abs(E.Sim.dev.intake.act) < 0.02, 'the joint holds the motor still: ' + E.Sim.dev.intake.act);
+  assert.equal(held(), 0, 'so nothing comes in');
+  assert.ok(E.Match.floor.includes(b));
+  assert.equal(note().length, 1, 'said once: ' + JSON.stringify(E.Shots.log.map((l) => l.text)));
+  assert.match(note()[0].text, /^intake is told to run but isn't turning: it is on the joint 'Lift \(vertical slides\)'/);
+  assert.deepEqual(E.Payload.summary().notTurning, ['intake']);
+  pad('right_trigger', 0);
+});
+
 test('payload: never more than four (G407); a fifth ball in the mouth is only pushed', () => {
   bench(MEET0());
   pad('right_trigger', 1);

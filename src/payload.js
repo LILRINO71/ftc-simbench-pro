@@ -49,6 +49,7 @@ const TAKE_CLEAR_M=0.005;               // a ball travels its diameter plus this
 const FLOWER_OUTLET_M=0.061;            // a FLOWER's bottom opening: its field-side face, from its centre
 const GATE_NAME=/gate|stopper|door|latch|blocker/i;
 const BACK_NAME=/back|rear/i, FRONT_NAME=/front/i;
+const STUCK_S=0.5;                       // a device told to run that stays still this long is said to be stuck
 const FLY_KP=20;                        // a hub velocity loop drives near full voltage until it's close (setVelocity)
 
 const Payload={
@@ -66,7 +67,7 @@ const Payload={
   reset(){
     for(const g of this.grips) if(g.ball.hold&&g.ball.hold.id==="user") g.ball.hold=null;
     this.held=[]; this.grips=[]; this.fgrips=[]; this.dirs={}; this.ej={}; this.t=0; this.lastOut=-1e9;
-    this.primed=false; this.dryNoted=false; this.preloaded=0; this.lastDrop=0;
+    this.primed=false; this.dryNoted=false; this.preloaded=0; this.lastDrop=0; this.stuck={}; this.stuckSaid={};
     this.stats={picked:0, ejected:0, fired:0, scored:0, flower:0, g408:0};
   },
 
@@ -192,6 +193,21 @@ const Payload={
       Shots.note(name+": "+(sg>0?"positive":"negative")+" power takes pieces in (its first "+(empty||any?"use":"feed")+")");
     }
   },
+  /* A device that should be turning a roller or a wheel but is held still by the joint it is on (a
+     slide at its stop, an arm at its limit: the wrong joint for it) picks nothing up and launches
+     nothing. Say so once, with the joint, or the user only sees a robot that does not work. */
+  stuckTick(dt,names){
+    if(!this.stuck){ this.stuck={}; this.stuckSaid={}; }
+    for(const n of names){
+      const s=Sim.dev[n]; if(!s) continue;
+      const still=Math.abs(s.cmd)>INTAKE_ON&&Math.abs(s.act)<0.02;
+      this.stuck[n]=still?(this.stuck[n]||0)+dt:0;
+      if(this.stuck[n]<STUCK_S||this.stuckSaid[n]) continue;
+      this.stuckSaid[n]=true;
+      const j=s.mech?(s.mech.label||s.mech.id):null;
+      Shots.note(n+" is told to run but isn't turning"+(j?": it is on the joint '"+j+"', which is at its stop. Check what "+n+" drives in the Robot tab":""));
+    }
+  },
   /* How hard a device runs the way that moves pieces in (share of power; negative is out). */
   inward(name){ const s=Sim.dev[name], d=this.dirs[name]; return s&&d&&d.sign?d.sign*s.act:0; },
   /* Roller surface speed (m/s) from the device's own speed. */
@@ -221,6 +237,7 @@ const Payload={
     const ins=this.intakes(), tr=this.transfer();
     for(const n of ins) this.learn(n,dt,false);
     if(tr) this.learn(tr,dt,true);
+    this.stuckTick(dt,ins.concat(tr?[tr]:[],this.flywheels()));
     const M=this.mouths(), X=this.box();
     this.gripTick(dt);
     this.flowerTick(dt,M,X);
@@ -434,6 +451,7 @@ const Payload={
       intakes:mouths.map(m=>{ const d=this.dirs[m.name]||{};
         return {name:m.name, edge:m.edge, edgeFrom:m.from, in:d.sign>0?"positive":d.sign<0?"negative":null, inFrom:d.from||null, decidedAt:d.t==null?null:d.t}; }),
       transfer:S.mode==="real"?this.transfer():null, gate:S.mode==="real"?this.gate():null,
-      flywheels:S.mode==="real"?this.flywheels():[]};
+      flywheels:S.mode==="real"?this.flywheels():[],
+      notTurning:Object.keys(this.stuckSaid||{})};
   }
 };
