@@ -9,6 +9,7 @@
    counter-clockwise from +x. Sim.chassis lives in this frame.
    ============================================================ */
 const IN=0.0254;
+const START_CLEAR_IN=0.25;       // a start pose keeps this far from the LOADING ZONE and the FLOWER (G304)
 const TIP_GRAMS=190;             // EFSG 12.3: 174 g placed must not TIP, 199 g launched must
 const ELEMENT_G={pollen:24.9, nectar:41.3};
 const FRONTS={"+x":0, "+y":-Math.PI/2, "-x":Math.PI, "-y":Math.PI/2};
@@ -68,16 +69,44 @@ const Field={
 
   /* Legal start (G304): own side, touching the alliance wall, facing the field,
      clear of the LOADING ZONE and the FLOWER on that wall. */
-  /* slot: "centre" (the default), "left" or "right" one tile along the wall as that
-     alliance's drivers see it (red stands at -x facing +x, so their left is +y; blue's is -y) */
+  /* slot: "centre" (the default), "left" or "right": toward that side along the wall as that
+     alliance's drivers see it (red stands at -x facing +x, so their left is +y; blue's is -y),
+     a tile over when there's room and otherwise as far as the box stays legal. A whole tile
+     put an 18 in robot 8.6 in into its LOADING ZONE on one side and 4.8 in into the FLOWER on
+     the other: both sit exactly one tile off the centre line. */
   startPose(alliance,fp,slot){
     const H=this.half(), s=alliance==="blue"?1:-1;
-    const hx=(fp&&fp.hx)||0.2286, ox=(fp&&fp.ox)||0, oy=(fp&&fp.oy)||0;
+    const hx=(fp&&fp.hx)||0.2286, hy=(fp&&fp.hy)||hx, ox=(fp&&fp.ox)||0, oy=(fp&&fp.oy)||0;
     const tile=(this.data&&this.data.field&&this.data.field.field.tile||23.5)*IN;
     const along=slot==="left"?1:slot==="right"?-1:0;
-    // the BOX touches the wall and sits on the centre line (or a tile off it); the pose is
+    // the BOX touches the wall and sits on the centre line (or toward a side); the pose is
     // the drivetrain centre, which is wherever the box's offset puts it
-    return {x:s*(H-hx+ox), y:s*oy-s*along*tile, h:alliance==="blue"?Math.PI:0};
+    const yb=this.startY(alliance,hx,hy,-s*along*tile);
+    return {x:s*(H-hx+ox), y:s*oy+yb, h:alliance==="blue"?Math.PI:0};
+  },
+  /* Is a start box against the alliance wall, centred yb along it, clear of that alliance's
+     LOADING ZONE and of every FLOWER (G304), and inside the field? START_CLEAR_IN to spare. */
+  startClear(alliance,hx,hy,yb){
+    const F=this.data&&this.data.field; if(!F) return true;
+    const H=this.half(), s=alliance==="blue"?1:-1, m=START_CLEAR_IN*IN;
+    const x0=s*(H-hx)-hx-m, x1=s*(H-hx)+hx+m, y0=yb-hy-m, y1=yb+hy+m;
+    if(Math.abs(yb)+hy>H) return false;
+    const z=F.loadingZones&&F.loadingZones[alliance];
+    if(z&&x1>z.x0*IN&&x0<z.x1*IN&&y1>z.y0*IN&&y0<z.y1*IN) return false;
+    for(const fl of F.flowers||[]){
+      // a FLOWER is a box against its wall: alongWall wide, depth deep
+      const alongX=fl.wall==="+y"||fl.wall==="-y", ex=(alongX?fl.alongWall:fl.depth)/2*IN, ey=(alongX?fl.depth:fl.alongWall)/2*IN;
+      if(x1>fl.x*IN-ex&&x0<fl.x*IN+ex&&y1>fl.y*IN-ey&&y0<fl.y*IN+ey) return false;
+    }
+    return true;
+  },
+  /* The legal place for the box nearest `want` (metres along the wall from the centre line),
+     looking back toward the centre a quarter inch at a time. The centre is always legal. */
+  startY(alliance,hx,hy,want){
+    if(!want) return 0;
+    const step=0.25*IN, n=Math.ceil(Math.abs(want)/step), d=Math.sign(want);
+    for(let k=0;k<n;k++){ const y=want-d*k*step; if(this.startClear(alliance,hx,hy,y)) return y; }
+    return 0;
   },
 
   /* Things a robot can't drive through, flattened to 2-D capsules at the

@@ -124,14 +124,17 @@ test('minimap: zones, HIVEs, FLOWERs, balls and robots, all in field inches; you
   assert.ok(Math.abs(r.x - 10) < 1e-9 && r.me && r.al === 'blue' && Math.abs(r.hx - 0.2 / 0.0254) < 1e-9);
 });
 
-test('starts: centre, a tile left and a tile right along the wall, as each alliance\'s drivers see them', async () => {
+test('starts: centre, left and right along the wall, as each alliance\'s drivers see them', async () => {
   const { loadWithField } = await import('./load.mjs');
-  const F = loadWithField().Field, fp = { hx: 0.2286, ox: 0, oy: 0 }, tile = 23.5 * 0.0254;
+  const F = loadWithField().Field, fp = { hx: 0.2286, ox: 0, oy: 0 }, IN = 0.0254;
   const c = F.startPose('red', fp), l = F.startPose('red', fp, 'left'), r = F.startPose('red', fp, 'right');
   assert.equal(c.x, l.x); assert.equal(c.h, 0);
-  assert.ok(Math.abs(l.y - tile) < 1e-9 && Math.abs(r.y + tile) < 1e-9, 'red faces +x: its left is +y');
+  // not a whole tile (23.5 in): that is where the LOADING ZONE and the FLOWER are, and G304 keeps a
+  // start clear of both (tests/field-start.test.mjs). An 18 in robot goes 14.5 in toward the zone
+  // (the zone starts at 23.9 in) and 11.25 in toward the FLOWER (its near side is at 20.55 in), in quarter-inch steps.
+  assert.ok(Math.abs(l.y - 14.5 * IN) < 1e-9 && Math.abs(r.y + 11.25 * IN) < 1e-9, `red faces +x: its left is +y (${(l.y / IN).toFixed(2)}, ${(r.y / IN).toFixed(2)} in)`);
   const bl = F.startPose('blue', fp, 'left');
-  assert.ok(Math.abs(bl.y + tile) < 1e-9 && bl.x > 0 && Math.abs(bl.h - Math.PI) < 1e-12, 'blue faces -x: its left is -y');
+  assert.ok(Math.abs(bl.y + 14.5 * IN) < 1e-9 && bl.x > 0 && Math.abs(bl.h - Math.PI) < 1e-12, 'blue faces -x: its left is -y');
   assert.deepEqual(F.startPose('red', fp, 'nonsense'), c, 'anything else is the centre');
 });
 
