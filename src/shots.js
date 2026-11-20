@@ -102,19 +102,27 @@ const Shots={
     const transfer=devs.filter(d=>spins(d)&&TRANSFER_NAME.test(d.name)&&shooter.indexOf(d.name)<0&&intake.indexOf(d.name)<0).map(d=>d.name);
     return {shooter, feeder, intake, transfer};
   },
-  /* Fill in whatever the user hasn't chosen from what the code declares. */
+  /* Fill in whatever the user hasn't chosen from what the code declares. What adopt filled is
+     marked in cfg.auto and worked out again for every OpMode; what the user picked in the Shot tab
+     (byHand takes the mark off) stays while its device exists. A value filled once used to be kept
+     for good: the second OpMode ran with the first one's shooter motor, and a flywheel its code
+     declares as 6000 rpm was flown as the 1620 rpm one before it, a 98 % shot read as 0 %. A
+     setting saved before the marks existed has none, so it counts as the user's. */
   adopt(code){
     if(!this.cfg) this.cfg=this.defaults();
-    const d=this.detect(code), names=((code&&code.devices)||[]).map(x=>x.name);
-    if(!this.cfg.shooter||names.indexOf(this.cfg.shooter)<0) this.cfg.shooter=d.shooter[0]||null;
-    if(!this.cfg.feeder||names.indexOf(this.cfg.feeder)<0) this.cfg.feeder=d.feeder[0]||null;
-    if(!this.cfg.motorId) this.cfg.motorId=nearestMotorId(this.deviceRpm());
+    const c=this.cfg, d=this.detect(code), names=((code&&code.devices)||[]).map(x=>x.name);
+    const auto=c.auto&&typeof c.auto==="object"?c.auto:(c.auto={});
+    if(auto.shooter||!c.shooter||names.indexOf(c.shooter)<0){ c.shooter=d.shooter[0]||null; auto.shooter=true; }
+    if(auto.feeder||!c.feeder||names.indexOf(c.feeder)<0){ c.feeder=d.feeder[0]||null; auto.feeder=true; }
+    if(auto.motorId||!c.motorId){ c.motorId=nearestMotorId(this.deviceRpm()); auto.motorId=true; }
     if(!this.cfg.precision) this.cfg.precision="typical";
     // the game-piece roles (src/payload.js), the same way
     const p=this.cfg.payload&&typeof this.cfg.payload==="object"?this.cfg.payload:(this.cfg.payload={});
     if(!Array.isArray(p.intakes)||!p.intakes.length||p.intakes.some(n=>names.indexOf(n)<0)) p.intakes=d.intake.slice();
     if(!p.transfer||names.indexOf(p.transfer)<0) p.transfer=d.transfer[0]||"";
   },
+  /* The user set this one in the Shot tab: adopt leaves it alone from now on. */
+  byHand(key){ if(this.cfg&&this.cfg.auto) delete this.cfg.auto[key]; },
   /* Output-shaft free speed of the shooter motor. An unnamed motor is
      assumed to be the 6000 rpm 1:1 most flywheels use. */
   deviceRpm(){

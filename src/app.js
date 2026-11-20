@@ -1475,11 +1475,13 @@ function wireShotTab(){
   seg("#precSeg",b=>Shots.cfg.precision=b.dataset.prec);
   $("#hoodSlider").addEventListener("input",e=>{ if(!Shots.cfg) return; Shots.cfg.hoodDeg=+e.target.value; $("#hoodVal").textContent=e.target.value+"°"; ShotUI.dirty=true; saveRig(); });
   $("#h0Slider").addEventListener("input",e=>{ if(!Shots.cfg) return; Shots.cfg.h0In=+e.target.value; $("#h0Val").textContent=e.target.value+" in"; ShotUI.dirty=true; saveRig(); });
-  $("#motorSel").addEventListener("change",e=>{ if(!Shots.cfg) return; Shots.cfg.motorId=e.target.value; shotChanged(); });
+  $("#motorSel").addEventListener("change",e=>{ if(!Shots.cfg) return; Shots.cfg.motorId=e.target.value; Shots.byHand("motorId"); shotChanged(); });
   $("#wheelSel").addEventListener("change",e=>{ if(!Shots.cfg) return; const p=e.target.value.split("|"); Shots.cfg.wheelMm=+p[0]; Shots.cfg.wheelId=p[1]; shotChanged(); });
   $("#gearIn").addEventListener("change",e=>{ if(!Shots.cfg) return; const v=parseFloat(e.target.value); if(isFinite(v)&&v>0) Shots.cfg.gear=Math.max(0.25,Math.min(4,v)); shotChanged(); });
-  $("#shotDev").addEventListener("change",e=>{ if(!Shots.cfg) return; Shots.cfg.shooter=e.target.value||null; Shots.cfg.motorId=nearestMotorId(Shots.deviceRpm()); shotChanged(); });
-  $("#shotFeed").addEventListener("change",e=>{ if(!Shots.cfg) return; Shots.cfg.feeder=e.target.value||null; shotChanged(); });
+  $("#shotDev").addEventListener("change",e=>{ if(!Shots.cfg) return; Shots.cfg.shooter=e.target.value||null; Shots.byHand("shooter");
+    // another device, another motor: its own, worked out again (and again for each OpMode until the user picks one)
+    Shots.cfg.motorId=nearestMotorId(Shots.deviceRpm()); (Shots.cfg.auto||(Shots.cfg.auto={})).motorId=true; shotChanged(); });
+  $("#shotFeed").addEventListener("change",e=>{ if(!Shots.cfg) return; Shots.cfg.feeder=e.target.value||null; Shots.byHand("feeder"); shotChanged(); });
   wirePieces();
   // the drawn parts: which way the CAD faces, and whether to draw a base and a shooter
   const robotSeg=(id,apply)=>$(id).addEventListener("click",e=>{ const b=e.target.closest("button"); if(!b) return;

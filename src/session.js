@@ -323,6 +323,8 @@ const {sessionFromBench, packSession, unpackSession} = (function(){
     ball: str(at(c, "ball"), C, "shot ball") || "pollen",
     type: str(at(c, "type"), C, "shot type") || "single",
     precision: str(at(c, "precision"), C, "shot precision") || "typical",
+    // which of these the bench filled in itself (src/shots.js adopt): only a plain true counts
+    ...(isObj(at(c, "auto")) ? {auto: Object.fromEntries(["shooter", "feeder", "motorId"].filter(k => at(at(c, "auto"), k) === true).map(k => [k, true]))} : {}),
     // the game pieces through the robot (src/payload.js); a file from before them has none
     ...(isObj(at(c, "payload")) ? {payload: readPayloadCfg(at(c, "payload"), C)} : {})
   };
