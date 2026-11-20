@@ -127,6 +127,8 @@ const Field={
     out.push({type:"plane", tag:"wall", n:[1,0,0], c:-H, e:K.wallE, mu:K.wallMu, x0:-BIG, x1:-H, y0:-BIG, y1:BIG, z0:-BIG, z1:BIG});
     out.push({type:"plane", tag:"wall", n:[0,-1,0], c:-H, e:K.wallE, mu:K.wallMu, x0:-BIG, x1:BIG, y0:H, y1:BIG, z0:-BIG, z1:BIG});
     out.push({type:"plane", tag:"wall", n:[0,1,0], c:-H, e:K.wallE, mu:K.wallMu, x0:-BIG, x1:BIG, y0:-BIG, y1:-H, z0:-BIG, z1:BIG});
+    // everything of the HIVE behind one box: a ball nowhere near it skips the lot (src/ballphys.js)
+    const grp={type:"group", n:0}; out.push(grp); const g0=out.length;
     const cap=(a,b,r)=>out.push(bound({type:"capsule", tag:"frame", a:m(a), b:m(b), r:r*IN, e:K.hiveE, mu:K.hiveMu},[m(a),m(b)],r*IN));
     const fr=F.hive.frame;
     for(const s of fr.legs) cap(s[0],s[1],fr.tubeRadius);
@@ -136,10 +138,11 @@ const Field={
     const M=this.model();
     for(const hv of M.hives) for(let i=0;i+1<hv.armBar.length;i++) cap(hv.armBar[i],hv.armBar[i+1],hv.armRadius);
     // FLOWERs: a box against the wall, as tall as the backstop
+    const flowers=[];
     for(const fl of F.flowers){
       const along=fl.wall==="+y"||fl.wall==="-y", sg=fl.wall.charAt(0)==="+"?1:-1, ac=sg*(F.field.half-fl.depth/2);
       const cx=along?fl.x:ac, cy=along?ac:fl.y, ex=(along?fl.alongWall:fl.depth)/2, ey=(along?fl.depth:fl.alongWall)/2;
-      out.push({type:"aabb", tag:"flower", x0:(cx-ex)*IN, x1:(cx+ex)*IN, y0:(cy-ey)*IN, y1:(cy+ey)*IN, z0:0, z1:(fl.backstopTopZ||22.75)*IN, e:K.hiveE, mu:K.hiveMu});
+      flowers.push({type:"aabb", tag:"flower", x0:(cx-ex)*IN, x1:(cx+ex)*IN, y0:(cy-ey)*IN, y1:(cy+ey)*IN, z0:0, z1:(fl.backstopTopZ||22.75)*IN, e:K.hiveE, mu:K.hiveMu});
     }
     // the CELLs, through the Shot Sim's own geometry (inches inside)
     const X=this.E._internal, G=X.geometry(), r2in=1/IN;
@@ -160,6 +163,12 @@ const Field={
       }:null;
       out.push(C);
     });
+    grp.n=out.length-g0;
+    grp.x0=grp.y0=grp.z0=Infinity; grp.x1=grp.y1=grp.z1=-Infinity;
+    for(let i=g0;i<out.length;i++){ const o=out[i];
+      grp.x0=Math.min(grp.x0,o.x0); grp.y0=Math.min(grp.y0,o.y0); grp.z0=Math.min(grp.z0,o.z0);
+      grp.x1=Math.max(grp.x1,o.x1); grp.y1=Math.max(grp.y1,o.y1); grp.z1=Math.max(grp.z1,o.z1); }
+    out.push(...flowers);
     this._bs=out; this._bsKey=key;
     return out;
   },

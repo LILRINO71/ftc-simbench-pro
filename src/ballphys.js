@@ -43,12 +43,17 @@ const BALL_AERO={rho:1.2, cd:0.45, clSlope:0.2, clSMax:1};
 
 /* The constants of one kind of ball: radius, mass, k = I/(m r^2), drag and lift per unit mass.
    From the Shot Sim when it's loaded (the same numbers its flights use), else its defaults. */
-const _ballSpecs={};
+const _ballSpecs={}, _bsFast={src:undefined, pollen:null, nectar:null};
 function ballSpec(kind){
+  const src=typeof Field!=="undefined"&&Field.ok&&Field.E?Field.E:null, F=_bsFast;
+  if(F.src===src){ const s=kind==="nectar"?F.nectar:F.pollen; if(s) return s; }
+  else{ F.src=src; F.pollen=F.nectar=null; }
   kind=kind==="nectar"?"nectar":"pollen";
-  const src=typeof Field!=="undefined"&&Field.ok&&Field.E?Field.E:null;
+  return (F[kind]=ballSpecOf(kind,src));
+}
+function ballSpecOf(kind,src){
   const key=kind+(src?"|E":"");
-  if(_ballSpecs[key]) return _ballSpecs[key];
+  if(_ballSpecs[key]&&_ballSpecs[key].src===src) return _ballSpecs[key];
   let r, m, I, A=BALL_AERO;
   if(src){
     const bp=src.ballProps(kind); r=bp.rIn*0.0254; m=bp.massKg; I=bp.I;
@@ -59,7 +64,7 @@ function ballSpec(kind){
     I=0.4*m*(Math.pow(R,5)-Math.pow(Ri,5))/(Math.pow(R,3)-Math.pow(Ri,3));
   }
   const area=Math.PI*r*r;
-  return (_ballSpecs[key]={kind, r, m, I, k:I/(m*r*r), kd:0.5*A.rho*A.cd*area/m, kl0:0.5*A.rho*area/m*A.clSlope, smax:A.clSMax});
+  return (_ballSpecs[key]={kind, src, r, m, I, k:I/(m*r*r), kd:0.5*A.rho*A.cd*area/m, kl0:0.5*A.rho*area/m*A.clSlope, smax:A.clSMax});
 }
 
 /* Make o a ball: at rest on the tiles unless o (or opts) says otherwise. */
@@ -95,7 +100,7 @@ function ballWorld(){
       const B=this.boxes(dt,boxes||[]);
       for(let i=0;i<balls.length;i++){ const b=balls[i]; b._i=i; if(b.sunk) continue;
         // a sleeping ball wakes when a robot comes up to it
-        if(b.sleep) for(const X of B) if(X.moved&&b.x>X.x0-0.06&&b.x<X.x1+0.06&&b.y>X.y0-0.06&&b.y<X.y1+0.06){ b.sleep=false; b.still=0; break; }
+        if(b.sleep) for(const X of B) if(b.x>X.x0-0.06&&b.x<X.x1+0.06&&b.y>X.y0-0.06&&b.y<X.y1+0.06&&(X.moved||ballBoxPen(b,ballSpec(b.kind).r,X))){ b.sleep=false; b.still=0; break; }
       }
       for(let s=1;s<=n;s++){
         const f=s/n;
@@ -103,7 +108,7 @@ function ballWorld(){
         for(const b of balls){
           if(b.sunk||b.sleep) continue;
           if(b.hold){ this.carry(b,B,h); continue; }
-          const sp=ballSpec(b.kind), V=Math.hypot(b.vx,b.vy,b.vz);
+          const sp=ballSpec(b.kind), V=Math.sqrt(b.vx*b.vx+b.vy*b.vy+b.vz*b.vz);
           // a fast ball moves at most 0.4 r between contact checks, so it can't skip through a thin CELL wall
           const m=Math.min(8,Math.max(1,Math.ceil(V*h/(0.4*sp.r)))), hm=h/m;
           b._floor=false;
@@ -115,8 +120,9 @@ function ballWorld(){
         }
         this.pairs(balls);
         // a ball another one knocked into a robot comes back out: the robots win
-        if(B.length) for(const b of balls) if(!b.sunk&&!b.sleep&&!b.hold) this.robots(b,ballSpec(b.kind),B,null);
-        for(const b of balls) if(!b.sunk&&!b.sleep&&!b.hold) ballRest(b,ballSpec(b.kind),h);
+        if(B.length) for(const b of balls) if(b._pm){ b._pm=false; if(!b.sunk&&!b.sleep&&!b.hold) this.robots(b,ballSpec(b.kind),B,null); }
+        // asleep only at the end of a tick, so a robot arriving later in it always finds the ball awake
+        for(const b of balls) if(!b.sunk&&!b.sleep&&!b.hold) ballRest(b,ballSpec(b.kind),h,s===n);
       }
       this.steps++;
       this.ms=ballNow()-t0; this.msAvg=this.msAvg?this.msAvg*0.95+this.ms*0.05:this.ms;
@@ -145,8 +151,11 @@ function ballWorld(){
        (a robot can shove a ball into a wall: then it squirts out sideways). */
     collide(b,sp,B,ev){
       const S=this.statics, r=sp.r;
-      for(const C of S){
-        if(b.x<C.x0-r||b.x>C.x1+r||b.y<C.y0-r||b.y>C.y1+r||b.z<C.z0-r||b.z>C.z1+r) continue;
+      for(let i=0;i<S.length;i++){
+        const C=S[i];
+        // a group: the next n pieces, skipped together when the ball is nowhere near their box
+        if(b.x<C.x0-r||b.x>C.x1+r||b.y<C.y0-r||b.y>C.y1+r||b.z<C.z0-r||b.z>C.z1+r){ if(C.type==="group") i+=C.n; continue; }
+        if(C.type==="group") continue;
         if(C.type==="sdf"&&C.sink&&C.sink(b,r)){ b.sunk=C.al||"in"; ev.push({type:"sink", ball:b, al:C.al}); return; }
         if(ballStatic(b,sp,C)&&!b.hitTag){ b.hitTag=C.tagOf?C.tagOf(b):C.tag; ev.push({type:"hit", ball:b, tag:b.hitTag}); }
       }
@@ -197,9 +206,14 @@ function ballWorld(){
 
     /* Ball on ball: the pairs from a spatial hash, in array order (the same every run). */
     pairs(balls){
-      const C=BALL_K.cell, grid=new Map(), key=(i,j)=>(i+512)*2048+(j+512);
+      let any=false; for(const b of balls) if(!b.sunk&&!b.sleep){ any=true; break; }
+      if(!any) return;
+      const C=BALL_K.cell, grid=this._grid||(this._grid=new Map()), used=this._used||(this._used=[]), key=(i,j)=>(i+512)*2048+(j+512);
+      for(const L of used) L.length=0;
+      used.length=0;
+      if(grid.size>4096) grid.clear();
       for(const b of balls){ if(b.sunk) continue;
-        const k=key(Math.floor(b.x/C),Math.floor(b.y/C)); let L=grid.get(k); if(!L) grid.set(k,L=[]); L.push(b); }
+        const k=key(Math.floor(b.x/C),Math.floor(b.y/C)); let L=grid.get(k); if(!L) grid.set(k,L=[]); if(!L.length) used.push(L); L.push(b); }
       for(const a of balls){
         if(a.sunk||a.sleep) continue;
         const i=Math.floor(a.x/C), j=Math.floor(a.y/C);
@@ -223,7 +237,7 @@ function ballBoxAt(X,f){ X.x=X.px+X.dx*f; X.y=X.py+X.dy*f; X.h=X.ph+X.dh*f; X.c=
 /* In the air: gravity, drag and backspin lift, RK4 like the Shot Sim's own flights. */
 function ballFly(b,sp,h){
   const g=BALL_K.g, kd=sp.kd, kl0=sp.kl0, smax=sp.smax, r=sp.r;
-  const W=Math.hypot(b.wx,b.wy,b.wz), ux=W>1e-9?b.wx/W:0, uy=W>1e-9?b.wy/W:0, uz=W>1e-9?b.wz/W:0, wr=W*r;
+  const W=Math.sqrt(b.wx*b.wx+b.wy*b.wy+b.wz*b.wz), ux=W>1e-9?b.wx/W:0, uy=W>1e-9?b.wy/W:0, uz=W>1e-9?b.wz/W:0, wr=W*r;
   // drag -kd V v; lift kl0 S V (u x v), S = w r / V capped (the Shot Sim's: kl0 S V^2 across the way it goes)
   const acc=(vx,vy,vz,o)=>{
     const V=Math.sqrt(vx*vx+vy*vy+vz*vz);
@@ -247,20 +261,20 @@ function ballFly(b,sp,h){
 const _ka=[0,0,0], _kb=[0,0,0], _kc=[0,0,0], _kd=[0,0,0];
 
 /* Settle a ball on the tiles: rolling resistance, spin matched to rolling, and sleep. */
-function ballRest(b,sp,h){
+function ballRest(b,sp,h,canSleep){
   const r=sp.r;
   if(b._floor){
     // still slipping (a spun ball landing): friction in contact does that; rolling: the foam holds it back
     const sx=b.vx-r*b.wy, sy=b.vy+r*b.wx;
-    if(Math.hypot(sx,sy)<0.03){
-      const v=Math.hypot(b.vx,b.vy), dv=BALL_K.rollC*BALL_K.g*h;
+    if(sx*sx+sy*sy<9e-4){
+      const v=Math.sqrt(b.vx*b.vx+b.vy*b.vy), dv=BALL_K.rollC*BALL_K.g*h;
       if(v<=dv){ b.vx=0; b.vy=0; } else { const k=(v-dv)/v; b.vx*=k; b.vy*=k; }
       b.wx=-b.vy/r; b.wy=b.vx/r;
     }
     b.wz*=Math.max(0,1-BALL_K.spinZ*h);
-    if(Math.hypot(b.vx,b.vy)<BALL_K.sleepV&&Math.abs(b.vz)<0.05&&b.z<r+2e-3){
+    if(b.vx*b.vx+b.vy*b.vy<BALL_K.sleepV*BALL_K.sleepV&&Math.abs(b.vz)<0.05&&b.z<r+2e-3){
       b.still+=h;
-      if(b.still>=BALL_K.sleepT){ b.sleep=true; b.vx=b.vy=b.vz=b.wx=b.wy=b.wz=0; b.z=r; }
+      if(b.still>=BALL_K.sleepT&&canSleep){ b.sleep=true; b.vx=b.vy=b.vz=b.wx=b.wy=b.wz=0; b.z=r; }
     }else b.still=0;
   }else b.still=0;
 }
@@ -361,6 +375,7 @@ function ballPair(a,b){
   if(b.sleep&&(vn<-0.03||pen>0.002)){ b.sleep=false; b.still=0; }
   const wa=a.hold?0:1/sa.m, wb=b.sleep||b.hold?0:1/sb.m, W=wa+wb;
   if(W<=0) return;
+  a._pm=b._pm=true;
   a.x+=nx*pen*wa/W; a.y+=ny*pen*wa/W; a.z+=nz*pen*wa/W;
   b.x-=nx*pen*wb/W; b.y-=ny*pen*wb/W; b.z-=nz*pen*wb/W;
   if(vn>=0) return;

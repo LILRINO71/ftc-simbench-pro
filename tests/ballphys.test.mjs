@@ -117,8 +117,15 @@ test('ballphys: in a match nothing goes through a robot, misses roll on, and the
   M.reset({ period: 'TeleOp', user: 'red', userPose: sim.chassis, seed: 11, skill: 'elite' });
   let worst = 0, pinched = 0, rolled = 0;
   const seen = new Map(), H = E.Field.half();
+  let entries = 0, landedIn = 0;
   for (let i = 0; i < 90 / 0.02; i++) {
     M.tick(0.02, sim);
+    if (M.entries.length > entries) {
+      // the NECTAR a HUMAN PLAYER just entered: on its way down into the LOADING ZONE
+      entries = M.entries.length;
+      const en = M.entries[entries - 1], e = M.floor.filter((q) => q.kind === 'nectar' && q.color === en.al).sort((p, q) => q.id - p.id)[0], z = M.zone(en.al);
+      if (e && e.x >= z.x0 - 0.05 && e.x <= z.x1 + 0.05 && e.y >= z.y0 && e.y <= z.y1 && e.z < 0.2) landedIn++;
+    }
     for (const e of M.floor) {
       if (e.hold) continue;
       const r = E.ballSpec(e.kind).r, onWall = H - Math.max(Math.abs(e.x), Math.abs(e.y)) < r + 0.002;
@@ -135,7 +142,7 @@ test('ballphys: in a match nothing goes through a robot, misses roll on, and the
   assert.ok(worst < 0.003, 'deepest a loose ball got into an AI robot: ' + (worst * 1000).toFixed(1) + ' mm');
   assert.ok(pinched < 0.02, 'squeezed against the wall by at most 2 cm: ' + (pinched * 1000).toFixed(1) + ' mm');
   assert.ok(rolled > 200, 'loose elements really move: ' + rolled);
-  const hp = M.floor.filter((e) => e.kind === 'nectar');
-  assert.ok(M.entries.length > 0 && hp.length > 0, 'HUMAN PLAYERS entered NECTAR');
+  assert.ok(entries > 0, 'HUMAN PLAYERS entered NECTAR');
+  assert.equal(landedIn, entries, 'each one comes down in its LOADING ZONE');
   M.on = false;
 });
