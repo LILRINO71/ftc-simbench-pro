@@ -40,6 +40,12 @@ const MASS_MIN_T = THIN_T;
                prints FTC parts at -> ~0.35 of the envelope.
      belt      rubber/cable. The hull of a belt loop or a wire run is almost
                entirely air, so the fill is tiny.
+     chain     a part of kind belt named as a chain is steel roller chain, not
+               rubber. #25 chain is ~0.13 kg/m (0.09 lb/ft published); a loop
+               round two 32-tooth sprockets 167 mm apart is 0.54 m, ~0.07 kg,
+               and its hull is a 9 mm slab of the loop's outline, ~140 cm^3:
+               7850 x 0.065. A longer loop or smaller sprockets fill less of
+               their hull and a shorter one more, up to about twice as much.
      fastener  steel 7850, minus thread valleys, drives and countersinks. */
 const MATERIALS = {
   // density x fill is the mass of a part's convex hull; `solid` is the density of the
@@ -53,6 +59,7 @@ const MATERIALS = {
   clear:       {density:1200, fill:0.90, solid:1200, label:"polycarbonate"},
   printed:     {density:1240, fill:0.35, solid:1100, label:"3D print"},
   belt:        {density:1200, fill:0.10, solid:1200, label:"belt/cable"},
+  chain:       {density:7850, fill:0.065, solid:7850, label:"steel roller chain"},
   fastener:    {density:7850, fill:0.55, solid:7850, label:"steel fastener"},
   game:        {density:0,    fill:0,    solid:0,    label:"game element"}
 };
@@ -186,6 +193,8 @@ function partMass(solid, opts){
   // a game element drawn in the robot (an artifact in the hopper) is not the robot's mass;
   // what it carries is the payload setting
   if(kind === "game") return {kg:0, how:"game", density:0, fill:0, volume:vol, why:"a game element, not part of the robot"};
+  // drawn and moved as a belt, weighed as what it is: a roller chain is steel
+  if(kind === "belt" && solid && kindSays(solid.name, /\bchains?\b/g)) kind = "chain";
   // a surface (Onshape gave it no mass and no volume, src/onshapecad.js): nothing to weigh
   if(solid && solid.massless) return {kg:0, how:"surface", density:0, fill:0, volume:0, why:"a surface, not a solid: it has no volume"};
   // the CAD's own mass with a real material (Onshape's materials, a URDF <inertial>): a

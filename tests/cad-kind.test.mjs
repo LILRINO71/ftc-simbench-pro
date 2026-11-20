@@ -2,11 +2,12 @@
 // may be a drive wheel, and the drive wheels decide where the floor is (src/drivetrain.js
 // dtOnFloor, src/frame.js robotFrame). The names were matched as substrings: "contROLLER" was a
 // wheel, so a 2016 robot's four electronics boxes became its drive base and the robot ended
-// 483 mm under its own floor; "Sample Intake" weighed nothing as a game element. A name is now
-// read as words ("IntakeRoller" and "motor_mount" too), by its head ("Servo Frame (..., for
-// Standard Size Servos)" is a frame), and a word followed by "mount", "hub", "chain",
-// "controller" and the like only describes the part. The floor is the lowest wheels, all of them
-// when the lowest stands alone, unless that one is far smaller than the rest.
+// 483 mm under its own floor; "Sample Intake" weighed nothing as a game element; a steel roller
+// chain was weighed as a rubber tyre. A name is now read as words ("IntakeRoller" and
+// "motor_mount" too), by its head ("Servo Frame (..., for Standard Size Servos)" is a frame), and
+// a word followed by "mount", "hub", "chain", "controller" and the like only describes the part.
+// A roller chain is drawn as a belt and weighed as steel chain. The floor is the lowest wheels,
+// all of them when the lowest stands alone, unless that one is far smaller than the rest.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { loadEngine } from './load.mjs';
@@ -54,6 +55,23 @@ test('part kinds: nothing that is not a wheel is a candidate for the drive base'
   for (const name of ['Wheel Spacer', 'Wheel Mount Plate', 'Wheel Bracket']) assert.equal(E.dtIsWheel({ name }), false, name);
   // a part number that says drive wheel decides, whatever the name
   assert.equal(E.dtIsWheel({ name: 'Wheel Spacer', part: '3213-3606-0002', kind: 'metal' }), true);
+});
+
+test('part mass: a roller chain is steel, drawn as a belt', () => {
+  // a #25 loop round two 32-tooth sprockets 167 mm apart: a 243 x 76 mm outline, 8.6 mm thick
+  // (ultimate-drivebase.stp's), 0.54 m of chain at ~0.13 kg/m published: ~0.07 kg
+  const pts = [];
+  for (const cx of [-0.0834, 0.0834]) for (let i = 0; i < 24; i++) for (const y of [-0.0043, 0.0043]) {
+    const t = (i / 24) * 2 * Math.PI; pts.push([cx + 0.0382 * Math.cos(t), y, 0.0382 * Math.sin(t)]);
+  }
+  const chain = { name: 'Roller Chain', part: null, kind: E.solidKind('Roller Chain', null), pts };
+  assert.equal(chain.kind, 'belt', 'drawn as a belt, and no wheel');
+  const m = E.partMass(chain);
+  assert.ok(m.kg > 0.05 && m.kg < 0.10, `a #25 loop weighs about 0.07 kg: ${m.kg.toFixed(3)} kg (${m.why})`);
+  assert.match(m.why, /^steel roller chain 7850 kg\/m\^3 x 0\.065 fill/);
+  // a timing belt of the same outline stays rubber, and a chain sprocket is no chain
+  assert.ok(E.partMass(Object.assign({}, chain, { name: 'Timing Belt' })).kg < 0.03);
+  assert.notEqual(E.partMass(Object.assign({}, chain, { name: 'Chain Sprocket', kind: E.solidKind('Chain Sprocket', null) })).why.slice(0, 5), 'steel');
 });
 
 test('part mass: a robot part named after a game element is the robot', () => {
