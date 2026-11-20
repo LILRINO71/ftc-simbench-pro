@@ -101,8 +101,26 @@ test('sim: a rising-edge bumper steps the accumulator once per press', () => {
   near(E.Sim.dev.rotate.act, 0.8, 1e-6, 'servo follows the variable');
 });
 
-test('sim: with CAD specs the speed servo stalls before reaching ARM_UP', () => {
+/* The sample CAD has the goBILDA 25-2 Torque servo on the arm and the 25-3 Speed
+   servo on the claw, as its code's comments say. These benches put the Speed
+   servo on the arm in the CAD, so the CAD and the code disagree about it. */
+function speedServoOnArm(b) {
+  b.cad.mechs.find((m) => m.id === 'Arm').part = '2000-0025-0003';
+  return b;
+}
+
+test('sim: the sample CAD and its code agree, so the arm reaches ARM_UP with CAD specs too', () => {
   const b = sampleBench(E, E.SAMPLE_JAVA, 'cad');
+  assert.equal(E.hwFromPart(b.cad.mechs.find((m) => m.id === 'Arm').part).role, 'Torque');
+  E.Sim.reset(b.code, b.cad, b.map, b.opts); freshPads();
+  E.Sim.pad[2].x = true;
+  run(E, 2);
+  assert.equal(E.Sim.dev.arm.stalled, false);
+  near(E.Sim.dev.arm.act, 0.4, 1e-6, 'arm');
+});
+
+test('sim: with CAD specs the speed servo stalls before reaching ARM_UP', () => {
+  const b = speedServoOnArm(sampleBench(E, E.SAMPLE_JAVA, 'cad'));
   E.Sim.reset(b.code, b.cad, b.map, b.opts); freshPads();
   E.Sim.pad[2].x = true;
   run(E, 2);
@@ -156,14 +174,17 @@ test('sim: STOP_AND_RESET_ENCODER zeroes the encoder', () => {
 const titles = (F) => F.map((f) => `${f.sev}:${f.title.replace(/<[^>]+>/g, '')}`);
 
 test('analysis: CAD trust reports the stalled arm and the swapped servos', () => {
-  const b = sampleBench(E, E.SAMPLE_JAVA, 'cad');
+  const b = speedServoOnArm(sampleBench(E, E.SAMPLE_JAVA, 'cad'));
   const F = E.analyze(b.code, b.cad, b.map, b.opts);
   assert.ok(F.some((f) => f.key === 'torque:arm' && f.sev === 'fail'), titles(F).join('\n'));
   assert.ok(F.some((f) => f.key === 'swap' && f.sev === 'fail'));
+  // the sample as drawn: no disagreement to report
+  const ok = sampleBench(E, E.SAMPLE_JAVA, 'cad');
+  assert.ok(!E.analyze(ok.code, ok.cad, ok.map, ok.opts).some((f) => f.key === 'swap'), 'the sample CAD matches its code');
 });
 
 test('analysis: code trust demotes the CAD disagreement to a note', () => {
-  const b = sampleBench(E, E.SAMPLE_JAVA, 'code');
+  const b = speedServoOnArm(sampleBench(E, E.SAMPLE_JAVA, 'code'));
   const F = E.analyze(b.code, b.cad, b.map, b.opts);
   assert.ok(!F.some((f) => f.key === 'torque:arm' && f.sev === 'fail'));
   assert.equal(F.find((f) => f.key === 'swap').sev, 'info');
@@ -234,7 +255,7 @@ test('rig: a parent loop is broken instead of hanging', () => {
 });
 
 test('rig: a typed lever overrides the measured one in the torque check', () => {
-  const b = sampleBench(E, E.SAMPLE_JAVA, 'cad');
+  const b = speedServoOnArm(sampleBench(E, E.SAMPLE_JAVA, 'cad'));
   const arm = b.cad.mechs.find((m) => m.id === 'Arm');
   const before = E.analyze(b.code, b.cad, b.map, b.opts).find((f) => f.key === 'torque:arm').sev;
   arm.leverOverride = 0.06;

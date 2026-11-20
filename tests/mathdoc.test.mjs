@@ -8,9 +8,10 @@ import { loadEngine, loadWithField, sampleBench } from './load.mjs';
 const E = loadEngine();
 
 /* ---- the rig ----------------------------------------------------------
-   Four goBILDA Yellow Jacket 435 rpm motors (13.7:1, 1.68 N.m stall) on
-   96 mm wheels, 12.5 kg, and one servo on a lift pivot that rests 30 deg
-   above horizontal. Those are the only inputs; everything else is derived. */
+   Four goBILDA Yellow Jacket 435 rpm motors (13.7:1, 18.7 kg.cm = 1.8338436 N.m
+   stall, goBILDA's page) on 96 mm wheels, 12.5 kg, and one unspecified servo
+   (the 25-2 Torque's 21.6 kg.cm = 2.1182364 N.m) on a lift pivot that rests
+   30 deg above horizontal. Those are the only inputs; everything else is derived. */
 const RIG_JAVA = `
 @TeleOp(name="Rig")
 public class Rig extends LinearOpMode {
@@ -181,12 +182,12 @@ test('the centre-of-mass offset points from the wheels to the mass', () => {
 
 test('traction governs this rig, and the report says so', () => {
   // a_traction = 0.9 * 9.80665 = 8.825985
-  // a_motor    = 4 * 1.68 / (0.048 * 12.5) = 6.72 / 0.6 = 11.2
+  // a_motor    = 4 * 1.8338436 / (0.048 * 12.5) = 7.3353742 / 0.6 = 12.2256237
   const s = sec(E.mathReport(rigBench()), 'traction');
   near(row(s, /traction-limited/).value, 0.9 * GRAV, 1e-9, 'a_traction');
-  near(row(s, /motor-limited/).value, 11.2, 1e-9, 'a_motor');
+  near(row(s, /motor-limited/).value, 12.2256237, 1e-6, 'a_motor');
   const g = row(s, /governing limit/);
-  near(g.value, 8.825985, 1e-6, 'governing acceleration');   // max() would give 11.2
+  near(g.value, 8.825985, 1e-6, 'governing acceleration');   // max() would give 12.23
   assert.ok(/traction governs/.test(g.expr), `expected traction to govern: "${g.expr}"`);
 });
 
@@ -215,23 +216,28 @@ test('holding torque takes the cosine in degrees, not radians', () => {
 });
 
 test('the safety margin derates the stall torque, it does not inflate the load', () => {
-  // n = 1.5 N.m * 0.30 / 0.5010757 = 0.45 / 0.5010757 = 0.898067
-  // applying the duty to the requirement instead would give 9.98
+  // n = 2.1182364 N.m * 0.30 / 0.5010757 = 0.6354709 / 0.5010757 = 1.268213
+  // applying the duty to the requirement instead would give 14.09
   const s = sec(E.mathReport(rigBench()), 'torque');
-  near(row(s, /stall torque/).value, 1.5, 1e-12, 'stall torque');
+  near(row(s, /stall torque/).value, 2.1182364, 1e-6, 'stall torque');
   const m = row(s, /safety margin/);
-  near(m.value, 0.898067, 1e-5, 'safety margin');
-  assert.ok(/cannot hold its load/.test(m.note), 'a margin under 1.0 should be called out');
+  near(m.value, 1.268213, 1e-5, 'safety margin');
+  assert.ok(!/cannot hold its load/.test(m.note), 'a margin over 1.0 is not called out');
+  // at a 20% duty: n = 2.1182364 * 0.20 / 0.5010757 = 0.845476, under 1.0
+  const low = sec(E.mathReport(rigBench({ opts: { payloadKg: 0.180, duty: 0.20, trust: 'code', mu: 0.90, batteryV: 12 } })), 'torque');
+  const m2 = row(low, /safety margin/);
+  near(m2.value, 0.845476, 1e-5, 'safety margin at 20% duty');
+  assert.ok(/cannot hold its load/.test(m2.note), 'a margin under 1.0 should be called out');
 });
 
 /* ================================================ feedforward and PID ==== */
 
 test('kV and kA are volts per unit of motion', () => {
-  // kV = 12 / 2.1865485 = 5.4881015 V.s/m ; kA = 12 / 11.2 = 1.071429 V.s^2/m
+  // kV = 12 / 2.1865485 = 5.4881015 V.s/m ; kA = 12 / 12.2256237 = 0.981545 V.s^2/m
   // a kV built on rpm rather than m/s would land near 0.002
   const s = sec(E.mathReport(rigBench()), 'ff');
   near(row(s, /^kV/).value, 5.4881015, 1e-6, 'kV');
-  near(row(s, /^kA/).value, 1.071429, 1e-6, 'kA');
+  near(row(s, /^kA/).value, 0.981545, 1e-6, 'kA');
 });
 
 test('the PID gains the OpMode actually sets are the ones reported', () => {
