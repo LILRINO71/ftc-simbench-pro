@@ -12,7 +12,7 @@ const store={
 
 let CODE=null, CAD=null, MAP={}, FINDINGS=[], activePad=2;
 let JOLT=null;                     // Jolt Physics once loaded (Physics.loadJolt), for solved mechanisms
-const OPTS={payloadKg:0.180, duty:0.30, trust:"code", robotConfig:null, front:"+x", baseModel:"auto", shooterModel:"auto", shift:null};
+const OPTS={payloadKg:0.180, duty:0.30, trust:"code", robotConfig:null, front:"+x", baseModel:"auto", shooterModel:"auto", shift:null, servoVolts:5};
 /* "Ignore" on a finding. A finding's key names the check (drive:feel), not what it was judged
    on, so an ignore is kept for the robot and the OpMode it was given on, with the severity it
    had: it hides that check there at that severity or milder, and never a worse one (an ignored
@@ -724,7 +724,7 @@ function exportRig(){
   return {
     format:"ftc-sim-bench.rig", version:1,
     cad:(CAD&&CAD.name)||null, opmode:(CODE&&CODE.opmode)||null,
-    trust:OPTS.trust, payloadKg:OPTS.payloadKg, duty:OPTS.duty, turretScale:View.turretScale,
+    trust:OPTS.trust, payloadKg:OPTS.payloadKg, duty:OPTS.duty, servoVolts:OPTS.servoVolts===6?6:5, turretScale:View.turretScale,
     front:OPTS.front, baseModel:OPTS.baseModel, shooterModel:OPTS.shooterModel, shot:Shots.cfg||null,
     joints:(CAD?CAD.mechs:[]).map(m=>({
       id:m.id, label:m.label||m.id, kind:m.kind, parent:m.parent, dir:m.dir||1,
@@ -743,6 +743,8 @@ function applyRig(r){
   if(r.trust) OPTS.trust=r.trust;
   if(typeof r.payloadKg==="number") OPTS.payloadKg=r.payloadKg;
   if(typeof r.duty==="number") OPTS.duty=r.duty;
+  // what feeds the servos: a Servo Power Module's 6 V, else the hub's own 5 V port (a rig saved before this said nothing)
+  OPTS.servoVolts=r.servoVolts===6?6:5;
   if(typeof r.turretScale==="number") View.turretScale=r.turretScale;
   if(r.front&&FRONTS[r.front]!==undefined) OPTS.front=r.front;
   if(/^(auto|show|hide)$/.test(r.baseModel||"")) OPTS.baseModel=r.baseModel;
@@ -1533,6 +1535,7 @@ function reloadSim(){
 function rebuild(){ analyzeAll(); reloadSim(); }
 function syncOptionControls(){
   $$("#trustSeg button").forEach(b=>b.classList.toggle("on",b.dataset.trust===OPTS.trust));
+  $$("#servoVoltSeg button").forEach(b=>b.classList.toggle("on",+b.dataset.volts===(OPTS.servoVolts===6?6:5)));
   $("#trustNote").textContent=OPTS.trust==="code"
     ?"Servo and motor types come from your declarations and comments. The CAD is used for geometry only."
     :"Servo and motor types come from the part numbers in the STEP assembly.";
@@ -3107,7 +3110,7 @@ const Session={
       // the file name if the workspace kept one, else what the OpMode calls itself
       if(s.java) addOpModeFromText(s.opName||((s.code&&s.code.opmode)||"Workspace").replace(/[^\w.-]+/g,"")+".java",s.java);
       // mu and physics are null in a workspace that didn't say: the bench keeps its own
-      if(s.opts){ for(const k of ["payloadKg","duty","trust","front","baseModel","shooterModel","mu","physics"]) if(s.opts[k]!=null) OPTS[k]=s.opts[k]; syncOptionControls(); }
+      if(s.opts){ for(const k of ["payloadKg","duty","servoVolts","trust","front","baseModel","shooterModel","mu","physics"]) if(s.opts[k]!=null) OPTS[k]=s.opts[k]; syncOptionControls(); }
       if(s.map&&Object.keys(s.map).length) MAP=s.map;
       // the shooter as it was set up
       if(s.shots){
@@ -3437,6 +3440,9 @@ function boot(){
   });
   $("#trustSeg").addEventListener("click",e=>{ const b=e.target.closest("button"); if(!b) return;
     OPTS.trust=b.dataset.trust; syncOptionControls(); rebuild(); saveRig(); });
+  // the sim reads OPTS.servoVolts every tick (Sim.opts is OPTS), so the servos change at once; the checks follow
+  $("#servoVoltSeg").addEventListener("click",e=>{ const b=e.target.closest("button"); if(!b) return;
+    OPTS.servoVolts=+b.dataset.volts===6?6:5; syncOptionControls(); analyzeAll(); saveRig(); });
 
   // rig
   $("#addJoint").addEventListener("click",addManualJoint);

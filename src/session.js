@@ -294,7 +294,11 @@ const {sessionFromBench, packSession, unpackSession} = (function(){
     h: wrapPi(num(at(v, "h"), 0, C, "pose.h"))                             // radians
   });
 
-  const readOpts = (v, C) => ({
+  /* What feeds the servos (src/hardware.js servoVolts): 6 for a Servo Power Module, else the hub
+     port's 5. A file saved before the setting existed says nothing, and gets nothing back (the
+     bench reads that as the hub port), so it still packs to the same bytes. */
+  const withVolts = (v, o) => { const x = at(v, "servoVolts"); if (x != null) o.servoVolts = x === 6 ? 6 : 5; return o; };
+  const readOpts = (v, C) => withVolts(v, {
     payloadKg: clamp(num(at(v, "payloadKg"), 0.18, C, "opts.payloadKg"), 0, 20),
     duty: clamp(num(at(v, "duty"), 0.3, C, "opts.duty"), 0, 1),
     trust: oneOf(at(v, "trust"), ["code", "cad"], "code"),
@@ -356,7 +360,7 @@ const {sessionFromBench, packSession, unpackSession} = (function(){
     const flatVal = (x, k) => x === null ? null : typeof x === "boolean" ? x : typeof x === "number" ? num(x, undefined, C, "rig.hardware " + k)
       : typeof x === "string" ? str(x, C, "rig.hardware " + k) : undefined;
     const d = at(v, "drive"), sh = at(v, "shift");
-    return {
+    return withVolts(v, {
       format: RIG_FORMAT, version: 1,
       cad: str(at(v, "cad"), C, "rig.cad"),
       opmode: str(at(v, "opmode"), C, "rig.opmode"),
@@ -391,7 +395,7 @@ const {sessionFromBench, packSession, unpackSession} = (function(){
         d: clamp(num(at(d, "d"), 0.096, C, "rig.drive.d"), 0.04, 0.2), track: clamp(num(at(d, "track"), 0.36, C, "rig.drive.track"), 0.1, 0.6),
         base: clamp(num(at(d, "base"), 0.3, C, "rig.drive.base"), 0, 0.6), pattern: at(d, "pattern") === "O" ? "O" : "X"},
       setup: dict(at(v, "setup"), C, "rig.setup", x => x === true)
-    };
+    });
   }
   /* The OpMode's file name, shown in the OpMode menu: never a path. */
   const fileName = (v, C) => (str(v, C, "opName") || "").replace(/[\u0000-\u001f\u007f/\\:*?"<>|]/g, "").trim().slice(0, 128);

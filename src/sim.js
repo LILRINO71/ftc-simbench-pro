@@ -456,7 +456,8 @@ const Sim={
     }
     // the solver: every solved joint's motor curve, gravity, limits, gears and loops at
     // once, then each device's encoder from where its joint went
-    if(W){ W.step(dt,JoltMech.deviceCommands(this.dev,W),(this.opts&&this.opts.substeps)||4); JoltMech.readBack(this.dev,W,dt); }
+    // a solved servo runs at the volts its port gives, as a posed one does above
+    if(W){ W.step(dt,JoltMech.deviceCommands(this.dev,W,{servoVolts:servoVolts(this.opts)}),(this.opts&&this.opts.substeps)||4); JoltMech.readBack(this.dev,W,dt); }
   },
   /* A slide carrying its load out moves the centre of mass with it. The shift
      is the carried mass over the mass the dynamics actually runs on — never the

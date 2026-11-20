@@ -375,6 +375,9 @@
             <div class="seg" id="trustSeg" title="Where servo and motor types come from"><button data-trust="code" class="on">code</button><button data-trust="cad">CAD</button></div></div>
           <div class="scrollx"><table class="grid" id="mapTable"></table></div>
           <p class="hint" id="trustNote">Servo and motor types come from your declarations and comments. The CAD is used for geometry only.</p>
+          <div class="form2 servo-power"><span id="servoVoltLabel">Servo power</span>
+            <div class="seg" id="servoVoltSeg" role="group" aria-labelledby="servoVoltLabel" title="What feeds the servos: their speed and torque are taken at this voltage"><button data-volts="5" class="on">hub port (5 V)</button><button data-volts="6">Servo Power Module (6 V)</button></div></div>
+          <p class="hint">Servo figures are quoted at 6 V; a Control or Expansion Hub's servo port gives 5 V, so a servo there is about a sixth slower and weaker. Pick the Servo Power Module if yours run from one.</p>
         </div>
         <div class="sec" data-sec="cfgxml" data-collapsed="1">
           <div class="sec-head"><h3>Robot configuration</h3><span class="spacer"></span>

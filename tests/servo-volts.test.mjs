@@ -6,7 +6,8 @@
 // 60/0.25 + (60/0.20 - 60/0.25) x 0.2/1.2 = 250 deg/s (0.24 s per 60 deg).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { loadEngine } from './load.mjs';
+import fs from 'node:fs';
+import { loadEngine, sampleBench } from './load.mjs';
 
 const E = loadEngine();
 const KGCM = 0.0980665;
@@ -60,4 +61,79 @@ test('servo volts: the Checks tab\'s holding check uses the torque at 5 V, or 6 
   near(usable(spm), 21.6 * KGCM * 0.3, 1e-3, 'usable torque on a Servo Power Module');
   assert.match(hub.math, /stall at 5 V/);
   assert.match(spm.math, /stall at 6 V/);
+});
+
+/* One servo on a joint the solver owns (Physics -> Mechanisms -> solved, src/joltmech.js), with a
+   stand-in for the Jolt world: what the bench commands it with. */
+function solvedServo() {
+  const spec = E.specFor({ name: 'arm', type: 'Servo', declaredRole: 'Torque' }, null, 'code');
+  const world = { joints: new Map([['arm', { lin: false, q: 0, w: 0 }]]), sent: null, step(dt, cmds) { this.sent = cmds; } };
+  const dev = { arm: { kind: 'servo', spec, mech: { id: 'arm', kind: 'revolute', fromMate: { name: 'arm' } }, cmd: 1, act: 0, restPos: 0, sec60: spec.sec60, travelDeg: 300, stalled: false } };
+  return { spec, world, dev };
+}
+const DEG = Math.PI / 180;
+
+test('servo volts: a solved servo gets the same speed and torque as a posed one, 5 V unless told 6 V', () => {
+  const { spec, world, dev } = solvedServo();
+  const hub = E.JoltMech.deviceCommands(dev, world).arm, spm = E.JoltMech.deviceCommands(dev, world, { servoVolts: 6 }).arm;
+  near(hub.rate / DEG, 250, 1e-9, 'deg/s on the hub port, as the posed sim slews it');
+  near(hub.stall, 17.933333333 * KGCM, 1e-8, 'stall on the hub port');
+  near(spm.rate / DEG, 300, 1e-9, 'deg/s on a Servo Power Module');
+  near(spm.stall, spec.stallNm, 1e-12, 'stall on a Servo Power Module');
+  // the sim hands the solver its own setting, every step
+  for (const [opts, rate] of [[{}, 250], [{ servoVolts: 6 }, 300]]) {
+    const S = Object.create(E.Sim);
+    Object.assign(S, { rig: null, drivetrain: null, mechWorld: world, physics: 'rigid', opts: Object.assign({ duty: 0.3, payloadKg: 0 }, opts), dev });
+    S.stepDevices(0.02);
+    near(world.sent.arm.rate / DEG, rate, 1e-9, 'deg/s the sim sent the solver with ' + JSON.stringify(opts));
+    near(slew(opts) / 0.1, rate, 1e-9, 'and the posed sim with the same setting');
+  }
+});
+
+test('servo volts: the setting is kept in a workspace file and in the robot\'s saved rig, and an old file means the hub port', () => {
+  // a real workspace of the sample robot, with the setting written into its options and its rig
+  const b = sampleBench(E); b.java = E.SAMPLE_JAVA; b.chassis = { x: 0, y: 0, h: 0 };
+  const base = JSON.parse(E.packSession(E.sessionFromBench(b)));
+  base.rig = { format: 'ftc-sim-bench.rig', version: 1, duty: 0.3 };
+  const read = (opts, rig) => {
+    const r = E.unpackSession(JSON.stringify(Object.assign({}, base, { opts: Object.assign({}, base.opts, opts), rig: Object.assign({}, base.rig, rig) })));
+    assert.equal(r.ok, true, r.error);
+    return r.session;
+  };
+  const six = read({ servoVolts: 6 }, { servoVolts: 6 });
+  assert.equal(six.opts.servoVolts, 6); assert.equal(six.rig.servoVolts, 6);
+  const back = E.unpackSession(E.packSession(six)).session;
+  assert.equal(back.opts.servoVolts, 6, 'and it packs back'); assert.equal(back.rig.servoVolts, 6);
+  for (const bad of [7, '6', -1, 0, 4.8, true]) {
+    const s = read({ servoVolts: bad }, { servoVolts: bad });
+    assert.equal(s.opts.servoVolts, 5, 'anything but 6 is the hub port: ' + JSON.stringify(bad)); assert.equal(s.rig.servoVolts, 5);
+  }
+  const old = read({}, {});
+  assert.equal('servoVolts' in old.opts, false, 'a file from before says nothing'); assert.equal('servoVolts' in old.rig, false);
+  assert.equal(E.servoVolts(old.opts), 5, 'which the sim reads as the hub port');
+
+  // the page's own save and restore (src/app.js exportRig / applyRig), run with the rest of the page stood in for
+  const src = fs.readFileSync(new URL('../src/app.js', import.meta.url), 'utf8');
+  const body = src.slice(src.indexOf('function exportRig(){'), src.indexOf('function applyDeviceMemory(){'));
+  const page = (OPTS) => new Function('OPTS', 'CAD', 'CODE', 'View', 'Shots', 'RIG_DEVICES', 'MAP', 'HW_USER', 'Ignores', 'IGNORED', 'ignoreRobot', 'SETUP', 'FRONTS',
+    'cleanDriveSpec', 'normJointKind', 'recomputeChain', 'syncOptionControls', 'saveIgnored', body + '\nreturn { exportRig, applyRig };')(
+    OPTS, { name: 'r', mechs: [] }, null, { turretScale: 0.55 }, { cfg: null, defaults: () => ({}) }, {}, {}, {}, { forRig: () => [], fromRig() {} }, {}, () => 'r',
+    { done: {} }, { '+x': 0 }, (d) => d, (k) => k, () => {}, () => {}, () => {});
+  const opts = { trust: 'code', payloadKg: 0.18, duty: 0.3, front: '+x', servoVolts: 6 };
+  const rig = page(opts).exportRig();
+  assert.equal(rig.servoVolts, 6, 'saved with the robot');
+  const fresh = { trust: 'code', payloadKg: 0.18, duty: 0.3, front: '+x', servoVolts: 5 };
+  page(fresh).applyRig(JSON.parse(JSON.stringify(rig)));
+  assert.equal(fresh.servoVolts, 6, 'and restored');
+  const other = Object.assign({}, rig); delete other.servoVolts;
+  page(fresh).applyRig(other);
+  assert.equal(fresh.servoVolts, 5, 'a robot saved before the setting runs on the hub port, not the last robot\'s setting');
+  // a workspace's options carry it too, and the control is where the servos are set up
+  assert.match(src, /for\(const k of \[[^\]]*"servoVolts"[^\]]*\]\) if\(s\.opts\[k\]!=null\) OPTS\[k\]=s\.opts\[k\]/);
+  assert.match(src, /const OPTS=\{[^}]*servoVolts:5\}/, 'the hub port by default');
+  assert.match(src, /\$\("#servoVoltSeg"\)\.addEventListener\("click"[^\n]*\n[^\n]*OPTS\.servoVolts=[^\n]*saveRig\(\)/, 'applied at once and saved');
+  const html = fs.readFileSync(new URL('../src/markup.html', import.meta.url), 'utf8');
+  const hw = html.slice(html.indexOf('data-sec="hwmap"'), html.indexOf('data-sec="cfgxml"'));
+  assert.match(hw, /Servo power/);
+  assert.match(hw, /id="servoVoltSeg"[^\n]*<button data-volts="5" class="on">hub port \(5 V\)<\/button><button data-volts="6">Servo Power Module \(6 V\)<\/button>/);
 });

@@ -340,8 +340,11 @@ const JoltMech=(function(){
         const travel=(s.travelDeg||300)*DEG;
         const lever=j.lin?(m.lever||0.15):1;
         const target=(s.cmd-(fin(s.restPos)?s.restPos:0.5))*(j.lin?lever:travel)*dir;
-        const rate=(60*DEG/(s.sec60||0.18))*(j.lin?lever:1);
-        cmds[m.id]={mode:"servo", target, stall:(spec.stallNm||2.5)/(j.lin?lever:1), rate};
+        // the quoted figures are at 6 V; it runs at what its port gives, as everywhere else
+        // (o.servoVolts, src/hardware.js servoScale: the hub's 5 V unless a Servo Power Module's 6 V)
+        const at=typeof servoScale==="function"?servoScale(spec,servoVolts(o)):{torque:1, speed:1};
+        const rate=(60*DEG/(s.sec60||0.18))*at.speed*(j.lin?lever:1);
+        cmds[m.id]={mode:"servo", target, stall:(spec.stallNm||2.5)*at.torque/(j.lin?lever:1), rate};
       }
     }
     return o.armature?{cmds, armature:arm}:cmds;
