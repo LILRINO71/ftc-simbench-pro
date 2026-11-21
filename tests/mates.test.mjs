@@ -220,6 +220,18 @@ test('a motor on a revolute joint and a servo stop at the mate limits', () => {
   assert.ok(Math.abs(deg * Math.PI / 180 - 1.2) < 1e-6, `claw opens only to its 1.2 rad limit: ${deg} deg`);
 });
 
+test('a compact body that is part of a wheel spins on its axle, not a joint, whatever kind its parts are', () => {
+  // a goBILDA mecanum roller is an axle, two bearings, a core and a cover: the axle and the
+  // bearings are metal, yet a body of only them is still a wheel's. The claw's finger, renamed.
+  const doc = JSON.stringify({ name: 'Mated Robot', asm: R.onshape.assembly, features: R.onshape.features, geom: R.onshape.geom });
+  const joints = (nm) => (E.cadFromOnshape(JSON.parse(doc.split('Claw Finger').join(nm))).mechs || []).map((m) => m.id).sort();
+  const all = joints('Claw Finger');
+  assert.ok(all.includes('Claw'), all.join(', '));
+  for (const nm of ['Roller Axle', 'Roller Bearing', 'Roller Cover']) assert.deepEqual(joints(nm), all.filter((j) => j !== 'Claw'), nm);
+  // parts that only hold the letters of one are not a wheel's, nor is a plate named only for its side
+  for (const nm of ['Roller Chain', 'Core_Motor_Controller', 'Retraction Spring', 'Entire Claw', 'Claw Side Plate']) assert.deepEqual(joints(nm), all, nm);
+});
+
 test('what is not an Onshape assembly, or not this STEP, says so', () => {
   assert.throws(() => E.applyOnshapeMates(fresh(), { hello: 1 }), /not an Onshape assembly definition/);
   const other = E.parseSTEP(buildRobot('arm-only').text);

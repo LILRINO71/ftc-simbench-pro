@@ -311,7 +311,9 @@ function applyOnshapeMates(cad,json,opts){
   // plate of an arm (fastened to the hub on the motor's shaft) to the chassis, and
   // the shaft's revolute was then "a mate between parts also fastened together".
   const wheelIdx=[];
-  (cad.solids||[]).forEach((s,i)=>{ if(s.kind==="wheel"||/wheel/i.test(s.name||"")) wheelIdx.push(i); });
+  // a piece of a wheel by the drive detector's own words for one (src/drivetrain.js dtWheelBit):
+  // a body of only roller axles and bearings is a wheel's, though neither is of kind "wheel"
+  (cad.solids||[]).forEach((s,i)=>{ if(dtWheelBit(s)) wheelIdx.push(i); });
   const solidOf=i=>map.get(keys[i]);
   const movingEnd=new Set();
   for(const m of moving) for(const e of m.ends) for(const i of under(e.path)) movingEnd.add(i);

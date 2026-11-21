@@ -128,6 +128,19 @@ function dtWheelGeom(pts){
    wheel to everything wheel-like packed round its own axle: rollers, tread,
    slant plates. Returns a new geometry, or the one given. */
 const DT_WHEELBIT=/roller|tread|tire|tyre|slant plate|side plate|wheel/i;
+/* A piece of a wheel by its kind or its name, whatever the piece itself is made of: a mecanum
+   roller's axle, bearings and cover, a tread, a slant plate, a wheel hub. src/mates.js asks this to
+   know a wheel spinning on its axle. The words are DT_WHEELBIT's, read whole on the name as words
+   (src/hull.js kindName): a "Core_Motor_Controller" holds "roller" and an "Entire Claw" "tire",
+   neither is a wheel's; nor is a "Roller Chain". A lone "Side Plate" is as often a chassis's or a
+   claw's: a real wheel's side plates sit with its rollers, which say wheel on their own. */
+const DT_WHEELBIT_WORDS=new RegExp("\\b("+DT_WHEELBIT.source.split("|").filter(w=>w!=="side plate").map(w=>w+"s?").join("|")+")\\b");
+function dtWheelBit(s){
+  if(!s) return false;
+  if(s.kind==="wheel") return true;
+  const t=kindName(String(s.name||"")+" "+String(s.part||""));
+  return DT_WHEELBIT_WORDS.test(t)&&!/\bchains?\b/.test(t);
+}
 function dtGrowWheel(g,solids){
   const a=g.axis, rad=p=>{ const d=[p[0]-g.c[0],p[1]-g.c[1],p[2]-g.c[2]], t=dtDot(d,a);
     return [Math.hypot(d[0]-t*a[0],d[1]-t*a[1],d[2]-t*a[2]), t]; };
