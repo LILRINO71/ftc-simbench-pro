@@ -16,20 +16,32 @@
 
    2. Which device drives which mechanism. The evidence, strongest first:
         spec       the joint spec or the mates named the device
-        name       the device's variable or config name matches the joint's
-                   (mate name, part names, FTC synonyms: src/mapping.js)
+        name       the device's name is the joint's own name, or shares a
+                   word with it (its id, label or mate: src/mapping.js). A word
+                   found only in a part the joint carries, a subsystem word
+                   (intake, outtake…) shared with a longer name, or a synonym
+                   is a hint: it ranks a question's answers, it binds nothing
         travel     RUN_TO_POSITION targets reach exactly one slide's length
         only-one   one servo left and one servo-sized joint left (and so on
-                   for motors and slides), so there is nothing to ask
+                   for motors and slides), so there is nothing to ask. Only
+                   when (a) another device of this code is bound by strong
+                   evidence (spec, declaration, its exact name), which shows
+                   the code was written for this robot, and (b) the code uses
+                   the device the way the joint needs: a joint that stops at
+                   both ends needs positions (targets, RUN_TO_POSITION, its
+                   encoder read, a servo's positions); a motor only given
+                   power or a velocity is a roller or a wheel
         pair       the second motor of a pair (liftLeft/liftRight) drives
-                   the same joint
+                   the same joint, as sure as the first and no surer
       The actuator on a joint's axis (src/autorig-lib.js finds every servo
       and motor output in the CAD) says what kind of device the joint takes,
       so a servo never lands on a motor's joint. Whatever is left is a
-      question with its likely answers, in the team's own device names.
+      question with its likely answers, in the team's own device names,
+      the first one first for a reason the question says.
 
    bindDevices never guesses between two live candidates: a question is
-   cheaper than a wrong robot shown as right.
+   cheaper than a wrong robot shown as right. Every binding says how it was
+   made (bound[].by and .why), so a guess is never silent.
 
    When the team has declared its joints (src/jointsheet.js: the mates'
    names, or a joint sheet), none of this guessing runs. The declared joints
@@ -43,7 +55,7 @@ const BIND_RULES={
   hardwareWords:/\b(bearing|shaft|axle|race|spacer|standoff|washer|collar|bushing|hub|clamp|coupler|encoder|magnet|clip|retainer|nut|bolt|screw|insert|pin|dowel|rod end|heim)\b|\bmotor\b|servo horn|horn\b/i,
   odometryWords:/odometry|odo|dead ?wheel|encoder (cvr|cover|board|mount)|encoder.*pod|pod.*encoder/i,
   travelTolerance:0.25,          // a slide's travel vs what the code asks of a motor, as a fraction
-  nameScoreSure:80,              // a name match this strong is bound outright
+  nameScoreSure:70,              // a name match this strong is bound outright (src/mapping.js); weaker ones are hints
 };
 const {classifyJoints, bindDevices}=(function(){
   const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
@@ -205,6 +217,57 @@ const {classifyJoints, bindDevices}=(function(){
   const fits=(cad,d,m)=>{ if(m.declared) return roleFits(d,m);
     const t=jointTakes(cad,m); if(!t) return isServoDev(d)?kindOf(m)!=="linear":true; return isServoDev(d)?t==="servo":t==="motor"; };
 
+  /* ---- how the code uses each device: power, a velocity, positions ----
+     Read from what the engine already has: the line reader's statement tree (the
+     setters, setTargetPosition, setMode(RUN_TO_POSITION), x.getCurrentPosition() or
+     x.isBusy() anywhere in an expression, a Road Runner auto's actions as they run),
+     or the Java VM's probes (src/jvmrun.js, an.use). Keyed by the code's device names. */
+  const USES=new WeakMap();
+  const USE_SKIP=new Set(["tr","pts","src","loopSrc","cls","A","statics","classes","params"]);
+  function codeUses(code){
+    if(!code||typeof code!=="object") return {};
+    if(USES.has(code)) return USES.get(code);
+    const U={}, u=n=>U[n]||(U[n]={});
+    if(code.vm&&code.vm.an){
+      const A=code.vm.an.use||{}; for(const n in A) Object.assign(u(n),A[n]);
+      for(const n in code.vm.an.ranges||{}) u(n).position=true;
+    } else {
+      const seen=new Set(), OPS={setPower:"power", setVelocity:"velocity", setPosition:"position"};
+      const walk=(x,depth)=>{
+        if(!x||typeof x!=="object"||seen.has(x)||depth>300) return; seen.add(x);
+        if(Array.isArray(x)){ for(const y of x) walk(y,depth+1); return; }
+        if(x.kind==="call"&&typeof x.dev==="string"&&OPS[x.op]) u(x.dev)[OPS[x.op]]=true;
+        if(x.kind==="objcall"&&typeof x.obj==="string"){
+          if(x.meth==="setTargetPosition") u(x.obj).target=true;
+          else if(x.meth==="setMode"&&/RUN_TO_POSITION/.test(x.raw||"")) u(x.obj).rtp=true;
+        }
+        if(x.o==="call"&&typeof x.name==="string"){ const q=/^(.+)\.(getCurrentPosition|isBusy)$/.exec(x.name); if(q) u(q[1]).encoder=true; }
+        for(const k in x) if(!USE_SKIP.has(k)) walk(x[k],depth+1);
+      };
+      walk([code.stmts,code.inits,code.auto,code.rr&&code.rr.root],0);
+    }
+    USES.set(code,U); return U;
+  }
+  function deviceUse(code,d){
+    const U=codeUses(code), o={};
+    for(const k of [d.name,d.cfg,d.alias]) if(k&&U[k]) Object.assign(o,U[k]);
+    return o;
+  }
+  /* position control: what a joint that stops at both ends needs */
+  const positional=(d,u)=>!!(u.target||u.rtp||u.encoder||(isServoDev(d)&&u.position));
+  const twoLimits=m=>!!(m.limits&&Number.isFinite(m.limits[0])&&Number.isFinite(m.limits[1]));
+  function useWords(d,u){
+    const w=[];
+    if(u.target) w.push("sends it to target positions"); if(u.rtp) w.push("runs it to position");
+    if(u.encoder) w.push("reads its encoder"); if(isServoDev(d)&&u.position) w.push("sets its position");
+    if(w.length) return "the code "+w.join(" and ");
+    if(u.power&&u.velocity) return "the code only gives it power and a velocity";
+    if(u.power) return "the code only gives it power";
+    if(u.velocity) return "the code only sets its velocity";
+    return "the code never says how it moves";
+  }
+  const what=m=>kindOf(m)==="linear"?"slide":"joint";
+
   /* ---- 2. devices onto joints ---- */
   function bindDevices(code,cad,opts){
     opts=opts||{};
@@ -217,6 +280,13 @@ const {classifyJoints, bindDevices}=(function(){
     for(const d of ((code&&code.devices)||[])) map[d.name]=null;
     const take=(dev,joint,by,score,why)=>{ map[dev.name]=joint.id; bound.push({device:dev.name, joint:joint.id, label:label(joint), by, score, why}); };
     const used=()=>new Set(Object.values(map).filter(Boolean));
+    const use=d=>deviceUse(code,d);
+    // a joint that stops at both ends takes a device the code sends to positions; one that turns freely takes either
+    const useFits=(d,m)=>!twoLimits(m)||positional(d,use(d));
+    // strong evidence that this code was written for this robot: a device bound by a declaration or its exact name
+    const STRONG={spec:1, "mate name":1, sheet:1};
+    const strongOther=group=>bound.find(b=>(STRONG[b.by]||(b.by==="name"&&b.score>=100))&&!group.some(d=>d.name===b.device));
+    const howStrong=b=>b.by==="name"?"its exact name":b.by==="spec"?"the joint spec":b.by==="sheet"?"the joint sheet":"its mate's name";
 
     // the spec or the mates said so
     const explicit=opts.explicit||{};
@@ -228,6 +298,9 @@ const {classifyJoints, bindDevices}=(function(){
       if(d&&!map[d.name]&&byId.has(b.joint)) take(d,byId.get(b.joint),b.from==="tag"?"mate name":"sheet",100,b.from==="tag"?"its mate's name in Onshape says so":"the joint sheet says so");
     }
     const free=()=>mechs.filter(m=>!m.couple&&!used().has(m.id));
+    // a joint the import hints follows another (a lift's second stage, a mirrored finger) is
+    // settled with its leader: never elimination's "only joint left", never an answer of its own
+    const leaders=()=>free().filter(m=>!(m.coupleHint&&byId.has(m.coupleHint.to)&&!used().has(m.coupleHint.to)));
     // twins on one axis (classifyJoints): the one the code drives leads the others; with two of
     // them driven (a turret and a spindexer on one centre line) each is its own mechanism
     const twins=()=>{
@@ -250,21 +323,31 @@ const {classifyJoints, bindDevices}=(function(){
     const hints=()=>{ for(const m of mechs){ const h=m.coupleHint; if(exact||!h||m.couple||used().has(m.id)) continue;
       const L=byId.get(h.to); if(!L||!used().has(L.id)) continue;
       m.couple={to:L.id, ratio:h.ratio, via:h.via}; applied.push({joint:m.id, to:L.id, via:h.via, ratio:h.ratio}); } };
+    // the second motor of a pair drives what the first does, and is as sure as the first was:
+    // the pair of a device that was asked about is asked about too (below)
+    const stemOf=d=>mapStem(d.name)||mapStem(d.cfg);
+    const twinIn=(d,list)=>{ if(!isMotorDev(d)) return null; const st=stemOf(d); if(st.length<3) return null;
+      return list.find(o=>o!==d&&isMotorDev(o)&&(mapStem(o.name)===st||mapStem(o.cfg)===st))||null; };
+    const pairs=()=>{ for(const d of devs){ if(map[d.name]) continue;
+      const twin=twinIn(d,devs.filter(o=>map[o.name])); if(!twin) continue;
+      const b=bound.find(x=>x.device===twin.name), how=b.by==="only-one"?"by elimination":b.by==="name"?"by its name":b.by==="travel"?"by its travel":b.by==="pair"?"as a pair":"by "+howStrong(b);
+      twinOf.set(d.name,twin.name); take(d,byId.get(map[twin.name]),"pair",Math.min(75,b.score),"it pairs with "+twin.name+", which was bound "+how); } };
+    // name hints, kept to rank the answers of a question
+    let named={pick:{}, score:()=>null};
     // without a declaration: names, pairs and the code's travel (none of it runs once the team has declared)
     if(!exact){
-      // names: the same scoring as the hardware table, kind-aware
-      const nameMap=typeof autoMap==="function"?autoMap(devs,mechs,{cad}):{};
+      // names: the same scoring as the hardware table, kind-aware. Only a sure name binds: the
+      // joint's own name, not a word in a part it carries; a subsystem word only when it is the
+      // joint's whole name and the code uses the device the way the joint needs
+      if(typeof autoMapScored==="function") named=autoMapScored(devs,mechs,{cad});
       for(const d of devs){
         if(map[d.name]) continue;
-        const j=nameMap[d.name]&&byId.get(nameMap[d.name]); if(!j||used().has(j.id)) continue;
-        if(!fits(cad,d,j)) continue;
-        take(d,j,"name",80,"its name matches \""+label(j)+"\"");
+        const p=named.pick[d.name], j=p&&byId.get(p.joint); if(!j||used().has(j.id)) continue;
+        if(!fits(cad,d,j)||!(p.raw>=BIND_RULES.nameScoreSure)) continue;
+        if(p.sub&&!useFits(d,j)) continue;
+        take(d,j,"name",p.raw,p.why+(p.sub?"; "+useWords(d,use(d))+", which the "+what(j)+" takes":""));
       }
-      // twins: the second motor of a pair drives what the first does (autoMap already pairs; this keeps them in `bound`)
-      for(const d of devs){ if(map[d.name]||!isMotorDev(d)) continue;
-        const st=mapStem(d.name)||mapStem(d.cfg); if(st.length<3) continue;
-        const twin=devs.find(o=>o!==d&&map[o.name]&&isMotorDev(o)&&(mapStem(o.name)===st||mapStem(o.cfg)===st));
-        if(twin){ twinOf.set(d.name,twin.name); take(d,byId.get(map[twin.name]),"pair",75,"it pairs with "+twin.name); } }
+      pairs();
       // travel: a motor sent to positions that reach exactly one slide's length
       const T=typeof travelRange==="function"&&code;
       for(const d of devs){
@@ -277,9 +360,30 @@ const {classifyJoints, bindDevices}=(function(){
           return {m, off:top>0?Math.abs(mm-top)/top:9}; }).filter(h=>h.off<=BIND_RULES.travelTolerance);
         if(hits.length===1) take(d,hits[0].m,"travel",70,"the positions it is sent to reach the slide's "+Math.round(Math.max(Math.abs(hits[0].m.limits[0]||0),Math.abs(hits[0].m.limits[1]||0))*1000)+" mm");
       }
+      pairs();
     }
     twins(); hints();
-    // only one: the last device of a kind and the last joint that takes it
+    // only one: the last device of a kind and the last joint that takes it. Elimination assumes
+    // the code and the CAD are the same robot and that the device drives some joint here; it
+    // binds only when (a) another device of this code is tied to this robot by strong evidence
+    // and (b) the device's use fits the joint. Otherwise that joint is offered first in a question
+    const elim=new Map();                    // device -> {joint, why}: elimination's answer, not taken
+    const sideOf=ws=>{ const L=ws.some(w=>/^(left|l)$/.test(w)), R=ws.some(w=>/^(right|r)$/.test(w)); return L===R?null:L?"left":"right"; };
+    const devSide=d=>sideOf(mapRaw(d.name))||sideOf(mapRaw(d.cfg));
+    const jointSide=m=>sideOf(mapRaw(m.id))||sideOf(mapRaw(m.alias))||sideOf(mapRaw(m.label));
+    const settle=(lead,group,j,K,last)=>{
+      const s=strongOther(group), ok=useFits(lead,j), u=use(lead);
+      const base=last+", and the only "+what(j)+" that takes one";
+      if(s&&ok){
+        take(lead,j,"only-one",60,"by elimination: "+base+"; "+useWords(lead,u)+(twoLimits(j)?", as a "+what(j)+" that stops at both ends needs":"")+"; and "+s.device+" is tied to this robot by "+howStrong(s));
+        for(const d of group) if(d!==lead){ twinOf.set(d.name,lead.name); take(d,j,"pair",60,"it pairs with "+lead.name+", which was bound by elimination"); }
+        return;
+      }
+      const not=[];
+      if(!s) not.push("nothing else in this code is tied to this robot by a declaration or an exact name, so it may not be written for this robot");
+      if(!ok) not.push(useWords(lead,u)+", as a roller or a flywheel gets, and the "+what(j)+" stops at both ends: that needs a motor sent to positions");
+      for(const d of group) elim.set(d.name,{joint:j.id, lead:lead.name, why:base+", but "+not.join("; and ")});
+    };
     for(let pass=0;pass<3;pass++){
       const left=devs.filter(d=>!map[d.name]&&moved(d.name));
       for(const K of ["servo","motor"]){
@@ -287,26 +391,54 @@ const {classifyJoints, bindDevices}=(function(){
         // twins count once
         const stems=new Set(ds.map(d=>mapStem(d.name)||d.name));
         if(stems.size!==1) continue;
-        const js=free().filter(m=>fits(cad,ds[0],m)&&!(exact&&m.sheetDevices&&m.sheetDevices.length));
-        if(js.length!==1) continue;
-        for(const d of ds) take(d,js[0],"only-one",60,"the only "+K+" left, and the only "+(kindOf(js[0])==="linear"?"slide":"joint")+" that takes one");
+        const js=leaders().filter(m=>fits(cad,ds[0],m)&&!(exact&&m.sheetDevices&&m.sheetDevices.length));
+        // the one the code sends to positions leads its pair
+        const lead=ds.find(d=>positional(d,use(d)))||ds[0];
+        if(js.length===1) settle(lead,ds,js[0],K,"the only "+K+" left");
+        // the last two, a left and a right, and the last two joints that take them, a left and a right
+        else if(js.length===2&&ds.length===2){
+          const dS=ds.map(devSide), jS=js.map(jointSide);
+          if(dS[0]&&dS[1]&&dS[0]!==dS[1]&&jS[0]&&jS[1]&&jS[0]!==jS[1])
+            for(const d of ds) if(!map[d.name]){ const j=js[jS.indexOf(devSide(d))]; if(!used().has(j.id)) settle(d,[d],j,K,"one of the last two "+K+"s, the "+devSide(d)+" one, and the "+devSide(d)+" one of the last two "+what(j)+"s"); }
+        }
       }
+      pairs();
       hints();
     }
 
     for(const m of mechs) if(m.couple&&m.couple.via==="coaxial") applied.push({joint:m.id, to:m.couple.to, via:"coaxial", ratio:m.couple.ratio});
-    // the questions: a device the code moves with no joint, and its likely answers
+    // the questions: a device the code moves with no joint, its likely answers in order, and why
     const open=[];
     for(const d of devs){
       if(map[d.name]||!moved(d.name)) continue;
-      const cands=free().filter(m=>fits(cad,d,m)).map(m=>{
+      const u=use(d), E=elim.get(d.name);
+      const cands=leaders().filter(m=>fits(cad,d,m)).map(m=>{
         let score=10, why=[];
+        if(E&&E.joint===m.id){ score+=1000; why.push(E.lead===d.name?"the only joint left that takes it":"the joint offered to its pair, "+E.lead); }
+        const h=named.score(d,m); if(h&&h.v>=45){ score+=Math.round(h.v); why.push(h.why); }
         const t=jointTakes(cad,m); if(t) { score+=20; why.push("a "+t+" sits on its axis"); }
         if(isMotorDev(d)&&kindOf(m)==="linear"){ score+=10; why.push("a slide"); }
         if(m.declared&&!(m.sheetDevices&&m.sheetDevices.length)){ score+=30; why.push("declared "+m.declaredRole+", with no device named"); }
+        if(twoLimits(m)&&!positional(d,u)&&(u.power||u.velocity)){ score-=15; why.push("though it stops at both ends and "+useWords(d,u)); }
         return {joint:m.id, label:label(m), score, why:why.join(", ")};
       }).sort((a,b)=>b.score-a.score);
-      open.push({device:d.name, type:isServoDev(d)?"servo":"motor", candidates:cands.slice(0,6)});
+      const hint=cands.length&&named.score(d,byId.get(cands[0].joint));
+      open.push({device:d.name, type:isServoDev(d)?"servo":"motor", use:useWords(d,u), candidates:cands.slice(0,6),
+        why:E?"It would be "+E.why+".":hint&&hint.v>=45?"Its name only hints at a joint: "+hint.why+".":"Nothing in its name or in how the code drives it picks one joint.",
+        first:cands.length?"\""+cands[0].label+"\" is offered first: "+(cands[0].why||"no joint is likelier than another")+".":null});
+    }
+    // a pair is asked as one: the second offered first what the first is offered first
+    for(const q of open){
+      const d=devs.find(x=>x.name===q.device), lead=twinIn(d,devs.filter(o=>open.some(p=>p.device===o.name)));
+      if(!lead) continue;
+      const L=open.find(p=>p.device===lead.name), Lq=elim.get(lead.name);
+      if(open.indexOf(L)>open.indexOf(q)||(Lq&&Lq.lead!==lead.name)) continue;      // the earlier one, or elimination's own lead, leads
+      const top=L.candidates[0]; if(!top) continue;
+      const i=q.candidates.findIndex(c=>c.joint===top.joint);
+      const c=i>=0?q.candidates.splice(i,1)[0]:{joint:top.joint, label:top.label, score:0, why:""};
+      if(c.why.indexOf(lead.name)<0) c.why="the joint offered first to its pair, "+lead.name+(c.why?", "+c.why:"");
+      q.candidates.unshift(c); q.candidates=q.candidates.slice(0,6); q.pair=lead.name;
+      q.first="\""+c.label+"\" is offered first: "+lead.name+", its pair, is asked about with it first.";
     }
     // joints no device reaches (still mechanisms): told, not asked
     const idle=mechs.filter(m=>!m.couple&&!used().has(m.id)).map(m=>({joint:m.id, label:label(m)}));

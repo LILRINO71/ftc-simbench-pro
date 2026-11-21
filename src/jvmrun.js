@@ -242,14 +242,22 @@ JvProgram.prototype.stubs=function(){
 function jvProbeHost(){
   const H={t:0,clock:0,h:0,pads:{1:{},2:{}},devs:new Map(),cmds:[],tel:[]};
   H.host={
-    dev(name,type,kind){ let s=H.devs.get(name); if(!s){ s={name,type,kind,cmd:kind==="servo"?null:0,act:0,ticks:0,offset:0,vel:0,target:0,reversed:false,mode:"run",tpr:537.7,spec:{rpm:312}}; H.devs.set(name,s); } return s; },
+    dev(name,type,kind){ let s=H.devs.get(name); if(!s){ s={name,type,kind,cmd:kind==="servo"?null:0,act:0,ticks:0,vel:0,target:0,reversed:false,tpr:537.7,spec:{rpm:312}};
+      // what the code uses the motor for (jvAnalyze's `use`): reading `offset` is reading the
+      // encoder (getCurrentPosition and isBusy subtract it; resetting the encoder only writes it),
+      // and RUN_TO_POSITION is a mode it was ever put in. The probe's own bookkeeping uses _off
+      let off=0, mode="run";
+      Object.defineProperty(s,"offset",{enumerable:true, get(){ s.encRead=true; return off; }, set(v){ off=v; }});
+      Object.defineProperty(s,"_off",{get(){ return off; }});
+      Object.defineProperty(s,"mode",{enumerable:true, get(){ return mode; }, set(v){ mode=v; if(v==="rtp") s.everRtp=true; }});
+      H.devs.set(name,s); } return s; },
     pad(i){ return H.pads[i]||{}; },
     now(){ return H.clock; }, runtime(){ return H.t; }, heading(){ return H.h; }, omega(){ return 0; },
     pose(){ return {x:0,y:0,h:H.h}; }, vel(){ return {x:0,y:0}; }, ray(){ return 8.19; }, color(){ return [120,120,120]; }, volts(){ return 12.6; },
     touch(){ return false; }, telemetry(l){ H.tel=l; }, rumble(){}, advance(dt){ H.clock+=dt; },
     // time passing while the code busy-waits: motors run, RUN_TO_POSITION ones head for their target
     world(dt){ H.clock+=dt; for(const [,s] of H.devs){ if(s.kind!=="motor") continue;
-      if(s.mode==="rtp"){ const pos=s.ticks-(s.offset||0), err=(s.target||0)-pos; s.ticks+=Math.sign(err)*Math.min(Math.abs(err),2500*dt*Math.max(0.2,Math.abs(s.cmd||1))); }
+      if(s.mode==="rtp"){ const pos=s.ticks-(s._off||0), err=(s.target||0)-pos; s.ticks+=Math.sign(err)*Math.min(Math.abs(err),2500*dt*Math.max(0.2,Math.abs(s.cmd||1))); }
       else if(s.mode!=="reset") s.ticks+=(s.cmd||0)*400*dt; } },
     cmd(name,op,v){ H.cmds.push([name,op,v]); },
   };
@@ -298,6 +306,11 @@ function jvAnalyze(comp,isAuto){
   for(const k in runs) for(const [n,op,v] of runs[k].H.cmds){ if(op==="setDirection") continue; if(!cmdOf.has(n)) cmdOf.set(n,[]); cmdOf.get(n).push([op,v]); }
   out.commanded=Array.from(cmdOf.keys());
   for(const [n,l] of cmdOf){ const p=l.filter(x=>x[0]==="setPosition").map(x=>x[1]); if(p.length) out.ranges[n]={lo:Math.min(...p),hi:Math.max(...p),n:p.length}; }
+  // what each device is used for, in any run (src/bind.js: a joint that stops at both ends
+  // needs a motor sent to positions): power, a velocity, positions, targets, RUN_TO_POSITION,
+  // its encoder read
+  out.use={};
+  for(const k in runs) jvUseFrom(out,runs[k].H);
   if(!isAuto) out.drive=jvDriveFrom(runs,devs);
   // given power while still in STOP_AND_RESET_ENCODER: on the robot that motor
   // stays off (the SDK removes power in that mode until another mode is set)
@@ -305,6 +318,13 @@ function jvAnalyze(comp,isAuto){
   for(const k in runs) for(const [n,m] of Object.entries(runs[k].motors))
     if(m.mode==="reset"&&m.cmd&&out.heldByReset.indexOf(n)<0) out.heldByReset.push(n);
   return out;
+}
+/* One probe run's evidence of what each device is used for, into an.use */
+function jvUseFrom(an,H){
+  const U=an.use||(an.use={}), use=n=>U[n]||(U[n]={});
+  const OPS={setPower:"power", setVelocity:"velocity", setPosition:"position", setTargetPosition:"target"};
+  for(const [n,op] of H.cmds) if(OPS[op]) use(n)[OPS[op]]=true;
+  for(const [n,s] of H.devs){ if(s.encRead) use(n).encoder=true; if(s.everRtp) use(n).rtp=true; }
 }
 /* The drive base, read off what the motors do when the sticks move.
    Assume the code is right on its own robot: stick up rolls every wheel
@@ -428,6 +448,7 @@ function jvMechProbe(comp,an){
     const v=/trigger/.test(c)?1:/_stick_y$/.test(c)?-1:true;
     const p={}; p[c]=v;
     let r; try{ r=jvProbeRun(comp,pad===1?p:{},pad===2?p:{},8); }catch(e){ continue; }
+    jvUseFrom(an,r.H);                      // what a button makes the code do with a device counts too
     const now=snap(r);
     for(const n in now){
       if(drive.has(n)) continue;
