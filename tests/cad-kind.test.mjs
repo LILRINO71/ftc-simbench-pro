@@ -33,7 +33,8 @@ test('part kinds: a name says what the part is, not what it is attached to or ha
       'Sonic Hub', '1310 Series Hyper Hub (5mm Hex Bore)', 'Clamping Hub', 'Hub', 'Belt Pulley', 'Chain Sprocket', 'Swerve Module', 'U-Channel', 'Part 12',
       // robot parts named after the game element they handle
       'sample_intake', 'Sample Intake', 'Specimen Claw', 'pixel_tray', 'artifact_ramp'],
-    game: ['Sample', 'Red Sample 3', 'sample_1', 'Specimen', 'Pixel', 'CENTERSTAGE™ Pixel White am-5001_white', 'Artifact', 'Game Piece', 'Game Element 2', 'am-3376', 'Pollen', 'Blue Nectar 2'],
+    game: ['Sample', 'Red Sample 3', 'sample_1', 'Specimen', 'Pixel', 'CENTERSTAGE Pixel White am-5001_white', 'CENTERSTAGE™ Pixel White am-5001_white', 'Artifact', 'Game Piece', 'Game Element 2',
+      'am-3376', 'am-5201', 'am-5101', 'Pollen', 'Blue Nectar 2'],
     fastener: ['M4 Socket Head Screw', 'Locknut'],
   };
   for (const [kind, names] of Object.entries(table)) for (const n of names) assert.equal(E.solidKind(n, null), kind, n);
