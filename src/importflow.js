@@ -24,10 +24,13 @@
 const ImportFlow={
   state:"bring", dismissed:false, busy:null, code:null, last:null, sheetOpen:false, draft:null, showAll:false, showNames:false,
   signin:{ready:null, signedIn:false}, pendingLink:null, tip:"", tipBad:false,
+  pasteOpen:false, pasteTip:"", pastePending:"", pasteT:null,
   init(){
     const card=$("#importCard"); if(!card) return;
     card.addEventListener("click",e=>this.click(e));
-    card.addEventListener("input",e=>this.sheetInput(e));
+    card.addEventListener("input",e=>{ if(e.target.id==="icPasteLink") this.pasteLink(e.target.value);
+      else if(e.target.id==="icPaste"){ clearTimeout(this.pasteT); this.pasteT=setTimeout(()=>this.takePaste(),60); }
+      else this.sheetInput(e); });
     card.addEventListener("change",e=>this.sheetInput(e));
     card.addEventListener("submit",e=>{ e.preventDefault(); const f=e.target;
       if(f.id==="icGh"){ $("#ghUrl").value=$("#icGhUrl").value; GH.find().then(()=>{ if(!$("#ghOverlay").hidden) return; }); GH.open(true); }
@@ -65,7 +68,7 @@ const ImportFlow={
     catch(e){ return null; }
   },
   open(){ this.dismissed=false; this.forced=true; this.render(true); const c=$("#importCard"); if(c) c.scrollTop=0; },
-  close(){ this.dismissed=CAD||true; this.forced=false; store.set("ftcbench.import.seen","1"); this.render(); },
+  close(){ this.dismissed=CAD||true; this.forced=false; this.pasteOpen=false; store.set("ftcbench.import.seen","1"); this.render(); },
   /* a job is running: the bar, in plain words */
   start(title,sub){ this.busy={title, text:"", frac:null, sub:sub||""}; this.render(); },
   progress(text,done,total){ if(!this.busy) return; this.busy.text=String(text||""); this.busy.frac=Number.isFinite(done)&&Number.isFinite(total)&&total>0?done/total:null; this.renderBusy(); },
@@ -75,7 +78,7 @@ const ImportFlow={
   render(force){
     const card=$("#importCard"); if(!card) return;
     const st=this.compute();
-    if(st==="done"&&!force&&!this.sheetOpen){ card.hidden=true; this.state=st; this.chip(); return; }
+    if(st==="done"&&!force&&!this.sheetOpen&&!(this.pasteOpen&&this.dismissed!==CAD)){ card.hidden=true; this.state=st; this.chip(); return; }
     this.state=st==="done"?"review":st;
     if(this.sheetOpen&&CAD&&st!=="busy"&&st!=="bring") this.state="sheet";
     card.hidden=false;
@@ -104,7 +107,7 @@ const ImportFlow={
     const docs=`<a class="linkish" href="https://github.com/LILRINO71/ftc-simbench-pro/blob/main/docs/robot-setup.md" target="_blank" rel="noopener">Sim-ready CAD checklist ↗</a>`;
     if(!relay) return `<div class="ic-head"><div><h2>Bring your robot</h2><p>Export it from Onshape and drop the zip: every joint from your mates, every part in its colour, its real weight. Nothing is uploaded; the robot is read on this computer.</p></div>
       <button class="ic-x" type="button" data-ic="close" aria-label="Not now">×</button></div>
-      ${dropZone}${bad}
+      ${dropZone}${bad}${this.htmlPaste()}
       <div class="ic-row"><span>Not on Onshape?</span><button class="linkish" type="button" data-ic="fusion">Fusion, SolidWorks, FreeCAD →</button><span>·</span>${docs}<span>·</span><button class="linkish" type="button" data-ic="close">Keep the demo robot</button></div>`;
     return `<div class="ic-head"><div><h2>Bring your robot</h2><p>Paste your Onshape assembly's address. It arrives with every joint from your mates, every part in its colour, and its real weight. Nothing to export, nothing to install.</p></div>
       <button class="ic-x" type="button" data-ic="close" aria-label="Not now">×</button></div>
@@ -115,8 +118,58 @@ const ImportFlow={
       <form class="ic-link" id="icLink" autocomplete="off"><input type="url" id="icLinkUrl" value="${esc(link)}" placeholder="https://cad.onshape.com/documents/…/w/…/e/…" spellcheck="false" aria-label="Your Onshape assembly's address"><button class="btn-sm primary" type="submit">Get my robot</button></form>
       ${tip}${bad}
       <p class="ic-why">One click next time: drag <a class="linkish" data-ic="bm" href="${esc(onshapeBookmark(location.origin+location.pathname))}" title="Drag me to your bookmarks bar">Send to SimBench</a> to your bookmarks bar, then click it on your Assembly tab in Onshape.</p>
+      ${this.htmlPaste()}
       <details class="ic-alt"><summary>No link to paste? Drop the export instead</summary>${dropZone}</details>
       <div class="ic-row">${S.signedIn?`<button class="linkish" type="button" data-ic="signout">Sign out of Onshape</button><span>·</span>`:""}<button class="linkish" type="button" data-ic="fusion">Fusion, SolidWorks, FreeCAD →</button><span>·</span>${docs}<span>·</span><button class="linkish" type="button" data-ic="close">Keep the demo robot</button></div>`;
+  },
+  /* ---------------- copy and paste (readOnshapePaste, src/onshapelink.js) ----------------
+     For school computers and school accounts: no sign-in, app or bookmark. The team's own
+     STEP, plus the assembly's API pages copied from their signed-in browser. */
+  htmlPaste(){
+    const S=LAST_STEP;
+    if(S&&(S.onshape||S.urdfZip||S.kept||S.session)) return "";     // that robot came whole, with its mates
+    const step=ownRobot()?S.name:null, href=store.get("ftcbench.onshapeLink","")||"", L=onshapeApiLinks(href), r=step&&PASTE.report;
+    const done=r?`<p class="ic-note">✓ ${esc(step)}: ${r.joints} joint${r.joints===1?"":"s"} from your mates, ${r.matched} of ${r.parts} parts matched.</p>`:"";
+    const tip=PASTE.error||this.pasteTip;
+    return `<details class="ic-alt ic-paste"${this.pasteOpen?" open":""}><summary data-ic="paste-toggle">School account, or can't sign in? Copy and paste your joints</summary>
+      <p class="ic-why">1. Export a STEP of the assembly and choose it. ${step?`<b>✓ ${esc(step)}</b>`:`<button class="linkish" type="button" data-ic="pick">Choose the STEP</button>`}</p>
+      <p class="ic-why">2. Paste your assembly's address.</p>
+      <div class="ic-link"><input type="url" id="icPasteLink" value="${esc(href)}" placeholder="https://yourschool.onshape.com/documents/…/w/…/e/…" spellcheck="false" autocomplete="off" aria-label="Your assembly's address, for the joints page"></div>
+      <p class="ic-why">3. <a class="linkish" id="icOpenJoints" target="_blank" rel="noopener"${L?` href="${esc(L.def)}"`:` aria-disabled="true"`}>Open your joints page ↗</a> Copy it all (Ctrl+A, Ctrl+C; ⌘ on a Mac) and paste it here.</p>
+      <textarea id="icPaste" rows="3" spellcheck="false" aria-label="Paste the page from Onshape"></textarea>
+      <p class="ic-why">4. Optional, the joints' limits: open each page, copy it, paste it in the same box. <span id="icLimits">${this.htmlLimits(href)}</span></p>
+      <p class="ic-why" id="icPasteTip"${tip?"":" hidden"}>${esc(tip||"")}</p>${done}</details>`;
+  },
+  htmlLimits(href){
+    if(!PASTE.asm) return "They show up after step 3.";
+    const L=onshapeLimitLinks(PASTE.asm,href);
+    if(!L.length) return "Paste your assembly's address in step 2 to get these links.";
+    return L.map(x=>`<a class="linkish" target="_blank" rel="noopener" data-lk="${esc(x.key)}" href="${esc(x.url)}">${esc(x.name)} ↗</a>${(x.key?PASTE.featuresBy[x.key]:PASTE.features)?" ✓":""}`).join(" · ");
+  },
+  pasteLink(v){
+    const href=String(v||"").trim(), L=onshapeApiLinks(href), a=$("#icOpenJoints"), box=$("#icLimits");
+    if(L) store.set("ftcbench.onshapeLink",href);
+    if(a){ if(L){ a.href=L.def; a.removeAttribute("aria-disabled"); } else { a.removeAttribute("href"); a.setAttribute("aria-disabled","true"); } }
+    if(box) box.innerHTML=this.htmlLimits(href);
+    this.pasteSay(href&&!L?"That isn't an Onshape assembly address. In Onshape, click your Assembly tab, then copy the whole address.":"");
+  },
+  pasteSay(t){ this.pasteTip=t||""; const p=$("#icPasteTip"); if(p){ p.textContent=this.pasteTip; p.hidden=!this.pasteTip; } },
+  takePaste(){
+    const box=$("#icPaste"); if(!box||!box.value.trim()) return;
+    let r; try{ r=readOnshapePaste(box.value); }catch(e){ this.pasteSay(e.message+"."); return; }
+    box.value=""; this.pasteOpen=true; this.dismissed=false;
+    if(r.kind==="assembly"){
+      resetPaste(); PASTE.asm=r.json; if(ownRobot()) PASTE.step=LAST_STEP.name; this.pastePending="";
+      this.pasteTip="✓ Got your joints: "+r.mates+" mate"+(r.mates===1?"":"s")+"."+(ownRobot()?"":" Now choose the STEP (step 1).");
+    }else{
+      if(!PASTE.asm){ this.pasteSay("That's a limits page. Paste your joints page first (step 3)."); return; }
+      const k=this.pastePending; this.pastePending="";
+      if(k) PASTE.featuresBy=Object.assign({},PASTE.featuresBy,{[k]:r.json}); else PASTE.features=r.json;
+      this.pasteTip="✓ Got that page of limits.";
+    }
+    this.render(true);
+    // the STEP is read again with the joints on it (parseAndLoad applies PASTE)
+    if(ownRobot()&&LAST_STEP.text) parseAndLoad();
   },
   htmlBusy(){
     const b=this.busy||{};
@@ -134,6 +187,7 @@ const ImportFlow={
       <div class="ic-drop" data-ic="pick-code" role="button" tabindex="0"><b>Drop your .java files, or click to choose them</b><span>TeleOps, autos and helper classes together, or a zip of the TeamCode folder</span></div>
       ${CAD&&CAD.mates&&CAD.mates.source==="onshape"?`<p class="ic-note">${isExact(CAD)?"Your joints are declared, so nothing about them is guessed.":"Which of the export's joints move was worked out from what they carry."} <button class="ic-textbtn" type="button" data-ic="sheet">${isExact(CAD)?"See the joint sheet":"Declare them instead"}</button></p>`:""}
       <form class="ic-code" id="icGh"><input id="icGhUrl" type="text" placeholder="or paste your team's GitHub repo" spellcheck="false" autocomplete="off"><button class="btn-sm primary" type="submit">Find OpModes</button></form>
+      ${this.htmlPaste()}
       ${sample?`<p class="ic-note">The OpMode selected now is a sample written for another robot. <button class="ic-textbtn" type="button" data-ic="sample-ok">Drive this robot with it anyway</button></p>`:""}`;
   },
   htmlReview(){
@@ -183,6 +237,7 @@ const ImportFlow={
       <div class="ic-facts">${facts}</div>
       ${qs.join("")}
       ${notes.length?`<ul class="ic-list">${notes.join("")}</ul>`:""}
+      ${this.htmlPaste()}
       <div class="ic-foot"><button class="btn-sm primary" type="button" data-ic="${ready?"close":"accept"}">${ready?"Looks right":"Looks right as it is"}</button>
         <button class="btn-sm" type="button" data-ic="cad">Open the CAD view</button>${CAD.source==="onshape"&&CAD.onshape&&CAD.onshape.url&&onshapeRef(CAD.onshape.url)&&this.signin&&this.signin.ready?`<button class="btn-sm" type="button" data-ic="reread" title="Read the assembly from Onshape again, as it is now">Update from Onshape</button>`:""}${CAD.mates&&CAD.mates.source==="onshape"?`<button class="btn-sm" type="button" data-ic="sheet">${declared?"Joint sheet":"Declare joints"}</button>`:""}<button class="btn-sm" type="button" data-ic="save">Save setup</button><span class="spacer"></span><span class="dim">${esc(CAD.name||"")}</span></div>`;
   },
@@ -203,10 +258,13 @@ const ImportFlow={
     const js=e.target.closest("[data-js]"); if(js){ this.sheetClick(js.dataset.js,js.dataset.a); return; }
     const rc=e.target.closest("[data-rc]");
     if(rc){ if(rc.dataset.rc==="gauge"){ this.gauge(rc.dataset.a); return; } robotCheckAct(rc.dataset.rc,rc.dataset.a); return; }
+    const lk=e.target.closest("[data-lk]");
+    if(lk){ this.pastePending=lk.dataset.lk; this.pasteSay("Now copy that page (Ctrl+A, Ctrl+C) and paste it in the box in step 3."); return; }
     const b=e.target.closest("[data-ic]"); if(!b) return;
     const k=b.dataset.ic;
     // the bookmark is for the bookmarks bar: clicked here it would only open this page again
     if(k==="bm"){ e.preventDefault(); this.say("Drag “Send to SimBench” up to your bookmarks bar (Ctrl+Shift+B shows the bar). Then open your Assembly tab in Onshape and click it there."); return; }
+    if(k==="paste-toggle"){ this.pasteOpen=!b.parentNode.open; return; }
     if(k==="close") this.close();
     else if(k==="accept"){ for(const s of SETUP_STEPS) SETUP.done[s]=true; saveRig(); SetupUI.render(); this.close(); }
     else if(k==="pick") $("#cadFile").click();
@@ -282,6 +340,7 @@ const ImportFlow={
   },
   /* a robot that arrived whole (the link, the export zip, a re-read with a new up or centre): onto the field */
   robotIn(cad,from,o){
+    resetPaste();
     this.progress("Placing it on the field …",1,1);
     // kept in this browser for the next visit (src/app.js RobotStore), as it arrived: IndexedDB
     // copies it here, before the view hangs its own objects on the joints

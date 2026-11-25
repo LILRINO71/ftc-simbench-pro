@@ -1590,6 +1590,7 @@ function takeCAD(file){
   readText(file,text=>{
     STEP_READS=Math.max(0,STEP_READS-1);
     LAST_STEP={name:file.name, text};
+    if(PASTE.step&&PASTE.step!==file.name) resetPaste();   // pasted joints were another robot's
     // a joint spec dropped with this STEP (see takeMates) is this robot's, ahead of joints saved for it before
     const P=JOINTS.pending; JOINTS.pending=null;
     if(P){ MATES.asm=MATES.features=MATES.name=MATES.report=null; JOINTS.spec=P.spec; JOINTS.name=P.name; JOINTS.step=JOINTS.dropped=file.name; }
@@ -1641,10 +1642,18 @@ function parseAndLoad(done){
       JOINTS.dropped=null;
       if(mine&&(!JOINTS.spec||!JOINTS.spec.edited)){ JOINTS.spec=mine; JOINTS.step=name; JOINTS.name="your joints"; }
       loadCAD(cad, (LAST_STEP.label||name+" · "+mb+" MB")+" · "+cad.mechs.length+" mechanism"+(cad.mechs.length===1?"":"s"), cad.mechs.length?"ok":"bad");
+      // joints pasted from Onshape, before the STEP or after it: the mates, not a guess
+      let pasted=false;
+      if(PASTE.asm&&own&&(PASTE.step==null||PASTE.step===name)){
+        PASTE.step=name;
+        if(JOINTS.spec&&!JOINTS.spec.edited) JOINTS.spec=JOINTS.report=JOINTS.devices=JOINTS.name=JOINTS.step=null;
+        pasted=applyPasted();
+      }
       if(JOINTS.spec) applyJoints();
-      else findJoints(cad,true);                  // no mates, no spec: the joints the worker found from the geometry
+      else if(!pasted) findJoints(cad,true);                  // no mates, no spec: the joints the worker found from the geometry
       exactGeometry(cad,text,PARSED.units);
-      if(own) RobotStore.keep({kind:"step", name, text, label:LAST_STEP.label||null});
+      if(own) RobotStore.keep({kind:"step", name, text, label:LAST_STEP.label||null,
+        paste:pasted?{asm:PASTE.asm, features:PASTE.features, featuresBy:PASTE.featuresBy}:null});
       if(done) done(cad);
     }catch(e){ $("#cadStatus").textContent="couldn't read this STEP file: "+e.message; $("#cadDrop").className="drop bad"; if(own) ImportFlow.fail("Couldn't read "+name+": "+e.message); return; }
     renderFrameNote();
@@ -1679,7 +1688,8 @@ const RobotStore={
   /* keep this robot; the same one twice is written once. Never throws: a private window or a
      full disk only means the robot isn't here next time */
   keep(rec){
-    const sig=[rec.kind,rec.name,rec.text?rec.text.length:(rec.cad&&rec.cad.solids?rec.cad.solids.length:0)].join("|");
+    const sig=[rec.kind,rec.name,rec.text?rec.text.length:(rec.cad&&rec.cad.solids?rec.cad.solids.length:0),
+      rec.paste?JSON.stringify(rec.paste).length:0].join("|");
     if(sig===this.sig&&rec.kind!=="whole") return Promise.resolve(false);
     this.sig=sig;
     // copied now: the write happens later, and by then the view has hung its own objects on the robot
@@ -1702,7 +1712,8 @@ async function restoreRobot(){
       return true;
     }
     if(rec.kind==="step"&&rec.text){
-      RobotStore.sig=["step",rec.name,rec.text.length].join("|");
+      RobotStore.sig=["step",rec.name,rec.text.length,rec.paste?JSON.stringify(rec.paste).length:0].join("|");
+      resetPaste(); if(rec.paste) Object.assign(PASTE,rec.paste,{step:rec.name});
       LAST_STEP={name:rec.name, text:rec.text, label:rec.label||undefined};
       parseAndLoad();
       return true;
@@ -1825,6 +1836,32 @@ function takeRobotConfig(file){ readText(file,text=>setRobotConfig(text,file.nam
    ============================================================ */
 const MATES={name:null, url:null, report:null};
 const ownRobot=()=>!!(LAST_STEP&&CAD&&LAST_STEP.name!==DEFAULT_ROBOT.step);
+/* Joints pages copied from Onshape and pasted (readOnshapePaste, src/onshapelink.js).
+   They belong to one STEP (step: its file name, null until one is in) and go on
+   each time it is parsed, so a page of limits added later never stacks joints. */
+const PASTE={step:null, asm:null, features:null, featuresBy:{}, report:null, error:null};
+function resetPaste(){ Object.assign(PASTE,{step:null, asm:null, features:null, featuresBy:{}, report:null, error:null}); }
+function applyPasted(){
+  PASTE.report=null; PASTE.error=null;
+  const st=$("#mateStatus"), drop=$("#mateDrop"), pill=$("#matePill");
+  let rep;
+  try{ rep=applyOnshapeMates(CAD,PASTE.asm,{features:PASTE.features, featuresBy:PASTE.featuresBy}); }
+  catch(e){ PASTE.error=e.message; st.textContent="Couldn't apply the pasted joints: "+e.message; drop.className="drop bad"; pill.textContent="error"; pill.className="pill bad"; return false; }
+  PASTE.report=MATES.report=rep; MATES.name="your Onshape assembly"; MATES.url=null;
+  recomputeChain(CAD.mechs);
+  classifyJoints(CAD);
+  View.load(CAD);
+  if(CadView.on) CadView.renderTree();
+  if(Sim.phase!=="running") placeAtStart();
+  if(CODE){ mapDevices(); rebuild(); }
+  syncOptionControls();
+  const J=rep.joints+" joint"+(rep.joints===1?"":"s");
+  pill.textContent=J; pill.className="pill ok"; drop.className="drop ok"; $("#mateClear").hidden=false;
+  st.textContent=J+" from your pasted mates · "+rep.matched+" of "+rep.parts+" parts matched";
+  $("#mateNote").innerHTML=(rep.why||[]).map(w=>"<li>"+esc(w)+"</li>").join("");
+  for(const el of [$("#vpTitle"),$("#cadStatus")]) el.textContent=el.textContent.replace(/\d+ mechanisms?/,J);
+  return true;
+}
 // pending: a spec that came while a STEP was still being read; dropped: the STEP it was given to
 const JOINTS={spec:null, name:null, step:null, report:null, devices:null, pending:null, dropped:null};
 /* a .json dropped anywhere: a saved Onshape read, a setup file, a joint sheet or a joint spec */
@@ -2228,7 +2265,7 @@ function mapDevices(){
 function clearMates(){
   if(LAST_STEP&&(LAST_STEP.onshape||LAST_STEP.urdfZip)) return;   // the mates are the robot: nothing to remove
   if(JOINTS.spec){ JOINTS.spec=JOINTS.report=JOINTS.devices=null; JOINTS.name=JOINTS.step=null; }
-  MATES.name=MATES.url=MATES.report=null;
+  MATES.name=MATES.url=MATES.report=null; resetPaste();
   $("#matePill").textContent="none"; $("#matePill").className="pill"; $("#mateClear").hidden=true;
   $("#mateNote").innerHTML=""; $("#mateDrop").className="drop";
   $("#mateStatus").textContent="Drop a joint sheet, a joint spec or a setup file.";

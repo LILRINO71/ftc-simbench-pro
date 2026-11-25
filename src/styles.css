@@ -418,6 +418,7 @@ kbd{display:inline-block; min-width:15px; padding:0 4px; border:1px solid var(--
 .ic-link input:focus{outline:2px solid var(--accent); outline-offset:1px;}
 .ic-link .btn-sm{font-size:13.5px; padding:7px 16px; border-radius:10px; white-space:nowrap;}
 .ic-alt{margin-top:14px;}
+.ic-paste textarea{width:100%; box-sizing:border-box; resize:vertical; font:12px var(--mono); padding:8px 10px; border-radius:10px; border:1px solid var(--sep-2); background:var(--card-2); color:var(--label);}
 .ic-alt summary{cursor:pointer; font-size:12.5px; color:var(--label-3); list-style:none;}
 .ic-alt summary::-webkit-details-marker{display:none;}
 .ic-alt summary::before{content:"▸ "; color:var(--label-4);} .ic-alt[open] summary::before{content:"▾ ";}
@@ -1117,4 +1118,3 @@ table.cal-grid td:first-child{line-height:1.25;}
 .mc-run{border-top:1px solid var(--sep-2); padding:8px 0; font-size:12px; display:grid; gap:3px;}
 .mc-miss{color:var(--fail);}
 .mc-acts{display:flex; gap:6px; margin-top:4px; flex-wrap:wrap;}
-
