@@ -275,7 +275,7 @@ function selectOpMode(id){
     if(Sim.phase==="init"||Sim.phase==="running") Sim.stop();
     Sim.phase="empty";
     $("#coverage").innerHTML=`<p class="cov-ok">Couldn't read this file: ${esc(e.error||"unknown error")}</p>`;
-    renderOpList(); renderOpSelect(); updateDS(); buildGauges(); renderPad(); return;
+    renderOpList(); renderOpSelect(); updateDS(); renderPad(); return;
   }
   CODE=e.code;
   // an auto written for another season's field would run into this one's HIVEs
