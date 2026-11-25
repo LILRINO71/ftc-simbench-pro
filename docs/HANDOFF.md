@@ -4,6 +4,20 @@ The handoffs live here, the newest first. The two older ones below mention `rese
 `research/realcad`, `research_notes/` and `reports/`: those folders were removed on 2026-10-04 as
 unused (nothing in the build or the tests read them); the measurements they held stay in the text.
 
+## 2026-11-25: PR #12 brought up to main
+
+Branch `refresh/pr12-2026-11-25`: the PR head with main merged in. Main already had the PR's bug hunt,
+so the merge kept main's code. Added on top:
+
+- **Copy and paste from Onshape**, ported to the import card as a fold (`ImportFlow.htmlPaste`,
+  `PASTE`/`applyPasted` in `src/app.js`, `readOnshapePaste` in `src/onshapelink.js`). The old pop-up
+  stays removed. Checked in a browser with the corpus robot only: never with a real Onshape account,
+  school Chromebook or phone.
+- Two page fixes the redesign had lost: an unreadable OpMode threw (`buildGauges`), and on a phone the
+  status and match pop-overs and the CAD tree ran off the screen.
+- Still open, also on the live site: at 390 px the import card is 12 px wider than the screen and sits
+  behind the open side panel.
+
 ## 2026-11-17: a rack on a gear is a slider
 
 On main. The team's gate (a goBILDA servo's 24T gear on a 35-tooth rack) came out a hinge that
