@@ -15,7 +15,7 @@
    Camera maths lives in liftG's frame — the canonical CAD — so Front, Top
    and Right mean the CAD's own axes, as they do in Onshape.
    ============================================================ */
-const CAD_BG_TOP="#c9d4df", CAD_BG_BOTTOM="#f4f6f8";
+const CAD_BG={light:["#dfe5ec","#f7f8fa"], dark:["#1b1f25","#0d0f12"]};
 const CAD_SELECT=0x2f80ed, CAD_HOVER=0xf2a33a;
 // named views, as directions from the model to the camera in canonical axes
 const CAD_VIEWS={iso:[1,-1,1], front:[0,-1,0], back:[0,1,0], right:[1,0,0], left:[-1,0,0], top:[0,0,1], bottom:[0,0,-1]};
@@ -31,14 +31,21 @@ const CadView={
     const V=View;
     this.cam=new THREE.OrthographicCamera(-1,1,1,-1,-50,50);
     this.head=new THREE.DirectionalLight(0xffffff,0.0); V.scene.add(this.head); V.scene.add(this.head.target);
-    // the pale gradient Onshape paints behind a model
-    const cv=document.createElement("canvas"); cv.width=2; cv.height=256;
-    const g=cv.getContext("2d"), gr=g.createLinearGradient(0,0,0,256);
-    gr.addColorStop(0,CAD_BG_TOP); gr.addColorStop(1,CAD_BG_BOTTOM); g.fillStyle=gr; g.fillRect(0,0,2,256);
-    this.bg=new THREE.CanvasTexture(cv);
+    this.bg=this.bgFor();
     this.buildCube();
     this.bind();
   },
+
+  /* the pale gradient Onshape paints behind a model, in the page's theme */
+  bgFor(){
+    const dark=typeof document!=="undefined"&&document.documentElement.getAttribute("data-theme")==="dark", C=CAD_BG[dark?"dark":"light"];
+    const cv=document.createElement("canvas"); cv.width=2; cv.height=256;
+    const g=cv.getContext("2d"), gr=g.createLinearGradient(0,0,0,256);
+    gr.addColorStop(0,C[0]); gr.addColorStop(1,C[1]); g.fillStyle=gr; g.fillRect(0,0,2,256);
+    const t=new THREE.CanvasTexture(cv); if(THREE.SRGBColorSpace) t.colorSpace=THREE.SRGBColorSpace; return t;
+  },
+  /* the page's theme changed: the backdrop follows */
+  theme(){ if(!this.cam) return; const old=this.bg; this.bg=this.bgFor(); if(this.on) View.scene.background=this.bg; if(old) old.dispose(); },
 
   /* ---------------- enter / leave ---------------- */
   enter(){
@@ -48,9 +55,9 @@ const CadView={
     const V=View; V.applyQuality();
     this.saved={bg:V.scene.background, hemi:V.hemi?V.hemi.intensity:null, sun:V.sun?V.sun.intensity:null, shadow:V.sun?V.sun.castShadow:null};
     V.scene.background=this.bg;
-    if(V.hemi){ V.hemi.intensity=0.62; }
-    if(V.sun){ V.sun.intensity=0.18; V.sun.castShadow=false; }
-    this.head.intensity=0.78;
+    if(V.hemi){ V.hemi.intensity=1.6; }
+    if(V.sun){ V.sun.intensity=0.5; V.sun.castShadow=false; }
+    this.head.intensity=2.2;
     V.el.classList.add("cad");
     $("#cadUI").hidden=false;
     this.fit(); this.view("iso");
@@ -114,7 +121,8 @@ const CadView={
     const V=View; if(!V.cad||!this.target) return;
     // nothing but the model: every other thing in the world (field, HIVEs,
     // balls — they don't all live under one group) steps out of the way
-    if(!this.hid){ this.hid=[]; for(const o of V.world.children) if(o!==V.chassisG&&o.visible){ o.visible=false; this.hid.push(o); } }
+    // (again after any View.load: a joint, mate or rig change, the turret slider, all build a new world)
+    if(!this.hid||this.hidN!==V.loadN){ this.hid=[]; this.hidN=V.loadN; for(const o of V.world.children) if(o!==V.chassisG&&o.visible){ o.visible=false; this.hid.push(o); } }
     for(const o of [V.fieldG,V.dynG,V.footG,V.baseG,V.shooterG]) if(o) o.visible=false;
     for(const m of V.markers||[]) m.visible=false;
     for(const J of V.jawSets||[]){ J.a.visible=false; J.b.visible=false; }
@@ -131,7 +139,7 @@ const CadView={
     c.position.copy(pW); c.up.copy(u.clone().applyQuaternion(q)); c.lookAt(tW);
     this.head.position.copy(pW); this.head.target.position.copy(tW);
     V.ren.autoClear=true;
-    V.ren.render(V.scene,c);
+    V.draw(c);
     this.renderCube(w,h);
   },
 
@@ -144,9 +152,9 @@ const CadView={
       const g=cv.getContext("2d");
       g.fillStyle="#f7f9fb"; g.fillRect(0,0,128,128);
       g.strokeStyle="#9aa6b2"; g.lineWidth=4; g.strokeRect(2,2,124,124);
-      g.fillStyle="#3a4652"; g.font="600 25px Barlow, 'Segoe UI', sans-serif"; g.textAlign="center"; g.textBaseline="middle";
+      g.fillStyle="#3a4652"; g.font="600 22px Inter, -apple-system, system-ui, 'Segoe UI', sans-serif"; g.textAlign="center"; g.textBaseline="middle";
       g.fillText(label,64,66);
-      const t=new THREE.CanvasTexture(cv);
+      const t=new THREE.CanvasTexture(cv); if(THREE.SRGBColorSpace) t.colorSpace=THREE.SRGBColorSpace;
       return new THREE.MeshBasicMaterial({map:t, color:0xffffff});
     };
     // BoxGeometry faces: +x -x +y -y +z -z in view axes = Right Left Top Bottom Front Back
@@ -304,7 +312,7 @@ const CadView={
     const j0=this.sel[0], si=asg?asg.solid[j0]:-1, s=si>=0?cad.solids[si]:null;
     // mass of the selection: each matched part once
     const solids=new Set(); for(const j of this.sel){ const i=asg?asg.solid[j]:-1; if(i>=0) solids.add(i); }
-    let kg=0, vendor=0; for(const i of solids){ const pm=partMass(cad.solids[i]); kg+=pm.kg; if(pm.how==="vendor") vendor++; }
+    let kg=0, vendor=0; for(const i of solids){ const pm=partMass(cad.solids[i]); kg+=pm.kg; if(pm.how==="vendor"||pm.how==="cad") vendor++; }
     // bounding size of the selection, canonical metres
     const M=frameM(cad), mn=[Infinity,Infinity,Infinity], mx=[-Infinity,-Infinity,-Infinity];
     for(const j of this.sel){ const b=tessBox(res.meshes[j].attributes.position.array,M); for(let k=0;k<3;k++){ mn[k]=Math.min(mn[k],b.min[k]); mx[k]=Math.max(mx[k],b.max[k]); } }

@@ -9,12 +9,13 @@ Open **Online** in the top bar.
 | | |
 |---|---|
 | **Quick match** | Joins the fullest open match that has a free place. If there isn't one, it starts a new match that others can find. |
-| **Host a match** | Opens a room with a 5-letter code (like `K7QMX`). **Copy invite link** gives a link that opens SimBench with the code filled in. Tick **Listed under Open matches** to let anyone find it. |
+| **Host a match** | Opens a room with a 5-letter code (like `K7QMX`). **Copy link** gives a link that opens SimBench with the code filled in; **Copy watch link** gives one that joins as a spectator. Tick **Listed under Open matches** to let anyone find it. Keep that tab open: your computer runs the match. |
 | **Join** | Type a code, or pick one under **Open matches**. |
+| **Watch** | The same, as a spectator: no robot, no place, no controls. You see the match as it is played, and can chat with everyone. |
 
 ## In the room
 
-- **Places:** four, RED 1 and 2, BLUE 1 and 2. Take any free one, or **Just watch**. Up to eight people fit in a room; anyone without a place watches.
+- **Places:** four, RED 1 and 2, BLUE 1 and 2. Take any free one, or **Just watch**. Up to eight spectators can join beside the four drivers (twelve in a room), and the drivers see how many are watching. Someone who joins with **Watch** never takes a place, and a spectator can join while a match is running.
 - **Ready:** load your robot and pick an OpMode of the match's kind (a TeleOp for a TeleOp match), then press **I'm ready**.
 - **Host settings:** the host picks the period (TeleOp 2:00 or Auto 0:30) and how good the AI robots are, and presses **Start the match** once everyone with a place is ready.
 - **The start:** every robot goes to its place's start (G304) and INITs. After a 3-second countdown, every robot STARTs at the same moment.
@@ -44,9 +45,10 @@ Open **Online** in the top bar.
 
 - **Direct connections.** Browsers connect straight to each other with WebRTC. They find each other through public [Nostr](https://nostr.com) relays, using the [Trystero](https://github.com/dmotz/trystero) library (MIT). Trystero is loaded from jsDelivr (or esm.sh if jsDelivr fails), pinned to one version, and only when someone opens **Online**.
 - **Which relays.** SimBench names its relays (`NET_RELAYS` in `src/net.js`): seven large public ones, all used at once, so one or two being down doesn't stop anyone. Left to itself, Trystero picked the same 5 of its built-in 28 for every SimBench player, and two of those were down or refused connections, so players often never found each other. Only "who is in which room" goes through a relay; the match itself is direct.
-- **No server.** The match itself never passes through any server, and SimBench runs none. There's no account, no sign-in and no API key.
+- **No account.** There's no sign-in and no API key. Over direct WebRTC the match passes through no server; when the site runs its own match rooms (below), they relay it, and keep nothing once the room closes.
 - **Your IP address.** Like any peer-to-peer game, the other players' browsers can see your IP address.
-- **Blocked networks.** Some school and company networks block direct connections between browsers. If players can't connect, try a phone hotspot or a home network. A TURN relay would fix this for every network, but it has to run somewhere with a secret key, so it isn't in the browser code.
+- **The ladder.** Going online, the page asks the site first (`/room/health`, `src/netrelay.js` `netConnect`): when the site runs its own match rooms (`functions/room`, `workers/room`, DEPLOY.md "Online rooms"), players meet there over HTTPS on SimBench's own address, which a school filter can't block without blocking SimBench; a room relays messages over a WebSocket, or Server-Sent Events and POSTs where a proxy strips WebSockets, and tells everyone the same time. Only the site's own pages may use its rooms and `/room/turn`: a request needs an `Origin` of the site, or no `Origin` and `Sec-Fetch-Site: same-origin` (what a browser sends on a same-origin GET); one with neither is refused, since both are billed to the site. A browser that sends no `Sec-Fetch-Site` (Safari before 16.4) still reaches the rooms over a WebSocket, which always carries `Origin`, but not over Server-Sent Events, and gets no TURN credentials. Without rooms but with TURN credentials, WebRTC goes through Cloudflare's TURN on port 443. Without either, it is direct WebRTC as above.
+- **Blocked networks.** Until the site's rooms are switched on, some school and company networks block direct connections between browsers. If players can't connect, try a phone hotspot or a home network.
 - **Tab in the background.** A browser gives a hidden or covered tab no animation frames. While a match is on, SimBench keeps stepping it from a timer instead, so a host who switches tabs doesn't freeze everyone.
 
 ## What it isn't yet
@@ -54,5 +56,5 @@ Open **Online** in the top bar.
 - **The host leaving ends the match.** It ends for everyone; nobody takes over as host.
 - **A player leaving mid-match.** Their robot leaves the field, and no AI robot takes their place.
 - **Other teams' robots are boxes.** They're drawn at their real size, not from their CAD.
-- **Unlimited balls.** Players' robots still launch from an endless supply, the same as on your own; only the AI robots have to pick elements up.
+- **Unlimited balls.** Players' robots still launch from an endless supply online; only the AI robots have to pick elements up. On your own bench a robot with an intake picks pieces up and launches what it holds ([game-pieces.md](game-pieces.md)).
 - **No voice chat.** Trystero can carry it, but SimBench doesn't use it yet.

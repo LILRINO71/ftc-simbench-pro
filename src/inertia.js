@@ -42,16 +42,19 @@ const MASS_MIN_T = THIN_T;
                entirely air, so the fill is tiny.
      fastener  steel 7850, minus thread valleys, drives and countersinks. */
 const MATERIALS = {
-  metal:       {density:2700, fill:0.18, label:"aluminium structure"},
-  plate:       {density:2700, fill:0.60, label:"aluminium plate, pocketed"},
-  servo:       {density:1800, fill:0.85, label:"servo"},
-  motor:       {density:3200, fill:0.63, label:"gearmotor"},
-  wheel:       {density:1400, fill:0.60, label:"wheel/tread"},
-  electronics: {density:1500, fill:0.35, label:"electronics"},
-  clear:       {density:1200, fill:0.90, label:"polycarbonate"},
-  printed:     {density:1240, fill:0.35, label:"3D print"},
-  belt:        {density:1200, fill:0.10, label:"belt/cable"},
-  fastener:    {density:7850, fill:0.55, label:"steel fastener"}
+  // density x fill is the mass of a part's convex hull; `solid` is the density of the
+  // material itself, for when the part's true volume is known (a CAD export's inertial)
+  metal:       {density:2700, fill:0.18, solid:2700, label:"aluminium structure"},
+  plate:       {density:2700, fill:0.60, solid:2700, label:"aluminium plate, pocketed"},
+  servo:       {density:1800, fill:0.85, solid:1800, label:"servo"},
+  motor:       {density:3200, fill:0.63, solid:3600, label:"gearmotor"},
+  wheel:       {density:1400, fill:0.60, solid:1200, label:"wheel/tread"},
+  electronics: {density:1500, fill:0.35, solid:1500, label:"electronics"},
+  clear:       {density:1200, fill:0.90, solid:1200, label:"polycarbonate"},
+  printed:     {density:1240, fill:0.35, solid:1100, label:"3D print"},
+  belt:        {density:1200, fill:0.10, solid:1200, label:"belt/cable"},
+  fastener:    {density:7850, fill:0.55, solid:7850, label:"steel fastener"},
+  game:        {density:0,    fill:0,    solid:0,    label:"game element"}
 };
 
 /* Parts whose published mass we actually know, best match first. Anything
@@ -75,6 +78,12 @@ const VENDOR_NOT = /\b(mount|mounts|bracket|strap|clamp|cable|wire|harness|clip|
 /* …and a published mass is only believable when the part it lands on is
    roughly the right size. Outside this band, the name matched something else. */
 const VENDOR_DENSITY = {lo:300, hi:9000};
+// a CAD-given mass over the part's hull: a hollow channel's hull is mostly air (down to ~50 kg/m^3), steel is 7800
+const CAD_DENSITY = {lo:40, hi:9000};
+// a team-drawn part of unknown material: between PLA (1240) and polycarbonate (1200), with some aluminium among them
+const CUSTOM_DENSITY = 1300;
+// Onshape's "Part 1", a bare "plate" or "body": a part the team drew, not a catalogue item
+const isCustomName = (n) => /^(part|body|solid|plate|bracket|mount|spacer|arm|link|cover|guard|hood|ramp)\b\s*\d*\s*$|^part\s*\d+/i.test(String(n || "").trim());
 
 /* Axis-aligned box of a point set: centre and the three side lengths.
    No points at all gives a zero box at the origin, never Infinity. */
@@ -99,8 +108,16 @@ function massBoxOf(pts){
    keeps a mirrored hull honest. Too few, coincident or coplanar points
    cannot be hulled — those fall back to the oriented box, which is what
    the 3-D view draws for them too. */
+const HULL_VOL = new WeakMap();      // points -> volume: every rebuild weighs every part again (1,938 hulls on an export robot)
 function hullVolume(pts){
   if(!pts || pts.length < 1) return 0;
+  const c = HULL_VOL.get(pts);
+  if(c && c.n === pts.length) return c.v;
+  const v = hullVolumeOf(pts);
+  HULL_VOL.set(pts, {n:pts.length, v});
+  return v;
+}
+function hullVolumeOf(pts){
   const b = massBoxOf(pts), boxVol = b.L*b.W*b.H;
   let P = pts, h = pts.length>=4 ? convexHull(pts) : null;
   if(!h){ P = boxCorners(pts); h = convexHull(P); }
@@ -162,7 +179,19 @@ function isPlateShape(pts){
 function partMass(solid, opts){
   opts = opts || {};
   const pts = (solid && solid.pts) || [];
-  const vol = hullVolume(pts);
+  // the CAD's own volume when it came with the part (Onshape's mass properties, src/onshapecad.js):
+  // exact, where a hull of the sample points reads a channel as a solid box
+  const vol = (solid && Number.isFinite(solid.vol) && solid.vol > 0) ? solid.vol : hullVolume(pts);
+  let kind = (solid && solid.kind) || "metal";
+  // a game element drawn in the robot (an artifact in the hopper) is not the robot's mass;
+  // what it carries is the payload setting
+  if(kind === "game") return {kg:0, how:"game", density:0, fill:0, volume:vol, why:"a game element, not part of the robot"};
+  // a surface (Onshape gave it no mass and no volume, src/onshapecad.js): nothing to weigh
+  if(solid && solid.massless) return {kg:0, how:"surface", density:0, fill:0, volume:0, why:"a surface, not a solid: it has no volume"};
+  // the CAD's own mass with a real material (Onshape's materials, a URDF <inertial>): a
+  // measurement of this part, cut to its length, so it beats a catalogue figure for the stock part
+  const cadD = (opts.cad !== false && solid && Number.isFinite(solid.kg) && solid.kg > 0 && vol > 0) ? solid.kg/vol : NaN;
+  if(cadD >= CAD_DENSITY.lo && cadD <= CAD_DENSITY.hi) return {kg:solid.kg, how:"cad", density:cadD, fill:1, volume:vol, why:"mass from the CAD's own material"};
   if(opts.vendor !== false){
     const v = vendorMassFor(solid, vol);
     // density here is the back-computed effective density, for display only
@@ -175,6 +204,23 @@ function partMass(solid, opts){
     const lin = linearVendorMass(solid, pts);
     if(lin) return {kg:lin.kg, how:"vendor", density:(vol>0 ? lin.kg/vol : 0), fill:1, volume:vol, why:lin.why};
   }
+  // the CAD's own mass with no material set (a real one returned above). Onshape's
+  // exporter writes the part at a density of 1 kg/m^3 — the number IS the part's volume
+  // in m^3 (checked on a goBILDA export: pins and rollers at 0.4-0.7 of their hull, channels
+  // at 0.1-0.3) — so that volume at the kind's solid density beats any hull-and-fill guess.
+  if(opts.cad !== false && solid && Number.isFinite(solid.kg) && solid.kg > 0 && vol > 0){
+    const d = solid.kg/vol;
+    if(d > 0.02 && d <= 1.05){
+      const k = (kind === "metal" && isPlateShape(pts)) ? "plate" : kind;
+      const mat = MATERIALS[k] || MATERIALS.metal;
+      let rho = Number.isFinite(mat.solid) ? mat.solid : mat.density, label = mat.label || k;
+      // a part with a vendor number is stock, nearly always aluminium; one the team drew
+      // itself ("Part 1", "Plate") is printed or cut from polycarbonate far more often than
+      // machined, and reading every one as aluminium weighed a robot 5 kg over
+      if((k === "metal" || k === "plate") && !solid.part && isCustomName(solid.name)){ rho = CUSTOM_DENSITY; label = "a part the team drew (printed or polycarbonate)"; }
+      return {kg:solid.kg*rho, how:"cad", density:rho, fill:1, volume:solid.kg, why:"the CAD's volume (no material set) at "+rho+" kg/m^3, "+label};
+    }
+  }
   let tbl = MATERIALS;
   if(opts.materials){                        // merge per kind: {metal:{density:5000}} keeps metal's fill
     tbl = Object.assign({}, MATERIALS);
@@ -183,7 +229,6 @@ function partMass(solid, opts){
     const m = opts.materials.metal;
     if(m && Number.isFinite(m.density) && !opts.materials.plate) tbl.plate = Object.assign({}, MATERIALS.plate, {density:m.density});
   }
-  let kind = (solid && solid.kind) || "metal";
   // a flat plate's hull is nearly all metal, unlike a channel's; the 0.18
   // structure fill read a 6 mm base plate at under a third of its weight
   if(kind === "metal" && isPlateShape(pts)) kind = "plate";
@@ -208,11 +253,14 @@ function inertiaOf(parts){
   for(const p of (parts||[])){
     if(!p) continue;
     const c = p.com || {}, b = p.box || {}, g = (v)=>Number.isFinite(+v) ? +v : 0;
+    // a part with its own tensor about its centre (Onshape's mass properties, row-major, 9 numbers) uses it instead of a box
+    const T = Array.isArray(p.I) && p.I.length === 9 && p.I.every(Number.isFinite) ? p.I : null;
     list.push({kg:(Number.isFinite(p.kg) && p.kg>0 ? p.kg : 0), x:g(c.x), y:g(c.y), z:g(c.z),
-               L:Math.max(0,g(b.L)), W:Math.max(0,g(b.W)), H:Math.max(0,g(b.H))});
+               L:Math.max(0,g(b.L)), W:Math.max(0,g(b.W)), H:Math.max(0,g(b.H)), T});
   }
   const I = {xx:0, yy:0, zz:0, xy:0, xz:0, yz:0};
   const products = {xy:0, xz:0, yz:0};
+  const own = {xy:0, xz:0, yz:0};                                     // the parts' own off-diagonals (already negated products)
   let M=0, cx=0, cy=0, cz=0;
   for(const p of list){ M+=p.kg; cx+=p.kg*p.x; cy+=p.kg*p.y; cz+=p.kg*p.z; }
   if(!(M>0)){
@@ -223,12 +271,19 @@ function inertiaOf(parts){
   cx/=M; cy/=M; cz/=M;
   for(const p of list){
     const m=p.kg, dx=p.x-cx, dy=p.y-cy, dz=p.z-cz;
-    I.xx += m/12*(p.W*p.W + p.H*p.H) + m*(dy*dy + dz*dz);
-    I.yy += m/12*(p.L*p.L + p.H*p.H) + m*(dx*dx + dz*dz);
-    I.zz += m/12*(p.L*p.L + p.W*p.W) + m*(dx*dx + dy*dy);
+    if(p.T){
+      I.xx += p.T[0] + m*(dy*dy + dz*dz);
+      I.yy += p.T[4] + m*(dx*dx + dz*dz);
+      I.zz += p.T[8] + m*(dx*dx + dy*dy);
+      own.xy += p.T[1]; own.xz += p.T[2]; own.yz += p.T[5];
+    } else {
+      I.xx += m/12*(p.W*p.W + p.H*p.H) + m*(dy*dy + dz*dz);
+      I.yy += m/12*(p.L*p.L + p.H*p.H) + m*(dx*dx + dz*dz);
+      I.zz += m/12*(p.L*p.L + p.W*p.W) + m*(dx*dx + dy*dy);
+    }
     products.xy += m*dx*dy; products.xz += m*dx*dz; products.yz += m*dy*dz;
   }
-  I.xy = -products.xy; I.xz = -products.xz; I.yz = -products.yz;
+  I.xy = own.xy - products.xy; I.xz = own.xz - products.xz; I.yz = own.yz - products.yz;
   for(const k in I) if(!Number.isFinite(I[k])) I[k]=0;
   for(const k in products) if(!Number.isFinite(products[k])) products[k]=0;
   return {I, products, kg:M, com:{x:cx, y:cy, z:cz}};
@@ -255,8 +310,14 @@ function massProps(cad, opts){
     if(!s) continue;
     const pm = partMass(s, opts), b = massBoxOf(s.pts || []);
     parts.push({name:s.name || "part", kg:pm.kg, how:pm.how});
-    items.push({kg:pm.kg, com:{x:b.c[0], y:b.c[1], z:b.c[2]}, box:{L:b.L, W:b.W, H:b.H}});
-    if(pm.how === "vendor") vendorKg += pm.kg;
+    // Onshape's own centre of mass and tensor (src/onshapecad.js) when the part keeps the CAD's mass;
+    // a volume weighed at an implied density scales the tensor with it (same geometry, other density)
+    const exact = pm.how === "cad" && Array.isArray(s.com) && s.com.length === 3 && s.com.every(Number.isFinite);
+    const scale = exact && Number.isFinite(s.kg) && s.kg > 0 ? pm.kg/s.kg : 1;
+    const own = exact && Array.isArray(s.I) && s.I.length === 9 ? s.I.map(v => v*scale) : null;
+    items.push(exact ? {kg:pm.kg, com:{x:s.com[0], y:s.com[1], z:s.com[2]}, box:{L:own ? 0 : b.L, W:own ? 0 : b.W, H:own ? 0 : b.H}, I:own}
+                     : {kg:pm.kg, com:{x:b.c[0], y:b.c[1], z:b.c[2]}, box:{L:b.L, W:b.W, H:b.H}});
+    if(pm.how === "vendor" || pm.how === "cad") vendorKg += pm.kg;
     const top = b.c[2] + b.H/2; if(top > zTop) zTop = top;
   }
   if(!Number.isFinite(zTop)) zTop = 0;

@@ -1,8 +1,9 @@
-# Deploying to app.ftc-simbench.com
+# Deploying FTC SimBench Pro
 
-The whole app is one static folder, so any static host works. What follows is the short path,
-the caveats that actually bite, and what you have to do yourself (I can't buy a domain or sign
-into a host for you).
+The app is one static folder plus one small server function (the Onshape sign-in relay). It is
+built and hosted on **Cloudflare Pages** from this repo; every push to `main` rebuilds the live
+site at <https://ftc-simbench-pro.pages.dev>. This file is the owner's checklist: what ships, how
+the Pages project is set up, and the one thing only the owner can do (register the Onshape app).
 
 ## What ships
 
@@ -14,155 +15,281 @@ That writes `dist/`:
 
 | file | what it is |
 |---|---|
-| `index.html` | the app, one self-contained file |
+| `index.html` | the app, one file; three.js r186 and its add-ons load from jsDelivr as ES modules |
+| `engine-<hash>.js` | the engine alone, run in a Web Worker to read CAD (and an Onshape assembly) off the page's thread; immutable, cached for a year |
 | `fragment.html` | the same app without `<html>`/`<head>`, for embedding |
-| `CNAME` | `app.ftc-simbench.com` — read by GitHub Pages; Cloudflare ignores it harmlessly |
-| `_headers` | cache and security headers, read by Cloudflare Pages and Netlify |
-| `.nojekyll` | stops Jekyll eating files that start with `_` |
+| `_headers` | cache and security headers, read by Cloudflare Pages (see "Security headers") |
+| `robots/`, `demo/`, `og.png` | the default robot, the demo STEP and the link-preview image |
 
-Two external requests remain at runtime: Google Fonts and the three.js CDN. To be fully
-self-hosted, download `three.min.js` into `vendor/` and inline the fonts — see "Going
-dependency-free" below.
+`functions/` (`onshape`, `room`, `leaderboard`) is not in `dist/`: Cloudflare Pages picks it up by
+itself and serves each folder at `/onshape/*`, `/room/*` and `/leaderboard/*`.
 
-## Hosting: pick one
+Three external requests remain at runtime: Google Fonts, the three.js CDN (jsDelivr) and
+OpenCascade (jsDelivr, the first time a STEP is dropped). `dist/` is build output and is never
+committed (AGENTS.md).
 
-**Cloudflare Pages — this is the one to use.** Free, builds straight from the *private* repo, and it
-hands you a working `https://<project>.pages.dev` link before you own any domain. GitHub Pages
-cannot do this: it refuses Pages on a private repo unless you pay
-(`422: Your current plan does not support GitHub Pages for this repository`).
+## The Pages project
 
 1. Sign in at <https://dash.cloudflare.com> (a free account is enough).
 2. **Compute (Workers & Pages) → Create → Pages → Connect to Git.**
-3. Authorise GitHub, and when it asks which repositories, give it
-   **LILRINO71/ftc-simbench-pro**. It stays private; Cloudflare just reads it.
-4. Set up the build:
+3. Authorise GitHub and give it **LILRINO71/ftc-simbench-pro**. The repo can stay private;
+   Cloudflare only reads it.
+4. Build settings:
    - **Framework preset:** None
    - **Build command:** `npm run build:ship`
    - **Build output directory:** `dist`
-   - Nothing else. (`.node-version` in the repo pins Node 22, and there are no dependencies to
-     install.) Cloudflare also picks up `functions/` by itself: that's **Sign in with Onshape**,
-     which needs two secrets; see the next section.
-5. **Save and Deploy.** The first build takes about a minute. The link appears at the top of the
-   page as `https://ftc-simbench-pro.pages.dev` — that is your shareable link, and every push to
-   `main` rebuilds it automatically.
+   - Nothing else. `.node-version` pins Node 22; `npm install` is only the one dev dependency.
+5. **Save and Deploy.** The first build takes about a minute, and the link appears at the top of
+   the page. Every push to `main` rebuilds it.
 
-Later, when you own the domain: **Custom domains → Set up a domain → `app.ftc-simbench.com`**.
-If the domain's DNS is on Cloudflare the record is made for you; otherwise add the CNAME they show
-you at your registrar. TLS is automatic either way.
+What Cloudflare runs is exactly what runs locally (`npm install && npm run build:ship`), so there
+are no surprises.
 
-What Cloudflare runs is exactly what you can run locally, so there are no surprises:
+## Sign in with Onshape (the main import route needs this)
 
-```bash
-npm install
-npm run build:ship
-```
+A team imports its robot by pasting its Onshape assembly's address. SimBench reads the assembly
+from Onshape's API, signed in as the team. Onshape's API answers no cross-site call from a browser
+and the sign-in needs an app secret, so the read goes through `functions/onshape/[[path]].js`:
+Onshape's OAuth page, then a read-only pass-through of exactly the calls the robot reader makes
+(`ALLOWED` in that file), with the team's token in an encrypted HttpOnly cookie that only
+`/onshape/*` ever sees. Part Studio shapes and masses pinned to a version or microversion are kept
+in the edge cache (`CACHEABLE`); what that saves against Onshape's yearly allowance is under
+**Quota** below.
 
-**Netlify.** Same shape: build `npm run build:ship`, publish `dist`, then Domain settings → add
-`app.ftc-simbench.com`.
+Until it is set up, `/onshape/status` answers `ready:false`, the import card hides the link box
+and offers the URDF export zip instead. Nothing else breaks.
 
-**GitHub Pages — read this first.** Pages from a *private* repository needs a paid GitHub plan. On
-the free plan, publishing this repo to Pages would mean making it public, which defeats the point.
-Use Cloudflare or Netlify instead, or publish only the built `dist/` to a separate public repo and
-accept that the bundle is readable (it is anyway — see below).
+### Register the Onshape app (owner, once)
 
-## Sign in with Onshape (do this once)
-
-Optional: SimBench's main way into Onshape (copy and paste, see the pop-up)
-needs no setup and works on school accounts. Sign in with Onshape is a
-faster extra for personal accounts. It doesn't work for a school's
-Enterprise account, and a private app only gets about 2,500 Onshape API
-calls a year, shared by everyone who uses it.
-
-School computers block the "Send to SimBench" bookmark: their admins list `javascript:` URLs as
-blocked, so clicking it does nothing and dragging it shows `about:blank#blocked`. **Sign in with
-Onshape** works there instead. The team signs in through Onshape's own page, pastes their
-assembly's address, and gets the whole robot. It runs in `functions/onshape/[[path]].js`, a
-Cloudflare Pages Function that ships with the site, and it needs an Onshape app of yours:
-
-1. Go to <https://dev-portal.onshape.com>, sign in with your Onshape account, and open
-   **OAuth applications → Create new OAuth application**.
+1. In Onshape: your account icon (top right) → **My account → Developer → OAuth applications →
+   Create new OAuth application** (or <https://dev-portal.onshape.com>). Use the account that
+   should carry the quota (below): a personal one, not one your school manages, so the app
+   doesn't vanish with a graduation.
    - **Name:** `FTC SimBench` (teams see this on Onshape's Allow page)
-   - **Primary format:** `com.ftcsimbench.app` (any unique name; it can't change later)
+   - **Primary format:** `com.ftcsimbench.app` (any unique reverse-domain name; it can't change later)
    - **Summary:** `Reads your robot's assembly so SimBench can simulate it.`
+   - **Type:** `Connected Cloud App` (a site outside Onshape, not a tab inside it)
    - **Redirect URLs:** `https://ftc-simbench-pro.pages.dev/onshape/callback`
-     (add `https://app.ftc-simbench.com/onshape/callback` too once the domain is live)
+     (add every other hostname the site is served from, one per line)
    - **OAuth URL:** `https://ftc-simbench-pro.pages.dev/`
    - **Permissions:** tick only **Application can read your documents**.
 2. Click **Create application**. Copy the **Client ID** and the **Client secret** right away;
    Onshape shows the secret only once.
 3. In Cloudflare: **Workers & Pages → ftc-simbench-pro → Settings → Variables and Secrets → Add**,
-   for **Production**:
-   - `ONSHAPE_CLIENT_ID`: the Client ID
+   for **Production** (and Preview if you want preview deploys to work too):
+   - `ONSHAPE_CLIENT_ID`: the Client ID (type Text)
    - `ONSHAPE_CLIENT_SECRET`: the Client secret (type **Secret**)
 4. **Deployments → the latest one → Retry deployment**, so the function sees them.
-5. Open the site, click **Get my robot from Onshape → Sign in with Onshape**, click **Allow**, and
-   paste an assembly's address. Then try it with a teammate's Onshape account too. If Onshape
-   shows them an error instead of the Allow page, the app needs a store entry before others can use
-   it: open the app in the dev portal and create one.
+5. Open the site. The import card now shows the link box. Paste an assembly's address, click
+   **Get my robot**, click **Allow** on Onshape's page, and the robot arrives.
+6. Try it with a teammate's Onshape account too, signed in on their own computer. If Onshape
+   shows them an error instead of the Allow page, open the app in the dev portal and add a
+   **store entry** (it stays private). Their reads still count against your allowance.
 
-Until the secrets are set, the pop-up says Sign in with Onshape isn't switched on and offers the
-bookmark and STEP files instead. The secret never reaches the page. Each team's Onshape token is
-kept in an encrypted, HttpOnly cookie that only `/onshape/*` sees. The function only reads, and only
-the calls the robot reader makes, and only from `cad.onshape.com`.
+### Quota
 
-## The domain
+Onshape meters API calls per year (<https://onshape-public.github.io/docs/auth/limits/>, checked
+2026-10-09):
 
-`ftc-simbench.com` has to be registered and paid for by you; I can't do that. Once it is:
-- point `app` at your host (Cloudflare Pages and Netlify both show you the exact record),
-- let the host issue the TLS certificate (both do it automatically),
-- keep `dist/CNAME` in sync if you also use GitHub Pages anywhere.
+- An app that isn't publicly listed in the Onshape App Store is a **private** app, and every call it
+  makes counts against **the app owner's** allowance, whoever signed in: 2,500 calls a year on a
+  Free, Standard or EDU Student account, 5,000 per user on Professional. An app created under a
+  school's or company's settings counts against that company. Calls that fail (4xx, 5xx) don't
+  count, and neither does anything teams do in Onshape itself.
+- When the allowance is spent, Onshape answers **402** to every call until the year renews, and more
+  can only be bought from Onshape. SimBench then stops the read and tells the team to drop the
+  export zip, which uses no API at all.
+- Calls from an app **listed publicly in the App Store** count against nobody. That is the only free
+  way to let every team use the link; see below.
+- See what's used: **My account → Developer → View your API usage**. Onshape emails at 25, 50, 75
+  and 100 %.
 
-## Donations
+What one import costs: one call for the document's name, one for the assembly, one for its
+features, one per subassembly that has mates, and two per Part Studio the robot places parts from
+(shapes, masses). A robot built from 100 Part Studios is about 200 calls the first time, so 2,500 is
+roughly a dozen first reads of a big robot a year. Repeats cost less:
 
-The **Support** button in the header is a plain link. Set your real checkout URL once, in
-`src/markup.html`:
+- **The browser** keeps every Part Studio it has read (IndexedDB, up to 400). Reading the same
+  robot again on the same computer costs the first three calls plus two per Part Studio that
+  changed. Parts inserted from other documents (goBILDA, REV) are pinned to a version and never
+  change; the team's own Part Studios in a workspace are keyed by the document's microversion, so
+  any edit anywhere in that document makes all of them new. Pasting the address of a **version**
+  (Onshape: Versions and history → Create version → open it → copy the address) keeps them
+  pinned too.
+- **The edge cache** keeps Part Studios at a version or microversion. A kept copy of a private
+  document still costs one call (the check that this team may open it, same as reading it), but a
+  document Onshape says is public (goBILDA's, REV's, any published library) is remembered for a day
+  and its kept copies cost nothing. Cloudflare's cache is per data centre, so this helps teams in the
+  same region.
 
-```html
-<a class="hdr-btn support" id="supportBtn" href="https://buymeacoffee.com/YOURNAME" ...>
-```
+So, on a private app: the link is for your own team and a few testers, and other teams use the
+export zip.
 
-Buy Me a Coffee or Ko-fi needs nothing but that link. Stripe Payment Links are the same idea:
-create the link in the Stripe dashboard and paste it in. Do not put API keys or secrets in this
-app — it is client-side code, and anything in it is public to anyone who opens the page. A
-checkout link is safe; a secret key never is.
+### Listing the app in the App Store (free, and no quota)
+
+Onshape's launch checklist (<https://onshape-public.github.io/docs/app-store/checklist/>): OAuth2
+(done), a store entry with a description and screenshots, at least five beta testers, Onshape's
+developer agreement (ask Developer Relations, <onshape-developer-relations@ptc.com>), their QA pass
+(up to a week), and a support contact. The checklist asks for a price; ask Developer Relations to
+confirm a free listing, and have an adult (a mentor) sign the agreement if the owner is under 18.
+Until it's listed, nothing changes for teams except that the link works within the owner's
+allowance.
+
+The whole plan, step by step, with the email to send, what QA checks and where SimBench stands,
+and whether the link is accurate: [docs/onshape-app-store.md](docs/onshape-app-store.md).
+
+### School networks and Chromebooks
+
+- The sign-in is first-party: the cookie belongs to the SimBench site and is set when Onshape sends
+  the team back, so blocking third-party cookies (common on managed Chromebooks) doesn't affect it.
+  A blocked pop-up signs in in the same tab instead.
+- The web filter has to let through: the site (`ftc-simbench-pro.pages.dev`; some filters block all
+  of `*.pages.dev`, so ask IT for that one name, or put the site on a custom domain),
+  `cad.onshape.com` and `oauth.onshape.com` (any school that uses Onshape already allows them),
+  `cdn.jsdelivr.net` (three.js and OpenCascade; `esm.sh` is the fallback) and Google Fonts.
+- A robot in a school's own Onshape enterprise (an address like `myschool.onshape.com`) is read
+  through `cad.onshape.com` and that hasn't been tried; if it fails, use the export zip.
+- Online matches over a school network need the rooms below.
+
+## Online rooms (do this once, so matches work on school networks)
+
+School networks drop UDP and WebSockets to unknown hosts, so the browsers' direct WebRTC
+connections and the public relays they meet through often fail there. The site can run its own
+match rooms instead, reached over HTTPS on SimBench's own address, which a school can't block
+without blocking SimBench (`docs/online.md`, "The network"). Each room is a Cloudflare Durable
+Object; the class lives in `workers/room/`, deployed as its own small Worker, and the Pages
+Function `functions/room/` routes `/room/*` to it.
+
+1. Deploy the Worker that holds the rooms (once, and again whenever `workers/room/` changes):
+   ```bash
+   npx wrangler login
+   npx wrangler deploy --config workers/room/wrangler.toml
+   ```
+   It's called `ftc-simbench-rooms`. Durable Objects with SQLite storage are on the free plan.
+2. In Cloudflare: **Workers & Pages → ftc-simbench-pro → Settings → Bindings → Add → Durable
+   Object namespace**: variable name `ROOMS`, Worker `ftc-simbench-rooms`, class `RoomDO`.
+   Add it for Production (and Preview if you test there).
+3. **Deployments → the latest one → Retry deployment.**
+4. Check: `https://<site>/room/health` says `{"ready":true,...}`. Players going online now meet
+   in the site's own rooms.
+
+Without the binding, `/room/health` says `ready:false` and the page uses direct WebRTC as before.
+
+**Cost.** A room sleeps between messages (WebSocket hibernation). Incoming WebSocket messages are
+billed at 20 to a request: a four-player match sends about 100 poses and states a second, so an
+hour of one match is about 18,000 billed requests. The free plan's 100,000 a day covers a few
+match-hours a day; past that it's the Workers Paid plan.
+
+### TURN (optional)
+
+For sites without rooms, or as WebRTC's fallback: Cloudflare Realtime TURN relays WebRTC through
+TCP port 443 when UDP is blocked. Create a TURN key in **Realtime → TURN**, then add two secrets
+to the Pages project: `TURN_KEY_ID` and `TURN_KEY_API_TOKEN`. `/room/turn` hands browsers
+short-lived credentials, only on the site's own pages (a request with no `Origin` and no
+`Sec-Fetch-Site: same-origin` is refused); the key never reaches the page. That check keeps other
+sites and casual scripts out; it is not a rate limit, since a client outside a browser can write
+those headers. 1,000 GB a month is free.
+
+## Shared leaderboard (optional, free)
+
+Every player's personal bests are kept in their own browser, and the results card shows
+them with nothing to set up. A board everyone shares needs one place to keep the scores:
+a Cloudflare **KV namespace**. Without it, `/leaderboard` answers `501 {"error":"not set up"}`
+and the page quietly shows personal bests only. Nothing else breaks.
+
+The one-time step, in the Cloudflare dashboard (no code, no card):
+
+1. **Workers & Pages → KV → Create a namespace.** Name it `simbench-leaderboard`.
+2. **Workers & Pages → ftc-simbench-pro → Settings → Bindings → Add → KV namespace.**
+   Variable name `LEADERBOARD` (exactly that), namespace `simbench-leaderboard`.
+   Add it for Production (and Preview if you test there).
+3. **Deployments → the latest one → Retry deployment**, so the function sees it.
+4. Check: `https://<site>/leaderboard` answers `{"boards":{"teleop":[],"auto":[]},...}`.
+   After a match, the results card now offers **Post my score**.
+
+**Better: keep the board in a Durable Object.** KV has no transactions and takes up to a
+minute to show a write everywhere, so two teams posting at the same moment can lose one score,
+and posts sent all at once can slip past the limit below. The rooms Worker (`workers/room/`,
+"Online rooms" above) also holds the board's Durable Object, `BoardDO`
+(`workers/room/board.js`), which takes one post at a time and loses nothing:
+
+1. Deploy the rooms Worker again (`npx wrangler deploy --config workers/room/wrangler.toml`): its
+   `v2` migration adds `BoardDO`.
+2. **ftc-simbench-pro → Settings → Bindings → Add → Durable Object namespace**: variable name
+   `BOARDS`, Worker `ftc-simbench-rooms`, class `BoardDO`. Then retry the latest deployment.
+3. With `BOARDS` bound, `/leaderboard` uses it and no longer touches the KV namespace (scores
+   already in KV are not copied over). If you set `LEADERBOARD_SALT`, set it on the
+   `ftc-simbench-rooms` Worker as well, since the object hashes the addresses there.
+
+How it behaves (`functions/leaderboard/[[path]].js`, `tests/leaderboard-function.test.mjs`):
+
+- Two boards, TeleOp and Auto, the top 50 each. An entry is a display name the player
+  chose, the score, the robot's and the OpMode's name, and the date. No account, no e-mail,
+  no address. A player posts on purpose, with a button; nothing is sent by itself.
+- One entry per name, robot and mode, keeping the best. A score is a whole number from 1
+  to 500 (TeleOp) or 150 (Auto), the most one alliance can score with room to spare
+  (`LIMITS` in that file; raise them if the game's points change in `src/match.js`).
+- A name is 1 to 24 letters and numbers, and is turned down if it is rude, a web address
+  or a phone number. It is a plain word filter, not a moderator: if something slips through,
+  delete the key `board:teleop` or `board:auto` in the KV dashboard, or edit its JSON.
+- Each address may post 8 times in 10 minutes. Only a SHA-256 hash of it is stored, in a key
+  that expires by itself (`rl:...`).
+- Only the site's own pages may call it (the `Origin` is checked).
+- A score comes from the player's browser and nothing can prove it was played. This is a
+  board for fun and for teams that trust each other, not for prizes.
+
+**Cost: free tier.** KV's free plan allows 100,000 reads and 1,000 writes a day. Each post
+is two writes (the address's counter and the board), so about 500 posts a day; a read is one
+per board shown (cached for 15 seconds). Past that, posts fail quietly and personal bests keep
+working. Workers Paid ($5 a month) lifts the limit, and only if you ever want it.
+
+## Security headers
+
+`tools/headers.mjs` writes them into `dist/_headers` on every build; nothing to set up.
+
+- **Enforced, on every path:** `Content-Security-Policy: frame-ancestors 'self' https://*.onshape.com`
+  (only this site and Onshape may frame the app, so another site can't put it under a decoy),
+  `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`. The
+  functions (`/onshape`, `/room`, `/leaderboard`) don't get `_headers`, so they send nosniff
+  themselves, and the Onshape sign-in page the same frame-ancestors.
+- **Report-only, on the app page:** `Content-Security-Policy-Report-Only` with the whole script,
+  worker and connect policy. The page is one inline script, so each inline script is allowed by
+  its SHA-256, computed by the build from the page it wrote; there is no `'unsafe-inline'` for
+  scripts. Report-only never blocks anything: the browser prints each violation in the console.
+- **CDN fallbacks:** when the site's own copy of three.js or Jolt can't load, the page imports
+  them from jsDelivr; the import map's `integrity` holds each file's SHA-384, taken from the
+  same `node_modules` files the build vendors (jsDelivr serves a package's published bytes
+  unchanged). Trystero's fallbacks (jsDelivr `+esm`, esm.sh) and esm.sh's three.js are built
+  by the CDN, so no hash could hold; OpenCascade loads with `importScripts`, which takes none.
+
+**Before the report-only policy is enforced** (renaming the header in `tools/headers.mjs`), open
+a deployed build in Chrome, Firefox and Safari with the console open and do the whole tour:
+load the default robot and let its exact geometry finish, drop a STEP and an export zip, paste
+an Onshape link and sign in, switch Physics → Mechanisms → solved (Jolt), run a Monte Carlo,
+record and play a clip, host and join an online match (rooms and the public relays), import
+OpModes from GitHub, and open the app inside an Onshape tab. There must be no
+"violates the following Content Security Policy directive" line. One is known today: a local
+run of the ship build (2026-11-19) showed `'unsafe-eval'` violations from OpenCascade, whose
+generated bindings build functions from strings in the tessellation workers; with the policy
+enforced those workers failed and exact geometry did not load (the robot still loaded with its
+parsed shapes). So either the policy gains `'unsafe-eval'` (it applies to the page too), or the
+OpenCascade worker is served from its own URL with its own policy, before enforcing.
 
 ## About "protecting" the code
 
-The ship build strips every comment, collapses layout, and can move string literals into an
-encoded table (`--strings`). `tests/ship.test.mjs` runs the entire engine test suite against the
-minified bundle, so the ship build is proven to behave identically to the readable one.
+The ship build strips every comment and collapses layout, and `tests/ship.test.mjs` runs the whole
+engine suite against the minified bundle, so it is proven to behave like the readable one; the
+browser files are compiled after minifying too, and `tools/build.mjs` refuses to write a build whose
+scripts don't compile, so a minifier mistake fails the deploy instead of shipping a blank page. That
+raises the effort of lifting the physics model. It is not security, and nothing that runs in a
+browser can be: anything in the page is readable by anyone who opens it. Nothing secret belongs in
+the bundle. The one secret this project has (the Onshape client secret) lives in Cloudflare, read
+only by the function.
 
-Measured on this build:
-
-| build | page | JS |
-|---|---|---|
-| `npm run build` (dev) | 615 KB | 435 KB |
-| `npm run build:ship` (`--min`) | 468 KB | 320 KB |
-| `--min --strings` | 547 KB | 400 KB |
-
-Note the last row: base64 costs a third on top of the strings it hides, so the obfuscated build is
-**80 KB bigger**, not smaller. Take it only if hiding strings is worth the download.
-
-That raises the effort of lifting the physics model. It is not security, and nothing that runs in
-a browser can be. If a part of this ever has to be genuinely unavailable to users, it has to move
-behind an API you control, with the browser sending inputs and receiving results.
-
-## Going dependency-free (optional)
-
-1. `curl -o vendor/three.min.js https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js`
-2. In `tools/build.mjs`, replace the three.js `<script src=...>` with an inline
-   `<script>${rd('vendor','three.min.js')}</script>`.
-3. Replace the Google Fonts `<link>` with locally hosted `@font-face` rules, or drop it — the app
-   falls back to system fonts.
-
-The bundle grows by roughly 600 KB and the app then works with no network at all, which is worth
-it for a competition venue with bad wifi.
-
-## Checklist before you announce it
+## Checklist before announcing it
 
 - [ ] `npm test` green, `npm run build:ship` clean
-- [ ] Sign in with Onshape set up (above), and tried on a school computer
-- [ ] Opened `dist/index.html` from the filesystem and driven a robot
-- [ ] Support link points at your real checkout
-- [ ] Tested on the laptop the team actually brings to competition
+- [ ] Sign in with Onshape set up (above), tried with the owner's robot and with a teammate's account
+- [ ] Tried on a school Chromebook: the pasted link, then INIT and START
 - [ ] A `.ftcsim` saved on one machine opens on another
+- [ ] Tested on the laptop the team actually brings to competition

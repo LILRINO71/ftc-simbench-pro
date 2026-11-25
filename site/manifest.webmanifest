@@ -1,0 +1,17 @@
+{
+  "id": "/",
+  "name": "FTC SimBench Pro",
+  "short_name": "SimBench",
+  "description": "Drive a real FTC robot on the BIOBUZZ field, in your browser. Free.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0F1012",
+  "theme_color": "#0F1012",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

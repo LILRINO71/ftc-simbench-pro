@@ -765,3 +765,68 @@ function worstAngle(a0,a1){
   if(lo<=0&&hi>=0) return 0;
   return Math.abs(lo)<Math.abs(hi)?lo:hi;
 }
+
+/* ---- big assemblies: one small STEP per shape ----
+   OpenCascade reads a whole 50 MB assembly, then fails to mesh any of it: a
+   real 773-part Onshape export came back as 773 empty meshes. Meshing each
+   shape on its own works, and a robot has far fewer shapes than parts (that
+   one has 99: a screw is one shape used 200 times). So the file is cut into
+   one small, complete STEP per shape, each meshed once, then placed at every
+   occurrence the parser recorded (cad.occs).
+
+   A unit is the part's representation (the one SHAPE_DEFINITION_REPRESENTATION
+   names), the geometry hanging off it by a plain SHAPE_REPRESENTATION_
+   RELATIONSHIP, and everything those reference, product records included, so
+   OpenCascade sees a proper part. Assembly links (the WITH_TRANSFORMATION
+   relationships, context-dependent representations, mapped items) are left
+   out, and nothing is pulled in backwards except the part's own definition,
+   its geometry relationship and its colours. Colours need a presentation
+   representation listing the styled items, which the whole file has once for
+   everything, so each unit gets its own. */
+function stepShapeUnits(text,occs){
+  const di=text.indexOf("DATA;"); if(di<0) return [];
+  const de=text.lastIndexOf("ENDSEC;");
+  const head=text.slice(0,di+5);
+  const recs=splitStepRecords(text.slice(di+5,de>di?de:text.length));
+  const byId=new Map(), headRe=/^\s*#(\d+)\s*=\s*/;
+  for(const r of recs){ const m=headRe.exec(r); if(m) byId.set(+m[1],r.trim()); }
+  // references after the "=", never inside a quoted name ("#25 Roller Chain Loop")
+  const refsOf=r=>{ const out=[], re=/#(\d+)/g, a=r.slice(r.indexOf("=")+1).replace(STEP_STR,"''"); let m; while((m=re.exec(a))) out.push(+m[1]); return out; };
+  // the few backward links a unit needs, found by type
+  const sdrOf=new Map(), srrOf=new Map(), styledOf=new Map();
+  let maxId=0;
+  for(const [id,r] of byId){
+    if(id>maxId) maxId=id;
+    if(/=\s*SHAPE_DEFINITION_REPRESENTATION\s*\(/.test(r)){ const k=refsOf(r); if(k.length>=2) sdrOf.set(k[1],id); }
+    else if(/SHAPE_REPRESENTATION_RELATIONSHIP/.test(r)&&!/WITH_TRANSFORMATION/.test(r)){
+      const k=refsOf(r); for(const x of k.slice(-2)){ if(!srrOf.has(x)) srrOf.set(x,[]); srrOf.get(x).push(id); } }
+    else if(/=\s*(OVER_RIDING_STYLED_ITEM|STYLED_ITEM)\s*\(/.test(r)){
+      const k=refsOf(r), item=k[k.length-(/OVER_RIDING/.test(r)?2:1)];
+      if(item!=null){ if(!styledOf.has(item)) styledOf.set(item,[]); styledOf.get(item).push(id); } }
+  }
+  const NOFOLLOW=/=\s*\(?\s*(MAPPED_ITEM|REPRESENTATION_MAP|CONTEXT_DEPENDENT_SHAPE_REPRESENTATION|NEXT_ASSEMBLY_USAGE_OCCURRENCE|MECHANICAL_DESIGN_GEOMETRIC_PRESENTATION_REPRESENTATION)\b/;
+  const units=[], seenRep=new Set();
+  for(const o of occs||[]){
+    if(o.rep==null||seenRep.has(o.rep)) continue;
+    seenRep.add(o.rep);
+    const seeds=[o.rep];
+    if(sdrOf.has(o.rep)) seeds.push(sdrOf.get(o.rep));
+    for(const srr of srrOf.get(o.rep)||[]){ seeds.push(srr); for(const x of refsOf(byId.get(srr)).slice(-2)) seeds.push(x); }
+    const keep=new Set(), stack=seeds.slice();
+    while(stack.length){
+      const id=stack.pop(); if(keep.has(id)) continue;
+      const r=byId.get(id); if(!r) continue;
+      if(keep.size&&NOFOLLOW.test(r)) continue;
+      keep.add(id);
+      for(const k of refsOf(r)) if(!keep.has(k)) stack.push(k);
+      for(const s of styledOf.get(id)||[]) if(!keep.has(s)) stack.push(s);
+    }
+    const styled=[...keep].filter(id=>/=\s*(OVER_RIDING_STYLED_ITEM|STYLED_ITEM)\s*\(/.test(byId.get(id)));
+    const ctx=/,\s*#(\d+)\s*\)\s*$/.exec(byId.get(o.rep)||"");
+    const body=[...keep].sort((a,b)=>a-b).map(id=>byId.get(id));
+    if(styled.length&&ctx) body.push("#"+(maxId+1)+"=MECHANICAL_DESIGN_GEOMETRIC_PRESENTATION_REPRESENTATION('',("+styled.map(i=>"#"+i).join(",")+"),#"+ctx[1]+")");
+    units.push({rep:o.rep, text:head+"\n"+body.join(";\n")+";\nENDSEC;\nEND-ISO-10303-21;\n"});
+  }
+  return units;
+}
+

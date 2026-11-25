@@ -14,21 +14,25 @@ const HW_PARTS = {
   "2000-0025-0005":{fam:"goBILDA 2000 Dual Mode 25-5",kind:"servo",role:"Torque",stallNm:4.20,sec60:0.42,travelDeg:300},
   // ---- REV ----
   "REV-41-1097":{fam:"REV Smart Robot Servo",kind:"servo",role:"Torque",stallNm:1.86,sec60:0.28,travelDeg:270},
-  "REV-41-1291":{fam:"REV HD Hex Motor",kind:"motor",role:"Motor",stallNm:0.105,rpm:6000,ratio:1},
-  "REV-41-1300":{fam:"REV Core Hex Motor",kind:"motor",role:"Motor",stallNm:3.20,rpm:125,ratio:72,tpr:288}   // 4 counts per motor rev, not 28
+  "REV-41-1291":{fam:"REV HD Hex Motor",kind:"motor",role:"Motor",stallNm:0.105,rpm:6000,ratio:1,tpr:28},
+  // the Core Hex's encoder counts 4 a motor turn, not 28: 288 at the output
+  "REV-41-1300":{fam:"REV Core Hex Motor",kind:"motor",role:"Motor",stallNm:3.20,rpm:125,ratio:72,tpr:288}
 };
 
 /* goBILDA Yellow Jacket planetary gearmotors: the trailing group of the part
-   number is the nominal reduction, which fixes both speed and stall torque. */
+   number is the nominal reduction, which fixes both speed and stall torque.
+   tpr is the encoder count per OUTPUT turn as goBILDA publishes it: 28 on
+   the motor times the exact planetary ratio, which the nominal one rounds
+   (19.2:1 is 537.7, not 537.6; 188:1 is 5281.1, not 5264). */
 const YELLOW_JACKET = {
-  1:{ratio:1,rpm:6000,nm:0.14},
-  3:{ratio:3.7,rpm:1620,nm:0.46},   5:{ratio:5.2,rpm:1150,nm:0.65},
-  13:{ratio:13.7,rpm:435,nm:1.68},  14:{ratio:13.7,rpm:435,nm:1.68},   // 5203-2402-0014 is the 13.7:1
-  19:{ratio:19.2,rpm:312,nm:2.38},
-  26:{ratio:26.9,rpm:223,nm:3.34},  27:{ratio:26.9,rpm:223,nm:3.34},
-  50:{ratio:50.9,rpm:117,nm:6.08},  51:{ratio:50.9,rpm:117,nm:6.08},
-  71:{ratio:71.2,rpm:84,nm:8.53},   100:{ratio:99.5,rpm:60,nm:11.57},
-  139:{ratio:139.0,rpm:43,nm:16.08},188:{ratio:188.0,rpm:30,nm:21.77},
+  1:{ratio:1,rpm:6000,nm:0.14,tpr:28},
+  3:{ratio:3.7,rpm:1620,nm:0.46,tpr:103.8},   5:{ratio:5.2,rpm:1150,nm:0.65,tpr:145.1},
+  13:{ratio:13.7,rpm:435,nm:1.68,tpr:384.5},  14:{ratio:13.7,rpm:435,nm:1.68,tpr:384.5},   // 5203-2402-0014 is the 13.7:1
+  19:{ratio:19.2,rpm:312,nm:2.38,tpr:537.7},
+  26:{ratio:26.9,rpm:223,nm:3.34,tpr:751.8},  27:{ratio:26.9,rpm:223,nm:3.34,tpr:751.8},
+  50:{ratio:50.9,rpm:117,nm:6.08,tpr:1425.1}, 51:{ratio:50.9,rpm:117,nm:6.08,tpr:1425.1},
+  71:{ratio:71.2,rpm:84,nm:8.53,tpr:1993.6},  100:{ratio:99.5,rpm:60,nm:11.57,tpr:2786.2},
+  139:{ratio:139.0,rpm:43,nm:16.08,tpr:3895.9},188:{ratio:188.0,rpm:30,nm:21.77,tpr:5281.1},
   223:{ratio:223.0,rpm:27,nm:24.60}
 };
 
@@ -36,7 +40,7 @@ const GENERIC = {
   Torque:{fam:"generic torque servo",kind:"servo",role:"Torque",stallNm:2.10,sec60:0.24,travelDeg:300,guess:true},
   Speed: {fam:"generic speed servo", kind:"servo",role:"Speed", stallNm:1.40,sec60:0.16,travelDeg:300,guess:true},
   Servo: {fam:"unspecified servo",   kind:"servo",role:"Servo", stallNm:1.50,sec60:0.18,travelDeg:300,guess:true},
-  Motor: {fam:"unspecified motor",   kind:"motor",role:"Motor", stallNm:2.38,rpm:312,ratio:19.2,guess:true},
+  Motor: {fam:"unspecified motor",   kind:"motor",role:"Motor", stallNm:2.38,rpm:312,ratio:19.2,tpr:537.7,guess:true},
   CRServo:{fam:"continuous servo",   kind:"crservo",role:"CR",  stallNm:1.40,rpm:100,guess:true},
   DistanceSensor:{fam:"distance sensor",kind:"sensor",role:"DistanceSensor",guess:true},
   TouchSensor:{fam:"touch sensor",kind:"sensor",role:"TouchSensor",guess:true},
@@ -48,8 +52,18 @@ function motorFromComment(text){
   const m=/(\d{2,4})\s*rpm/i.exec(text||""); if(!m) return null;
   const rpm=+m[1];
   for(const k in YELLOW_JACKET){ const yj=YELLOW_JACKET[k];
-    if(yj.rpm===rpm) return {src:"code", fam:"goBILDA Yellow Jacket "+yj.ratio+":1", kind:"motor", role:"Motor", stallNm:yj.nm, rpm:yj.rpm, ratio:yj.ratio}; }
-  return Object.assign({}, GENERIC.Motor, {src:"code", fam:rpm+" rpm motor", rpm, ratio:6000/rpm, guess:false});
+    if(yj.rpm===rpm) return {src:"code", fam:"goBILDA Yellow Jacket "+yj.ratio+":1", kind:"motor", role:"Motor", stallNm:yj.nm, rpm:yj.rpm, ratio:yj.ratio, tpr:yj.tpr}; }
+  return Object.assign({}, GENERIC.Motor, {src:"code", fam:rpm+" rpm motor", rpm, ratio:6000/rpm, tpr:28*6000/rpm, guess:false});
+}
+
+/* Encoder counts per OUTPUT revolution, what getCurrentPosition() counts
+   through one turn of the shaft: the part's published figure when it has
+   one, else 28 counts on the motor through its gearbox (right for a REV HD
+   Hex: 1120 at 40:1, 560 at 20:1), else the unspecified motor's. */
+function ticksPerRev(spec){
+  const t=spec?+spec.tpr:0; if(t>0) return t;
+  const r=spec?+spec.ratio:0; if(r>0) return 28*r;
+  return GENERIC.Motor.tpr;
 }
 
 /* Identify an actuator from a part number and/or the CAD part name. */
@@ -60,9 +74,9 @@ function hwFromPart(pn, name){
   if(pn && (m=/^(520[234])-\d{4}-(\d{1,4})$/.exec(pn))){
     const yj = YELLOW_JACKET[+m[2]];
     if(yj) return {part:pn, fam:"goBILDA Yellow Jacket "+m[1]+"  "+yj.ratio+":1",
-                   kind:"motor", role:"Motor", stallNm:yj.nm, rpm:yj.rpm, ratio:yj.ratio};
+                   kind:"motor", role:"Motor", stallNm:yj.nm, rpm:yj.rpm, ratio:yj.ratio, tpr:yj.tpr};
     return {part:pn, fam:"goBILDA Yellow Jacket "+m[1], kind:"motor", role:"Motor",
-            stallNm:GENERIC.Motor.stallNm, rpm:GENERIC.Motor.rpm, ratio:null, guess:true};
+            stallNm:GENERIC.Motor.stallNm, rpm:GENERIC.Motor.rpm, ratio:null, tpr:GENERIC.Motor.tpr, guess:true};
   }
   /* Name-only matching has to be strict: a real assembly is full of parts
      called "Motor Sleeve", "Servo Case" and "Motor Port" that are pieces of an
@@ -83,6 +97,8 @@ function specFor(dev, mech, trust){
   if(!ov) return base;
   const out=Object.assign({},base);
   for(const k in ov) if(ov[k]!==undefined && ov[k]!==null) out[k]=ov[k];
+  // a ratio set by hand outdates the part's published count
+  if(ov.ratio!=null && ov.tpr==null) delete out.tpr;
   out.src = "you";
   if(ov.kind==="motor"&&!ov.rpm&&!base.rpm) out.rpm=GENERIC.Motor.rpm;
   return out;
@@ -134,6 +150,5 @@ function specDetect(dev, mech, trust){
   return Object.assign({src:"default"}, GENERIC.Servo);
 }
 
-/* Encoder counts per output revolution: 28 per motor rev through the gearbox,
-   unless the motor says otherwise (a Core Hex counts 288 per output rev) */
-function motorTpr(spec){ return spec&&spec.tpr>0?spec.tpr:28*((spec&&spec.ratio)||19.2); }
+/* Encoder counts per output revolution, by its older name: ticksPerRev above is the one place a count comes from */
+function motorTpr(spec){ return ticksPerRev(spec&&(spec.tpr>0||spec.ratio>0)?spec:{ratio:19.2}); }   // the same count (ticksPerRev); a spec with neither is a 19.2:1

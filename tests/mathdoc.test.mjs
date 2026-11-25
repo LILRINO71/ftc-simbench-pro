@@ -142,13 +142,14 @@ test('free speed converts rpm to rad/s, not the other way round', () => {
 });
 
 test('the odometry constant uses the radius, not the diameter', () => {
-  // s = 2pi * 0.048 / (28 * 13.7) = 0.30159289 / 383.6 = 7.8621714e-4 m/tick
-  // using the diameter would double it, and 1 m would come out at 636 ticks
+  // s = 2pi * 0.048 / 384.5 = 0.30159289 / 384.5 = 7.8437684e-4 m/tick, with
+  // 384.5 the count goBILDA publishes for the 13.7:1 (not 28 x 13.7 = 383.6)
+  // using the diameter would double it, and 1 m would come out at 637 ticks
   const r = row(sec(E.mathReport(rigBench()), 'drive'), /odometry constant/);
-  near(r.value, 7.8621714e-4, 1e-10, 'metres per tick');
-  near(1 / r.value, 1271.9, 0.1, 'ticks per metre');
+  near(r.value, 7.8437684e-4, 1e-10, 'metres per tick');
+  near(1 / r.value, 1274.9, 0.1, 'ticks per metre');
   assert.equal(r.unit, 'm/tick');
-  assert.ok(/28/.test(r.expr), 'the ticks per motor revolution are not shown');
+  assert.ok(/384\.5/.test(r.expr), 'the ticks per output revolution are not shown: ' + r.expr);
 });
 
 test('the IK matrix prints one row per wheel, labelled', () => {

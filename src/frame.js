@@ -48,17 +48,17 @@ function frameWheels(solids){
     if(!s||!s.pts||s.pts.length<4||!dtIsWheel(s)) continue;
     const g=dtWheelGeom(s.pts);
     if(!(g.r>0.012&&g.r<0.16)||g.round<0.75||g.width>2.2*g.r) continue;
-    out.push(dtGrowWheel(g,solids));                  // a hub and its rollers are one wheel
+    out.push({s, g:dtGrowWheel(g,solids)});           // a hub and its rollers are one wheel
   }
-  // wheels made of many parts (src/drivetrain.js): the wheel assemblies themselves
-  // wheels made of many parts, where they stand like a drive base (src/drivetrain.js)
-  const D=dtDriveComposites(solids,null), comp=D.wheels.map(c=>c.g);
-  const all=dtUniqueWheels(comp.concat(out),g=>g);
+  // wheels made of many parts, where they stand like a drive base (src/drivetrain.js); the
+  // rollers and hubs inside them are not wheels of their own
+  const D=dtDriveComposites(solids,null), comp=D.wheels.map(c=>c.g), owned=dtCompositeParts(D.wheels);
+  const all=dtUniqueWheels(comp.concat(out.filter(o=>!owned.has(o.s)).map(o=>o.g)),g=>g);
   if(all.length>=2) return all;
   // one wheel drawn and its base's four drive motors in the CAD: the other three by mirroring
   if(D.single&&all.length===1){ const copies=dtMirrorWheel(D.wheels[0].g,D.single.c0,D.single.up); if(copies) return [D.wheels[0].g].concat(copies); }
   const byShape=dtShapeWheels(solids,null);
-  return byShape?byShape.wheels.map(c=>c.g):out;
+  return byShape?byShape.wheels.map(c=>c.g):out.map(o=>o.g);
 }
 
 /* Which CAD axis is up. Every drive axle is horizontal, so up is square to all

@@ -179,8 +179,10 @@ function dtWheelOfParts(parts,name){
     if(Math.hypot(d[0]-t*g.axis[0],d[1]-t*g.axis[1],d[2]-t*g.axis[2])<0.45*g.r) continue;   // out at the rim
     rollers.push({c:pr.c, ax:pr.vec[0], tilt:Math.abs(dtDot(pr.vec[0],g.axis))});
   }
-  return {s:{name:name||"wheel ("+parts.length+" parts)", part:null}, g:Object.assign({},g,{grown:parts.length}), rollers};
+  return {s:{name:name||"wheel ("+parts.length+" parts)", part:null}, g:Object.assign({},g,{grown:parts.length}), rollers, parts};
 }
+/* the solids inside a set of composite wheels: none of them is a wheel of its own */
+function dtCompositeParts(comps){ const set=new Set(); for(const c of comps||[]) for(const s of c.parts||[]) set.add(s); return set; }
 const DT_WHEELPART=/roller|tread|tire|tyre|wheel|\bor\b|\bir\b|side ?plate|slant|hub/i;
 function dtCompositeWheels(solids){
   const out=[], groups=new Map();
@@ -190,14 +192,18 @@ function dtCompositeWheels(solids){
     for(const p of s.asm){ key+="/"+p.k; let G=groups.get(key); if(!G){ G={name:p.n, parts:[]}; groups.set(key,G); } G.parts.push(s); }
   }
   for(const G of groups.values()){ const w=dtWheelOfParts(G.parts,G.name); if(w) out.push(w); }
-  if(out.length<2){
-    // flattened: wheel parts whose centres sit within a wheel's reach of each other, joined up
-    const bits=(solids||[]).filter(s=>s&&s.pts&&s.pts.length>=4&&(s.kind==="wheel"||DT_WHEELPART.test(String(s.name||"")))&&!DT_NOT_A_WHEEL.test(String(s.name||"")));
+  {
+    // the wheels no assembly gave: a file with the assemblies flattened away, or a mix (a base
+    // whose left wheels are sub-assemblies and whose right wheels, mirrored copies, lie loose
+    // among a thousand chassis parts). Wheel parts not already in a wheel, whose centres sit
+    // within a wheel's reach of each other, joined up.
+    const taken=dtCompositeParts(out);
+    const bits=(solids||[]).filter(s=>s&&!taken.has(s)&&s.pts&&s.pts.length>=4&&(s.kind==="wheel"||DT_WHEELPART.test(String(s.name||"")))&&!DT_NOT_A_WHEEL.test(String(s.name||"")));
     const cs=bits.map(s=>dtCentroid(s.pts)), par=bits.map((_,i)=>i), find=i=>{ while(par[i]!==i) i=par[i]=par[par[i]]; return i; };
     for(let i=0;i<bits.length;i++) for(let j=i+1;j<bits.length;j++)
       if(Math.hypot(cs[i][0]-cs[j][0],cs[i][1]-cs[j][1],cs[i][2]-cs[j][2])<0.05) par[find(i)]=find(j);
     const cl=new Map(); bits.forEach((s,i)=>{ const r=find(i); if(!cl.has(r)) cl.set(r,[]); cl.get(r).push(s); });
-    for(const parts of cl.values()){ const w=dtWheelOfParts(parts,null); if(w) out.push(w); }
+    for(const parts of cl.values()){ const w=dtWheelOfParts(parts,null); if(w){ w.packed=true; out.push(w); } }
   }
   // a wheel found at two levels (the wheel, and a sub-assembly holding just it): keep one
   return dtUniqueWheels(out,w=>w.g);
@@ -326,7 +332,10 @@ function dtOnFloor(ws,up){
 function dtIsWheel(s){
   const n=String((s&&s.name)||"")+" "+String((s&&s.part)||"");
   if(DT_NOTWHEEL.test(n)) return false;
-  return (s&&s.kind)==="wheel" || DT_WHEEL.test(n);
+  if((s&&s.kind)==="wheel" || DT_WHEEL.test(n)) return true;
+  // a drive-sized wheel by its goBILDA or REV part number (src/partsdb.js), whatever the part is called
+  const pw=typeof partsWheel==="function"?partsWheel((s&&s.part)||n):null;
+  return !!pw&&(pw.dMm==null||pw.dMm>=48);
 }
 
 /* Wheels from shape alone, for a CAD whose parts are all "Part 7". Pulleys,
@@ -475,10 +484,15 @@ function dtRollers(ws,why,F){
       why.push("The one mecanum wheel drawn is the other hand for its corner (read off its rollers), so the mirrored set would be an \"O\" base that can't turn in place. A real drive base is built in the standard X pattern, so that is used. Check that wheel in the CAD.");
       return;
     }
-    ws.forEach((w,i)=>{ w.roller=geo[i]; });
-    why.push("Roller handedness read off each wheel's own rollers in the CAD (the roller on the floor): "+(x?"the standard X pattern.":o?"an \"O\" pattern.":"not a standard pattern."));
-    if(o) why.push("In an \"O\" pattern every wheel pushes along a line through the middle of the robot, so it strafes but can't turn in place: each wheel is probably the other hand from the one it should be. Modelled as drawn.");
-    else if(!x) why.push("With these hands the real robot can't strafe properly: two wheels are probably on the wrong corners in the CAD. Modelled as drawn.");
+    if(x){ ws.forEach((w,i)=>{ w.roller=geo[i]; }); why.push("Roller handedness read off each wheel's own rollers in the CAD (the roller on the floor): the standard X pattern."); return; }
+    // Not X: an "O" (every wheel the other hand: it strafes but can't turn in place) or a
+    // mix (it can't strafe at all). No team drives that, so the CAD has the wrong wheel at
+    // some corner, as copies of one wheel often are. The robot is simulated as it is built,
+    // in the standard X pattern, and the CAD's wheels are pointed out.
+    const off=ws.filter((w,i)=>geo[i]!==xPat(w)).map(w=>w.corner);
+    ws.forEach(w=>{ w.roller=xPat(w); });
+    why.push("Roller handedness read off each wheel's own rollers in the CAD (the roller on the floor): "+(o?"an \"O\" pattern, which strafes but can't turn in place.":"not a mecanum pattern — a base with these hands can't strafe.")+
+      " No real drive base is built that way, so the standard X pattern is used. In the CAD the "+(off.length===1?"wheel at "+off[0]+" is":"wheels at "+off.join(", ")+" are")+" the other hand for "+(off.length===1?"its":"their")+" corner"+(off.length===1?"":"s")+".");
     return;
   }
   const hand=ws.map(dtHandFromName);
@@ -574,7 +588,7 @@ function driveFromSpec(spec,F){
   for(const x of xs) for(const y of [track/2,-track/2]){
     const c=[F.fwd[0]*x+F.left[0]*y+F.up[0]*r, F.fwd[1]*x+F.left[1]*y+F.up[1]*r, F.fwd[2]*x+F.left[2]*y+F.up[2]*r];
     // an X-drive's wheels sit at 45 degrees, rolling round the centre
-    const ax=kind==="x"?[(x>0)===(y>0)?-1:1,1].map(v=>v/Math.SQRT2):[0,1];
+    const ax=kind==="x"?[(x>0)===(y>0)?1:-1,1].map(v=>v/Math.SQRT2):[0,1];
     const axis=[F.fwd[0]*ax[0]+F.left[0]*ax[1], F.fwd[1]*ax[0]+F.left[1]*ax[1], F.fwd[2]*ax[0]+F.left[2]*ax[1]];
     ws.push({name:"wheel (set by hand)", part:null, c, axis, r, width:0.04, x, y, z:r, ax, skew:dtSkew(ax), roller:0, steer:false, corner:null, alpha:0});
   }
@@ -603,7 +617,7 @@ function driveFromCAD(cad,opts){
     return nothing("The CAD has no part solids, so there is nothing to read a drivetrain from.");
   }
   const cand=solids.filter(dtIsWheel);
-  const wheelOf=(s,g)=>({name:s.name||"", part:s.part||null, c:g.c, axis:g.axis, r:g.r, width:g.width, grown:g.grown||0,
+  const wheelOf=(s,g)=>({name:s.name||"", part:s.part||null, solid:s, c:g.c, axis:g.axis, r:g.r, width:g.width, grown:g.grown||0,
              x:0, y:0, z:0, ax:[0,0,0], skew:0, roller:0, steer:false, corner:null, alpha:0});
 
   // ---- each candidate as a cylinder, with the obvious non-wheels dropped
@@ -614,12 +628,18 @@ function driveFromCAD(cad,opts){
     if(!(g.r>0.012&&g.r<0.16) || g.round<0.75 || g.width>2.2*g.r){ odd++; continue; }
     ws.push(wheelOf(s,dtGrowWheel(g,solids)));
   }
-  const comp=dtDriveComposites(solids,F.up).wheels.map(c=>Object.assign(wheelOf(c.s,c.g),{rollers:c.rollers, composite:true}));
+  const DC=dtDriveComposites(solids,F.up);
+  const comp=DC.wheels.map(c=>Object.assign(wheelOf(c.s,c.g),{rollers:c.rollers, composite:true}));
   if(comp.length){
     const same=(a,b)=>Math.hypot(a.c[0]-b.c[0],a.c[1]-b.c[1],a.c[2]-b.c[2])<Math.max(0.012,0.4*Math.min(a.r,b.r))&&Math.abs(dtDot(a.axis,b.axis))>0.9;
-    ws=comp.concat(ws.filter(w=>!comp.some(c=>same(c,w))));
+    // a roller or hub inside a composite wheel is not a wheel of its own: grown about its own
+    // 45-degree axis, a mecanum roller read as a 170 mm wheel at the wrong height and took the floor with it
+    const owned=dtCompositeParts(DC.wheels);
+    ws=comp.concat(ws.filter(w=>!owned.has(w.solid)&&!comp.some(c=>same(c,w))));
+    const packed=DC.wheels.filter(c=>c.packed).length, inAsm=DC.wheels.length-packed;
     why.push(comp.length+" wheel"+(comp.length===1?" is":"s are")+" made of several parts together (a hub with rollers, a tread round a hub), found as "+
-      (solids.some(s=>s.asm)?"the CAD's own wheel assemblies":"wheel parts packed round one centre")+".");
+      (packed&&inAsm?"the CAD's own wheel assemblies ("+inAsm+") and wheel parts packed round one centre ("+packed+")"
+        :packed?"wheel parts packed round one centre":"the CAD's own wheel assemblies")+".");
   }
   ws=dtUniqueWheels(ws,w=>w);
   const grown=ws.filter(w=>w.grown&&!w.composite);
@@ -823,7 +843,8 @@ function dtMounts(ws,solids,F,kind,why){
   const where=list=>list.map(w=>w.corner||((w.x>=0?"front ":"back ")+(w.y>=0?"left":"right"))).join(", ");
   const side=list=>list.length&&list.every(w=>w.y>0)?"the left side":list.length&&list.every(w=>w.y<0)?"the right side":where(list);
   let s="Motor direction: ";
-  if(assumed===ws.length) s+="no drive motor is in the CAD, so each wheel is assumed driven the standard way, by a motor inboard of it with the shaft pointing out.";
+  if(assumed===ws.length) s+=(motors.length?"the CAD's motors aren't on the wheels' axles (belted or geared across to them, or not drive motors at all)":"no drive motor is in the CAD")+
+    ", so each wheel is assumed driven the standard way, by a motor inboard of it with the shaft pointing out; the code's own forward is trusted over that.";
   else s+=direct+" wheel"+(direct===1?"":"s")+" have a motor on the axle"+(chain?", "+chain+" more are chained or belted to one on the same side":"")+
           (assumed?", and "+assumed+" have no motor found and are assumed standard":"")+".";
   s+=" The FTC SDK turns a shaft clockwise, seen from its end, for positive power, so ";

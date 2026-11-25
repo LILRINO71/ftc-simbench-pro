@@ -23,6 +23,53 @@ const {autoRig}=(function(){
     let best="chassis", bn=0; for(const k in n) if(n[k]>bn){ best=k; bn=n[k]; }
     return best;
   }
+  /* A rack on an actuator's pinion: among the parts on its output, one that is long and
+     straight, square to the shaft, lying in the plane of a round output part (the pinion) with
+     its near face inside that part's rim, the way teeth mesh. Such a part doesn't turn with the
+     output: it slides along its own length, one pitch radius for each radian. The pitch line
+     is halfway between the gear's rim and the rack's near face (standard teeth are one module
+     either side of it). Returns {i, axis, pivot, r, limits} in metres, axis the way positive
+     rotation pushes it, or null. */
+  function rackOn(A,S){
+    const a=A.axis, p=A.pivot.map(v=>v/1000), out=A.output||[];
+    const rel=q=>[q[0]-p[0],q[1]-p[1],q[2]-p[2]];
+    const span=(P,u,o)=>{ let lo=Infinity, hi=-Infinity; for(const q of P){ const t=dot(o?[q[0]-o[0],q[1]-o[1],q[2]-o[2]]:q,u); if(t<lo) lo=t; if(t>hi) hi=t; } return [lo,hi]; };
+    for(const i of new Set((A.attached||[]).concat(out))){
+      const P=S[i]&&S[i].pts; if(!P||P.length<8) continue;
+      let u=dtPrincipal(P).vec[0];
+      if(Math.abs(dot(u,a))>0.2) continue;                               // square to the shaft
+      const s0=dot(u,a); u=[u[0]-a[0]*s0,u[1]-a[1]*s0,u[2]-a[2]*s0]; const ul=Math.hypot(u[0],u[1],u[2]); u=u.map(v=>v/ul);
+      // a rack's points crowd its toothed side, which leans that axis a few degrees toward the
+      // teeth (2.3 on team 7831's gate, enough to read its teeth 3 mm too close to the gear):
+      // turn it, square to the shaft, to where the bar is thinnest, which is along its length
+      { const across=v=>[a[1]*v[2]-a[2]*v[1], a[2]*v[0]-a[0]*v[2], a[0]*v[1]-a[1]*v[0]];
+        const thick=v=>{ const [x,y]=span(P,across(v),p); return y-x; }, m=across(u);
+        let bu=u, bt=thick(u);
+        for(let k=-40;k<=40;k++){ if(!k) continue; const th=k*Math.PI/720, c=Math.cos(th), s=Math.sin(th);
+          const v=[u[0]*c+m[0]*s, u[1]*c+m[1]*s, u[2]*c+m[2]*s], t=thick(v); if(t<bt-1e-9){ bt=t; bu=v; } }
+        u=bu; }
+      let n=[a[1]*u[2]-a[2]*u[1], a[2]*u[0]-a[0]*u[2], a[0]*u[1]-a[1]*u[0]];     // square to both: from the shaft to the rack
+      let [n0,n1]=span(P,n,p); if(n0+n1<0){ n=n.map(v=>-v); [n0,n1]=[-n1,-n0]; }
+      const [t0,t1]=span(P,u,p), [a0,a1]=span(P,a,p), L=t1-t0, h=n1-n0;
+      if(!(n0>0.003&&L>=0.03&&L>=2.5*h&&L>=2.5*(a1-a0))) continue;       // off the shaft, long and thin
+      if(t0>0.002||t1<-0.002) continue;                                  // the shaft is somewhere along it
+      // the pinion: a round part on the output, in the rack's plane, its rim just past the rack's near face
+      let rim=0;
+      for(const k of out){ if(k===i) continue; const Q=S[k]&&S[k].pts; if(!Q||Q.length<6) continue;
+        const [b0,b1]=span(Q,a,p); if(Math.min(a1,b1)-Math.max(a0,b0)<0.001) continue;
+        let r=0; for(const q of Q){ const d=rel(q), t=dot(d,a); r=Math.max(r,Math.hypot(d[0]-a[0]*t,d[1]-a[1]*t,d[2]-a[2]*t)); }
+        if(r-n0>=-0.0005&&r-n0<=0.0045&&r>rim) rim=r; }
+      if(!rim) continue;
+      // positive rotation carries the gear's rim, at the rack, along axis x n
+      let dir=[a[1]*n[2]-a[2]*n[1], a[2]*n[0]-a[0]*n[2], a[0]*n[1]-a[1]*n[0]], lo=t0, hi=t1;
+      if(dot(dir,u)<0){ u=u.map(v=>-v); [lo,hi]=[-t1,-t0]; }
+      const c=dtCentroid(P);
+      // it can slide until the gear reaches either end: as drawn it spans lo..hi past the
+      // gear, so moving s along u it spans lo+s..hi+s, and the gear stays on it for -hi..-lo
+      return {i, axis:u, pivot:c, r:(rim+n0)/2, limits:[-hi,-lo]};
+    }
+    return null;
+  }
   function autoRig(cad,opts){
     opts=opts||{};
     const S=(cad&&cad.solids)||[], review=[];
@@ -34,6 +81,26 @@ const {autoRig}=(function(){
     let AC={actuators:[]};
     try{ AC=ARActuators.findActuators(cad,{driveFromCAD:c=>driveFromCAD(c,{front:opts.front}), hwFromPart}); }
     catch(e){ review.push("The actuator finder stopped: "+e.message); }
+    // a "rail" on the axis of something an actuator turns (its own shaft, a gear it meshes, a
+    // pulley at the far end of its belt) is a shaft that turns with it: an intake's roller axle
+    // with spacers clamped on it is not a rail with carriage blocks. A lead screw turns and
+    // drives a slide, so a rail named as one stays.
+    const turning=[];
+    for(const A of AC.actuators||[]){ if(A.role!=="joint") continue;
+      turning.push([A.axis,A.pivot]);
+      for(const M of (A.meshes||[]).concat(A.belts||[])) turning.push([M.withAxis,M.withCentre]); }
+    const onTurning=i=>{
+      const P=S[i]&&S[i].pts; if(!P||P.length<4||/lead ?screw|ball ?screw|acme|threaded rod/i.test((S[i].name||"")+" "+(S[i].part||""))) return false;
+      const c=dtCentroid(P), u=dtPrincipal(P).vec[0];
+      return turning.some(([ax,pv])=>{
+        if(Math.abs(dot(u,ax))<Math.cos(5*Math.PI/180)) return false;
+        const p=pv.map(v=>v/1000), d=[c[0]-p[0],c[1]-p[1],c[2]-p[2]], t=dot(d,ax);
+        if(Math.hypot(d[0]-ax[0]*t,d[1]-ax[1]*t,d[2]-ax[2]*t)>0.004) return false;   // on that axis
+        let lo=Infinity, hi=-Infinity; for(const q of P){ const s=(q[0]-p[0])*ax[0]+(q[1]-p[1])*ax[1]+(q[2]-p[2])*ax[2]; if(s<lo) lo=s; if(s>hi) hi=s; }
+        return lo<=0.03&&hi>=-0.03; }); };                                           // and reaching what turns
+    const shafts=(SL.mechanisms||[]).filter(m=>m.stages[0].rails.some(onTurning));
+    if(shafts.length){ const gone=new Set(shafts.flatMap(m=>m.jointIds));
+      SL={...SL, mechanisms:SL.mechanisms.filter(m=>!shafts.includes(m)), joints:(SL.joints||[]).filter(j=>!gone.has(j.id))}; }
     const joints=[], seeds={}, extra={}, belts=new Set();
     for(const j of SL.joints||[]){
       joints.push({id:j.id, kind:"linear", axis:j.axis, pivot:j.pivot, parent:"chassis", couple:j.couple, mech:(SL.mechanisms||[]).findIndex(m=>m.jointIds.includes(j.id))});
@@ -54,18 +121,28 @@ const {autoRig}=(function(){
       // a gear it meshes with turns the other way, and a pulley at the far end of a belt or
       // chain the same way, at the ratio of their sizes; each driven part once, each name its own
       const followed=new Set(), uid=base=>{ let k=base, n=2; while(joints.some(j=>j.id===k)) k=base+" "+(n++); return k; };
+      const rk=rackOn(A,S);
+      if(rk){
+        seeds[id]=seeds[id].filter(i=>i!==rk.i);
+        const rid=uid(id+" rack");
+        joints.push({id:rid, kind:"linear", axis:rk.axis, pivot:rk.pivot, parent:"chassis", couple:{to:id, ratio:+rk.r.toFixed(5)}});
+        seeds[rid]=[rk.i];
+        // the rack is held by whatever holds the actuator: that side stays, the rack's side slides
+        extra[rid]={label:extra[id].label+", rack", limits:rk.limits.map(v=>+(v*1000).toFixed(0)), fixed:(A.body||[]).concat(A.mounts||[]), pinion:seeds[id].slice()};
+        review.push("\""+extra[rid].label+"\": a rack on a pinion, sliding "+(rk.r*2000*Math.PI).toFixed(0)+" mm for each turn. Check which way it goes in the CAD view.");
+      }
       for(const M of A.meshes||[]){
         if(followed.has(M.with)) continue; followed.add(M.with);
         const gid=uid(id+" gear"), ax=dot(M.withAxis,A.axis)<0?M.withAxis.map(v=>-v):M.withAxis;
         joints.push({id:gid, kind:"revolute-lift", axis:ax, pivot:M.withCentre.map(v=>v/1000), parent:"chassis", couple:{to:id, ratio:M.ratio}});
-        seeds[gid]=[M.with]; extra[gid]={label:extra[id].label+", geared", body:extra[id].body};
+        seeds[gid]=[M.with]; extra[gid]={label:extra[id].label+", geared", body:extra[id].body, follower:true};
       }
       for(const B of A.belts||[]){
         belts.add(B.belt);
         if(followed.has(B.with)) continue; followed.add(B.with);
         const bid=uid(id+" belt"), ax=dot(B.withAxis,A.axis)<0?B.withAxis.map(v=>-v):B.withAxis;
         joints.push({id:bid, kind:"revolute-lift", axis:ax, pivot:B.withCentre.map(v=>v/1000), parent:"chassis", couple:{to:id, ratio:B.ratio}});
-        seeds[bid]=[B.with]; extra[bid]={label:extra[id].label+", belt", body:extra[id].body};
+        seeds[bid]=[B.with]; extra[bid]={label:extra[id].label+", belt", body:extra[id].body, follower:true};
         if(!B.named) review.push("\""+extra[bid].label+"\": a belt or chain was found from its shape alone. Check its ratio ("+B.ratio+").");
       }
     }
@@ -80,6 +157,43 @@ const {autoRig}=(function(){
     // a slide stage's hardware bolted to the fixed stage too (a bottom block the
     // retracted stage rests on) stays with the frame: only the moving rail says so
     const allRails=new Set(); for(const m of SL.mechanisms||[]) for(const g of m.stages) for(const i of g.rails) allRails.add(i);
+    /* What a gear or pulley at the far end of a mesh or belt sits on turns with it, as an
+       actuator's own output does: the shaft through it (long, thin, on its axis), the hubs and
+       wheels centred on that shaft, and what is bolted to those alone (a spacer clamped on).
+       Without the shaft, the far side plate it runs through joins it to the frame. */
+    {
+      const taken=new Set(); for(const j of joints) for(const i of seeds[j.id]) taken.add(i);
+      const geo=new Map(), info=i=>{ if(!geo.has(i)){ const P=S[i]&&S[i].pts; geo.set(i,P&&P.length>=4?{P,c:dtCentroid(P),u:dtPrincipal(P).vec[0]}:null); } return geo.get(i); };
+      const nb=i=>G.adj[i].map(k=>{ const e=G.edges[k]; return e.a===i?e.b:e.a; });
+      const free=(i,own)=>!own.has(i)&&!taken.has(i)&&!allRails.has(i)&&!belts.has(i)&&!!info(i);
+      for(const j of joints){
+        if(!extra[j.id].follower||!seeds[j.id].length) continue;
+        const a=j.axis, p=j.pivot, own=new Set(seeds[j.id]);
+        const radial=q=>{ const d=[q[0]-p[0],q[1]-p[1],q[2]-p[2]], t=dot(d,a); return [t, Math.hypot(d[0]-a[0]*t,d[1]-a[1]*t,d[2]-a[2]*t)]; };
+        const extent=i=>{ let t0=Infinity, t1=-Infinity, r=0; for(const q of info(i).P){ const [t,d]=radial(q); if(t<t0) t0=t; if(t>t1) t1=t; if(d>r) r=d; } return {t0,t1,r}; };
+        const shafts=[];
+        for(const s of seeds[j.id]) for(const i of nb(s)){
+          if(!free(i,own)||Math.abs(dot(info(i).u,a))<0.97||radial(info(i).c)[1]>0.003) continue;
+          const e=extent(i); if(e.r>0.008||e.t1-e.t0<4*e.r) continue;
+          shafts.push(i); own.add(i); }
+        if(!shafts.length) continue;
+        let lo=Infinity, hi=-Infinity; for(const s of shafts){ const e=extent(s); lo=Math.min(lo,e.t0); hi=Math.max(hi,e.t1); }
+        // (a hub up to 120 mm across, or a round part up to 200: an intake's flap wheel; a plate
+        // centred on the shaft is square or long, its corners further out than its sides)
+        const e1=Math.abs(a[0])<0.9?[0,-a[2],a[1]]:[-a[2],0,a[0]], l1=Math.hypot(...e1), u1=e1.map(v=>v/l1);
+        const u2=[a[1]*u1[2]-a[2]*u1[1], a[2]*u1[0]-a[0]*u1[2], a[0]*u1[1]-a[1]*u1[0]];
+        const round=i=>{ const w=[u1,u2].map(u=>{ let x0=Infinity, x1=-Infinity; for(const q of info(i).P){ const t=dot(q,u); if(t<x0) x0=t; if(t>x1) x1=t; } return x1-x0; });
+          return Math.min(...w)>=0.85*Math.max(...w)&&extent(i).r<=0.6*Math.max(...w); };
+        for(const s of shafts) for(const i of nb(s)){
+          if(!free(i,own)) continue;
+          const B=G.box[i], [t,d]=radial(B.mn.map((v,k)=>(v+B.mx[k])/2)), r=extent(i).r;
+          if(d>0.004||t<lo-0.002||t>hi+0.002||r>0.1||(r>0.06&&!round(i))) continue;
+          own.add(i); }
+        for(let grew=true; grew;){ grew=false;
+          for(const i of [...own]) for(const k of nb(i)) if(free(k,own)&&nb(k).every(m=>own.has(m))){ own.add(k); grew=true; } }
+        seeds[j.id]=[...own]; for(const i of own) taken.add(i);
+      }
+    }
     const onFixed=new Map(), allStaged=new Set(), allSeeds=new Set(); for(const j of joints) for(const i of seeds[j.id]) allSeeds.add(i);
     for(const m of SL.mechanisms||[]) for(const g of m.stages) for(const i of g.rails.concat(g.blocks||[],g.hw||[])) allStaged.add(i);
     for(const j of joints){ if(j.kind!=="linear") continue; const fx=new Set(extra[j.id].fixed||[]); if(!fx.size) continue;
@@ -91,7 +205,19 @@ const {autoRig}=(function(){
       const keep=seeds[j.id].filter(i=>!held.has(i)); if(keep.length<seeds[j.id].length&&keep.length){ seeds[j.id].filter(i=>held.has(i)).forEach(i=>onFixed.set(i,j.mech)); seeds[j.id]=keep; } }
     const par=[...Array(n).keys()], find=i=>{ while(par[i]!==i){ par[i]=par[par[i]]; i=par[i]; } return i; };
     const cut=new Set(), key=(a,b)=>a<b?a+","+b:b+","+a;
-    for(const j of joints){ const x=extra[j.id]; if(!x.body) continue;
+    for(const j of joints){ const x=extra[j.id];
+      // a rack meets its pinion tooth to tooth: they touch, and move apart. It also lies in a
+      // guide it only rests against: a contact with nothing reaching into anything, beside the
+      // rack, is where it slides. A part past either end of it (a gate on its tip) it pushes.
+      if(x.pinion){ const own=new Set(seeds[j.id]), u=j.axis;
+        const along=I=>{ let lo=Infinity, hi=-Infinity; for(const i of I) for(const q of S[i].pts){ const t=dot(q,u); if(t<lo) lo=t; if(t>hi) hi=t; } return [lo,hi]; };
+        const [r0,r1]=along(own);
+        for(const a of own) for(const b of x.pinion) cut.add(key(a,b));
+        for(const e of G.edges) if(!e.strong&&own.has(e.a)!==own.has(e.b)){
+          const [k0,k1]=along([own.has(e.a)?e.b:e.a]);
+          if(k0>=r1-0.002||k1<=r0+0.002) continue;
+          cut.add(key(e.a,e.b)); } }
+      if(!x.body) continue;
       for(const a of seeds[j.id]) for(const b of x.body) cut.add(key(a,b)); }
     // a belt or chain loop moves with neither pulley: it stays off every body
     for(const e of G.edges) if(belts.has(e.a)||belts.has(e.b)) cut.add(key(e.a,e.b));
@@ -202,8 +328,11 @@ const {autoRig}=(function(){
     // (a linkage closing a loop, an output drawn touching its own case) is
     // shared out by growing from each joint's output at once; a joint never
     // takes its own actuator's case, which rides the joint below it
-    const label=new Array(n).fill(null), claim=new Map();
+    const label=new Array(n).fill(null), claim=new Map(), heldRack=new Map();
     for(const j of joints){ const c=+compOf(seeds[j.id].length?seeds[j.id]:[0]); if(c===frame) continue;
+      // a rack still joined to what holds its actuator (drawn into its guide) doesn't own that
+      // whole body: it is cut free below, like a slide drawn touching the frame
+      if(extra[j.id].pinion&&(extra[j.id].fixed||[]).some(i=>comp(i)===c&&!seeds[j.id].includes(i))){ heldRack.set(j.id,c); continue; }
       if(!claim.has(c)) claim.set(c,[]); claim.get(c).push(j); }
     const bodyOf={}; for(const j of joints) bodyOf[j.id]=new Set(extra[j.id].body||[]);
     const shared=[];
@@ -216,16 +345,64 @@ const {autoRig}=(function(){
       // what the flood couldn't give out (only reachable through a case) goes to a claimant that may have it
       for(let i=0;i<n;i++) if(comp(i)===c&&label[i]==null){ const j=js.find(x=>!bodyOf[x.id].has(i)); if(j) label[i]=j.id; }
     }
+    /* A slide's moving stage is never the frame. When its output's body is
+       the frame's, something drawn touching joined them (on 7832's robot the
+       intake carriage meets the frame through a beam 0.7 mm off a frame part
+       and a linkage rod drawn into one), and the slide carried only its own
+       rails. Cut that body where it holds together least, between the moving
+       stage and its fixed rails: a minimum cut over the contacts, each worth
+       how far its parts reach into each other (e.w). The stage's side rides
+       the slide, as long as the frame keeps most of the body. */
+    const capOf=new Map(); for(const e of G.edges) if(joins(e)) capOf.set(key(e.a,e.b),(capOf.get(key(e.a,e.b))||0)+e.w);
+    function stageSide(src,sink){
+      const flow=new Map(), res=(a,b)=>(capOf.get(key(a,b))||0)-(flow.get(a+">"+b)||0)+(flow.get(b+">"+a)||0);
+      const reach=()=>{ const prev=new Map(); src.forEach(i=>prev.set(i,-1)); const q=src.slice();
+        for(let h=0;h<q.length;h++){ const i=q[h]; if(sink.has(i)) return {prev,end:i};
+          for(const k of link[i]) if(!prev.has(k)&&res(i,k)>1e-9){ prev.set(k,i); q.push(k); } }
+        return {prev,end:-1}; };
+      for(let it=0;it<500;it++){
+        const {prev,end}=reach(); if(end<0) return new Set(prev.keys());
+        let f=Infinity; for(let v=end;prev.get(v)>=0;v=prev.get(v)) f=Math.min(f,res(prev.get(v),v));
+        for(let v=end;prev.get(v)>=0;v=prev.get(v)){ const u=prev.get(v), back=flow.get(v+">"+u)||0, t=Math.min(back,f);
+          if(t) flow.set(v+">"+u,back-t); if(f>t) flow.set(u+">"+v,(flow.get(u+">"+v)||0)+f-t); }
+      }
+      return null;
+    }
+    for(const j of joints){
+      if(j.kind!=="linear"||!seeds[j.id].length) continue;
+      const body=+compOf(seeds[j.id]);
+      if(body!==frame&&!heldRack.has(j.id)) continue;
+      const sink=new Set((extra[j.id].fixed||[]).concat(body===frame?drv:[]).filter(i=>comp(i)===body&&!seeds[j.id].includes(i)));
+      if(!sink.size) continue;
+      const side=stageSide(seeds[j.id],sink); if(!side) continue;
+      const took=[...side].filter(i=>label[i]==null&&!seeds[j.id].includes(i));
+      if(!took.length||2*side.size>=size.get(body)) continue;
+      for(const i of took) label[i]=j.id;
+      const at=new Set(); for(const i of side) for(const k of link[i]) if(!side.has(k)) at.add(S[k].name||"a part");
+      if(at.size) review.push("\""+extra[j.id].label+"\" was drawn touching the frame; it was cut free where it meets "+
+        [...at].slice(0,4).map(s=>"\""+s+"\"").join(", ")+(at.size>4?" and "+(at.size-4)+" more":"")+". Check what rides it in the CAD view.");
+    }
     if(shared.length) review.push("Joints sharing one rigid body were split by what's nearest each one's output: "+
       shared.map(g=>g.map(id=>"\""+extra[id].label+"\"").join(" / ")).join("; ")+". Check those in the CAD view.");
     for(const j of joints) for(const i of seeds[j.id]) label[i]=j.id;     // a joint's own output is always its
-    // parents: the joint most of a joint's own case (or fixed stage) rides
+    // parents: the joint a joint's own case and mounts (or fixed stage) ride.
+    // Any of them on a joint is enough: the rest are on the frame only because
+    // they were drawn touching it. On 7832's robot the outtake claw servo is
+    // mounted on the wrist's U-channel, and the intake pivot servo's case sits
+    // on the servo arm that swings it; by a majority both rode the frame
+    const caseOf=j=>{ const x=extra[j.id]; return x.body&&x.body.length?x.body:x.fixed&&x.fixed.length?x.fixed:[]; };
+    function parentOf(j){
+      const on=caseOf(j).filter(i=>label[i]&&label[i]!==j.id);
+      return on.length?majority(label,on):"chassis";
+    }
     for(const j of joints){
       const x=extra[j.id]; if(x.parentFixed){ j.parent=x.parentFixed; continue; }
-      const base=x.body&&x.body.length?x.body:x.fixed&&x.fixed.length?x.fixed:[];
-      const p=base.length?majority(label,base):"chassis";
+      const p=parentOf(j);
       j.parent=p&&p!==j.id&&p!=="chassis"?p:"chassis";
     }
+    // a gear or a pulley on the leader's case hangs where the leader does
+    for(const j of joints){ if(!j.couple||!j.couple.to||extra[j.id].parentFixed) continue;
+      const L=joints.find(k=>k.id===j.couple.to); if(L&&extra[j.id].body===extra[L.id].body) j.parent=L.parent; }
     for(const j of joints){ const seen=new Set([j.id]); let p=j.parent;
       while(p&&p!=="chassis"){ if(seen.has(p)){ j.parent="chassis"; break; } seen.add(p); p=(joints.find(k=>k.id===p)||{}).parent; } }
     const final={label, members:{}};
@@ -256,3 +433,15 @@ const {autoRig}=(function(){
   }
   return {autoRig};
 })();
+/* Every servo and motor output on a robot, found once per CAD with the default
+   drive and shared: the device binder (src/bind.js) and the robot check
+   (src/robotcheck.js) each searched for themselves, 3 s apiece on a 1,938-part
+   export. The parts don't change; a new robot is a new CAD. */
+const ACTUATORS_OF=new WeakMap();
+function actuatorsOf(cad){
+  if(!cad||typeof cad!=="object"||typeof ARActuators==="undefined") return [];
+  if(ACTUATORS_OF.has(cad)) return ACTUATORS_OF.get(cad);
+  let A=[];
+  try{ A=ARActuators.findActuators(cad,{driveFromCAD:c=>driveFromCAD(c,{}), hwFromPart}).actuators||[]; }catch(e){ A=[]; }
+  ACTUATORS_OF.set(cad,A); return A;
+}

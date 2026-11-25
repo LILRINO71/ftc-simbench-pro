@@ -1,0 +1,11 @@
+{
+  "note": "Time of one sim tick (default robot, its TeleOp on the Java VM, field, AI robots) divided by the time of a fixed JavaScript reference loop. tests/cpu-bench.test.mjs fails when it is more than maxSlowdown times this. Re-measure: UPDATE_CPU_BASELINE=1 node --test tests/cpu-bench.test.mjs",
+  "ratio": 0.04876,
+  "maxSlowdown": 2,
+  "measured": {
+    "ticksPerSec": 3971,
+    "msPerTick": 0.252,
+    "referenceMs": 5.16,
+    "node": "v24.22.1"
+  }
+}

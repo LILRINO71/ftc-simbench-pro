@@ -9,6 +9,7 @@
    counter-clockwise from +x. Sim.chassis lives in this frame.
    ============================================================ */
 const IN=0.0254;
+const START_CLEAR_IN=0.25;       // a start pose keeps this far from the LOADING ZONE and the FLOWER (G304)
 const TIP_GRAMS=190;             // EFSG 12.3: 174 g placed must not TIP, 199 g launched must
 const ELEMENT_G={pollen:24.9, nectar:41.3};
 const FRONTS={"+x":0, "+y":-Math.PI/2, "-x":Math.PI, "-y":Math.PI/2};
@@ -38,7 +39,7 @@ const Field={
     this.cells={red:[], blue:[]};
     for(const al of ["red","blue"]) for(let i=0;i<3;i++) this.cells[al].push({kind:"nectar", color:al});
     this.tips={red:0, blue:0}; this.lastTip=null;
-    this._hm=null; this.version++;
+    this._hm=null; this._bs=null; this.version++;
   },
   half(){ return this.ok ? this.data.field.field.half*IN : 1.83; },
   wallH(){ return this.ok ? this.data.field.field.wallHeight*IN : 0.31; },
@@ -68,12 +69,44 @@ const Field={
 
   /* Legal start (G304): own side, touching the alliance wall, facing the field,
      clear of the LOADING ZONE and the FLOWER on that wall. */
-  startPose(alliance,fp){
+  /* slot: "centre" (the default), "left" or "right": toward that side along the wall as that
+     alliance's drivers see it (red stands at -x facing +x, so their left is +y; blue's is -y),
+     a tile over when there's room and otherwise as far as the box stays legal. A whole tile
+     put an 18 in robot 8.6 in into its LOADING ZONE on one side and 4.8 in into the FLOWER on
+     the other: both sit exactly one tile off the centre line. */
+  startPose(alliance,fp,slot){
     const H=this.half(), s=alliance==="blue"?1:-1;
-    const hx=(fp&&fp.hx)||0.2286, ox=(fp&&fp.ox)||0, oy=(fp&&fp.oy)||0;
-    // the BOX touches the wall and sits on the centre line; the pose is the
-    // drivetrain centre, which is wherever the box's offset puts it
-    return {x:s*(H-hx+ox), y:s*oy, h:alliance==="blue"?Math.PI:0};
+    const hx=(fp&&fp.hx)||0.2286, hy=(fp&&fp.hy)||hx, ox=(fp&&fp.ox)||0, oy=(fp&&fp.oy)||0;
+    const tile=(this.data&&this.data.field&&this.data.field.field.tile||23.5)*IN;
+    const along=slot==="left"?1:slot==="right"?-1:0;
+    // the BOX touches the wall and sits on the centre line (or toward a side); the pose is
+    // the drivetrain centre, which is wherever the box's offset puts it
+    const yb=this.startY(alliance,hx,hy,-s*along*tile);
+    return {x:s*(H-hx+ox), y:s*oy+yb, h:alliance==="blue"?Math.PI:0};
+  },
+  /* Is a start box against the alliance wall, centred yb along it, clear of that alliance's
+     LOADING ZONE and of every FLOWER (G304), and inside the field? START_CLEAR_IN to spare. */
+  startClear(alliance,hx,hy,yb){
+    const F=this.data&&this.data.field; if(!F) return true;
+    const H=this.half(), s=alliance==="blue"?1:-1, m=START_CLEAR_IN*IN;
+    const x0=s*(H-hx)-hx-m, x1=s*(H-hx)+hx+m, y0=yb-hy-m, y1=yb+hy+m;
+    if(Math.abs(yb)+hy>H) return false;
+    const z=F.loadingZones&&F.loadingZones[alliance];
+    if(z&&x1>z.x0*IN&&x0<z.x1*IN&&y1>z.y0*IN&&y0<z.y1*IN) return false;
+    for(const fl of F.flowers||[]){
+      // a FLOWER is a box against its wall: alongWall wide, depth deep
+      const alongX=fl.wall==="+y"||fl.wall==="-y", ex=(alongX?fl.alongWall:fl.depth)/2*IN, ey=(alongX?fl.depth:fl.alongWall)/2*IN;
+      if(x1>fl.x*IN-ex&&x0<fl.x*IN+ex&&y1>fl.y*IN-ey&&y0<fl.y*IN+ey) return false;
+    }
+    return true;
+  },
+  /* The legal place for the box nearest `want` (metres along the wall from the centre line),
+     looking back toward the centre a quarter inch at a time. The centre is always legal. */
+  startY(alliance,hx,hy,want){
+    if(!want) return 0;
+    const step=0.25*IN, n=Math.ceil(Math.abs(want)/step), d=Math.sign(want);
+    for(let k=0;k<n;k++){ const y=want-d*k*step; if(this.startClear(alliance,hx,hy,y)) return y; }
+    return 0;
   },
 
   /* Things a robot can't drive through, flattened to 2-D capsules at the
@@ -100,6 +133,72 @@ const Field={
       const a=along?[c[0]-half,c[1]]:[c[0],c[1]-half], b=along?[c[0]+half,c[1]]:[c[0],c[1]+half];
       out.push({what:"FLOWER", r:fl.depth/2*IN, a:[a[0]*IN,a[1]*IN], b:[b[0]*IN,b[1]*IN]});
     }
+    return out;
+  },
+
+  /* What a loose ball can hit (src/ballphys.js), in metres: the tiles, the perimeter (as tall as
+     it needs to be: a ball never leaves the field), the HIVE frame as capsules, the FLOWERs as
+     boxes, and the four CELLs as the Shot Sim draws them. An up-CELL is a thin-walled tube open
+     at its mouth for a ball aimed at it (b.target) while it's still the CELL that was up when
+     the ball left (b.hive); a ball whose centre gets a radius into it is in. Every other CELL is
+     solid. Built again when a HIVE tips. */
+  ballStatics(){
+    if(!this.ok) return [];
+    const key=this.hive.red+","+this.hive.blue;
+    if(this._bs&&this._bsKey===key) return this._bs;
+    const F=this.data.field, H=this.half(), K=BALL_K, BIG=1e9, out=[];
+    const m=p=>[p[0]*IN, p[1]*IN, p[2]*IN];
+    const bound=(o,pts,R)=>{ o.x0=o.y0=o.z0=Infinity; o.x1=o.y1=o.z1=-Infinity;
+      for(const p of pts){ o.x0=Math.min(o.x0,p[0]-R); o.x1=Math.max(o.x1,p[0]+R); o.y0=Math.min(o.y0,p[1]-R); o.y1=Math.max(o.y1,p[1]+R); o.z0=Math.min(o.z0,p[2]-R); o.z1=Math.max(o.z1,p[2]+R); }
+      return o; };
+    out.push({type:"plane", tag:"floor", floor:true, n:[0,0,1], c:0, e:K.floorE, mu:K.floorMu, x0:-BIG, x1:BIG, y0:-BIG, y1:BIG, z0:-BIG, z1:0});
+    out.push({type:"plane", tag:"wall", n:[-1,0,0], c:-H, e:K.wallE, mu:K.wallMu, x0:H, x1:BIG, y0:-BIG, y1:BIG, z0:-BIG, z1:BIG});
+    out.push({type:"plane", tag:"wall", n:[1,0,0], c:-H, e:K.wallE, mu:K.wallMu, x0:-BIG, x1:-H, y0:-BIG, y1:BIG, z0:-BIG, z1:BIG});
+    out.push({type:"plane", tag:"wall", n:[0,-1,0], c:-H, e:K.wallE, mu:K.wallMu, x0:-BIG, x1:BIG, y0:H, y1:BIG, z0:-BIG, z1:BIG});
+    out.push({type:"plane", tag:"wall", n:[0,1,0], c:-H, e:K.wallE, mu:K.wallMu, x0:-BIG, x1:BIG, y0:-BIG, y1:-H, z0:-BIG, z1:BIG});
+    // everything of the HIVE behind one box: a ball nowhere near it skips the lot (src/ballphys.js)
+    const grp={type:"group", n:0}; out.push(grp); const g0=out.length;
+    const cap=(a,b,r)=>out.push(bound({type:"capsule", tag:"frame", a:m(a), b:m(b), r:r*IN, e:K.hiveE, mu:K.hiveMu},[m(a),m(b)],r*IN));
+    const fr=F.hive.frame;
+    for(const s of fr.legs) cap(s[0],s[1],fr.tubeRadius);
+    cap(fr.crossbar[0],fr.crossbar[1],fr.tubeRadius);
+    if(fr.cornerBlocks) for(const s of fr.cornerBlocks.segments) cap(s[0],s[1],fr.cornerBlocks.radius);
+    if(fr.footBars) for(const s of fr.footBars.segments) cap(s[0],s[1],fr.footBars.width/2);
+    const M=this.model();
+    for(const hv of M.hives) for(let i=0;i+1<hv.armBar.length;i++) cap(hv.armBar[i],hv.armBar[i+1],hv.armRadius);
+    // FLOWERs: a box against the wall, as tall as the backstop
+    const flowers=[];
+    for(const fl of F.flowers){
+      const along=fl.wall==="+y"||fl.wall==="-y", sg=fl.wall.charAt(0)==="+"?1:-1, ac=sg*(F.field.half-fl.depth/2);
+      const cx=along?fl.x:ac, cy=along?ac:fl.y, ex=(along?fl.alongWall:fl.depth)/2, ey=(along?fl.depth:fl.alongWall)/2;
+      flowers.push({type:"aabb", tag:"flower", x0:(cx-ex)*IN, x1:(cx+ex)*IN, y0:(cy-ey)*IN, y1:(cy+ey)*IN, z0:0, z1:(fl.backstopTopZ||22.75)*IN, e:K.hiveE, mu:K.hiveMu});
+    }
+    // the CELLs, through the Shot Sim's own geometry (inches inside)
+    const X=this.E._internal, G=X.geometry(), r2in=1/IN;
+    for(const hv of M.hives) hv.cells.forEach((cw,ci)=>{
+      const al=hv.alliance, sg=hv.sigma, hx=hv.hx, up=ci===0;
+      const open=b=>up&&b.target===al&&(b.hive==null||b.hive===sg);
+      const C=bound({type:"sdf", tag:"cell", al, up, e:K.hiveE, mu:K.hiveMu},cw.vertices.map(m),0);
+      C.dist=(x,y,z,b)=>{
+        const p=X.worldToBody(x*r2in,y*r2in,z*r2in,hx,sg);
+        return (open(b)?X.shellDist(p[0],p[1],p[2]):up?X.prismDist(p[0],p[1],p[2],G.aIn,G.aOut):X.prismDist(p[0],p[1],p[2],-G.aOut,-G.aIn))*IN;
+      };
+      // which part it hit, the way the Shot Sim names it: the lip (the rim's low edge), the roof, or a CELL
+      C.tagOf=b=>{ if(!open(b)) return "cell"; const p=X.worldToBody(b.x*r2in,b.y*r2in,b.z*r2in,hx,sg); return p[2]-G.b0<1.5?"lip":"roof"; };
+      C.sink=up?(b,r)=>{
+        if(!open(b)) return false;
+        const p=X.worldToBody(b.x*r2in,b.y*r2in,b.z*r2in,hx,sg), f=p[1]-G.aOut;
+        return f< -r*r2in&&f>=-G.depth&&X.insidePentagon(p[0],p[2]);
+      }:null;
+      out.push(C);
+    });
+    grp.n=out.length-g0;
+    grp.x0=grp.y0=grp.z0=Infinity; grp.x1=grp.y1=grp.z1=-Infinity;
+    for(let i=g0;i<out.length;i++){ const o=out[i];
+      grp.x0=Math.min(grp.x0,o.x0); grp.y0=Math.min(grp.y0,o.y0); grp.z0=Math.min(grp.z0,o.z0);
+      grp.x1=Math.max(grp.x1,o.x1); grp.y1=Math.max(grp.y1,o.y1); grp.z1=Math.max(grp.z1,o.z1); }
+    out.push(...flowers);
+    this._bs=out; this._bsKey=key;
     return out;
   },
 

@@ -95,8 +95,9 @@ test('setVelocity: ticks per second become a share of the motor\'s free speed', 
 
 test('shooter: found by name in the code; a claw OpMode has none', () => {
   const E = loadWithField();
-  assert.deepEqual(E.Shots.detect(E.parseJava(E.SHOOTER_JAVA)), { shooter: ['flywheel'], feeder: ['kicker'] });
-  assert.deepEqual(E.Shots.detect(E.parseJava(E.SAMPLE_JAVA)), { shooter: [], feeder: [] });
+  // the game-piece roles come from the same names (src/payload.js): this robot has no intake and no transfer
+  assert.deepEqual(E.Shots.detect(E.parseJava(E.SHOOTER_JAVA)), { shooter: ['flywheel'], feeder: ['kicker'], intake: [], transfer: [] });
+  assert.deepEqual(E.Shots.detect(E.parseJava(E.SAMPLE_JAVA)), { shooter: [], feeder: [], intake: [], transfer: [] });
 });
 
 test('verdict: a mid-field spot works, the far corner does not', () => {

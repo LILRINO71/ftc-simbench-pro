@@ -12,6 +12,14 @@
 // Optional --strings pass hides every plain string literal in an encoded table.
 // That is obfuscation, not security: anything shipped to a browser can be read.
 // It raises the effort of lifting the physics model, nothing more.
+import vm from 'node:vm';
+
+/** Why `code` would not run as a classic script (a <script> tag, a classic worker), or null when
+    it parses. `new Function(code)` is not this check: it makes the text a function body, where a
+    stray top-level `return` is legal. */
+export function scriptError(code) {
+  try { new vm.Script(code); return null; } catch (e) { return (e && e.message) || String(e); }
+}
 
 const KEYWORD_BEFORE_REGEX = new Set(['return', 'typeof', 'instanceof', 'in', 'of', 'new', 'delete', 'void',
   'throw', 'case', 'do', 'else', 'yield', 'await']);
@@ -19,11 +27,79 @@ const ID_START = /[A-Za-z_$]/;
 const ID_PART = /[A-Za-z0-9_$]/;
 
 /** JS -> tokens: {t, v} where t is ws|lc|bc|str|tmpl|regex|num|id|punc. */
-export function tokenize(src) {
+export function tokenize(src) { return lex(src, 0, false).out; }
+
+/* Regex or division after ')' and '}' depends on what the bracket closed, and
+   the previous token alone can't say. So the scan keeps a stack of the open
+   brackets and marks each closing ')' and '}' with `re` (a regex may follow):
+     ')'  closed an if / while / for / with header: a statement follows (regex);
+          any other ')' (a call, a group, parameters) ends an expression (division).
+     '}'  closed a block, a function or class declaration, or an arrow body: the
+          next token starts a statement (regex); one that closed an object literal
+          or a function or class expression ends an expression (division).
+   Each '{' on the stack knows two things: whether what it holds is statements
+   (`stmts`: a block or a body, not an object literal) and whether a regex may
+   follow its '}' (`re`). Both come from the token before it (startsStatement),
+   with a '?' count per bracket so a ternary's ':' is not taken for a label's. */
+const CONTROL_HEAD = new Set(['if', 'while', 'for', 'with']);
+// reserved words that end an expression; any other is an operator or a statement
+// keyword, after which an expression must still come
+const VALUE_WORDS = new Set(['this', 'super', 'null', 'true', 'false']);
+const RESERVED = new Set(['break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default', 'delete', 'do',
+  'else', 'export', 'extends', 'finally', 'for', 'function', 'if', 'import', 'in', 'instanceof', 'new', 'return', 'switch',
+  'throw', 'try', 'typeof', 'var', 'void', 'while', 'with', 'yield', 'let', 'static', 'await', 'of', 'async',
+  'this', 'super', 'null', 'true', 'false']);
+// a line break right after one of these ends the statement
+const RESTRICTED = new Set(['return', 'yield', 'break', 'continue']);
+// the brace after these opens a block
+const BLOCK_WORDS = new Set(['else', 'do', 'try', 'catch', 'finally', 'static']);   // catch: the form with no variable, `catch {`
+
+/* Tokens from `start`. Inside a template's ${…} (inTemplate) it stops at the
+   brace that closes the expression and returns that brace's index as `end`:
+   the expression is code like any other, with its own strings, regexes and
+   comments. */
+function lex(src, start, inTemplate) {
   const out = [];
-  let i = 0;
+  let i = start, depth = 0;
   const n = src.length;
-  const last = () => { for (let k = out.length - 1; k >= 0; k--) { const t = out[k].t; if (t !== 'ws' && t !== 'lc' && t !== 'bc') return out[k]; } return null; };
+  const sig = (k) => { for (; k >= 0; k--) { const t = out[k].t; if (t !== 'ws' && t !== 'lc' && t !== 'bc') return k; } return -1; };
+  const last = () => { const k = sig(out.length - 1); return k < 0 ? null : out[k]; };
+  const isMember = (k) => { const b = k >= 0 ? out[sig(k - 1)] : null; return !!b && b.t === 'punc' && (b.v === '.' || b.v === '?.'); };
+  // the open brackets: {v:'(', ctl, fn} | {v:'['} | {v:'{', stmts, re}; each counts its open '?'
+  // (a template's ${…} is an expression, so its root is not a statement list)
+  const stack = [inTemplate ? { v: '(', q: 0 } : { v: '{', stmts: true, re: true, q: 0 }];
+  const top = () => stack[stack.length - 1];
+  let fnNext = null;      // after `function`: 'decl' or 'expr', until its parameter list opens
+  let classNext = null;   // after `class`: {decl, at} until its body's '{' at the same bracket depth
+  /* Would a token after out[k] begin a statement? Asked only before `{`,
+     `function` and `class`, none of which can continue an expression, so after
+     a token that ends one only an inserted semicolon puts them there. */
+  const startsStatement = (k, brace) => {
+    if (top().v !== '{' || !top().stmts) return false;   // inside ( ), [ ] or an object literal
+    if (k < 0) return true;
+    const p = out[k];
+    if (p.t === 'punc') {
+      if (p.v === ';' || p.v === '}' || p.v === ')' || p.v === ']' || p.v === '++' || p.v === '--') return true;
+      if (p.v === '{') return !!p.stmts;
+      if (p.v === ':') return !!p.label;
+      return false;
+    }
+    if (p.t === 'id') {
+      if (isMember(k)) return true;                     // obj.else: a property name ends an expression
+      if (BLOCK_WORDS.has(p.v)) return true;
+      // a module's `export function`, `export class` and `export { a }`: a declaration or a clause, and a new
+      // statement after it. After `export default` a function or a class is a declaration too; a brace there
+      // is an object literal, which is an expression.
+      if (p.v === 'export') return true;
+      if (p.v === 'default' && !brace) { const e = sig(k - 1), b = e >= 0 ? out[e] : null; if (b && b.t === 'id' && b.v === 'export' && !isMember(e)) return true; }
+      if (RESTRICTED.has(p.v)) {
+        for (let j = k + 1; j < out.length; j++) if (out[j].t !== 'lc' && LINE_BREAK.test(out[j].v)) return true;
+        return false;
+      }
+      return !RESERVED.has(p.v) || VALUE_WORDS.has(p.v);
+    }
+    return true;                                         // a literal
+  };
 
   while (i < n) {
     const c = src[i];
@@ -60,7 +136,16 @@ export function tokenize(src) {
     }
     if (ID_START.test(c)) {
       let j = i; while (j < n && ID_PART.test(src[j])) j++;
-      out.push({ t: 'id', v: src.slice(i, j) }); i = j; continue;
+      const v = src.slice(i, j);
+      const k = sig(out.length - 1);
+      if (!isMember(out.length) && v === 'function') {
+        // `async function` stands where `async` does
+        const p = k >= 0 ? out[k] : null;
+        const at = p && p.t === 'id' && p.v === 'async' && !isMember(k) ? sig(k - 1) : k;
+        fnNext = startsStatement(at) ? 'decl' : 'expr';
+      }
+      if (!isMember(out.length) && v === 'class') classNext = { decl: startsStatement(k), at: stack.length };
+      out.push({ t: 'id', v }); i = j; continue;
     }
     // punctuators, longest first
     const three = src.substr(i, 3), four = src.substr(i, 4);
@@ -69,9 +154,45 @@ export function tokenize(src) {
     let v = null;
     if (P4.includes(four)) v = four; else if (P3.includes(three)) v = three;
     else if (P2.includes(src.substr(i, 2))) v = src.substr(i, 2); else v = c;
-    out.push({ t: 'punc', v }); i += v.length; continue;
+    if (v === '?.' && /[0-9]/.test(src[i + 2] || '')) v = '?';   // `a?.5:1` is a ternary
+    if (inTemplate && v === '{') depth++;
+    else if (inTemplate && v === '}' && depth-- === 0) return { out, end: i };
+    const tok = { t: 'punc', v };
+    // `function` and `class` were a property name or key after all (`{ class: 1 }`)
+    if (fnNext && v !== '(' && v !== '*') fnNext = null;
+    if (classNext && classNext.at === stack.length && (v === ':' || v === ',' || v === ';' || v === '=' || v === '}' || v === ')')) classNext = null;
+    if (v === '(') {
+      const k = sig(out.length - 1), p = k >= 0 ? out[k] : null;
+      // the header's keyword, one token further back for `for await (`
+      let kw = p && p.t === 'id' && !isMember(k) ? p.v : null;
+      if (kw === 'await') { const b = out[sig(k - 1)]; if (b && b.t === 'id' && b.v === 'for') kw = 'for'; }
+      const entry = { v: '(', ctl: CONTROL_HEAD.has(kw), q: 0 };
+      if (fnNext) { entry.fn = fnNext; fnNext = null; }
+      stack.push(entry);
+    } else if (v === '[') stack.push({ v: '[', q: 0 });
+    else if (v === '{') {
+      const k = sig(out.length - 1), p = k >= 0 ? out[k] : null;
+      let stmts, re;
+      if (classNext && classNext.at === stack.length) { stmts = true; re = classNext.decl; classNext = null; }
+      // a body after a parameter list or a header: a function's says what it ends; a method's, catch's, switch's end nothing
+      else if (p && p.t === 'punc' && p.v === ')') { stmts = true; re = p.fn ? p.fn === 'decl' : true; }
+      // an arrow is the whole expression: after its body only a new line, so a new statement, can come
+      else if (p && p.t === 'punc' && p.v === '=>') { stmts = true; re = true; }
+      else stmts = re = startsStatement(k, true);
+      tok.stmts = stmts;
+      stack.push({ v: '{', stmts, re, q: 0 });
+    } else if (v === ')' || v === ']' || v === '}') {
+      const e = stack.length > 1 ? stack.pop() : top();   // a stray closer leaves the root alone
+      if (v === ')') { tok.re = !!e.ctl; if (e.fn) tok.fn = e.fn; }
+      if (v === '}') tok.re = !!e.re;
+    } else if (v === '?') top().q++;
+    else if (v === ':') {
+      if (top().q > 0) top().q--;                                 // a ternary's
+      else tok.label = top().v === '{' && !!top().stmts;          // a label's or a case's; else an object key's
+    }
+    out.push(tok); i += v.length; continue;
   }
-  return out;
+  return { out, end: n };
 }
 
 function templateEnd(src, start) {
@@ -80,19 +201,9 @@ function templateEnd(src, start) {
     const c = src[i];
     if (c === '\\') { i += 2; continue; }
     if (c === '`') return i + 1;
-    if (c === '$' && src[i + 1] === '{') {           // nested expression: walk braces, strings and templates
-      let depth = 1; i += 2;
-      while (i < src.length && depth > 0) {
-        const d = src[i];
-        if (d === '\\') { i += 2; continue; }
-        if (d === '`') { i = templateEnd(src, i); continue; }
-        if (d === '"' || d === "'") { i++; while (i < src.length) { if (src[i] === '\\') i += 2; else if (src[i] === d) { i++; break; } else i++; } continue; }
-        if (d === '{') depth++;
-        if (d === '}') depth--;
-        i++;
-      }
-      continue;
-    }
+    // a ${…} expression is tokenized like the code around it, so a quote in a
+    // regex (/can't/) or a comment can't end it early or run it past its brace
+    if (c === '$' && src[i + 1] === '{') { i = lex(src, i + 2, true).end + 1; continue; }
     i++;
   }
   return src.length;
@@ -102,7 +213,10 @@ function regexAllowed(prev) {
   if (!prev) return true;
   if (prev.t === 'id') return KEYWORD_BEFORE_REGEX.has(prev.v);
   if (prev.t === 'num' || prev.t === 'str' || prev.t === 'tmpl' || prev.t === 'regex') return false;
-  if (prev.t === 'punc') return !([')', ']', '}', '++', '--'].includes(prev.v));
+  if (prev.t === 'punc') {
+    if (prev.v === ')' || prev.v === '}') return !!prev.re;   // see lex(): what the bracket closed
+    return !([']', '++', '--'].includes(prev.v));
+  }
   return true;
 }
 
@@ -142,19 +256,26 @@ function needsSpace(a, b) {
   return false;
 }
 
+// LF, CR and the two Unicode line terminators (U+2028, U+2029)
+const LINE_BREAK = new RegExp('[\\n\\r' + String.fromCharCode(0x2028, 0x2029) + ']');
+
 export function minifyJS(src, opts = {}) {
   const toks = tokenize(src);
   const kept = [];
+  const gap = (t) => t.t === 'ws' || t.t === 'lc' || t.t === 'bc';
   for (let i = 0; i < toks.length; i++) {
     const t = toks[i];
-    if (t.t === 'bc' || t.t === 'lc') continue;
-    if (t.t === 'ws') {
-      const prev = kept[kept.length - 1];
-      let next = null;
-      for (let j = i + 1; j < toks.length; j++) { const u = toks[j]; if (u.t !== 'ws' && u.t !== 'lc' && u.t !== 'bc') { next = u; break; } }
+    if (gap(t)) {
+      // the whole run of whitespace and comments between two tokens is one gap:
+      // `a // c\nb` has its newline after the comment, and a block comment with
+      // a line break in it is a line break to ASI
+      let j = i, nl = false;
+      for (; j < toks.length && gap(toks[j]); j++) if (toks[j].t !== 'lc' && LINE_BREAK.test(toks[j].v)) nl = true;
+      const prev = kept[kept.length - 1], next = toks[j];
+      i = j - 1;
       if (!prev || !next) continue;
       // a newline only matters where ASI could fire; everything else is layout
-      if (t.v.includes('\n') && CAN_END_STATEMENT(prev)) kept.push({ t: 'nl', v: '\n' });
+      if (nl && CAN_END_STATEMENT(prev)) kept.push({ t: 'nl', v: '\n' });
       else if (needsSpace(prev, next)) kept.push({ t: 'sp', v: ' ' });
       continue;
     }
@@ -178,8 +299,20 @@ function hideStrings(src) {
   const toks = tokenize(src);
   const table = [];
   const index = new Map();
+  // a directive prologue ("use strict";) stays where it is, as written: hidden
+  // in the table or behind the prelude it would be an expression, not a directive
+  const gap = (t) => t && (t.t === 'ws' || t.t === 'lc' || t.t === 'bc');
+  let body = 0;
+  for (let k = 0; ; ) {
+    while (gap(toks[k])) k++;
+    if (!toks[k] || toks[k].t !== 'str') break;
+    let s = k + 1; while (gap(toks[s])) s++;
+    if (!toks[s] || toks[s].t !== 'punc' || toks[s].v !== ';') break;
+    body = k = s + 1;
+  }
+  const head = toks.slice(0, body).map((t) => t.v).join('');
   let out = '';
-  for (let i = 0; i < toks.length; i++) {
+  for (let i = body; i < toks.length; i++) {
     const t = toks[i];
     if (t.t !== 'str') { out += t.v; continue; }
     const nextTok = toks[i + 1];
@@ -199,7 +332,7 @@ function hideStrings(src) {
   if (!table.length) return src;
   const enc = Buffer.from(JSON.stringify(table), 'utf8').toString('base64');
   const prelude = 'var _st=JSON.parse(typeof atob==="function"?decodeURIComponent(escape(atob("' + enc + '"))):Buffer.from("' + enc + '","base64").toString("utf8"));function _s(i){return _st[i]}\n';
-  return prelude + out;
+  return head + prelude + out;
 }
 
 /* The value a JS string literal denotes, or null when this pass can't be sure.
@@ -248,13 +381,27 @@ export function minifyCSS(src) {
   return out.trim();
 }
 
+/* Elements whose neighbouring whitespace never renders: block boxes, table
+   parts, things in <head>, SVG shapes. Whitespace next to anything else (b,
+   kbd, span, button, input...) is a visible space between inline boxes. */
+const NO_SPACE_AROUND = new Set(('html head body meta link title script style div p ul ol li dl dt dd table thead tbody ' +
+  'tfoot tr td th caption colgroup col section article aside header footer nav main h1 h2 h3 h4 h5 h6 form fieldset ' +
+  'legend details summary dialog pre hr br blockquote figure figcaption option optgroup template noscript ' +
+  'svg g defs rect path circle ellipse line polyline polygon use symbol').split(' '));
+
 /* Conservative: comments and inter-tag whitespace only, and never inside a
-   pre/textarea/script/style where whitespace is content. */
+   pre/textarea/script/style where whitespace is content. Whitespace between
+   two tags goes when either tag is a block one, and is one space otherwise:
+   "<b>Keys</b> <kbd>I</kbd>" must not render as "KeysI". */
 export function minifyHTML(src) {
   const keep = /<(pre|textarea|script|style)\b[\s\S]*?<\/\1>/gi;
   const holes = [];
   let masked = src.replace(keep, (m) => { holes.push(m); return '\u0000' + (holes.length - 1) + '\u0000'; });
   masked = masked.replace(/<!--[\s\S]*?-->/g, '');
-  masked = masked.replace(/\n\s*/g, '\n').replace(/>\s+</g, '><').replace(/\s{2,}/g, ' ');
+  const tagAt = (s, i) => { const m = /^<\/?([A-Za-z][\w-]*)/.exec(s.slice(i, i + 64)); return m ? m[1].toLowerCase() : null; };
+  masked = masked.replace(/\n\s*/g, '\n').replace(/>\s+</g, (m, off, s) => {
+    const left = tagAt(s, s.lastIndexOf('<', off)), right = tagAt(s, off + m.length - 1);
+    return !left || !right || NO_SPACE_AROUND.has(left) || NO_SPACE_AROUND.has(right) ? '><' : '> <';
+  }).replace(/\s{2,}/g, ' ');
   return masked.replace(/\u0000(\d+)\u0000/g, (m, i) => holes[+i]).trim();
 }

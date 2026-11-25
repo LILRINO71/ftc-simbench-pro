@@ -18,7 +18,7 @@ const Sim={
     const sp=(opts&&opts.startPose)||{x:0,y:0,h:0};
     this.chassis={x:sp.x,y:sp.y,h:sp.h};
     this.code=code; this.cad=cad; this.map=map; this.opts=opts;
-    this.bump=null; this.vel={x:0,y:0};
+    this.bump=null; this.vel={x:0,y:0}; this.yawRate=0;
     this.pc=0; this.sleepEnd=null; this.sleptMs=0; this.autoDone=false; this.pass=null; this.resumeAt=0;
     this.clock=0; this.vmTel=null;
     for(const d of code.devices) this.makeDev(d);
@@ -35,6 +35,10 @@ const Sim={
     this.footprint=footprintOf(cad,opts&&opts.front,this.base);
     // "walls": an auto written for another season's field only meets the walls
     this.obstacles=Field.ok&&!(opts&&opts.obstacles==="walls")?Field.obstacles(this.footprint.h):[];
+    // Monte Carlo (src/montecarlo.js): each element a little off its nominal place, in metres
+    if(opts&&Array.isArray(opts.obstacleOffsets)) this.obstacles=this.obstacles.map((o,i)=>{ const d=opts.obstacleOffsets[i];
+      return d?Object.assign({},o,{a:[o.a[0]+d[0],o.a[1]+d[1]], b:[o.b[0]+d[0],o.b[1]+d[1]]}):o; });
+    this.cmdQ=null;
     // the physical rig underneath: mass, wheels, motors. Null means we fall
     // back to the old kinematic glide, which is also what "kinematic" asks for.
     this.physics=(opts&&opts.physics)||"rigid";
@@ -42,6 +46,16 @@ const Sim={
     this.dstate=this.rig?Dyn.reset(this.rig):null;
     this.slipping=false;
     this.rr=code.rr&&typeof RRRuntime==="function"?RRRuntime(this,code.rr):null;
+    // solved mechanisms (src/joltmech.js): the joints in Jolt Physics, when chosen and
+    // loaded. Only the live sim gets one: a probe (Object.create(Sim)) must neither
+    // build its own nor tear down the live one it inherits
+    if(Object.prototype.hasOwnProperty.call(this,"mechWorld")&&this.mechWorld){ try{ this.mechWorld.destroy(); }catch(e){} }
+    this.mechWorld=null; this.mechNote=null;
+    const J=(opts&&opts.jolt)||(typeof JOLT!=="undefined"?JOLT:null);
+    if(opts&&opts.mechanisms==="jolt"&&J&&typeof JoltMech!=="undefined"&&(this===Sim||(opts&&opts.jolt))){
+      try{ this.mechWorld=JoltMech.build(J,cad,{armature:JoltMech.armatureOf(this.dev)}); if(!this.mechWorld.joints.size){ this.mechWorld.destroy(); this.mechWorld=null; } }
+      catch(e){ this.mechWorld=null; this.mechNote=String(e&&e.message||e); }
+    }
     this.phase="loaded";
   },
   /* One device's state: what the code commands and what the mechanism does. */
@@ -52,14 +66,16 @@ const Sim={
     let kind = spec.kind;
     if (kind === "crservo") kind = "motor";
     const isMotor=kind==="motor";
+    // the servo position the CAD was drawn at: a joint spec says; else the code's own
+    const restPos=(mech&&Number.isFinite(mech.restPos))?mech.restPos:(this.code&&!this.code.vm?restPosOf(this.code,d.name):0.5);
     return (this.dev[d.name]={kind, mech, spec,
-      // a servo nothing has commanded yet is unpowered: it sits where the CAD drew it
-      cmd:isMotor?0:(mech&&Number.isFinite(mech.restPos)?mech.restPos:0.5),
-      act:isMotor?0:(mech&&Number.isFinite(mech.restPos)?mech.restPos:0.5), revs:0, ticks:0, stalled:false,
+      // a servo nothing has commanded yet is unpowered: it sits where the CAD drew it, which is
+      // at that position. (Started at 0.5 whatever the drawn position was, a servo the code
+      // sends between 0.1 and 0.9 began 120 degrees from where its joint was drawn.)
+      cmd:isMotor?0:restPos, act:isMotor?0:restPos, revs:0, ticks:0, stalled:false,
       reversed:false, mode:"run", target:0,
-      tpr: motorTpr(spec),               // goBILDA: 28 counts per motor rev
-      // the servo position the CAD was drawn at: a joint spec says; else the code's own
-      restPos:(mech&&Number.isFinite(mech.restPos))?mech.restPos:(this.code&&!this.code.vm?restPosOf(this.code,d.name):0.5),
+      tpr: ticksPerRev(spec),            // counts per output turn (src/hardware.js)
+      restPos,
       sec60:spec.sec60||0.18, travelDeg:travelDegOf(spec)});
   },
   /* What the Java VM asks of the robot: devices, sticks, time, sensors. */
@@ -71,13 +87,14 @@ const Sim={
       // the OpMode's own runtime: resetRuntime() starts it again, never the match clock (Sim.t)
       now(){ return self.clock||0; }, runtime(){ return self.t-(self.rt0||0); }, resetRuntime(){ self.rt0=self.t; },
       heading(){ return self.chassis.h; },
-      omega(){ return self.dstate&&Number.isFinite(self.dstate.omega)?self.dstate.omega:0; },
+      // the turn rate driveChassis last moved the robot at, rigid or kinematic
+      omega(){ return Number.isFinite(self.yawRate)?self.yawRate:0; },
       pose(){ return {x:self.chassis.x,y:self.chassis.y,h:self.chassis.h}; },
       vel(){ const v=self.vel||{x:0,y:0}, h=self.chassis.h, c=Math.cos(h), sn=Math.sin(h); return {x:v.x*c+v.y*sn, y:-v.x*sn+v.y*c}; },
       ray(){ return self.frontRay(); },
       color(){ let r=120,g=120,b=120; if(typeof Field!=="undefined"&&Field.ok&&Field.zoneAt){ const z=Field.zoneAt(self.chassis.x/0.0254,self.chassis.y/0.0254);
         if(z==="red LOADING ZONE"){ r=200; g=50; b=50; } else if(z==="blue LOADING ZONE"){ r=50; g=50; b=200; } else if(z==="red side") r=140; else if(z==="blue side") b=140; } return [r,g,b]; },
-      volts(){ return 12.6; },
+      volts(){ return self.opts&&self.opts.volts>0?self.opts.volts:12.6; },
       touch(name){ const s=self.dev[name]; if(!s||!s.mech) return self.frontRay()<0.015;
         const drv=Object.values(self.dev).find(o=>o!==s&&o.mech===s.mech&&(o.kind==="motor"||o.kind==="servo"));
         return drv?(drv.kind==="motor"?Math.abs(drv.ticks)<20:Math.abs(drv.act-drv.restPos)<0.02):false; },
@@ -240,9 +257,9 @@ const Sim={
            Physical direction — REVERSE and which way the motor is mounted —
            is applied only where a motor turns something: wheelCmd() for the
            drive wheels. */
-        if(st.op==="setPosition") s.cmd=clamp01(v);
-        else if(st.op==="setVelocity") s.cmd=Math.max(-1,Math.min(1,v/((s.spec.rpm||300)/60*s.tpr)));   // ticks/s → share of free speed
-        else s.cmd=Math.max(-1,Math.min(1,v));
+        if(st.op==="setPosition"){ s.cmd=clamp01(v); s.sent=true; }
+        else if(st.op==="setVelocity"){ s.cmd=Math.max(-1,Math.min(1,v/((s.spec.rpm||300)/60*s.tpr))); s.vctl=true; }   // ticks/s → share of free speed
+        else{ s.cmd=Math.max(-1,Math.min(1,v)); s.vctl=false; }
       }else if(st.kind==="pidnew"){
         const a=st.args.map(x=>evalNode(x,env));
         this.pidOp(st.obj,"setPID",a);
@@ -256,6 +273,7 @@ const Sim={
         const s=this.dev[st.obj];
         if(this.timers[st.obj]!==undefined){ if(st.meth==="reset") this.timers[st.obj]=this.t; }
         else if(s&&st.meth==="setDirection") s.reversed=/REVERSE/i.test(st.raw||"");
+        else if(s&&st.meth==="setZeroPowerBehavior"){ const z=/\b(FLOAT|BRAKE)\b/.exec(st.raw||""); if(z) s.zpb=z[1]; }
         else if(s&&st.meth==="setTargetPosition") s.target=evalNode(st.args[0],env);
         else if(s&&st.meth==="setMode"){
           const raw=st.raw||"";
@@ -323,10 +341,19 @@ const Sim={
       else if(this.code.auto&&this.code.auto.length) this.stepAuto();
     }
 
+    this.stepWorld(dt);
+  },
+  /* Everything after the code's own pass: devices, the chassis, the pieces in the robot, the
+     shots, the match. tick() runs it; so does a headless run on the field (tools/run-opmode.mjs),
+     whose own VM drives the devices. */
+  stepWorld(dt){
+    // which motors are flywheels before they move (src/payload.js): only the live sim's
+    if(this===Sim&&typeof Payload!=="undefined") Payload.prepare();
     this.stepDevices(dt);
     this.updateCOM();
     this.driveChassis(dt);
-    if(this===Sim) Shots.tick(dt,this.chassis);          // a probe's copy never moves the live shots
+    // a probe's copy never moves the live shots: the pieces in the robot first (src/payload.js), then what flies
+    if(this===Sim){ if(typeof Payload!=="undefined") Payload.tick(dt,this); Shots.tick(dt,this.chassis); }
     // the rest of the match (src/match.js): only the live sim plays it, never a probe's copy
     // (online, src/net.js steps it instead, whatever this robot is doing)
     if(this===Sim&&this.phase==="running"&&typeof Match!=="undefined"&&Match.on&&!Match.net) Match.tick(dt,this);
@@ -335,6 +362,9 @@ const Sim={
      slew and the joints' stops. tick() runs it; so does INIT, when an OpMode
      busy-waits for a mechanism to arrive (src/jvmrun.js drain) */
   stepDevices(dt){
+    const wheeled=this.rigidDrive();
+    // a joint the solver moves takes its device's command, not the posing below
+    const W=this.mechWorld, solved=s=>!!(W&&s.mech&&W.joints.has(s.mech.id));
     for(const name in this.dev){
       const s=this.dev[name];
       if(s.kind==="motor"){
@@ -358,14 +388,24 @@ const Sim={
           drive=Math.abs(s.cmd)*Math.max(-1,Math.min(1,err/band));
         }
         const slew=SLEW*dt;
-        let act=s.act+Math.sign(drive-s.act)*Math.min(Math.abs(drive-s.act),slew);
+        let act;
+        if(s.flyT>0&&s.mode==="run"){
+          /* a flywheel (src/payload.js marks it): a DC motor's speed follows its voltage with time
+             constant T = I omega_free / tau_stall. Under setVelocity the hub's loop drives near full
+             voltage until the wheel is close, then holds it there */
+          act=flyStep(s.act,drive,s.flyT,dt,s.vctl?FLY_KP:0);
+        }else act=s.act+Math.sign(drive-s.act)*Math.min(Math.abs(drive-s.act),slew);
         const lin=s.mech&&isLinearKind(s.mech.kind);
         // a slide asked to lift more than its motor holds doesn't climb; it can still lower
-        if(lin&&s.spec.stallNm&&act){
+        if(lin&&s.spec.stallNm&&act&&!solved(s)){
           const up=slideLiftSign(s.mech);
           if(up&&Math.sign(act)===up&&slideHoldNm(s,this.opts)>s.spec.stallNm*(this.opts.duty||1)){ act=0; s.stalled=true; }
         }
         s.act=act;
+        // a drive motor under the chassis physics: its encoder counts what its
+        // wheel really turns, after the step (stepRigid), not free speed x power
+        if(wheeled&&wheeled.indexOf(name)>=0) continue;
+        if(solved(s)) continue;                             // Jolt turns it, below
         const prev=s.ticks;
         /* a drive motor's encoder counts what its wheel did, not its free speed:
            rigid physics sets it from the wheel's own spin (stepRigid), and the
@@ -381,7 +421,8 @@ const Sim={
           const qc=Math.max(Number.isFinite(lo)?lo:-Infinity, Math.min(Number.isFinite(hi)?hi:Infinity, q));
           if(qc!==q){ s.revs=qc/k; s.ticks=s.revs*s.tpr; s.act=0; s.stalled=true; }
         }
-        // hard stops only where the travel is known: Onshape slider limits, or set by hand
+        // hard stops only where the travel is known: Onshape slider limits, or set by
+        // hand. In the joint's own direction, as mateJointQ and updateCOM read it
         if(lin&&s.mech.limits){
           const k=slideMPerTick(s)*(s.mech.dir||1), q=s.ticks*k, lo=s.mech.limits[0], hi=s.mech.limits[1];
           const qc=Math.max(Number.isFinite(lo)?lo:-Infinity, Math.min(Number.isFinite(hi)?hi:Infinity, q));
@@ -391,6 +432,7 @@ const Sim={
         continue;
       }
       if(s.kind!=="servo") continue;                        // sensors and the IMU don't move
+      if(solved(s)){ s.stalled=false; continue; }          // Jolt drives it to its command, below
       const rate=60/(s.sec60*s.travelDeg);
       const err=s.cmd-s.act;
       const step=Math.sign(err)*Math.min(Math.abs(err), rate*dt);
@@ -410,6 +452,9 @@ const Sim={
         if(qc!==q){ s.act=s.restPos+qc/k; s.stalled=true; }
       }
     }
+    // the solver: every solved joint's motor curve, gravity, limits, gears and loops at
+    // once, then each device's encoder from where its joint went
+    if(W){ W.step(dt,JoltMech.deviceCommands(this.dev,W),(this.opts&&this.opts.substeps)||4); JoltMech.readBack(this.dev,W,dt); }
   },
   /* A slide carrying its load out moves the centre of mass with it. The shift
      is the carried mass over the mass the dynamics actually runs on — never the
@@ -479,7 +524,7 @@ const Sim={
   },
   driveChassis(dt){
     const dtn=this.drivetrain;
-    if(!dtn||!dtn.ok){ this.vel={x:0,y:0}; return; }
+    if(!dtn||!dtn.ok){ this.vel={x:0,y:0}; this.yawRate=0; return; }
     const x0=this.chassis.x, y0=this.chassis.y;
     if(this.rig&&this.physics!=="kinematic"){
       this.stepRigid(dt);
@@ -492,6 +537,7 @@ const Sim={
       }
       this.vel={x:(this.chassis.x-x0)/dt, y:(this.chassis.y-y0)/dt};
       this.stopAgainst(this.chassis.x-xi, this.chassis.y-yi);
+      this.driveEncoders(dt);
       return;
     }
     // Kinematic mode for anything that isn't a left/right base: forward
@@ -504,7 +550,7 @@ const Sim={
       const W=this.rig.drive.wheels, fk=fkFromIk(ikMatrix(rk,W));
       const t=chassisFromWheels(fk,this.rig.devs.map((n,i)=>this.wheelCmd(n,W[i]&&W[i].mount)*SPD));
       const h=this.chassis.h, c=Math.cos(h), s=Math.sin(h);
-      this.chassis.x+=(t.vx*c-t.vy*s)*dt; this.chassis.y+=(t.vx*s+t.vy*c)*dt; this.chassis.h+=t.omega*dt;
+      this.chassis.x+=(t.vx*c-t.vy*s)*dt; this.chassis.y+=(t.vx*s+t.vy*c)*dt; this.chassis.h+=t.omega*dt; this.yawRate=t.omega;
       if(Field.ok) this.bump=Field.collide(this.chassis,this.footprint,this.obstacles);
       this.vel={x:(this.chassis.x-x0)/dt, y:(this.chassis.y-y0)/dt};
       return;
@@ -528,7 +574,7 @@ const Sim={
     }
     const SPEED=KIN_SPEED, TURN=3.4;          // m/s and rad/s at full power
     const v=(L+R)/2*SPEED, w=(R-L)/2*TURN;
-    this.chassis.h += w*dt;
+    this.chassis.h += w*dt; this.yawRate=w;
     this.chassis.x += (v*Math.cos(this.chassis.h) - strafe*SPEED*Math.sin(this.chassis.h))*dt;
     this.chassis.y += (v*Math.sin(this.chassis.h) + strafe*SPEED*Math.cos(this.chassis.h))*dt;
     if(Field.ok) this.bump=Field.collide(this.chassis,this.footprint,this.obstacles);
@@ -555,21 +601,51 @@ const Sim={
   stepRigid(dt){
     this.steerModules();
     const W=this.rig.drive.wheels;
-    const cmd=this.rig.devs.map((n,i)=>this.wheelCmd(n,W[i]&&W[i].mount));
-    const st=Dyn.step(this.dstate,cmd,this.rig,dt);
+    let cmd=this.rig.devs.map((n,i)=>this.wheelCmd(n,W[i]&&W[i].mount));
+    // control latency (opts.latencyMs, set by the Monte Carlo runner): the wheels act on what was
+    // commanded that long ago, blended between the two ticks it falls between
+    const lag=this.opts&&this.opts.latencyMs>0?this.opts.latencyMs/1000/dt:0;
+    if(lag>0){
+      const q=this.cmdQ||(this.cmdQ=[]); q.push(cmd);
+      const k=Math.ceil(lag); while(q.length>k+1) q.shift();
+      const a=q[Math.max(0,q.length-1-Math.floor(lag))], b=q[Math.max(0,q.length-1-k)], f=lag-Math.floor(lag);
+      cmd=a.map((v,i)=>v+(b[i]-v)*f);
+    }
+    // setZeroPowerBehavior(FLOAT): at zero power that wheel coasts instead of braking
+    const coast=this.rig.devs.map(n=>{ const s=this.dev[n]; return !!(s&&s.zpb==="FLOAT"); });
+    const st=Dyn.step(this.dstate,cmd,this.rig,dt,coast);
     this.dstate=st;
-    // each drive encoder from its wheel's spin, back in the code's frame (see wheelCmd)
-    this.rig.devs.forEach((n,i)=>{
-      const s=this.dev[n], w=W[i]; if(!s||!w||s.kind!=="motor"||!this.driveWheel(n)) return;
-      const sg=(s.reversed?-1:1)*(w.mount===-1?-1:1), prev=s.ticks;
-      s.revs+=(st.wheelOmega[i]||0)*(w.gear||this.rig.gear||1)/(2*Math.PI)*sg*dt;
-      s.ticks=s.revs*s.tpr; s.vel=(s.ticks-prev)/dt;
-    });
+    // the drive encoders are counted from the wheels' spin in driveEncoders, after the walls
     const c=Math.cos(this.chassis.h), s=Math.sin(this.chassis.h);
     this.chassis.x += (st.v.x*c - st.v.y*s)*dt;
     this.chassis.y += (st.v.x*s + st.v.y*c)*dt;
-    this.chassis.h += st.omega*dt;
+    this.chassis.h += st.omega*dt; this.yawRate=st.omega;
     this.slipping=(st.slip||[]).some(k=>Math.abs(k)>0.3);
+  },
+  /* Each drive encoder from its wheel's own speed, through the gearing, with
+     the mounting and setDirection undone (wheelCmd's signs are their own
+     inverses) so it counts in the code's frame, up under positive power. Run
+     after the walls have had their say: a robot pinned on one reads still, a
+     wheel spinning on the tiles counts. */
+  driveEncoders(dt){
+    const W=this.rig.drive.wheels, wo=(this.dstate&&this.dstate.wheelOmega)||[], mine=this.rigidDrive()||[], seen=new Set();
+    this.rig.devs.forEach((n,i)=>{
+      const s=this.dev[n]; if(mine.indexOf(n)<0||seen.has(n)) return; seen.add(n);
+      const gr=Math.abs(+(Array.isArray(this.rig.gear)?this.rig.gear[i]:this.rig.gear))||1;
+      const sign=(s.reversed?-1:1)*((W[i]&&W[i].mount)===-1?-1:1);
+      const prev=s.ticks;
+      s.revs+=(wo[i]||0)*gr/(2*Math.PI)*dt*sign;
+      s.ticks=s.revs*s.tpr;
+      s.vel=(s.ticks-prev)/dt;
+    });
+  },
+  /* The drive motors whose encoders the chassis physics turns, or null when
+     the chassis glides kinematically (the same test driveChassis makes). A
+     motor mapped to a mechanism keeps the mechanism's model and its stops,
+     even when the drivetrain finder counted it as a wheel. */
+  rigidDrive(){
+    if(!(this.rig&&this.physics!=="kinematic"&&this.drivetrain&&this.drivetrain.ok)) return null;
+    return this.rig.devs.filter(n=>{ const s=this.dev[n]; return s&&s.kind==="motor"&&!s.mech; });
   },
 
   /* A wall stops a robot, it doesn't throw it back. (px,py) is how far the
@@ -586,7 +662,17 @@ const Sim={
     let wx=v.x*c-v.y*s, wy=v.x*s+v.y*c;              // chassis frame -> world
     const into=wx*nx+wy*ny;
     if(into<0){ wx-=into*nx; wy-=into*ny; }          // only the part driving in
-    this.dstate.v={x:wx*c+wy*s, y:-wx*s+wy*c};
+    const nv={x:wx*c+wy*s, y:-wx*s+wy*c}, dvx=nv.x-v.x, dvy=nv.y-v.y;
+    this.dstate.v=nv;
+    // the wall stops the ground under each wheel too: a wheel keeps its slip
+    // against the ground, so one that was rolling stops with the robot and one
+    // that was spinning keeps spinning. Left alone, every wheel spun on as if
+    // the robot had driven through the wall, and its encoder counted it.
+    const r=this.rig, wo=this.dstate.wheelOmega;
+    if(!r||!wo||!(Math.abs(dvx)+Math.abs(dvy)>0)) return;
+    const ik=ikMatrix(r.drive.kind,r.drive.wheels);
+    this.dstate.wheelOmega=wo.map((o,i)=>{ const w=r.drive.wheels[i], k=ik[i];
+      return w&&k&&w.r>0?o+(k[0]*dvx+k[1]*dvy)/w.r:o; });
   }
 };
 
@@ -637,7 +723,7 @@ function driveVerdict(pr,add){
   if(s&&!(s.left<-0.05&&Math.abs(s.turn)<0.6)) bad.push(s.left>0.05?"left stick right strafes it <b>left</b>":Math.abs(s.turn)>=0.6?"left stick right makes it <b>spin</b>":"left stick right <b>doesn't strafe</b> it");
   const rows=pr.mounts.map(m=>(m.dev+"                ").slice(0,17)+((m.corner||"")+"  ").slice(0,3)+
     " positive power "+(m.mount<0?"backward":"forward ")+"   code: "+(pr.reversed.indexOf(m.dev)>=0?"REVERSE":"forward")).join("\n");
-  const src=pr.mounts.some(m=>m.from==="cad")?"from the CAD":pr.mounts.some(m=>m.from==="code")?"from your code's own forward (the CAD has no drive motors to measure)":"assumed (the standard build)";
+  const src=pr.mounts.some(m=>m.from==="cad")?"from the CAD":pr.mounts.some(m=>m.from==="code")?"from your code's own forward (no drive motor in the CAD sits on a wheel's axle to measure, so a wrong setDirection can't show here)":"assumed (the standard build)";
   const how="Measured on a private copy of the sim: this OpMode's own INIT and loop, this robot's motor mounting "+src+", "+
     "and every <code>setDirection</code> call, half a second per push, front <b>"+pr.front+"</b>.";
   if(!bad.length){
@@ -724,6 +810,13 @@ function buildRig(cad,dtn,base,dev,opts){
     const c=toR([props.com.x,props.com.y,props.com.z]);
     props=Object.assign({},props,{com:{x:c[0],y:c[1],z:c[2]}, comHeight:c[2]});
   }
+  // a measured mass (src/calibrate.js) and Monte Carlo's mass spread: the same robot, heavier or lighter,
+  // its yaw inertia scaled with it
+  const cb=o.calib||{}, kgSet=cb.massKg>0?cb.massKg:0, kgMul=o.massScale>0?o.massScale:1;
+  if(kgSet||kgMul!==1){
+    const f=(kgSet||props.kg)*kgMul/props.kg, I=props.I||{};
+    props=Object.assign({},props,{kg:props.kg*f, Izz:props.Izz*f, I:Object.assign({},I,{xx:(I.xx||0)*f, yy:(I.yy||0)*f, zz:(I.zz||0)*f})});
+  }
   const geo=(typeof driveFromCAD==="function")?driveFromCAD(cad,{front:o.front}):null;
   const cadWheels=(geo&&geo.wheels)||[];
   const corners={};
@@ -765,7 +858,13 @@ function buildRig(cad,dtn,base,dev,opts){
   for(const w of dtn.wheels){
     const corner=(w.front?"F":w.back?"B":"")+(w.left?"L":w.right?"R":"");
     const g=pick(w); if(g) taken.add(g);
-    const x=g?g.x:span?(w.front?span.x1:(w.back?span.x0:(span.x0+span.x1)/2)):(w.front?L/2:(w.back?-L/2:0));
+    // a tank motor that drives a whole side (chained or belted to every wheel
+    // on it) pushes and grips at the middle of that side, not at whichever of
+    // its wheels the pick landed on — a two-motor four-wheel base otherwise
+    // turned about its back axle
+    const side=kind==="tank"&&g&&!w.front&&!w.back?cadWheels.filter(o=>Math.sign(o.y)===Math.sign(g.y)):[];
+    const x=side.length>1?side.reduce((a,o)=>a+o.x,0)/side.length
+      :g?g.x:span?(w.front?span.x1:(w.back?span.x0:(span.x0+span.x1)/2)):(w.front?L/2:(w.back?-L/2:0));
     const y=g?g.y:span?(w.left?span.y1:span.y0):(w.left?W/2:-W/2);
     // the standard mecanum X when nothing says otherwise: FL and BR one way,
     // FR and BL the other
@@ -776,15 +875,18 @@ function buildRig(cad,dtn,base,dev,opts){
     // wheels point round the circle, an X-drive's at 45 degrees)
     const alpha=(kind!=="mecanum"&&g&&Number.isFinite(g.alpha))?g.alpha:0;
     // which way positive power turns this wheel (src/drivetrain.js dtMounts):
-    // measured from the motor in the CAD, so the drive check can still catch a
-    // wrong setDirection. With no motor in the CAD to measure (a drawn base),
-    // the team's own code says best how their robot is built: whatever sign its
-    // "stick up" gives a wheel (src/jvmrun.js) rolls that wheel forward. Else
+    // measured from the motor in the CAD (on the wheel's axle, or chained to one that
+    // is), so the drive check can still catch a wrong setDirection. A mount dtMounts
+    // could only assume (mountHow "assumed": a drawn base with no motors, or a motor
+    // belted to its wheel from off the axle) is not a measurement. There the team's
+    // own code says best how their robot is built: whatever sign its "stick up" gives
+    // a wheel (src/jvmrun.js) rolls that wheel forward. Else the assumption itself,
     // the standard inboard build.
-    const mount=(g&&(g.mount===1||g.mount===-1))?g.mount
-      :(w.sense===1||w.sense===-1)?w.sense:(kind==="swerve"?1:(w.left?-1:1));
+    const pm=v=>v===1||v===-1;
+    const measured=!!g&&pm(g.mount)&&g.mountHow!=="assumed";
+    const mount=measured?g.mount:pm(w.sense)?w.sense:(g&&pm(g.mount))?g.mount:(kind==="swerve"?1:(w.left?-1:1));
     // c: the CAD wheel's centre in the canonical frame, for the view to turn its parts
-    const mountFrom=(g&&(g.mount===1||g.mount===-1))?"cad":(w.sense===1||w.sense===-1)?"code":"assumed";
+    const mountFrom=measured?"cad":pm(w.sense)?"code":"assumed";
     wheels.push({x, y, z:0, r, roller, alpha, mount, mountFrom, corner:corner.length===2?corner:null, c:g&&g.c?g.c.slice():null});
     devs.push(w.dev);
     const sd=dev&&dev[w.dev];
@@ -805,12 +907,45 @@ function buildRig(cad,dtn,base,dev,opts){
     if(!steer.some(Boolean)) steer=null;
   }
   const sw=o.swerve||{};
-  return {props, drive:{kind, wheels, from:g0(geo)}, motors, devs, gear:(Number.isFinite(o.gear)&&o.gear>0)?o.gear:1, steer,
+  const rig={props, drive:{kind, wheels, from:g0(geo)}, motors, devs, gear:(Number.isFinite(cb.gear)&&cb.gear>0)?cb.gear:(Number.isFinite(o.gear)&&o.gear>0)?o.gear:1, steer,
           steerCfg:{zero:Number.isFinite(sw.zero)?sw.zero:0.5, travel:(Number.isFinite(sw.travelDeg)?sw.travelDeg:180)*Math.PI/180, sense:sw.sense===-1?-1:1},
           mu:(Number.isFinite(o.mu)&&o.mu>0)?o.mu:undefined};
+  // floor friction a share off the set value (Monte Carlo, src/montecarlo.js)
+  if(o.muScale>0&&o.muScale!==1) rig.mu=((Number.isFinite(o.mu)&&o.mu>0)?o.mu:Dyn.defaults.mu)*o.muScale;
+  // what a calibration fitted (src/calibrate.js): the drive's own drag and strafe loss; battery volts as a share of 12.6 V
+  for(const k of ["strafeEff","viscous","yawViscous"]) if(Number.isFinite(cb[k])&&cb[k]>0) rig[k]=cb[k];
+  if(o.volts>0&&Math.abs(o.volts-12.6)>1e-9) rig.vScale=o.volts/12.6;
+  return rig;
 }
 // where the wheel geometry came from, for the physics panel and the math sheet
 const g0=geo=>geo&&geo.wheels&&geo.wheels.length?"cad":"code";
 const clamp01=v=>Math.max(0,Math.min(1,v));
+/* The pose k of the way from a to b (heading the short way round), written into out. False, and out left
+   alone, for a jump (a reset, a drag, a robot put somewhere) that must be shown as it is, not smoothed. */
+function lerpPose(out,a,b,k){
+  const dx=b.x-a.x, dy=b.y-a.y;
+  if(!(dx*dx+dy*dy<0.25)) return false;           // over 0.5 m in one 20 ms step is not driving
+  const dh=Math.atan2(Math.sin(b.h-a.h),Math.cos(b.h-a.h));
+  if(!(Math.abs(dh)<1)) return false;
+  out.x=a.x+dx*k; out.y=a.y+dy*k; out.h=a.h+dh*k;
+  return true;
+}
+/* A flywheel's speed after dt, as a share of free speed: a DC motor follows its voltage u with time
+   constant T. Run on power, u is the command. Under the hub's velocity loop u = cmd + kp (cmd - act),
+   held to +-1: the stretch at full voltage first, then the loop's own approach, each integrated
+   exactly, so it holds however short T is. (One explicit step per tick multiplied the error by
+   21 e^(-dt/T) - 20: a light wheel with T under 0.2 s swung between -0.2 and 0.7 around 0.43.) */
+function flyStep(a,cmd,T,dt,kp){
+  if(!(kp>0)) return cmd+(a-cmd)*Math.exp(-dt/T);
+  let rem=dt;
+  const raw=cmd+kp*(cmd-a);
+  if(Math.abs(raw)>1){
+    const u=Math.sign(raw), ad=cmd-(u-cmd)/kp;        // full voltage one way, until the loop comes off the stop at ad
+    const r=(ad-u)/(a-u), td=r>0&&r<1?-T*Math.log(r):Infinity;
+    if(td>=rem) return u+(a-u)*Math.exp(-rem/T);
+    a=ad; rem-=td;
+  }
+  return cmd+(a-cmd)*Math.exp(-rem*(1+kp)/T);
+}
 const SLEW=8;                                   // motor power change per second (power units / s)
 const RTP_LEAD=0.15;                              // s of travel RUN_TO_POSITION looks ahead

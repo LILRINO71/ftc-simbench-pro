@@ -1,166 +1,263 @@
-// The "Send to SimBench" bookmark (src/onshapelink.js), run against a stand-in
-// Onshape tab that serves the `mated` robot's assembly definition and mate
-// features the way Onshape's API does. What it opens SimBench with has to
-// unpack to exactly those two documents, and they have to rebuild the robot's
-// joints on its STEP. A too-big assembly becomes one file to drop instead.
+// The pasted-link import (src/onshapelink.js, src/onshapecad.js): a team pastes
+// its assembly's address and the robot is read from Onshape's API, through the
+// sign-in relay, with no export. Onshape here is a stand-in serving the `mated`
+// corpus robot the way the API does (the assembly definition, its features, and
+// per Part Studio the tessellated faces and mass properties). What has to hold:
+// the address is read as copied (configuration included), each Part Studio is
+// read once, every part arrives as a placed copy of one thinned shape, the mates
+// are the joints, and the rigid links' mass properties are Onshape's own, summed.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { loadEngine, engineBundle } from './load.mjs';
-import { minifyJS } from '../tools/minify.mjs';
+import { loadEngine } from './load.mjs';
 import { buildRobot } from '../tools/stepgen.mjs';
 
 const E = loadEngine();
 const R = buildRobot('mated');
 const D = 'a'.repeat(24), W = 'b'.repeat(24), EL = 'c'.repeat(24);
-const PAGE = `https://cad.onshape.com/documents/${D}/w/${W}/e/${EL}`;
-const SB = 'https://ftc-simbench-pro.pages.dev/';
+const LINK = `https://cad.onshape.com/documents/${D}/w/${W}/e/${EL}`;
+const HOST = 'https://sb.test/onshape';
 
-/* A browser tab on Onshape, just enough for the bookmark: the page address and
-   title, fetch answering the API (the assembly, its features, and per part
-   studio its tessellated faces and mass properties, shaped like Onshape's),
-   window.open, postMessage both ways, alert, a download. */
-const hex = (c) => '#' + c.map((v) => Math.round(v * 255).toString(16).padStart(2, '0')).join('');
-function studioOf(u) {
+/* Onshape's API behind the relay: per part, a tensor about its centroid so the
+   link sums can be checked; a part placed twice shares its Part Studio. */
+const studioOf = (u) => {
   const m = /\/partstudios\/d\/(\w+)\/(v|m)\/(\w+)\/e\/(\w+)\/(tessellatedfaces|massproperties)\?configuration=([^&]*)/.exec(u);
-  if (!m) return null;
-  const key = m[1] + '/' + m[2] + '/' + m[3] + '/e/' + m[4] + '|' + decodeURIComponent(m[6]);
-  return { key, what: m[5], g: R.onshape.geom[key] };
-}
-function apiAnswer(u, asm, features, real) {
-  const st = studioOf(u);
-  if (st) {
-    if (!st.g) return null;
-    if (st.what === 'massproperties') return { bodies: Object.fromEntries(Object.entries(st.g.mass).map(([k, v]) => [k, { mass: [v.kg, v.kg, v.kg], centroid: [0, 0, 0] }])) };
-    return Object.entries(st.g.parts).map(([id, b]) => {
-      // real: as Onshape's spec writes them, points {x,y,z} and an appearance with its colour
-      const pt = (i) => (real ? { x: b.tri[i], y: b.tri[i + 1], z: b.tri[i + 2] } : b.tri.slice(i, i + 3));
-      const facets = []; for (let i = 0; i < b.tri.length; i += 9) facets.push({ vertices: [pt(i), pt(i + 3), pt(i + 6)] });
-      const face = real ? { appearance: b.color ? { color: b.color.map((v) => String(Math.round(v * 255))), opacity: 255 } : null, facets }
-        : { color: b.color ? hex(b.color) : null, facets };
-      return { id, name: b.name, faces: [face] };
-    });
-  }
-  return /\/features$/.test(u) ? features : asm;
-}
-function onshapeTab({ href = PAGE, asm = R.onshape.assembly, features = R.onshape.features, popups = true, answers = true, real = false, busy = 0 } = {}) {
-  const t = { fetched: [], alerts: [], opened: [], downloads: [], got: [], listeners: [] };
-  const popup = { closed: false, location: { href: '' }, close() { this.closed = true; },
-    postMessage(d, origin) { if (d && d.type === 'simbench-progress') return; t.got.push({ d, origin }); } };
-  t.popup = popup;
-  const win = { open: (u, n) => { t.opened.push([u, n]); if (!popups) return null; popup.location.href = u; return popup; },
-    addEventListener: (ev, f) => { if (ev === 'message') t.listeners.push(f); } };
-  t.env = {
-    location: { href },
-    document: { title: 'Robot 2026 | Onshape', body: { appendChild() {} },
-      createElement: () => { const a = { click() { t.downloads.push({ name: a.download, href: a.href }); }, remove() {} }; return a; } },
-    window: win,
-    fetch: async (u, o) => {
-      t.fetched.push({ u, cred: o && o.credentials });
-      // busy: Onshape answers the first `busy` calls with 429 Too Many Requests
-      if (t.fetched.length <= busy) return { ok: false, status: 429, headers: { get: (h) => (h === 'Retry-After' ? '0' : null) }, json: async () => ({}) };
-      const body = apiAnswer(u, asm, features, real);
-      if (body == null) return { ok: false, status: 404, json: async () => ({}) };
-      return { ok: true, status: 200, json: async () => JSON.parse(JSON.stringify(body)) };
-    },
-    alert: (m) => t.alerts.push(m),
-    URL: Object.assign(function (u) { return new URL(u); }, { createObjectURL: (b) => b }),
-    setTimeout: (f, ms) => setTimeout(f, Math.min(ms, 50)),
+  return m && { key: m[1] + '/' + m[2] + '/' + m[3] + '/e/' + m[4] + '|' + decodeURIComponent(m[6]), what: m[5] };
+};
+const tensorOf = (kg) => [kg * 1e-3, 0, 0, 0, kg * 2e-3, 0, 0, 0, kg * 3e-3];
+function onshape({ asm = R.onshape.assembly, features = R.onshape.features, busy = 0, hasMass = true } = {}) {
+  const o = { calls: [] };
+  o.fetch = async (u, init) => {
+    o.calls.push({ u, init });
+    if (o.calls.length <= busy) return { ok: false, status: 429, headers: { get: (h) => (h === 'Retry-After' ? '0' : null) }, json: async () => ({}) };
+    const st = studioOf(u);
+    let body = null;
+    if (st) {
+      const g = R.onshape.geom[st.key];
+      if (g) {
+        if (st.what === 'massproperties') body = { bodies: Object.fromEntries(Object.entries(g.mass).map(([k, v]) => [k, hasMass
+          ? { hasMass: true, mass: [v.kg, v.kg, v.kg], volume: [v.kg / 2700, v.kg / 2700, v.kg / 2700], centroid: [0.01, 0.02, 0.03, 0.01, 0.02, 0.03, 0.01, 0.02, 0.03], inertia: tensorOf(v.kg).concat(tensorOf(v.kg), tensorOf(v.kg)) }
+          : { hasMass: false, mass: [0, 0, 0], volume: [v.kg / 2700, v.kg / 2700, v.kg / 2700], centroid: [0.01, 0.02, 0.03], inertia: tensorOf(v.kg / 2700).concat(tensorOf(v.kg / 2700), tensorOf(v.kg / 2700)) }])) };
+        else body = Object.entries(g.parts).map(([id, b]) => {
+          const facets = []; for (let i = 0; i < b.tri.length; i += 9) facets.push({ vertices: [0, 3, 6].map((k) => ({ x: b.tri[i + k], y: b.tri[i + k + 1], z: b.tri[i + k + 2] })) });
+          return { id, name: b.name, faces: [{ appearance: b.color ? { color: b.color.map((v) => String(Math.round(v * 255))), opacity: 255 } : null, facets }] };
+        });
+      }
+    } else if (/\/features(\?|$)/.test(u)) body = features;
+    else if (u.startsWith(HOST + `/api/assemblies/d/${D}/w/${W}/e/${EL}`)) body = asm;
+    if (body == null) return { ok: false, status: 404, headers: { get: () => null }, json: async () => ({}) };
+    return { ok: true, status: 200, headers: { get: () => null }, json: async () => JSON.parse(JSON.stringify(body)) };
   };
-  // the SimBench tab, once open, says it's ready (from its own origin)
-  if (answers) setTimeout(() => t.listeners.forEach((f) => f({ origin: new URL(SB).origin, data: { type: 'simbench-ready' } })), 5);
-  return t;
+  return o;
 }
-async function click(engine, tab) {
-  const href = engine.onshapeBookmarklet(SB);
-  assert.ok(href.startsWith('javascript:'));
-  const code = decodeURIComponent(href.slice('javascript:'.length));
-  const names = Object.keys(tab.env);
-  new Function(...names, code)(...names.map((k) => tab.env[k]));
-  for (let i = 0; i < 400 && !tab.got.length && !tab.alerts.length && !tab.downloads.length; i++) await new Promise((r) => setTimeout(r, 10));
-}
+const read = (os, href = LINK) => E.onshapeRead(HOST, E.onshapeRef(href), { fetch: os.fetch, say() {} });
 
-test('bookmark: reads the whole robot with the team\'s own sign-in and hands it to the SimBench tab', async () => {
-  const tab = onshapeTab();
-  await click(E, tab);
-  assert.deepEqual(tab.alerts, []);
-  const L = E.onshapeApiLinks(PAGE);
-  const urls = tab.fetched.map((f) => f.u);
-  assert.ok(urls.some((u) => u.startsWith(L.def.split('?')[0] + '?')), 'the assembly definition');
-  assert.ok(urls.includes(L.features), 'its features (mate limits)');
-  // each part studio once, however many times its parts are used
+test('link: the assembly, its features and each Part Studio once, through the relay, with the browser\'s own cookies', async () => {
+  const os = onshape();
+  const p = await read(os);
+  const urls = os.calls.map((c) => c.u);
+  assert.ok(urls[0].startsWith(HOST + `/api/assemblies/d/${D}/w/${W}/e/${EL}?`) && /excludeSuppressed=true/.test(urls[0]), 'the definition, suppressed parts left out');
+  assert.ok(urls.includes(HOST + `/api/assemblies/d/${D}/w/${W}/e/${EL}/features`), 'its features (mate limits and relations)');
   const studios = Object.keys(R.onshape.geom);
-  assert.equal(urls.filter((u) => /tessellatedfaces/.test(u)).length, studios.length);
+  assert.equal(urls.filter((u) => /tessellatedfaces/.test(u)).length, studios.length, 'each Part Studio once, however many parts it places');
   assert.equal(urls.filter((u) => /massproperties/.test(u)).length, studios.length);
-  assert.ok(tab.fetched.every((f) => f.cred === 'include'));
-  // it opened SimBench waiting, and posted the robot only to SimBench's own origin
-  assert.ok(tab.popup.location.href.startsWith(SB + '#onshape-wait'));
-  assert.equal(tab.got.length, 1);
-  assert.equal(tab.got[0].origin, new URL(SB).origin);
-  const p = E.checkOnshapePayload(tab.got[0].d);
-  assert.deepEqual(p.asm, R.onshape.assembly);
-  assert.equal(p.name, 'Robot 2026');
-  // and that is the whole robot: every part with its shape, every joint from a mate
-  const cad = E.cadFromOnshape(p);
-  assert.equal(cad.solids.length, R.truth.leafParts);
-  assert.equal(cad.mechs.filter((m) => m.fromMate).length, R.truth.joints.length);
-  assert.ok(Math.abs(cad.onshape.kg - R.truth.massKg) < 1e-3);
-});
-
-test('bookmark: Onshape\'s real shapes ({x,y,z} points, appearance colours) and a busy answer still give the whole robot', async () => {
-  const tab = onshapeTab({ real: true, busy: 3 });
-  await click(E, tab);
-  assert.deepEqual(tab.alerts, []);
-  assert.equal(tab.got.length, 1, 'retried past the 429s');
-  const cad = E.cadFromOnshape(E.checkOnshapePayload(tab.got[0].d));
-  assert.equal(cad.solids.length, R.truth.leafParts);
-  for (const s of cad.solids) {
-    assert.ok(s.tri.pos.every(Number.isFinite), s.name + ' has real points');
-    assert.ok(Array.isArray(s.color), s.name + ' has its colour');
+  assert.ok(os.calls.every((c) => c.init.credentials === 'same-origin'), 'the relay cookie, nothing else');
+  assert.equal(Object.keys(p.geom).length, studios.length);
+  for (const k of studios) for (const id in p.geom[k].parts) {
+    assert.ok(p.geom[k].parts[id].tri instanceof Float32Array, 'triangles compacted on arrival');
+    assert.equal(p.geom[k].mass[id].I.length, 9, 'the tensor, nominal first');
   }
 });
 
-test('bookmark: the ship build (minified) makes a bookmark that works the same', async () => {
-  const M = loadEngine(minifyJS(engineBundle()));
-  const tab = onshapeTab();
-  await click(M, tab);
-  const p = E.checkOnshapePayload(tab.got[0].d);
-  assert.deepEqual(p.asm, R.onshape.assembly);
-  assert.equal(E.cadFromOnshape(p).solids.length, R.truth.leafParts);
+test('link: the address is read as copied, configuration included, and the definition is read in it', async () => {
+  const os = onshape();
+  await read(os, LINK + '?configuration=List_7Xq%3DSim&foo=1#tab');
+  assert.ok(/[?&]configuration=List_7Xq%3DSim/.test(os.calls[0].u), os.calls[0].u);
+  assert.ok(/\/features\?configuration=List_7Xq%3DSim$/.test(os.calls[1].u), os.calls[1].u);
 });
 
-test('bookmark: no SimBench tab (pop-ups blocked) saves the whole robot as one file to drop in', async () => {
-  const tab = onshapeTab({ popups: false, answers: false });
-  await click(E, tab);
-  assert.equal(tab.downloads.length, 1);
-  assert.equal(tab.downloads[0].name, 'Robot 2026.onshape.json');
-  const p = E.checkOnshapePayload(JSON.parse(await tab.downloads[0].href.text()));
-  assert.ok(/Drop it into SimBench/.test(tab.alerts[0]));
-  assert.equal(E.cadFromOnshape(p).solids.length, R.truth.leafParts);
+test('link: the robot: every part a placed copy of one thinned shape, the mates the joints, the mass Onshape\'s', async () => {
+  const p = await read(onshape());
+  const cad = E.cadFromOnshape(E.checkOnshapePayload(Object.assign({ format: E.ONSHAPE_FORMAT, name: 'Robot 2026', url: LINK }, p)));
+  assert.equal(cad.source, 'onshape');
+  assert.equal(cad.solids.length, R.truth.leafParts);
+  assert.ok(cad.shapes.length < cad.solids.length, 'parts placed more than once share a shape');
+  for (const s of cad.solids) {
+    assert.ok(s.shapes.length === 1 && cad.shapes[s.shapes[0]].idx.length >= 3, s.name + ' has a shape');
+    assert.ok(Array.isArray(s.color), s.name + ' has its colour');
+    assert.ok(s.kg > 0 && s.com.length === 3 && s.I.length === 9, s.name + ' has its mass, centre and tensor');
+  }
+  const joints = cad.mechs.filter((m) => m.fromMate);
+  assert.deepEqual(joints.map((m) => m.id).sort(), R.truth.joints.map((j) => j.name).sort());
+  assert.ok(Math.abs(cad.onshape.kg - R.truth.massKg) < 1e-3, 'the mass is Onshape\'s, summed');
+  assert.ok(E.urdfExact(cad).meshes.length === cad.solids.length, 'the view gets one instance per part');
+  assert.equal(cad.frame.up, R.truth.up);
 });
 
-test('bookmark: not on an assembly page, it says so and reads nothing', async () => {
-  const tab = onshapeTab({ href: 'https://cad.onshape.com/documents?nodeId=x' });
-  await click(E, tab);
-  assert.equal(tab.fetched.length, 0);
-  assert.ok(/Open your robot's assembly/.test(tab.alerts[0]));
+test('link: the rigid links\' mass properties are the parts\' own, summed with the parallel-axis shift', async () => {
+  const cad = E.cadFromOnshape(E.checkOnshapePayload(Object.assign({ format: E.ONSHAPE_FORMAT }, await read(onshape()))));
+  assert.ok(cad.links.length >= 2, 'the chassis and at least one moving link');
+  // each part weighs what the bench weighs it (a vendor figure beats the CAD's), and every part is in exactly one link
+  const kgOf = (s) => E.partMass(s, {}).kg;
+  const total = cad.links.reduce((a, l) => a + l.kg, 0);
+  assert.ok(Math.abs(total - cad.solids.reduce((a, s) => a + kgOf(s), 0)) < 1e-9, 'every part is in exactly one link');
+  for (const L of cad.links) {
+    assert.ok(L.exact, L.id + ' has every part\'s tensor');
+    const list = cad.solids.filter((s) => (s.mech && cad.mechs.some((m) => m.id === s.mech) ? s.mech : 'chassis') === L.id);
+    assert.equal(list.length, L.parts);
+    // the sum by hand: I = sum(I_i + m_i (d^2 E - d d^T)) about the link's centre of mass
+    const M = list.reduce((a, s) => a + kgOf(s), 0), c = [0, 1, 2].map((k) => list.reduce((a, s) => a + kgOf(s) * s.com[k], 0) / M);
+    for (let k = 0; k < 3; k++) assert.ok(Math.abs(c[k] - L.com[k]) < 1e-9);
+    const I = new Array(9).fill(0);
+    for (const s of list) { const d = s.com.map((v, k) => v - c[k]), dd = d[0] * d[0] + d[1] * d[1] + d[2] * d[2], kg = kgOf(s);
+      for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) I[3 * i + j] += s.I[3 * i + j] + kg * ((i === j ? dd : 0) - d[i] * d[j]); }
+    for (let k = 0; k < 9; k++) assert.ok(Math.abs(I[k] - L.I[k]) < 1e-9, L.id + ' tensor');
+    // the tensor is positive on its diagonal and symmetric
+    assert.ok(L.I[0] > 0 && L.I[4] > 0 && L.I[8] > 0 && Math.abs(L.I[1] - L.I[3]) < 1e-12);
+  }
+  // each joint knows what it carries, itself and everything hanging from it
+  const lift = cad.mechs.find((m) => m.id === 'Lift Stage');
+  assert.ok(lift.carries.kg > 0 && lift.carries.com, 'the lift knows the mass it lifts');
+  // the whole-robot mass properties: a recognised vendor part keeps its published weight, every other part
+  // is weighed as Onshape weighed it, with Onshape's own centre and tensor
+  const mp = E.massProps(cad, { payloadKg: 0 });
+  assert.ok(mp.parts.every((p) => p.how === 'vendor' || p.how === 'cad'), mp.parts.map((p) => p.how).join(','));
+  assert.ok(mp.parts.some((p) => p.how === 'cad'));
+  assert.ok(Math.abs(mp.kg - R.truth.massKg) < R.truth.massKg * 0.05, 'the robot weighs about what Onshape says: ' + mp.kg);
+  assert.ok(mp.I.zz > 0 && mp.I.xx > 0);
 });
 
-test('bookmark: a Part Studio tab (no assembly definition) is refused with a message', async () => {
-  const tab = onshapeTab({ asm: { message: 'not an assembly' } });
-  await click(E, tab);
-  assert.ok(/isn't an assembly/.test(tab.alerts[0]), tab.alerts[0]);
-  assert.ok(tab.popup.closed);
+test('link: a part with no material weighs its volume at the density its kind implies, tensor scaled with it', async () => {
+  const cad = E.cadFromOnshape(E.checkOnshapePayload(Object.assign({ format: E.ONSHAPE_FORMAT }, await read(onshape({ hasMass: false })))));
+  const mp = E.massProps(cad, { payloadKg: 0 });
+  assert.ok(mp.kg > R.truth.massKg * 0.2 && mp.kg < R.truth.massKg * 3, 'a plausible robot, not its volume in kilograms: ' + mp.kg);
+  const part = mp.parts.find((p) => p.how === 'cad');
+  assert.ok(part, 'the CAD\'s volume was used');
 });
 
-test('SimBench side: a damaged or foreign #fragment is refused, and only the two documents are kept', async () => {
-  await assert.rejects(E.readOnshapeHash('%%%not base64'), /damaged/);
-  await assert.rejects(E.readOnshapeHash('aGVsbG8'), /damaged/);           // base64, not gzip
-  // gzip that's cut off half way: refused, not waited on for ever
-  const whole = (await import('node:zlib')).gzipSync(JSON.stringify({ format: E.ONSHAPE_FORMAT, asm: { rootAssembly: {} } }));
-  const cut = Buffer.from(whole.subarray(0, whole.length - 12)).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-  await assert.rejects(E.readOnshapeHash(cut), /damaged/);
-  assert.throws(() => E.checkOnshapePayload({ format: 'something else', asm: { rootAssembly: {} } }), /isn't mates/);
+test('link: Onshape busy (429) is retried; a Part Studio address is refused with what to do; no sign-in says so', async () => {
+  const os = onshape({ busy: 3 });
+  const p = await read(os);
+  assert.ok(p.asm.rootAssembly, 'read after the retries');
+  await assert.rejects(read(onshape({ asm: null })), /isn't an assembly/);
+  const denied = { fetch: async () => ({ ok: false, status: 401, headers: { get: () => null }, json: async () => ({}) }) };
+  await assert.rejects(E.onshapeRead(HOST, E.onshapeRef(LINK), { fetch: denied.fetch }), (e) => e.status === 401);
+});
+
+test('link: a dropped or relayed payload is checked: only the documents, the shapes and the masses are kept', () => {
+  assert.throws(() => E.checkOnshapePayload({ format: 'something else', asm: { rootAssembly: {} } }), /isn't a robot/);
   assert.throws(() => E.checkOnshapePayload({ format: E.ONSHAPE_FORMAT, asm: {} }), /no assembly/);
-  const p = E.checkOnshapePayload({ format: E.ONSHAPE_FORMAT, asm: { rootAssembly: {} }, features: 'x', name: 'n'.repeat(999), url: 'https://evil.example/x', extra: 1 });
+  const p = E.checkOnshapePayload({ format: E.ONSHAPE_FORMAT, asm: { rootAssembly: {} }, features: 'x', name: 'n'.repeat(999), url: 'https://evil.example/x', extra: 1,
+    geom: { k: { parts: { a: { name: 'A', tri: [0, 0, 0, 1, 0, 0, 0, 1, 0], color: '#ff0000' }, b: { tri: 'junk' } }, mass: { a: { kg: 2, com: [1, 2, 3], I: [1, 0, 0, 0, 1, 0, 0, 0, 1], vol: 1e-3 }, b: { kg: -1 }, c: { kg: 'x' } } } } });
   assert.equal(p.features, null); assert.equal(p.url, ''); assert.equal(p.name.length, 200); assert.equal(p.extra, undefined);
+  assert.deepEqual(Object.keys(p.geom.k.parts), ['a']);
+  assert.deepEqual(p.geom.k.mass, { a: { kg: 2, com: [1, 2, 3], I: [1, 0, 0, 0, 1, 0, 0, 0, 1], vol: 1e-3 } });
+});
+
+test('link: an empty assembly, and one with no solid part, are said as what they are', () => {
+  const root = (instances, occurrences) => ({ format: E.ONSHAPE_FORMAT, name: 'x', url: LINK, geom: {},
+    asm: { rootAssembly: { documentId: D, elementId: EL, instances, occurrences, features: [] }, subAssemblies: [], parts: [] } });
+  assert.throws(() => E.cadFromOnshape(root([], [])), /this assembly has no parts in it/);
+  // one part instance whose Part Studio sent no faces for it (a sketch, a curve)
+  const inst = { id: 'i1', name: 'Sketch 1 <1>', type: 'Part', partId: 'JHD', documentId: D, documentMicroversion: 'f'.repeat(24), elementId: 'e'.repeat(24), configuration: 'default' };
+  const P = root([inst], [{ path: ['i1'], transform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] }]);
+  P.geom[E.onshapeGeomKey(inst)] = { parts: {}, mass: {} };
+  assert.throws(() => E.cadFromOnshape(P), /none of this assembly's 1 part has a solid shape.*Sketch 1/);
+});
+
+test('link: a surface (no mass and no volume from Onshape) weighs nothing, through the payload check too', async () => {
+  // the first part of the first Part Studio answers as a surface body does: hasMass false, volume 0
+  const os = onshape(); const base = os.fetch; let hit = null;
+  os.fetch = async (u, init) => { const r = await base(u, init);
+    if (!/massproperties/.test(u) || hit) return r;
+    return { ...r, json: async () => { const b = await r.json(), id = Object.keys(b.bodies)[0]; hit = id; b.bodies[id] = { hasMass: false, mass: [0, 0, 0], volume: [0, 0, 0], centroid: [0, 0, 0], inertia: new Array(27).fill(0) }; return b; } }; };
+  const P = E.checkOnshapePayload(Object.assign({ format: E.ONSHAPE_FORMAT }, await read(os)));
+  const cad = E.cadFromOnshape(P), flat = cad.solids.filter((s) => s.massless);
+  assert.ok(hit && flat.length >= 1, 'the surface is marked');
+  for (const s of flat) { const pm = E.partMass(s); assert.equal(pm.kg, 0); assert.equal(pm.how, 'surface'); }
+  const solid = cad.solids.find((s) => !s.massless);
+  assert.ok(E.partMass(solid).kg > 0, 'a solid part still has its mass');
+});
+
+// ---- opened from inside Onshape: the assembly rides in the page's own address ----
+test('launch: an Onshape extension\'s action URL, or a link that carries the address, names the assembly to read', () => {
+  const d = 'a'.repeat(24), w = 'b'.repeat(24), e = 'c'.repeat(24), at = 'https://cad.onshape.com/documents/' + d;
+  // what an app extension fills in ({$documentId}, {$workspaceOrVersion}, {$workspaceOrVersionId}, {$elementId})
+  assert.equal(E.onshapeLaunch(`?documentId=${d}&workspaceOrVersion=w&workspaceOrVersionId=${w}&elementId=${e}`), `${at}/w/${w}/e/${e}`);
+  assert.equal(E.onshapeLaunch(`?documentId=${d}&workspaceOrVersion=v&workspaceOrVersionId=${w}&elementId=${e}`), `${at}/v/${w}/e/${e}`);
+  assert.equal(E.onshapeLaunch(`?documentId=${d}&workspaceId=${w}&elementId=${e}&view=cad`), `${at}/w/${w}/e/${e}`);
+  assert.equal(E.onshapeLaunch(`?documentId=${d}&versionId=${w}&elementId=${e}`), `${at}/v/${w}/e/${e}`);
+  // a configuration rides along; one Onshape left as its placeholder is none
+  assert.equal(E.onshapeLaunch(`?documentId=${d}&workspaceId=${w}&elementId=${e}&configuration=List_7Xq%3DSim`), `${at}/w/${w}/e/${e}?configuration=List_7Xq%3DSim`);
+  assert.equal(E.onshapeLaunch(`?documentId=${d}&workspaceId=${w}&elementId=${e}&configuration=%7B%24configuration%7D`), `${at}/w/${w}/e/${e}`);
+  // an enterprise's own address, and nothing that isn't Onshape's
+  assert.equal(E.onshapeLaunch(`?documentId=${d}&workspaceId=${w}&elementId=${e}&server=https%3A%2F%2Fpuhsd.onshape.com`), `https://puhsd.onshape.com/documents/${d}/w/${w}/e/${e}`);
+  assert.equal(E.onshapeLaunch(`?documentId=${d}&workspaceId=${w}&elementId=${e}&server=https%3A%2F%2Fevil.example`), `${at}/w/${w}/e/${e}`);
+  // the whole address, encoded: what a teammate's link carries
+  const full = `${at}/w/${w}/e/${e}?configuration=default`;
+  assert.equal(E.onshapeLaunch('?onshape=' + encodeURIComponent(full) + '&alliance=red'), full);
+  // what it reads is what the pasted box reads
+  assert.deepEqual(E.onshapeRef(E.onshapeLaunch(`?documentId=${d}&workspaceId=${w}&elementId=${e}&configuration=Sim`)), { host: 'https://cad.onshape.com', did: d, wvm: 'w', wvmid: w, eid: e, config: 'Sim' });
+  // nothing to read: an ordinary visit, a broken id, an address that isn't Onshape's
+  for (const q of ['', '?robot=demo', `?documentId=${d}&elementId=${e}`, `?documentId=xyz&workspaceId=${w}&elementId=${e}`, '?onshape=' + encodeURIComponent('https://example.com/documents/' + d + '/w/' + w + '/e/' + e), '?onshape=javascript:alert(1)'])
+    assert.equal(E.onshapeLaunch(q), null, q);
+});
+
+test('launch: the address bar keeps everything but the assembly, so a reload reads nothing again', () => {
+  const d = 'a'.repeat(24), w = 'b'.repeat(24), e = 'c'.repeat(24);
+  assert.equal(E.onshapeLaunchStrip(`?documentId=${d}&workspaceOrVersion=w&workspaceOrVersionId=${w}&elementId=${e}&configuration=x&server=y`), '');
+  assert.equal(E.onshapeLaunchStrip(`?alliance=red&documentId=${d}&workspaceId=${w}&elementId=${e}&view=cad`), '?alliance=red&view=cad');
+  assert.equal(E.onshapeLaunchStrip('?onshape=' + encodeURIComponent('https://cad.onshape.com/documents/' + d) + '&tier=1'), '?tier=1');
+  assert.equal(E.onshapeLaunch(E.onshapeLaunchStrip(`?documentId=${d}&workspaceId=${w}&elementId=${e}`)), null);
+  // what Onshape itself appends when its menu entry is clicked (the address as it arrived on 2026-11-18)
+  const real = `?documentId=${d}&workspaceOrVersion=w&workspaceOrVersionId=${w}&elementId=${e}&configuration=default&companyId=cad&sessionCompanyId=${d}&userId=${w}&clientId=ABC%3D&locale=en-US&theme=light`;
+  assert.equal(E.onshapeLaunchStrip(real), '', 'no account id is left in the address bar');
+  assert.equal(E.onshapeLaunch(real), `https://cad.onshape.com/documents/${d}/w/${w}/e/${e}?configuration=default`);
+  assert.equal(E.onshapeLaunchStrip(real + '&view=cad'), '?view=cad');
+});
+
+test('launch: the bookmark, clicked on an Assembly tab, opens SimBench with that tab\'s address to read', () => {
+  const d = 'a'.repeat(24), w = 'b'.repeat(24), e = 'c'.repeat(24);
+  const at = `https://cad.onshape.com/documents/${d}/w/${w}/e/${e}?configuration=List_7Xq%3DSim&renderMode=0`;
+  const code = E.onshapeBookmark('https://ftc-simbench-pro.pages.dev/?robot=demo#x');
+  assert.ok(code.startsWith('javascript:'));
+  const click = (href) => { const out = { opened: null, said: null };
+    new Function('location', 'window', 'alert', code.slice(11))({ href }, { open: (u) => { out.opened = u; } }, (m) => { out.said = m; });
+    return out; };
+  const on = click(at);
+  assert.ok(on.opened.startsWith('https://ftc-simbench-pro.pages.dev/?onshape='), on.opened);
+  // what SimBench then reads is the tab's own address, configuration and all
+  assert.equal(E.onshapeLaunch(new URL(on.opened).search), at);
+  assert.deepEqual(E.onshapeRef(E.onshapeLaunch(new URL(on.opened).search)).config, 'List_7Xq=Sim');
+  // an enterprise's own address works the same
+  assert.ok(click(at.replace('cad.', 'puhsd.')).opened);
+  // anywhere else it says what to do, and opens nothing
+  for (const href of ['https://cad.onshape.com/documents', 'https://example.com/', 'https://ftc-simbench-pro.pages.dev/']) { const o = click(href); assert.equal(o.opened, null); assert.match(o.said, /Assembly tab/); }
+});
+
+// ---- the live site, 2026-11-18: read beside five others, the robot's largest Part Studio failed once and 1,278 parts were left out ----
+test('link: a Part Studio that fails once is read again by itself; one the team can\'t open is not', async () => {
+  const studios = Object.keys(R.onshape.geom);
+  const flaky = (status, times) => { const os = onshape(), inner = os.fetch; let left = times, live = 0, alone = null;
+    os.fetch = async (u, init) => {
+      if (!/tessellatedfaces/.test(u) || !u.includes(encodeURI(studios[0].split('|')[0]).replace(/%7C.*/, ''))) { live++; try { return await inner(u, init); } finally { live--; } }
+      if (left > 0) { left--; if (status === 'network') throw new TypeError('fetch failed'); return { ok: false, status, headers: { get: () => null }, json: async () => ({}) }; }
+      alone = live === 0; return inner(u, init); };
+    return { os, wasAlone: () => alone }; };
+  // a 500 from the relay, then fine: the studio arrives, asked for a second time when nothing else is being read
+  for (const how of [500, 'network']) {
+    const f = flaky(how, 1), said = [];
+    const p = await E.onshapeRead(HOST, E.onshapeRef(LINK), { fetch: f.os.fetch, say: (t) => said.push(t) });
+    assert.ok(p.geom[studios[0]] && Object.keys(p.geom[studios[0]].parts).length, how + ': the studio arrives on the second try');
+    assert.equal(p.retried, 1);
+    assert.equal(f.wasAlone(), true, 'read again by itself');
+    assert.ok(said.some((t) => /again/.test(t)), 'and the card says so');
+    assert.equal(E.cadFromOnshape(E.checkOnshapePayload(Object.assign({ format: E.ONSHAPE_FORMAT }, p))).solids.length, R.truth.leafParts, 'the whole robot');
+  }
+  // failing twice: left out, as before, and asked for no third time
+  const twice = flaky(500, 5), p2 = await E.onshapeRead(HOST, E.onshapeRef(LINK), { fetch: twice.os.fetch, say() {} });
+  assert.equal(p2.geom[studios[0]], null);
+  assert.equal(twice.os.calls.filter((c) => /tessellatedfaces/.test(c.u)).length, studios.length - 1, 'the stand-in saw only the others (the failing calls never reached it)');
+  // 403: the team can't open it; no second call
+  const no = flaky(403, 5), p3 = await E.onshapeRead(HOST, E.onshapeRef(LINK), { fetch: no.os.fetch, say() {} });
+  assert.equal(p3.geom[studios[0]], null); assert.equal(p3.retried, 0);
 });

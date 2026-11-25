@@ -1,9 +1,6 @@
 /* ============================================================
    5.  MAPPING
    ============================================================ */
-const SYNONYM={ lift:["arm","lift","shoulder","elbow","slide","extend","pivot"],
-                grip:["claw","grip","gripper","hand","intake","clamp","wrist"],
-                yaw: ["rotate","base","turret","yaw","swivel","spin"] };
 /* Devices that never drive a CAD mechanism: sensors and the IMU move nothing,
    and a drive motor turns a wheel (the drivetrain pairs those with wheels by
    corner). */
@@ -66,10 +63,14 @@ function autoMap(devices,mechs,opts){
     mechText.set(m.id,{id:String(m.id||"").toLowerCase(), alias:String(m.alias||"").toLowerCase(), words:[...new Set(mapWords(m.id).concat(mapWords(m.alias),mapWords(m.partName),...parts.map(mapWords)))],
       raw:mapRaw(m.id).concat(mapRaw(m.alias))});
   }
+  // a mate named exactly as the device's configuration name is the team saying so:
+  // case, spaces, underscores and onshape-to-robot's dof_/_inv don't count
+  const exact=s=>String(s||"").toLowerCase().replace(/^dof_/,"").replace(/_inv$/,"").replace(/[^a-z0-9]/g,"");
   const one=(name,mech)=>{
     const T=mechText.get(mech.id), s=T.id, d=String(name||"").toLowerCase();
     if(!s||!d) return 0;
     if(d===s||(T.alias&&d===T.alias)) return 100;
+    const de=exact(d); if(de.length>=2&&(de===exact(s)||(T.alias&&de===exact(T.alias)))) return 100;
     const dw=mapWords(name), clash=mapClash(mapRaw(name),T.raw)?50:0;
     // a meaningful word in both: "liftMotor" and the mate "Lift Stage"
     if(dw.some(w=>w.length>=3&&T.words.indexOf(w)>=0)) return 80-clash;
@@ -99,7 +100,7 @@ function autoMap(devices,mechs,opts){
     if(MAP_NOT_ACTUATOR.test(dev.type||"")||isDriveDevice(dev)) continue;
     acts.push(dev);
     // a joint tied to another by a gear, rack or cascade is driven through that one
-    for(const mech of mechs){ if(mech.couple) continue; const v=score(dev,mech); if(v>=45) pairs.push({dev:dev.name, mech:mech.id, v}); }
+    for(const mech of mechs){ if(mech.couple||mech.internal) continue; const v=score(dev,mech); if(v>=45) pairs.push({dev:dev.name, mech:mech.id, v}); }
   }
   pairs.sort((a,b)=>b.v-a.v);
   for(const p of pairs) if(map[p.dev]===null&&!used[p.mech]){ map[p.dev]=p.mech; used[p.mech]=p.dev; }

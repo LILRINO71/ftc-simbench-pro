@@ -71,7 +71,7 @@ test('a bound left unset is no bound, and expressions Onshape writes are read', 
     { message: { parameterId: 'limitRotationMin', isNull: false, nullValue: 'No minimum', expression: '0.0*deg' } },
     { message: { parameterId: 'limitRotationMax', isNull: false, nullValue: '', expression: '90 degrees' } }];
   const j = joint(E.cadFromOnshape(p), 'Arm Pivot');
-  assert.ok(Number.isNaN(j.limits[0]) && near(j.limits[1], Math.PI / 2), JSON.stringify(j.limits));
+  assert.ok(j.limits[0] === null && near(j.limits[1], Math.PI / 2), JSON.stringify(j.limits));   // open: null, which survives a saved file (NaN does not)
   assert.ok(near(E.mateQty({ expression: '1/2 in' }), 0.0127));
   assert.ok(near(E.mateQty({ expression: '2 * 25.4 mm' }), 0.0508));
   assert.ok(near(E.mateQty({ expression: '+5 mm' }), 0.005));

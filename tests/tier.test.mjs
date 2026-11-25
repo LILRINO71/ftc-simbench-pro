@@ -1,0 +1,50 @@
+// Device tiers (src/tier.js): a school Chromebook starts light, a gaming
+// laptop starts full, and a hand-picked tier wins.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { loadEngine } from './load.mjs';
+
+const E = loadEngine();
+const t = (i) => E.deviceTier(i).tier;
+
+test('tiers: the machines the design names land where it says', () => {
+  // 4 GB education Chromebooks (Intel N4500's UHD Graphics, MediaTek Kompanio 500's Mali-G52)
+  assert.equal(t({ memoryGB: 4, cores: 2, renderer: 'ANGLE (Intel, Mesa Intel(R) UHD Graphics (JSL), OpenGL ES 3.2)', webgl2: true }), 0);
+  assert.equal(t({ memoryGB: 4, cores: 8, renderer: 'Mali-G52 MC2', webgl2: true }), 0);
+  // an 8 GB laptop on Iris Xe
+  assert.equal(t({ memoryGB: 8, cores: 8, renderer: 'ANGLE (Intel, Intel(R) Iris(R) Xe Graphics Direct3D11 vs_5_0 ps_5_0)', webgl2: true }), 1);
+  // a discrete GPU, and Apple silicon
+  assert.equal(t({ memoryGB: 8, cores: 12, renderer: 'ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Laptop GPU Direct3D11)', webgl2: true }), 2);
+  assert.equal(t({ memoryGB: 8, cores: 8, renderer: 'Apple M2', webgl2: true }), 2);
+  // drawing in software is the slowest machine of all
+  assert.equal(t({ memoryGB: 16, cores: 16, renderer: 'ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero)))', webgl2: true }), 0);
+  assert.equal(t({ memoryGB: 16, cores: 8, webgl2: false }), 0);
+});
+
+test('tiers: each tier\'s budget follows the design (shadows, pixel ratio, light copy, substeps)', () => {
+  const b0 = E.deviceTier({ memoryGB: 4 }).budget, b1 = E.deviceTier({ memoryGB: 8, renderer: 'Intel Iris Xe' }).budget, b2 = E.deviceTier({ override: 2 }).budget;
+  assert.deepEqual([b0.shadows, b0.pixelRatio, b0.lite, b0.substeps], [0, 1, true, 2]);
+  assert.deepEqual([b1.shadows, b1.pixelRatio, b1.lite, b1.substeps], [1024, 1, false, 4]);
+  assert.deepEqual([b2.shadows, b2.pixelRatio, b2.lite, b2.substeps], [4096, 2, false, 4]);
+  // the look's extras cost the slowest machine nothing
+  assert.deepEqual([b0.bump, b0.glass, b0.aoSamples, b0.vignette], [false, false, 0, false]);
+  assert.ok(b1.aoSamples > 0 && b2.aoSamples >= b1.aoSamples, 'AO on the tiers that can afford it');
+  assert.equal(E.deviceTier({ memoryGB: 4, override: 2 }).tier, 2, 'chosen by hand wins');
+  assert.match(E.deviceTier({ memoryGB: 4 }).why, /4 GB/);
+});
+
+test('tiers: an iPad says "Apple GPU" like a Mac, and still starts light', () => {
+  assert.equal(E.deviceTier({ renderer: 'Apple GPU', mobile: true, memoryGB: 8 }).tier, 0);
+});
+
+test('tiers: an iPad in Safari sends a Mac\'s user agent, and is still a tablet; a Mac in Safari is Apple silicon', () => {
+  const ipadSafari = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15';
+  assert.equal(E.tierMobile(ipadSafari, 5), true, 'a Mac with a touch screen is an iPad');
+  assert.equal(E.tierMobile(ipadSafari, 0), false, 'a Mac');
+  assert.equal(E.tierMobile('Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Mobile/15E148', 5), true);
+  assert.equal(E.tierMobile('Mozilla/5.0 (Linux; Android 14; Pixel 8) Mobile Safari/537.36', 5), true);
+  assert.equal(E.tierMobile('Mozilla/5.0 (X11; CrOS x86_64 14541.0.0) Chrome/128.0 Safari/537.36', 10), false, 'a touch-screen Chromebook is a laptop');
+  // Safari masks the renderer: every Apple silicon Mac reads "Apple GPU" and has no deviceMemory
+  assert.equal(t({ renderer: 'Apple GPU', mobile: E.tierMobile(ipadSafari, 0), cores: 8, webgl2: true }), 2);
+  assert.equal(t({ renderer: 'Apple GPU', mobile: E.tierMobile(ipadSafari, 5), cores: 8, webgl2: true }), 0);
+});

@@ -119,11 +119,14 @@ with every part renamed "Part N".
 | `arm-corehex` | a REV Core Hex: the hex shaft runs through the gearbox, across the motor |
 | `turret` | a vertical motor under a turntable, with a mast on it |
 | `arm-geared` | a 20-tooth pinion driving a 60-tooth gear on the arm's axle |
+| `twin-gears` | one pinion driving two gears, above and below it, each with its own arm |
 | `arm-belt` | a timing belt from a small pulley on the motor to a big one on the arm |
 | `viper-slide` | three side-by-side stages on a mount block |
 | `rail-carriage` | one linear rail with a carriage block straddling it (MGN12H) |
 | `intake-roller` | a motor, a coupler and a long roller shaft through two side plates |
+| `intake-spacers` | a belt from a motor to a pulley on a goBILDA REX roller shaft through two side plates, with wheels, a 124 mm flap wheel, and clamp spacers drawn cut into the shaft |
 | `four-bar` | a parallel four-bar arm: the motor turns the lower link, the upper link swings on a pin in the tower, the coupler carries the payload |
+| `rack-servo` | a servo's 24T gear on a 108 mm rack lying in a holder, a gate bar on its end (a ball gate) |
 | `wrist-on-arm` | a servo wrist riding the end of a gearmotor arm (a joint on a joint: its parent has to be the arm) |
 
 It started at 12 of 24 joints and 20 of 54 moving parts, with 29 frame parts moved. It's now at
@@ -162,6 +165,41 @@ crank's output reach back round to its own case, which glued the whole robot to 
   four-bar the rocker turns with the crank and the coupler stays level.
 
 That brings it to **33 of 34 joints, 76 of 78 moving parts, 0 frame parts moved**.
+
+Then a rack and pinion (the gate on team 7831's BIOBUZZ robot, where the finder made the rack a
+hinge that swung round the servo's axis):
+- **A rack is a slider that follows its gear.** Among the parts on an actuator's output, a long
+  straight one square to the shaft, in the plane of a round output part, with its near face
+  inside that part's rim the way teeth mesh. It slides along its length at the pitch radius per
+  radian (halfway between the gear's rim and the rack's face), the way the gear's tooth at the
+  rack moves for positive rotation, and its limits are the travel that keeps the gear on it.
+- **It is cut free of its gear and of what it lies in.** The rack touches the gear tooth to tooth
+  and rests in its holder; neither contact is a fastening, so a rack still joined to the
+  servo's bracket through its holder is cut there like a slide drawn touching the frame.
+
+That brings it to **43 of 44 joints, 94 of 96 moving parts, 0 frame parts moved**.
+
+Then the team's intakes: an 8 mm REX roller shaft with spacers clamped on it between its wheels
+came out a single rail with carriage blocks (step 10), twice, and on the zoo copy that false
+carriage took the whole frame with it.
+- **A rail on the axis of something an actuator turns is a shaft.** Its own output, a gear it
+  meshes or a pulley at the far end of its belt: a slide whose fixed rail lies on that line (within
+  4 mm, square to within 5 degrees, reaching what turns) is dropped before any joint is made. A
+  rail named as a lead screw, ball screw or threaded rod turns and drives a slide, and stays.
+
+- **A gear or pulley at the far end of a mesh or belt carries what it sits on**, as an
+  actuator's own output does: the shaft through it (long, thin, on its axis), the hubs and wheels
+  centred on that shaft (up to 120 mm across, or up to 200 mm when round: an intake's flap wheel),
+  and what is bolted to those alone (a spacer clamped on). The shaft takes the on-axis window
+  with it, so the far side plate it runs through is a turning point. Before, the pulley turned
+  alone and the shaft joined it to the frame: 15 frame parts moved on the zoo copy.
+
+That brings it to **47 of 48 joints, 110 of 112 moving parts, 0 frame parts moved**.
+
+On the team's STEP that makes 208 moving parts where there were 77: each intake's two roller
+shafts turn with their motor's belts, with 5 of the 6 flap wheels, the hubs, the spacers and the
+rubber rollers. The flap wheels' size limit shows only there; on the zoo copy the flap wheel is
+found either way.
 
 Still missed: an unnamed Core Hex. With no name it's a box with a shaft through it, which is
 also what every bearing block on an axle looks like. `tests/autorig-zoo.test.mjs` runs the

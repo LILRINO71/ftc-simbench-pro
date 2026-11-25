@@ -35,6 +35,28 @@ test('setup: tank with 2, 4 or 6 wheels, and an X-drive at 45 degrees', () => {
   for (const w of x.wheels) assert.ok(Math.abs(Math.abs(Math.cos(w.alpha)) - Math.SQRT1_2) < 1e-6, 'each wheel at 45 degrees');
 });
 
+test('setup: an X-drive set by hand rolls round its centre, so it can turn', () => {
+  // every axle used to point along the tangent, so every wheel rolled
+  // straight out from the middle: a pure turn needed no wheel speed at all
+  const cad = noWheels();
+  cad.driveSpec = { kind: 'x', d: 0.096, track: 0.36, base: 0.36 };
+  const x = E.driveFromCAD(cad, {});
+  const byC = Object.fromEntries(x.wheels.map((w) => [w.corner, w]));
+  // the pattern driveFromCAD checks a measured X-drive against
+  assert.ok(byC.FL.alpha < 0 && byC.BR.alpha < 0 && byC.FR.alpha > 0 && byC.BL.alpha > 0,
+    'FL and BR at -45 deg, FR and BL at +45: ' + ['FL', 'FR', 'BL', 'BR'].map((c) => c + ' ' + (byC[c].alpha * 180 / Math.PI).toFixed(0)).join(', '));
+  // a pure turn: every wheel rolls at omega times its distance from the middle
+  const R = Math.hypot(0.18, 0.18), spin = E.wheelSpeeds(x.ik, 0, 0, 1);
+  for (const v of spin) assert.ok(Math.abs(Math.abs(v) - R) < 1e-9, 'turn wheel speeds ' + spin.map((v) => v.toFixed(3)).join(', '));
+  // and it still drives both ways and strafes: the 3 x N map has full rank
+  const t = E.chassisFromWheels(E.fkFromIk(x.ik), spin);
+  assert.ok(Math.abs(t.omega - 1) < 1e-6 && Math.abs(t.vx) < 1e-6 && Math.abs(t.vy) < 1e-6, 'the wheels give back the turn');
+  for (const [vx, vy] of [[1, 0], [0, 1]]) {
+    const back = E.chassisFromWheels(E.fkFromIk(x.ik), E.wheelSpeeds(x.ik, vx, vy, 0));
+    assert.ok(Math.abs(back.vx - vx) < 1e-6 && Math.abs(back.vy - vy) < 1e-6 && Math.abs(back.omega) < 1e-6, `drives (${vx}, ${vy})`);
+  }
+});
+
 test('setup: an O pattern set by hand is kept, and nonsense numbers are clamped', () => {
   const cad = noWheels();
   cad.driveSpec = { kind: 'mecanum', d: 'big', track: -5, base: 99, pattern: 'O' };

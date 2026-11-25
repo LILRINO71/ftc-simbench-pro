@@ -380,3 +380,28 @@ test('vm: an INIT that waits for a RUN_TO_POSITION slide finishes (the slide mov
   Q.init();
   assert.equal(Q.error && Q.error.cls, 'Hang', 'an endless INIT says so');
 });
+
+test('VM: a StackOverflowError the code catches leaves the call depth where it was, so the next one comes at the same depth', () => {
+  const main = `package org.firstinspires.ftc.teamcode;
+import com.qualcomm.robotcore.eventloop.opmode.*;
+@TeleOp(name="Deep")
+public class Deep extends LinearOpMode {
+  int d = 0;
+  void down() { d++; down(); }
+  int once() { d = 0; try { down(); } catch (StackOverflowError e) { } return d; }
+  @Override public void runOpMode() {
+    waitForStart();
+    int a = once(), b = once(), c = once();
+    telemetry.addData("depths", a + " " + b + " " + c);
+    telemetry.update();
+    while (opModeIsActive()) { idle(); }
+  }
+}`;
+  const { P, H } = run({ main }, {}, 0.1);
+  assert.equal(P.error, null, JSON.stringify(P.error));
+  const line = (H.tel || []).find((l) => /depths/.test(l)) || '';
+  const [a, b, c] = line.replace(/^.*: /, '').split(' ').map(Number);
+  assert.ok(a > 100, line);
+  assert.equal(b, a, line);
+  assert.equal(c, a, line);
+});

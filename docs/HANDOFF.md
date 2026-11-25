@@ -1,4 +1,443 @@
-# Handoff: real joints and real Java
+# Handoff
+
+The handoffs live here, the newest first. The two older ones below mention `research/fullrobots`,
+`research/realcad`, `research_notes/` and `reports/`: those folders were removed on 2026-10-04 as
+unused (nothing in the build or the tests read them); the measurements they held stay in the text.
+
+## 2026-11-17: a rack on a gear is a slider
+
+On main. The team's gate (a goBILDA servo's 24T gear on a 35-tooth rack) came out a hinge that
+swung the rack round the servo. `src/autorig.js` `rackOn` now finds a rack among the parts on an
+actuator's output: long and straight, square to the shaft, its teeth inside a round output
+part's rim. It becomes a slider that `follows` the gear at the pitch radius per radian, the way
+the gear's tooth at the rack moves, limited to the travel that keeps the gear on it. It is cut
+free of its gear and of the guide it lies in, but keeps a part past its end (a gate on its tip).
+
+The direction comes from the rack's points, which crowd its teeth and holes: on the team's rack
+that leaned the axis 2.3 degrees and read the teeth 3 mm too close (8.3 mm per radian for a
+9.6 mm pitch radius). The axis is now turned, square to the shaft, to where the bar is thinnest.
+
+| | Before | Now |
+|---|---|---|
+| The team's gate | a hinge turning the rack | `servo 9 rack`: slider along x, 9.68 mm per radian (24T module 0.8: 9.6), travel -81..27 mm |
+| Zoo | 39 of 40 joints, 86 of 88 moving parts | `rack-servo` added (a toothed rack with a boss under one end): 43 of 44, 94 of 96, 0 frame parts moved |
+
+`npm test`: 855 pass, 0 fail (the zoo's two `rack-servo` runs and a test of its direction,
+ratio and travel, which fails with the axis left as the points lean it).
+
+Then the intakes' two false slides: each is an 8 mm REX roller shaft with spacers clamped on it,
+read as a rail with carriage blocks. A slide whose fixed rail lies on the axis of something an
+actuator turns (its output, a gear it meshes, a pulley at the far end of its belt) is now dropped
+before any joint is made; a rail named as a lead screw stays. The team's STEP has no slides now.
+Zoo robot `intake-spacers` (belt-driven, as the team's are) showed the next problem: the pulley
+at the far end of a belt turned alone, and the roller shaft it sits on joined it to the frame (15
+frame parts moved). A gear or pulley at the far end of a mesh or belt now carries its shaft, the
+hubs and wheels centred on it and what is bolted to those alone, as an actuator's own output
+does. The team's STEP goes from 77 moving parts to 208: both intakes' roller shafts turn with
+their belts, with 5 of each one's 6 flap wheels. Zoo 47 of 48 joints, 110 of 112 moving parts,
+0 frame parts moved; `npm test` 858 pass, 0 fail.
+
+Still open from the list below: the belted drive motors read as joints, and the six parts read
+as actuators.
+
+## 2026-11-16: a team's STEP with its code, and PR #14 on main
+
+On main. The owner's robot arrived as a 122 MB Onshape STEP (1,426 parts, no mates) with no
+code for it; the code was written from the CAD and both were run here.
+
+### What changed
+
+| | Before | Now | Where |
+|---|---|---|---|
+| An OpMode that extends another OpMode (a "+ encoders" variant, a blue auto on the red one) | read alone: "No hardware devices found" | read with its parent (`jvSiblings`); a parent that is missing ends INIT with `MissingClass` | `src/jvmrun.js`, `src/app.js`, `src/analyze.js` |
+| Other repos' CI ran OpModes through `tests/load.mjs` | a test helper nobody promised to keep | `tools/run-opmode.mjs` (`runOpMode`, `readJava`, `libsFor`, `engine`) and a command line | `tools/`, `docs/code-support.md` |
+| A base whose left wheels are sub-assemblies and whose right wheels are loose mirrored parts | "drivetrain unknown" | loose wheel parts are always packed, beside the wheels an assembly gave | `src/drivetrain.js` |
+| A drive motor belted across to its wheel | the standard build was assumed and reported as "mounting from the CAD"; code tuned on the real robot spun it | an assumed mount gives way to the code's own forward, and the verdict says so | `src/sim.js` `buildRig` |
+
+PR #14 (below) was rebased onto these and pushed to main; its two doc conflicts were the test
+count and the claims table.
+
+### Measured here
+
+- `npm test`: 852 pass, 0 fail. `npm run build:ship` clean. The built page was opened: the
+  default robot, its OpModes and the import card load; the only failed request is
+  `/onshape/status`, which a static server doesn't have.
+- The team's file: mecanum, confidence 0.94, track 359 mm, wheelbase 240 mm, 9.5 kg; its TeleOp
+  read with 11 devices; the drive verdict passes with mounting "from your code's own forward".
+
+### Still open
+
+- **The joint finder on that STEP**: the gate (a servo pinion on a rack) comes out a hinge that
+  swings the rack; the two intakes' parallel roller shafts are read as two slide stacks; the
+  four belted drive motors become four joints turning their pulleys; six parts are read as
+  actuators that aren't (encoder caps of the mirrored motors, the odometry pods, two channels).
+- **The model's balance**: 9.5 kg with motors weighed part by part and no battery or hubs in the
+  CAD; the centre of mass comes out 160 mm up on a 240 mm wheelbase and the robot yaws 37 degrees
+  in two seconds of full stick. Nothing here says whether the real one does.
+- PR #14's own open list (below) stands: nothing was tried on the owner's REVIVER zip.
+- Draft PRs #15 (a smoother view), #13 (the redesign) and #12 (superseded) are still open.
+
+## 2026-11-13: the export zip's joints, checked against the file itself
+
+Branch `claude/laughing-johnson-xatdki`, PR #14 (draft, on top of the 2026-10-26 work below).
+The owner: "we do this robot and then another robot and then another; I want a solution, not
+each robot redone", and the route that goes wrong for them is **Onshape's URDF export zip**
+(REVIVER). The zip itself never reached this session (see "Still open"), so nothing here was
+tuned on it.
+
+### The idea
+
+A URDF says exactly how its parts move. So the reader has an answer key for any export, with no
+robot needed: drive a joint, and every part must end up where the file's own joint tree puts it.
+`tests/exportrobot.mjs` builds a robot the way Onshape exports one, from boxes and cylinders
+(no mesh files), with `urdfFk` (the file's kinematics) and `misplaced` (the parts that are not
+where the file says, moved the way the view and the sim move them: `solid.mech`, parents,
+`jointValues`, internal joints held). `tests/export-kinematics.test.mjs` runs it. Every bug below
+is a way any export is written, and came out of that check, not out of one team's CAD.
+
+### What was wrong, and what changed
+
+| | Before | Now | Where |
+|---|---|---|---|
+| A wheel with its own joint on a moving part (a flywheel on a turret, a compliant wheel on an intake arm) | got no joint and no carrier: it stayed on the frame when the turret or arm moved | rides the joint that carries the body it hangs from (`rides`, `carrierOf`) | `src/mates.js` |
+| Joints off one part on one axis (a spindexer's three plates) | "one motion", so all but one were held as drawn: they never turned | the others follow (`couple … via:"coaxial"`); the one the code drives leads; two the code both drives stay separate | `src/bind.js` |
+| A bearing's race, shaft and arm on one axis | race and arm both stayed; the arm's servo landed on the race (no limits) | the fold looks past turns already folded on that axis; the limited one is the mechanism | `src/bind.js` |
+| A joint with limits, under 45 mm (a small claw) | set aside as a bearing race; its servo had no joint | limits always make a mechanism | `src/bind.js` |
+| A lift's second stage (a hinted follower) | "the only joint left" for a motor that had no joint | hints are applied before that rule | `src/bind.js` |
+| A slider mate pointing down (limits wholly below zero) | positive ticks ran into the stop at zero: the lift never moved | `dir = -1`: the code's positive goes the way the joint can go | `src/mates.js` |
+| A cascade stage whose mate points the other way from its leader's | followed along its own axis: down as the leader went up | the hint's ratio carries the sign between the two axes | `src/urdf.js` |
+| A servo before its first command, on any robot with no joint spec | started at 0.5 while its joint is drawn from `restPos` (the code's lowest, say 0.1): 120° off as drawn | starts at `restPos` | `src/sim.js` |
+| `npm test` where Node's heap is ~2 GB | `robotcheck-mutations` died out of memory | `tools/test.mjs` gives test processes 4 GB | `tools/test.mjs` |
+
+Conventions these add are in AGENTS.md ("Twins on one axis", "A mate joint's `dir`", "A servo's
+starting position").
+
+### Measured here
+
+- `npm test`: 820 pass, 0 fail (9 new in `export-kinematics`; 8 fail before their fix).
+  `npm run build:ship` clean.
+- The joint finder (2026-10-26 below) is untouched by this; its numbers stand.
+- Not measured: REVIVER itself, and the page in a browser. The fixes are in the engine and are
+  covered by Node tests only; nobody has watched the robot move in the view after them.
+
+### Still open
+
+- **The owner's zip.** Their Drive folder (`1nSeUoHng6ytJsNRpy-lSmdru4Uu9Aeve`) is private and
+  the Drive connector lacks the permission to read it: it needs "Anyone with the link", or the
+  `.urdf` alone uploaded (it is small text and holds every joint). First thing to do with it:
+  `urdfRobot` on it, then for each mechanism `misplaced(E, R, cad, lead, Q)` with `R` built from
+  the file (`exportrobot.mjs` takes `{links, joints}` in the shape its generator returns; a
+  30-line reader of the real `.urdf` into that shape is all that's missing).
+- **Loop closures and four-bars in an export** aren't in the generated robot: how Onshape writes
+  them (`loop_closure` links) is known only from REVIVER's notes, and the bench drives a loop
+  through its first joint.
+- **`only-one` can still be wrong** when a motor with no joint (a shooter) is the last motor and
+  one unrelated joint is the last joint. It's the rule's design; naming the mates
+  (docs/exact-joints.md) is what removes the guess.
+- **A flywheel has no joint** (it is "a wheel on its axle"), so its motor is a gauge and the
+  import card asks about it with no candidates. Harmless, but the question could be dropped.
+- **Servo travel** is still 300° of joint per unit of position, clamped by the mate's limits.
+  With limits on both ends the span could map onto the code's own range instead.
+- `jointTakes` in `src/bind.js` returns null from both arms of its last test (dead code).
+
+### For the next session
+
+1. Get the zip (above) and run the answer-key check on it before changing anything.
+2. If the owner reports a part moving wrong, add that pattern to `exportRobot` first, watch
+   `misplaced` name it, then fix the reader. That keeps every fix general.
+3. PR #14 is a draft with green CI; merging it is the owner's call. `main` has not moved since
+   2026-10-21, and the other session's claim (mesh reading, frame cost) is still in AGENTS.md.
+
+## 2026-10-26: the joint finder's tree, scored against 7832's hand joints
+
+Branch `claude/laughing-johnson-xatdki`. The owner: importing a real robot without mates "doesn't
+work well". The default robot has both a STEP and the team's hand-made joints, so the finder
+(`autoRig`) can be scored on real CAD: each found joint is named after the hand joint whose parts it
+carries, then checked for its parent and for the parts it moves (its own and everything below it).
+
+### What was wrong, and what changed (`src/autorig.js`)
+
+- **Parents.** A joint hung from whatever most of its case and mounts rode, and a case drawn
+  touching the frame voted "frame". The outtake claw servo (mounted on the wrist's U-channel, its
+  case and frame just grazing a frame part) and the intake pivot servo (its case half on the servo arm
+  that swings it) both hung from the chassis: the claw stayed behind when the arm swung. Any part of
+  the case on a joint now decides; a gear or pulley on the leader's case hangs where the leader does.
+- **A slide stage inside the frame's body.** The intake carriage met the frame through a beam
+  0.7 mm off a frame part and a linkage rod drawn into one, so the slide's output was "the frame"
+  and the slide carried only its 18 rails and screws. A slide's moving stage is never the frame: the
+  body is now cut by a minimum cut over the contacts (worth `e.w`, how far parts reach into each
+  other) between the moving stage and its fixed rails. The stage's side rides the slide while the
+  frame keeps most of the body, and the review names the parts it was cut from.
+
+### Measured here
+
+- 7832: parents right 11/15 → 15/15; mean reach overlap with the hand joints 0.68 → 0.76; the
+  intake slide's reach 0.38 → 0.96. `tests/autorig-tree.test.mjs` (fails before).
+- `research/autorig/zoo/eval.mjs`: unchanged, 39/40 joints, 86/88 parts.
+- `research/realcad/run.mjs` (the 8 public STEPs): unchanged except FTC 8375's 2016 robot, whose
+  cap-ball lift now carries 60 parts, not 17: its fold-out forks and their servos, and probably
+  the hopper the forks rest on, which may belong to the frame. Its review line says to check it.
+- `npm test`: 797 green; `robotcheck-mutations` runs out of the default 2 GB heap in this
+  container before and after the change, and passes 14/14 with `--max-old-space-size=8192`.
+
+### Still open
+
+- The hand joints have two rods (`rod R`, `rod L`) and two-finger claws the finder doesn't make:
+  the rods ride the slide whole, and each claw's second finger is a one-part gear follower.
+- A STEP has no mates, so this stays a guess; the Onshape link and the URDF export zip are exact.
+
+## 2026-10-09: review fixes, and what the Onshape link costs
+
+On main. A review of the 2026-10-08 online and tier commits, plus a look at the link route
+against Onshape's API limits now that the OAuth app is registered (`/onshape/status` on the
+live site says `ready:true`).
+
+### What changed
+
+- **Onshape's yearly allowance** (`functions/onshape`, `src/onshapelink.js`). A private app's
+  calls all count against its owner (2,500 a year on Free or EDU Student). A spent allowance
+  (402) now stops the read and sends the team to the export zip; before, every Part Studio was
+  silently left out. The edge cache's access check cost a call, the same as the read it saved;
+  documents Onshape says are public are now remembered for a day, so kept library parts cost
+  nothing. A linked part the team can only reach through its own document is read fresh rather
+  than refused. DEPLOY.md "Quota", "Listing the app in the App Store" and "School networks"
+  have the numbers and the steps.
+- **Online rooms** (`src/netrelay.js`, `workers/room/room.js`): an SSE stream that drops gets
+  its retries; batches are sized in UTF-8 bytes and only ask for keepalive while it fits; the
+  room's ledger takes a player's ticks out of order, keeps its window across hibernation,
+  replays only the ticks it has, and caps a POST while reading it.
+- **Device tiers**: iPad Safari (a Mac user agent with touch points) starts at tier 0, and Macs
+  in Safari ("Apple GPU") at tier 2 again.
+
+### Measured here
+
+- `npm test`: 772 green (11 new tests, each failing before its fix). `npm run build:ship` clean.
+
+### Still open
+
+- The first real import through the live app hasn't been watched from here: call count and time
+  on a REVIVER-sized robot, `tessellatedfaces` size, COTS colours and masses.
+- A robot in a school's own Onshape enterprise (`myschool.onshape.com`) is read through
+  `cad.onshape.com`; untried.
+- The App Store listing (free, and exempt from the allowance) needs the owner: Developer
+  Relations, the agreement, five beta testers.
+- The room's ledger lives in memory; a room that hibernates keeps its window but not its history
+  (a replay after that has nothing before the pause). Persisting it is for when lockstep lands.
+  (2026-11-19: the ledger was removed, unused by any page and open to one player pushing out
+  another's commands; see the note at the top of `workers/room/room.js`.)
+- The WebSocket client's "dropped" branch is unreachable (a hello resets the count, and a retry
+  that never gets in falls back to SSE, which reports). Harmless; left as is.
+
+## 2026-10-04 (later): the pasted Onshape link is the way in, and the repo is swept
+
+Branch `claude/onshape-link`, on top of `claude/exact-joints`. The owner asked for the import the
+way a team thinks of it: paste the Onshape assembly's address, nothing to export.
+
+### What changed
+
+- **The link route is the main route** (`src/onshapelink.js`, `src/onshapecad.js`,
+  `src/engineworker.js` op `onshapelink`). The import card's first state is a link box. The read
+  (assembly definition, features, per Part Studio the tessellated faces and mass properties) and
+  the build both run in the engine worker; same-origin cookies travel with a worker's fetch, so the
+  relay (`functions/onshape/`) needs nothing new. `onshapeRef` keeps the `?configuration=` of the
+  address (the Sim configuration) and the definition is read in it.
+- **The robot comes out in the URDF route's shape**: `cad.shapes` (one thinned mesh per unique
+  Part Studio part, `meshReduce`) and solids with `shapes:[k]` + `occT`, so `urdfExact` and the
+  view's instancing draw it with no new case. Before, each occurrence carried its own full triangle
+  list and the view merged them per link.
+- **Exact mass properties**: `osCompactMass` keeps the centroid, the inertia tensor (nominal, about
+  the centroid) and the volume; `cadFromOnshape` rotates them into the robot frame per solid
+  (`s.com`, `s.I`, `s.vol`); `onshapeLinks` sums each rigid link (parallel axis) into `cad.links`
+  and gives each joint `carries` (kg, com, parts). `inertiaOf` takes a part's own tensor
+  (`p.I`) instead of its box; `partMass` prefers the CAD's exact volume to the hull's; `massProps`
+  uses the centre and tensor whenever the part keeps the CAD's mass. A part with no material
+  carries its volume as kg (density 1, what the URDF export writes) and is weighed by kind.
+  Vendor figures still beat CAD mass for recognised parts.
+- **Removed**: the "Send to SimBench" bookmarklet and its `#onshape=` / `#onshape-wait` paths, the
+  Onshape pop-up (`OnshapeHelp`, `#osOverlay`), the manual mates panel (saved API pages, the URL
+  box, `onshapeApiLinks`, `tools/onshape-mates.mjs`), loose URDF files (zip them), the legacy
+  eager URDF builder (`urdfToPayload`, `cadFromUrdf`, `urdfFromZip`; `urdfRobot` is the one),
+  the dock gauges that had no element, the portable-rig textarea, the turret slider, the hidden
+  Support link, the dead drop veil, `DOMAIN`/`dist/CNAME`, unreferenced names (`JV_LANG`, `jvGen`,
+  `SYNONYM`, `HIVE_KEEP`, `segCrossesBox`, `MESH_EXT`), six unreferenced screenshots, and the
+  research folders named above.
+- **Docs**: `docs/robot-setup.md` is the Sim-ready CAD standard (a Sim configuration with hardware
+  suppressed; mate sub-assemblies, not parts; name the mates that are mechanisms; set materials).
+  `DEPLOY.md` is the owner's checklist, with the Onshape app registration the link route needs.
+
+### Measured here
+
+- `npm test`: 628 green (`tests/onshapelink.test.mjs` rewritten for the link; the URDF tests moved
+  to `urdfRobot`). `npm run build` 1.7 MB page, 1.1 MB engine.
+
+### Still open
+
+- **Nothing here has touched Onshape's real API.** The reader is checked against a stand-in built
+  from Onshape's OpenAPI spec and the corpus robot. The owner has to register the OAuth app
+  (`DEPLOY.md`) before the link box even appears on the live site; then the first real import will
+  say whether `tessellatedfaces` at 1.5 mm chords is the right size for a 700-part robot, how long
+  a REVIVER-sized read takes against the quota, and whether linked (COTS) parts come with their
+  colours and masses. `inertia` as "about the centroid, nominal first" follows onshape-to-robot's
+  reading of the response; verify on a real part.
+- The `onshape` worker op re-sends the whole payload for a re-read (a new up or centre). Fine for
+  a corpus robot; a 100-studio robot may want the payload kept in the worker.
+- `src/autorig-lib.js` still carries ~470 generated lines nothing calls (`inferCarry` and its
+  helpers); cutting them means changing the research prototypes `tools/gen-autorig.mjs` wraps.
+
+## 2026-10-04: the first real export, and what it taught the reader
+
+The owner's own robot, REVIVER (an Onshape URDF export: 1,920 links, 1,919 joints, 186 MB zipped,
+473 MB unpacked, 85.7 M triangles at Fine), and its 109 MB STEP. Everything below was found by
+running them, not by reading Onshape's docs; each fix has a test.
+
+### What a real export looks like
+
+- **One link per rigid body, so the root link holds the whole chassis as 56 `<visual>`s** (and a
+  turret link 13). Read as one solid it weighed as a 600 mm block and set the floor by its lowest
+  stray part. `urdfRobot` now makes one solid per visual; the link is a sub-assembly of them in the
+  mate model, so a mate on the link lands on every part. Names come from the mesh files.
+- **Parts with no material are exported at a density of 1 kg/m³**: the inertial mass IS the part's
+  volume in m³ (pins and rollers at 0.4–0.7 of their hull, channels at 0.1–0.3). `partMass` uses
+  that volume at the kind's solid density; a part with a real material keeps its mass when it is
+  plausible for the hull; a team-drawn part ("Part 1", no vendor number) is weighed as printed or
+  polycarbonate (1300 kg/m³), because reading them all as aluminium put the robot 5 kg over. Game
+  elements drawn in the robot (DECODE's artifacts) weigh nothing: `solidKind` → "game".
+- **Unmated parts hang off the root** by a fixed `hanging_node_to_root_joint`. Most sit where they
+  belong; a group whose box is clear of the mated robot's (a bracket 700 mm in front, two screws and
+  a REV part 150 mm under the floor) is left off and named in the import notes. Parts wholly below
+  the wheels' floor go the same way.
+- **Planar and parallel mates come as chains of three prismatic connector links and a turn.**
+  Collapsing a chain with two non-parallel slides gives a part free to slide about a plane: no
+  mechanism, held where drawn (`held` in the notes).
+- **463 continuous joints, and only two with limits** (two servo horns, ±22°). Every bearing race,
+  every shaft, every roller and every gear has its own joint. `classifyJoints` now judges a joint by
+  everything it carries (its body plus every joint hanging from it), marks a turn on a drive wheel's
+  axle as the drive's, and folds a turn that is coaxial with the turn it hangs from (the gear on the
+  gear a servo turns) into it. REVIVER: 238 joints → 11 mechanisms, 227 set aside.
+- **The wheels**: four goBILDA 104 mm mecanums, 66 parts each (one corner drawn twice). The
+  per-roller "wheels" the grower found around each roller's own 45° axis used to beat the composite
+  wheels and set the floor 50 mm low. A composite wheel now owns its parts (drive and frame alike),
+  and box corners are only added to sparse shapes (they read a roller 17 mm fat). Mecanum ×4,
+  103 mm, track 336, wheelbase 389, up from the wheels, floor at their bottom.
+- **Roller hands read FR, FL and BL as the other hand** for their corners. Modelled as drawn the
+  base couldn't strafe. A non-X reading now falls back to the X pattern and names the wheels to check
+  in the CAD (`tests/wheels-composite.test.mjs`).
+- **The zip is read lazily** (`zipEntries(buf,{lazy:true})`, `zipRead`): an entry is inflated only
+  while its mesh is being thinned, and the page hands the bytes to the worker instead of copying
+  them. A 520 MB export had run the tab out of memory; the import card and docs now say Medium
+  resolution (Fine is ten times the file for no gain, since every shape is thinned to a budget).
+- **Edges**: a thinned mesh is faceted everywhere, so its edges (30° crease) drew the robot as
+  wire. Export meshes take a 62° crease and none at all over 6,000 triangles.
+
+### The second pass, same day: the mechanisms were there all along
+
+The owner reported the robot "doesn't move the right mates". It didn't: `applyOnshapeMates`
+took every root-level part that wasn't the moving end of a mate as frame. In a URDF model every
+link is root-level, so an arm's plates (fastened to the hub on its motor's shaft) were welded to
+the chassis and the shaft's revolute became "a mate between parts also fastened together", ignored
+— 99 of them. The frame is now the fixed parts plus the parts no mate touches (and, with nothing
+fixed, the biggest root-level body); planar/parallel connector chains and loop closures are left
+free instead of "fixed" (they are no fastening); a mate with a real degree of freedom is walked
+before a planar one so loops land on the planar. REVIVER went from 11 one-part "mechanisms" to 19
+real ones: the turret (96 parts, 123 carried, yaw), its hood servo and feeder wheel, the spindexer
+(three coaxial copies folded to one), the intake arm (234 mm), the shooter shaft, the servos.
+`classifyJoints` also folds coaxial siblings and sets odometry pods aside. Thinned meshes now keep
+up to 60,000 triangles each (1.7 M for the robot) and get crease-angle normals, so flat faces stay
+flat and fillets stay smooth. Tested: `tests/import-zip.test.mjs` (a plate fastened to the arm
+moves with the arm), `tests/mates.test.mjs` still exact on the corpus; headless Chrome shows the
+turret turning with its parts (`View.preview`).
+
+**Research (deep-research, 22 claims verified 3-0 against Onshape's docs and OpenAPI spec,
+2026-10-04):** the owner asked whether "STEP for looks + a JSON for mates" would be better. The
+mates JSON exists (`getAssemblyDefinition` with `includeMateFeatures`), can be called with
+per-user API keys and no OAuth, and glTF can be exported by API; but it carries the same mates
+Onshape's URDF export already writes, the occurrence transforms are absolute (not parent-relative),
+API keys are per user ("local testing only" per Onshape) and the browser still needs the relay for
+CORS. STEP would need OpenCascade in the browser for looks, which is the slow path this import
+replaced. So the URDF zip stays the route; the looks problem was ours (thinning and normals), not
+the format's. onshape-to-robot's `dof_` naming convention does not apply to Onshape's native
+export.
+
+### Measured here
+
+- Node: the zip builds in 22–30 s (536 unique shapes, 19.5 M → 0.92 M triangles, 1,939 parts);
+  headless Chrome, in the worker: about 60 s with the page drawing. 14.3 kg (was 76 kg as one
+  root solid, 21.5 kg with aluminium everywhere). The STEP parses in 11 s (839 solids, one mecanum
+  wheel assembly drawn, the rest mirrored; 11 kg).
+- The review card with the sample OpMode still selected now says "Now your code" and offers
+  "Drive this robot with it anyway"; with it, 8 items (sweeps of the stacked intake rollers).
+- 618 tests green.
+
+### Still open
+
+- The 520 MB export itself was not re-run (the owner has it; this zip is 186 MB). The memory fix is
+  by construction: nothing larger than one inflated mesh plus the zip is live at once.
+- Masses of team-drawn parts are a guess at 1300 kg/m³; set materials in Onshape for exact.
+- Frame rate on a real GPU with 1,939 instanced parts and GTAO was not measured (SwiftShader only).
+- The STEP export of REVIVER has one wheel assembly; the URDF export is the one to use.
+
+## 2026-10-03: the import redone, the page redone
+
+Branch `claude/cad-import-apple-ui`. The problem set by the owner: getting a robot's CAD in took
+too many steps, wasn't clear, and wasn't accurate; the page lagged and looked dated.
+
+### What changed
+
+- **Onshape's URDF export is the way in** (Onshape release 1.212, March 2026; GLB meshes since
+  September 2026). Right-click the assembly tab → Export → URDF → drop the zip. `src/meshfiles.js`
+  (zip, GLB/glTF, OBJ, STL readers; pure, tested in Node) and `src/urdf.js` (`urdfFromZip`,
+  tolerant mesh paths, coupling hints) make the robot with no sign-in, no server and no quota.
+- **`src/bind.js`**: `classifyJoints` marks the library's bearing and motor-shaft mates internal
+  (never a question; the robot check and the name mapper skip them); `bindDevices` ties devices to
+  joints by name, by the actuator kind on the axis, by `RUN_TO_POSITION` travel, by pairing and by
+  elimination, applies the URDF's coupling hints when the code confirms the leader, and returns the
+  open questions with candidates. On 7832's robot with the spec withheld: 11 of 11 bound, nothing
+  asked (`tests/import-zip.test.mjs`).
+- **`src/engineworker.js`**: the build ships the engine alone as `dist/engine-<hash>.js`; a Blob
+  worker imports it and parses STEPs, finds joints, cuts the shape units and builds URDF robots off
+  the page's thread (the robot is posted first; the joints and the units follow as promises). The
+  eight-second freeze on loading a robot is gone. It falls back to the page on file://.
+- **`src/importflow.js`**: one card over the field: bring → busy → code → review → done. The review
+  shows facts (up, front, drive base, joints, devices bound, weight) and only the real questions,
+  each answerable with one click and a "show" that wiggles the joint.
+- **The page**: `src/markup.html` and `src/styles.css` rewritten with the apple-design skill:
+  light by default (dark follows the system or the switch), glass chrome (top bar, side panels,
+  dock) over a full-bleed field, quiet solid cards, one accent (system blue), spring motion on
+  transforms only, reduced-motion and reduced-transparency honoured. Every element id the scripts
+  use was kept; the Robot tab is "Your robot / Review / Your robot and your code", with everything
+  else under **Advanced**.
+- **Graphics**: three.js r128 → r186 as ES modules (an import map, `window.THREE` plus the add-ons,
+  the app boots on `three-ready`). GTAO ambient occlusion, SMAA and an OutputPass through an
+  EffectComposer (`View.draw`, one composer per camera); RoomEnvironment PMREM as the scene
+  environment; physically scaled light intensities; colour management on (no more `linearize`;
+  canvases marked sRGB, vertex colours converted where they are built). The frame-rate watchdog
+  turns the passes off first, then pixels, then the light copy.
+- **The Onshape relay** caches Part Studio shapes and masses at the edge by version or
+  microversion (`CACHEABLE`), so the private app's 2,500 calls a year go much further.
+- **`tools/fusion/ExportToSimBench`**: a Fusion script that writes robot.urdf, OBJ meshes and a
+  zip, with joints and limits from the design's joints and motion links as mimics. Not run in
+  Fusion itself (no Fusion here); the API names are from Autodesk's current reference pages.
+
+### Measured here
+
+- Parse 5.2 s, joint finder 3.1 s, shape units 3.1 s for the 773-part robot, all in the worker now.
+- 610 tests, all green (`npm test`). `tests/net.test.mjs` is timing-sensitive: it failed once while
+  Chrome was rendering alongside, and passes alone.
+- Headless Chrome (swiftshader) loads the page with no exceptions, in both themes.
+
+### Not done, in order
+
+1. **Try a real Onshape URDF export.** Done 2026-10-04 with REVIVER (see above). Still worth doing
+   with GearGurus 7832's assembly to check the lift's stages couple, the claw fingers mirror and the
+   eleven devices bind against a robot whose code is here.
+2. **Run the Fusion script in Fusion** once and fix whatever the API disagrees with (occurrence
+   transforms against body coordinates in `meshManager`, joint geometry on as-built joints).
+3. **"Set it by numbers"** for a CAD with no wheels still lives in the Robot tab's Review section;
+   the card points at it. Bringing that form into the card would finish the one-place promise.
+4. The earlier handoff's list still stands: Sign in with Onshape secrets, online on two real
+   computers, the teams whose TeleOps don't drive.
+
+## Earlier: real joints and real Java
 
 Where the "it never works on our robot" work stands, for whoever picks it up
 next. Branch `claude/ftc-simbench-ui-bugs-63kx2s`, pull request
@@ -150,23 +589,14 @@ and from 21 to 8 with the ITD code.
 
 ## Not done, in order
 
-1. **Test the copy-and-paste way on a real school account.** The Onshape
-   pop-up now leads with it: export a STEP, paste the assembly's address,
-   open the joints page (the assembly definition on the team's own Onshape
-   host, read with their browser session), copy it and paste it, and paste
-   the limits pages if wanted. It's tested on generated pages and in
-   headless Chromium, never on a real school assembly. Things to check:
-   that `puhsd.onshape.com/api/...` opens as text for a student, how big a
-   real robot's page is to paste, and whether linked (COTS) parts match.
-   - **Sign in with Onshape** stays in a fold. On the owner's school
-     account it failed: Onshape answered 400 "Invalid request", and its
-     general sign-in page couldn't reach the Enterprise account. Onshape's
-     docs say Enterprise users need a `company_id` on `/authorize`
-     ([OAuth](https://onshape-public.github.io/docs/auth/oauth/)); the
-     function doesn't send one. Private OAuth apps also count every call
-     against the owner: 2,500 a year for a free or EDU user
-     ([limits](https://onshape-public.github.io/docs/auth/limits/)). The
-     copy-and-paste way avoids both.
+1. **Switch on Sign in with Onshape and test it live.** Register the OAuth
+   app and set the two secrets (`DEPLOY.md`), then try it on a school
+   Chromebook with the team's own robot. Check that a second Onshape account
+   can authorize the app before it has a public store entry. The reader is
+   checked against Onshape's OpenAPI spec and a generated payload, never a
+   real assembly (a cloud container can't sign in to Onshape). Still open from the research: the real call count and
+   payload size, how Onshape counts session-cookie calls against its quota,
+   and whether linked (COTS) parts come with their colours.
 2. **Test online on two real computers.** The relays and the loader are
    fixed and tested with the library faked; a cloud container's proxy carries
    no WebSockets, so no live match ran here. A TURN relay would still be
@@ -190,42 +620,8 @@ and from 21 to 8 with the ITD code.
    joints and device bindings. See section 4 of the report.
 6. **Device to joint from the Control Hub config XML**, the first rung of
    the report's matching ladder. Not started.
-7. **Left from the bug hunt** (October 2026; everything else it found is fixed,
-   with a test each):
-   - **A REVERSE servo on the line reader** isn't flipped (the VM flips it).
-     The default robot's `joints.json` (`crank R` on the reversed `linkR`)
-     was tuned to the line reader as it is, so decide the servo frame first
-     (keep `s.cmd` in the code's frame and flip at the joint, as motors do),
-     then re-check that spec. Fixing only the sim broke
-     `tests/into-the-deep.test.mjs` and `tests/roadrunner.test.mjs`.
-   - **Java values the VM still gets wrong:** a `double` with no fraction
-     prints without ".0" in telemetry (`getPower()` shows "1"); an element
-     of a `List<Integer>` divides as a double; overloads are picked by the
-     runtime value (`ov(1.0)` can run `ov(int)`); no 32-bit int overflow;
-     `new String("x")`.
-   - **Cylindrical mates' limits**: which of Onshape's limit parameters is
-     the slide and which the turn isn't confirmed; the bench simulates a
-     cylindrical as its turn.
 
 ## Fixed along the way (worth knowing)
-
-- **The October 2026 bug hunt** (four reviewers, then fixes with a test
-  each):
-  - script in a joint or device name ran on the page (findings are now
-    escaped at the source);
-  - Java `==` returned null instead of false;
-  - an int method's result divided as a double;
-  - VM autos never moved, and drive encoders counted free speed, so encoder
-    autos drove short;
-  - getYaw(DEGREES) read radians on the line reader;
-  - a fixed drivetrain subassembly made a wheel the chassis;
-  - mate limits were measured from the wrong place and never read from
-    subassemblies;
-  - a Core Hex counted 2016 ticks a turn instead of 288;
-  - resetRuntime() reset the match clock;
-  - several screen bugs at phone width, keys, and a stale label.
-
-  The commits since 1016c18 say what each one was and how it's tested.
 
 - **VM state shared through the parse cache.** Parsed units are cached by
   source, so two programs sharing an OpMode file share its AST. The VM used

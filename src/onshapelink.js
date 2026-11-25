@@ -1,200 +1,186 @@
 /* ============================================================
-   ONSHAPE → SIMBENCH: THE WHOLE ROBOT, JOINTS AND ALL
-   The exact joints are in the team's Onshape assembly (its mates), and the
-   shapes, colours and mass are in its part studios. onshapeRead reads all
-   of it from Onshape's API, signed in as the team. Two ways to run it:
-   - Sign in with Onshape (onshapeFromLink): OAuth through
-     functions/onshape, then the team pastes the assembly's address. This
-     is the main way: school computers block bookmarklets.
-   - The "Send to SimBench" bookmark (onshapeGrab): run on the team's own
-     assembly tab with their Onshape session, it hands the robot to the
-     SimBench tab it opens by postMessage, or saves one .onshape.json file.
-   Either way it only reads, and nothing needs an API key.
+   ONSHAPE → SIMBENCH: THE WHOLE ROBOT FROM A PASTED LINK
+   ------------------------------------------------------------
+   A team pastes its assembly's address. Nothing is exported and nothing
+   is uploaded: SimBench reads the assembly from Onshape's own API, signed
+   in as the team (Sign in with Onshape, through functions/onshape, because
+   Onshape's API answers no cross-site call from a browser), and builds the
+   robot from what Onshape already knows:
+
+     the assembly definition   every part occurrence and where it sits;
+                               every mate, with its type and its exact frame
+                               on each side (the joints, no translation)
+     the assembly's features   the mates' limits (zMin/zMax, the turn's
+                               min/max) and their relations (gear, rack,
+                               linear: a cascade's stages, a two-gear claw)
+     per Part Studio, once     each part's tessellated faces with their
+                               colours, and its mass, centre of mass and
+                               inertia tensor as Onshape computes them
+
+   onshapeRead gathers those (it is self-contained: fetch and nothing of
+   SimBench, so it runs on the page or in the engine worker); onshapeFromLink
+   is the page's call; src/onshapecad.js turns the payload into the robot
+   (src/mates.js makes the rigid links and the joints).
+
+   The address may carry a configuration (…/e/<eid>?configuration=…): that
+   is the "Sim" configuration docs/robot-setup.md asks for, with the
+   hardware suppressed, and the definition is read in it.
    ============================================================ */
 const ONSHAPE_FORMAT="ftc-simbench.onshape";
+const ONSHAPE_QUOTA="this copy of SimBench has used up its yearly allowance of Onshape reads (Onshape answered 402)";
 
-/* Reading one assembly, the whole robot: its definition (parts, placements,
-   mates), its features (limits), and, once per part studio the robot uses,
-   that studio's tessellated shapes with their colours and its mass
-   properties. host is where "/api/..." lives: the Onshape tab's own origin
-   for the bookmark, or "<SimBench>/onshape" (functions/onshape) after Sign
-   in with Onshape. ref is {did, wvm, wvmid, eid} from the assembly's
-   address. It's self-contained (the bookmark carries its source), so it
-   uses nothing from SimBench. Resolves to {asm, features, geom}; a failed
-   call rejects with e.status set. */
+/* An Onshape document address: its host, the assembly it points at, and the
+   configuration it is open in, or null. Accepts the address bar as copied
+   (workspace, version or microversion; a query; a fragment). */
+function onshapeRef(href){
+  const s=String(href||"").trim();
+  const m=/^(https:\/\/(?:[a-z0-9-]+\.)*onshape\.com)\/documents\/([0-9a-f]{24})\/(w|v|m)\/([0-9a-f]{24})\/e\/([0-9a-f]{24})(?:[/?#]|$)/i.exec(s);
+  if(!m) return null;
+  let config="";
+  try{ config=new URL(s).searchParams.get("configuration")||""; }catch(e){}
+  return {host:m[1], did:m[2], wvm:m[3].toLowerCase(), wvmid:m[4], eid:m[5], config};
+}
+
+/* Opened from inside Onshape, or by a link that carries the assembly: the
+   address to read, or null. A page address's query, in either spelling:
+     ?onshape=<the assembly's address, encoded>
+     ?documentId=…&workspaceId=…&elementId=…      (or versionId, microversionId,
+        or workspaceOrVersion=w|v|m with workspaceOrVersionId; and maybe
+        configuration, and server for an enterprise's own address)
+   The second is what an Onshape app extension's action URL fills in
+   (docs/onshape-app-store.md, "One click from Onshape"), so a button in the
+   assembly's own menu opens SimBench with that assembly already being read. */
+const ONSHAPE_LAUNCH_KEYS=["onshape","documentId","workspaceId","versionId","microversionId","workspaceOrVersion","workspaceOrVersionId","elementId","configuration","server"];
+function onshapeLaunch(search){
+  let q; try{ q=new URLSearchParams(String(search||"").replace(/^[?#]/,"")); }catch(e){ return null; }
+  const direct=(q.get("onshape")||"").trim();
+  if(direct) return onshapeRef(direct)?direct:null;
+  const hex=v=>/^[0-9a-f]{24}$/i.test(v||"")?v.toLowerCase():null;
+  const did=hex(q.get("documentId")), eid=hex(q.get("elementId"));
+  if(!did||!eid) return null;
+  let wvm=null, id=null;
+  const kind=(q.get("workspaceOrVersion")||"").toLowerCase();
+  if(/^[wvm]$/.test(kind)&&hex(q.get("workspaceOrVersionId"))){ wvm=kind; id=hex(q.get("workspaceOrVersionId")); }
+  else for(const k of [["w","workspaceId"],["v","versionId"],["m","microversionId"]]) if(hex(q.get(k[1]))){ wvm=k[0]; id=hex(q.get(k[1])); break; }
+  if(!wvm) return null;
+  const s=(q.get("server")||"").trim(), host=/^https:\/\/(?:[a-z0-9-]+\.)*onshape\.com\/?$/i.test(s)?s.replace(/\/$/,""):"https://cad.onshape.com";
+  // a field Onshape had nothing to put in stays as its placeholder ("{$configuration}"): that is no configuration
+  const cfg=(q.get("configuration")||"").trim(), config=cfg&&!/[{}$]/.test(cfg)?cfg:"";
+  return host+"/documents/"+did+"/"+wvm+"/"+id+"/e/"+eid+(config?"?configuration="+encodeURIComponent(config):"");
+}
+/* A bookmark that does the same from any browser, with nothing to install or
+   approve in Onshape: clicked on the Assembly tab, it opens this SimBench
+   (site: its address) with that tab's address to read. A javascript: address. */
+function onshapeBookmark(site){
+  const to=String(site||"").replace(/[?#].*$/,"");
+  // its pattern is written with [/] and [.]: a bookmark's address is no place for backslashes
+  return "javascript:(function(){var u=location.href;if(!/^https:[/][/]([a-z0-9-]+[.])*onshape[.]com[/]documents[/][0-9a-f]{24}[/][wvm][/][0-9a-f]{24}[/]e[/][0-9a-f]{24}/i.test(u)){alert('Open your robot in Onshape and click its Assembly tab first, then click this bookmark.');return;}window.open("+JSON.stringify(to)+"+'?onshape='+encodeURIComponent(u),'_blank');})()";
+}
+/* what Onshape adds to an extension's address by itself (seen 2026-11-18): who clicked and from where.
+   None of it is read, and an account's id has no business staying in an address someone may copy */
+const ONSHAPE_ADDED_KEYS=["companyId","sessionCompanyId","userId","clientId","locale","theme"];
+/* The page's query without what onshapeLaunch read, so a reload or a shared
+   address doesn't read the assembly again: "" or "?…". */
+function onshapeLaunchStrip(search){
+  let q; try{ q=new URLSearchParams(String(search||"").replace(/^\?/,"")); }catch(e){ return ""; }
+  for(const k of ONSHAPE_LAUNCH_KEYS.concat(ONSHAPE_ADDED_KEYS)) q.delete(k);
+  const s=q.toString(); return s?"?"+s:"";
+}
+
+/* Reading one assembly, the whole robot. host is where "/api/..." lives:
+   "<SimBench>/onshape" (functions/onshape) after Sign in with Onshape. ref is
+   onshapeRef(href). opt.say(text, done, total) reports progress. Resolves to
+   {asm, features, geom}; a failed call rejects with e.status set.
+     geom: "<did>/<v|m>/<id>/e/<eid>|<configuration>" -> {
+       parts: partId -> {name, tri (Float32Array, xyz triples, metres, the
+                         Part Studio's frame), color ([r,g,b] 0..1 or null)},
+       mass:  partId -> {kg, com [x,y,z], I [9] (about the centroid, the Part
+                         Studio's frame), vol (m^3)} }
+   Mass with no material: Onshape reports hasMass false and a volume. The
+   part then carries kg = its volume (density 1, exactly what Onshape's URDF
+   export writes), and src/inertia.js weighs that volume at the material its
+   kind implies. */
 function onshapeRead(host, ref, opt){
   opt=opt||{};
-  var cred=opt.cred||"include", say=opt.say||function(){};
-  var base=host+"/api/assemblies/d/"+ref.did+"/"+ref.wvm+"/"+ref.wvmid+"/e/"+ref.eid;
-  var fail=function(msg,status){ var e=new Error(msg); e.status=status; return e; };
-  /* Onshape answers 429 (too many calls) or 503 when busy: wait as asked, up to 5 tries */
-  var get=function(u,n){ n=n||0; return fetch(u,{credentials:cred,headers:{Accept:"application/json"}}).then(function(r){
-    if((r.status===429||r.status===503)&&n<5){ var s=+r.headers.get("Retry-After"); return new Promise(function(ok){ setTimeout(ok,(s>0?s*1000:1500*Math.pow(2,n))); }).then(function(){ return get(u,n+1); }); }
-    if(r.status===401||r.status===403) throw fail(opt.denied||("Onshape said you aren't allowed to read it ("+r.status+"): sign in to Onshape in this browser"),r.status);
+  const cred=opt.cred||"same-origin", say=opt.say||function(){}, fetchImpl=opt.fetch||fetch;
+  const base=host+"/api/assemblies/d/"+ref.did+"/"+ref.wvm+"/"+ref.wvmid+"/e/"+ref.eid;
+  const fail=(msg,status)=>{ const e=new Error(msg); e.status=status; return e; };
+  // Onshape answers 429 (too many calls) or 503 when busy: wait as asked, up to 5 tries
+  const get=(u,n)=>{ n=n||0; return fetchImpl(u,{credentials:cred,headers:{Accept:"application/json"}}).then(r=>{
+    if((r.status===429||r.status===503)&&n<5){ const s=+(r.headers&&r.headers.get&&r.headers.get("Retry-After")); return new Promise(ok=>setTimeout(ok,(s>0?s*1000:1500*Math.pow(2,n)))).then(()=>get(u,n+1)); }
+    if(r.status===401||r.status===403) throw fail(opt.denied||("Onshape said you aren't allowed to read it ("+r.status+"): sign in with Onshape again"),r.status);
+    // 402: the app's yearly allowance of API calls is used up. Every call after it is refused too,
+    // so the read stops here instead of leaving each part studio out as if it couldn't be opened
+    if(r.status===402) throw fail(ONSHAPE_QUOTA,402);
     if(!r.ok) throw fail("Onshape said "+r.status,r.status); return r.json(); }); };
-  /* a point as Onshape writes it: [x,y,z] or {x,y,z}, in metres */
-  var P=function(p,k){ return Array.isArray(p)?+p[k]:p?+p["xyz"[k]]:NaN; };
-  /* one part studio: each part's triangles (part studio frame, metres) and the colour that covers most of it */
-  var compact=function(tess){
-    var out={}, bodies=Array.isArray(tess)?tess:((tess&&tess.bodies)||[]);
-    bodies.forEach(function(b){
-      var n=0, best=null, bestA=-1, area={};
-      (b.faces||[]).forEach(function(f){ (f.facets||[]).forEach(function(){ n++; }); });
-      var tri=new Float32Array(n*9), o=0;
-      (b.faces||[]).forEach(function(f){
-        var c=f.color||f.appearance||null, key=JSON.stringify(c), a=0;
-        (f.facets||[]).forEach(function(fc){ var v=fc.vertices; if(!v||v.length<3) return;
-          var at=o;
-          for(var q=0;q<3;q++){ tri[o++]=P(v[q],0); tri[o++]=P(v[q],1); tri[o++]=P(v[q],2); }
-          var ux=tri[at+3]-tri[at],uy=tri[at+4]-tri[at+1],uz=tri[at+5]-tri[at+2],wx=tri[at+6]-tri[at],wy=tri[at+7]-tri[at+1],wz=tri[at+8]-tri[at+2];
-          a+=Math.hypot(uy*wz-uz*wy,uz*wx-ux*wz,ux*wy-uy*wx); });
-        if(c){ area[key]=(area[key]||0)+a; if(area[key]>bestA){ bestA=area[key]; best=c; } }
-      });
-      out[b.id]={name:b.name||b.id, tri:o<tri.length?tri.slice(0,o):tri, color:best||b.color||b.appearance||null};
-    });
-    return out;
-  };
-  var mass=function(mp){ var out={}, B=mp&&mp.bodies; if(B) for(var id in B){ var x=B[id], kg=Array.isArray(x.mass)?x.mass[0]:x.mass; if(kg>0) out[id]={kg:kg,com:x.centroid?x.centroid.slice(0,3):null}; } return out; };
+  const cfg=ref.config?"&configuration="+encodeURIComponent(ref.config):"";
   say("Reading the assembly …");
   return Promise.all([
-    get(base+"?includeMateFeatures=true&includeMateConnectors=true&includeNonSolids=false&excludeSuppressed=true").catch(function(e){
+    get(base+"?includeMateFeatures=true&includeMateConnectors=true&includeNonSolids=false&excludeSuppressed=true"+cfg).catch(e=>{
       // a Part Studio or a drawing has no assembly definition: Onshape answers 400 or 404
       if(e.status===400||e.status===404) throw fail("this isn't an assembly",e.status); throw e; }),
-    get(base+"/features").catch(function(){ return null; })])
-  .then(function(r){
-    var asm=r[0], features=r[1], featuresBy={}, noLimits=0;
+    get(base+"/features"+(cfg?"?"+cfg.slice(1):"")).catch(e=>{ if(e&&e.status===402) throw e; return null; })])
+  .then(r=>{
+    const asm=r[0], features=r[1], featuresBy={}; let noLimits=0;
     if(!asm||!asm.rootAssembly) throw fail("this isn't an assembly");
-    /* that call lists the root's own features: each subassembly's mate
-       limits come from its own definition, keyed the way subAssemblies is */
-    var subs=(asm.subAssemblies||[]).filter(function(d){ return d.documentMicroversion&&(d.features||[]).some(function(f){ return f&&f.featureType==="mate"; }); });
-    var subLimits=function(){ return Promise.all(subs.map(function(d){
-      var cfg=d.fullConfiguration||d.configuration||"default", key=[d.documentId||"",d.elementId||"",cfg].join("|");
-      return get(host+"/api/assemblies/d/"+d.documentId+"/m/"+d.documentMicroversion+"/e/"+d.elementId+"/features?configuration="+encodeURIComponent(cfg)+(d.documentId!==ref.did?"&linkDocumentId="+ref.did:""))
-        .then(function(f){ featuresBy[key]=f; },function(e){ if(e&&e.status===401) throw e; noLimits++; });
-    })); };
-    var jobs=[], seen={};
-    [asm.rootAssembly].concat(asm.subAssemblies||[]).forEach(function(a){ (a.instances||[]).forEach(function(i){
+    // that call lists the root's own features: each subassembly's mate limits (where lifts and
+    // claws live) come from its own definition, keyed the way subAssemblies is
+    const subs=(asm.subAssemblies||[]).filter(d=>d.documentMicroversion&&(d.features||[]).some(f=>f&&f.featureType==="mate"));
+    // at a microversion, so they never change either: kept like the part studios (opt.cache, below)
+    const subLimits=()=>Promise.all(subs.map(d=>{
+      const c=d.fullConfiguration||d.configuration||"default", key=[d.documentId||"",d.elementId||"",c].join("|");
+      const ck="features|"+d.documentId+"/m/"+d.documentMicroversion+"/e/"+d.elementId+"|"+c, cache=opt.cache||null;
+      const read=()=>get(host+"/api/assemblies/d/"+d.documentId+"/m/"+d.documentMicroversion+"/e/"+d.elementId+"/features?configuration="+encodeURIComponent(c)+(d.documentId!==ref.did?"&linkDocumentId="+ref.did:""))
+        .then(f=>{ featuresBy[key]=f; if(cache&&f) try{ Promise.resolve(cache.put(ck,{features:f})).catch(()=>{}); }catch(e){} },e=>{ if(e&&(e.status===401||e.status===402)) throw e; noLimits++; });
+      const kept=cache?Promise.resolve().then(()=>cache.get(ck)).catch(()=>null):Promise.resolve(null);
+      return kept.then(hit=>{ if(hit&&hit.features){ featuresBy[key]=hit.features; return; } return read(); });
+    }));
+    // every Part Studio the robot uses, once, however many parts it places from it
+    const jobs=[], seen={};
+    [asm.rootAssembly].concat(asm.subAssemblies||[]).forEach(a=>(a.instances||[]).forEach(i=>{
       if(i.type!=="Part"||i.suppressed) return;
-      var ver=i.documentVersion?"v/"+i.documentVersion:"m/"+i.documentMicroversion, key=i.documentId+"/"+ver+"/e/"+i.elementId+"|"+(i.configuration||"");
-      if(seen[key]) return; seen[key]=1; jobs.push({key:key,i:i,ver:ver});
-    }); });
-    var geom={}, done=0, at=0;
-    var one=function(){
-      if(at>=jobs.length) return Promise.resolve();
-      var j=jobs[at++], i=j.i, ps=host+"/api/partstudios/d/"+i.documentId+"/"+j.ver+"/e/"+i.elementId;
-      var q="?configuration="+encodeURIComponent(i.configuration||"")+(i.documentId!==ref.did?"&linkDocumentId="+ref.did:"");
+      const key=onshapeGeomKey(i);
+      if(seen[key]) return; seen[key]=1; jobs.push({key, i, ver:i.documentVersion?"v/"+i.documentVersion:"m/"+i.documentMicroversion});
+    }));
+    const geom={}; let done=0, at=0, hits=0;
+    /* A part studio at a version or a microversion never changes, so what was
+       read once (opt.cache: {get(key), put(key, value)}, promises) is kept:
+       reading the same robot again costs the assembly and its features, not
+       two calls per part studio (a private Onshape app has 2,500 a year). A
+       cache that throws or is full never stops a read. */
+    const cache=opt.cache||null;
+    /* A studio that failed for a reason that may pass (Onshape or the relay answering 5xx, the
+       connection dropping, an answer cut short) is read once more, by itself, after the rest:
+       the owner's robot lost its largest studio (1,278 of 1,375 parts, 281 MB of shapes) when
+       it was asked for beside five others, and arrived whole when asked for alone. One the
+       team can't open (403, 404) is not asked for twice. */
+    const again=[];
+    const fresh=(j)=>{
+      const i=j.i, ps=host+"/api/partstudios/d/"+i.documentId+"/"+j.ver+"/e/"+i.elementId;
+      const q="?configuration="+encodeURIComponent(i.configuration||"")+(i.documentId!==ref.did?"&linkDocumentId="+ref.did:"");
       return Promise.all([
+        // 1.5 mm chords, 20 degrees per facet: the low-poly mesh the bench wants (src/meshfiles.js thins it further)
         get(ps+"/tessellatedfaces"+q+"&outputFaceAppearances=true&outputFacetNormals=false&chordTolerance=0.0015&angleTolerance=0.35"),
-        get(ps+"/massproperties"+q+"&massAsGroup=false").catch(function(){ return null; })
-      ]).then(function(t){ geom[j.key]={parts:compact(t[0]),mass:mass(t[1])}; },function(e){ if(e&&e.status===401) throw e; geom[j.key]=null; })
-        .then(function(){ done++; say("Reading part shapes: "+done+" of "+jobs.length+" part studios …",done,jobs.length); return one(); });
+        get(ps+"/massproperties"+q+"&massAsGroup=false&useMassPropertyOverrides=true").catch(()=>null)
+      ]).then(t=>{ geom[j.key]={parts:osCompactTess(t[0]), mass:osCompactMass(t[1])}; if(cache) try{ Promise.resolve(cache.put(j.key,geom[j.key])).catch(()=>{}); }catch(e){} });
     };
-    return Promise.all([one(),one(),one(),one(),subLimits()]).then(function(){ return {asm:asm, features:features, featuresBy:featuresBy, geom:geom, noLimits:noLimits+(features?0:1)}; });
+    const one=()=>{
+      if(at>=jobs.length) return Promise.resolve();
+      const j=jobs[at++];
+      const kept=cache?Promise.resolve().then(()=>cache.get(j.key)).catch(()=>null):Promise.resolve(null);
+      return kept.then(hit=>{ if(hit&&hit.parts){ geom[j.key]=hit; hits++; return; }
+          return fresh(j).catch(e=>{ if(e&&(e.status===401||e.status===402)) throw e;
+            geom[j.key]=null;                                   // a studio this user can't read (403) is left out, named by the builder
+            if(!(e&&(e.status===403||e.status===404))) again.push(j); }); })
+        .then(()=>{ done++; say("Reading part shapes: "+done+" of "+jobs.length+" part studios"+(hits?" ("+hits+" already here)":"")+" …",done,jobs.length); return one(); });
+    };
+    const retry=()=>again.reduce((p,j,k)=>p.then(()=>{ say("Reading part shapes again: "+(k+1)+" of "+again.length+" that didn't arrive …",jobs.length-again.length+k,jobs.length);
+      return fresh(j).catch(e=>{ if(e&&(e.status===401||e.status===402)) throw e; geom[j.key]=null; }); }),Promise.resolve());
+    return Promise.all([Promise.all([one(),one(),one(),one()]).then(retry),subLimits()]).then(()=>({asm, features, featuresBy, geom, noLimits:noLimits+(features?0:1), cached:hits, retried:again.length}));
   });
 }
-/* An Onshape document address: its host and the assembly it points at, or null. */
-function onshapeRef(href){
-  var m=/^(https:\/\/[a-z0-9-]+\.onshape\.com)\/documents\/([0-9a-f]{24})\/(w|v|m)\/([0-9a-f]{24})\/e\/([0-9a-f]{24})/i.exec(String(href||"").trim());
-  return m?{host:m[1], did:m[2], wvm:m[3].toLowerCase(), wvmid:m[4], eid:m[5]}:null;
-}
 
-/* The bookmark itself: this function's source, run on an Onshape tab with
-   onshapeRead's source as read. It uses nothing from SimBench, only the
-   browser. SB is SimBench's address. It reads the robot with the team's own
-   sign-in, then hands it to the SimBench tab it opened, by postMessage (no
-   size limit, never through a server). */
-function onshapeGrab(SB, read){
-  var m=/^(.*)\/documents\/([0-9a-f]{24})\/(w|v|m)\/([0-9a-f]{24})\/e\/([0-9a-f]{24})/i.exec(location.href);
-  if(!m){ alert("Open your robot's assembly in Onshape (the assembly tab, not a Part Studio), then click the SimBench bookmark again."); return; }
-  var host=m[1], ref={did:m[2], wvm:m[3], wvmid:m[4], eid:m[5]};
-  var name=String(document.title||"").replace(/\s*[|\-–]\s*Onshape\s*$/i,"").trim()||"Onshape assembly";
-  var sbOrigin=new URL(SB).origin;
-  /* open the tab now, while the click still counts; it says it's ready, then gets the robot */
-  var w=window.open(SB+"#onshape-wait","ftcsimbench_onshape");
-  var ready=false, payload=null, sent=false, failed=false;
-  var say=function(t,d,n){ try{ if(w&&!w.closed) w.postMessage({type:"simbench-progress",text:t,done:d,total:n},sbOrigin); }catch(e){} };
-  var send=function(){ if(sent||!ready||!payload) return; sent=true; try{ w.postMessage(payload,sbOrigin); }catch(e){ sent=false; save(); } };
-  var save=function(){
-    /* no SimBench tab, or it never answered: one file to drop into SimBench instead */
-    var j=JSON.stringify(payload,function(k,v){ return v instanceof Float32Array?Array.from(v,function(x){ return Math.round(x*1e5)/1e5; }):v; });
-    var a=document.createElement("a");
-    a.href=URL.createObjectURL(new Blob([j],{type:"application/json"}));
-    a.download=name.replace(/[\\/:*?"<>|]+/g,"_")+".onshape.json";
-    document.body.appendChild(a); a.click(); a.remove();
-    alert("Saved \""+a.download+"\". Drop it into SimBench: it is the whole robot, joints and all.");
-  };
-  window.addEventListener("message",function(e){ if(e.origin===sbOrigin&&e.data&&e.data.type==="simbench-ready"){ ready=true; send(); } });
-  read(host, ref, {cred:"include", say:say})
-  .then(function(r){
-    payload={format:"ftc-simbench.onshape", v:2, name:name, url:location.href, asm:r.asm, features:r.features, featuresBy:r.featuresBy, noLimits:r.noLimits, geom:r.geom};
-    if(!w||w.closed){ save(); return; }
-    send();
-    /* the SimBench tab never said it was ready: the file instead */
-    setTimeout(function(){ if(!sent&&!failed){ failed=true; save(); } },30000);
-  })
-  .catch(function(e){
-    if(w&&!w.closed) try{ w.close(); }catch(x){}
-    alert("SimBench couldn't read this assembly from Onshape: "+e.message+". Open the assembly tab (not a Part Studio) while signed in, and try again.");
-  });
-}
-/* The bookmark's address, for a SimBench at sb (its own address). */
-function onshapeBookmarklet(sb){
-  return "javascript:"+encodeURIComponent("("+onshapeGrab.toString()+")("+JSON.stringify(String(sb).replace(/#.*$/,""))+","+onshapeRead.toString()+");void 0");
-}
-
-/* ---- Copy and paste: no app, no bookmark, no sign-up ----
-   The team opens their assembly's own API page in a tab already signed in
-   to Onshape (school accounts included: an Enterprise opens it on its own
-   domain), copies the page's text and pastes it here. Those calls ride the
-   team's browser session, so they count against no API limit. The joints
-   then go onto the STEP the team exported from the same assembly. */
-
-/* What came from a paste: {kind:"assembly"|"features", json, mates}, or an
-   error that says what to do. A copied page may carry Chrome's
-   "Pretty-print" line or stray text around the JSON. */
-function readOnshapePaste(text){
-  const s=String(text||"").trim();
-  if(!s) throw new Error("nothing was pasted yet");
-  if(/^<(!doctype|html)|<body[\s>]/i.test(s)) throw new Error("that's a web page, not Onshape's page of text. Sign in to Onshape in this browser, open the link again, and copy that page");
-  const a=s.search(/[{[]/), b=Math.max(s.lastIndexOf("}"),s.lastIndexOf("]"));
-  if(a<0) throw new Error("that isn't the page of text from Onshape. On that page press Ctrl+A, then Ctrl+C, and paste here");
-  let j;
-  try{ if(b<a) throw 0; j=JSON.parse(s.slice(a,b+1)); }
-  catch(e){ throw new Error("only part of the page came through. On that page press Ctrl+A, then Ctrl+C, and paste again"); }
-  if(j&&typeof j==="object"&&j.rootAssembly&&typeof j.rootAssembly==="object"){
-    const isMate=f=>f&&f.featureType==="mate"&&!f.suppressed;
-    const mates=[j.rootAssembly].concat(Array.isArray(j.subAssemblies)?j.subAssemblies:[]).reduce((n,d)=>n+((d&&d.features)||[]).filter(isMate).length,0);
-    return {kind:"assembly", json:j, mates};
-  }
-  if(j&&(Array.isArray(j)||(typeof j==="object"&&Array.isArray(j.features)))) return {kind:"features", json:j};
-  if(j&&typeof j==="object"&&j.message&&j.status){
-    const st=+j.status;
-    throw new Error("Onshape said \""+String(j.message).slice(0,120)+"\" ("+st+"). "+
-      (st===401||st===403?"Sign in to Onshape in this browser with the account that can open the robot, then open the link again":
-       st===400||st===404?"The address has to come from your Assembly tab, not a Part Studio: copy it again":"Open the link again"));
-  }
-  throw new Error("that isn't your assembly's joints page. Use the Open your joints page button, then copy that page");
-}
-/* The pages to open for mate limits: the main assembly's, and each
-   subassembly's that has mates (that call only lists one element's own
-   features). key is what applyMateLimits files them under. */
-function onshapeLimitLinks(asm, href){
-  const ref=onshapeRef(href), L=onshapeApiLinks(href);
-  if(!ref||!L||!asm||!asm.rootAssembly) return [];
-  const out=[{key:"", name:"Main assembly", url:L.features}];
-  const names={};
-  for(const d of [asm.rootAssembly].concat(asm.subAssemblies||[])) for(const i of (d.instances||[]))
-    if(i&&i.type==="Assembly") names[[i.documentId||"",i.elementId||"",i.fullConfiguration||i.configuration||"default"].join("|")]=String(i.name||"").replace(/\s*<\d+>\s*$/,"");
-  for(const d of (asm.subAssemblies||[])){
-    if(!d||!d.documentMicroversion||!(d.features||[]).some(f=>f&&f.featureType==="mate"&&!f.suppressed)) continue;
-    const cfg=d.fullConfiguration||d.configuration||"default", key=[d.documentId||"",d.elementId||"",cfg].join("|");
-    if(out.some(o=>o.key===key)) continue;
-    out.push({key, name:names[key]||"Subassembly", url:ref.host+"/api/assemblies/d/"+d.documentId+"/m/"+d.documentMicroversion+"/e/"+d.elementId+"/features?configuration="+encodeURIComponent(cfg)+(d.documentId!==ref.did?"&linkDocumentId="+ref.did:"")});
-  }
-  return out;
-}
-
-/* ---- Sign in with Onshape (functions/onshape): works where bookmarks are blocked ---- */
+/* ---- Sign in with Onshape (functions/onshape) ---- */
 /* Whether this site can sign in to Onshape, and whether it already has:
    {ready, signedIn}; ready is false with no server (a file, a plain host). */
 async function onshapeSignInState(){
@@ -205,47 +191,46 @@ async function onshapeSignInState(){
     return {ready:!!j.ready, signedIn:!!j.signedIn};
   }catch(e){ return {ready:false, signedIn:false}; }
 }
+/* Part studios read before, kept in this browser (IndexedDB), by the key
+   onshapeRead uses: a document at a version or a microversion, which never
+   changes. At most CACHE_MAX of them; the oldest go first. Null where there's
+   no IndexedDB (a private window, Node). */
+const ONSHAPE_CACHE_MAX=400;
+function onshapeGeomCache(idb){
+  const I=idb||(typeof indexedDB!=="undefined"?indexedDB:null);
+  if(!I) return null;
+  let dbp=null, puts=0;
+  const db=()=>dbp||(dbp=new Promise((ok,no)=>{ const r=I.open("simbench-onshape",1);
+    r.onupgradeneeded=()=>r.result.createObjectStore("geom"); r.onsuccess=()=>ok(r.result); r.onerror=()=>no(r.error); }));
+  const tx=(mode,f)=>db().then(d=>new Promise((ok,no)=>{ const t=d.transaction("geom",mode), q=f(t.objectStore("geom"));
+    t.oncomplete=()=>ok(q&&q.result); t.onerror=()=>no(t.error); t.onabort=()=>no(t.error); }));
+  const prune=()=>tx("readwrite",s=>{ const all=[]; const c=s.openCursor();
+    c.onsuccess=()=>{ const cur=c.result; if(cur){ all.push([cur.key,(cur.value&&cur.value.at)||0]); cur.continue(); }
+      else if(all.length>ONSHAPE_CACHE_MAX){ all.sort((a,b)=>a[1]-b[1]); for(const [k] of all.slice(0,all.length-Math.floor(ONSHAPE_CACHE_MAX*0.75))) s.delete(k); } };
+    return null; });
+  return {
+    get:k=>tx("readonly",s=>s.get(k)).then(v=>v&&v.parts?v:null),
+    put:(k,v)=>tx("readwrite",s=>s.put(Object.assign({at:Date.now()},v),k)).then(()=>{ if(++puts%50===0) return prune(); })
+  };
+}
 /* The whole robot from a pasted assembly address, read through the sign-in.
-   Resolves to the same payload the bookmark sends. */
-async function onshapeFromLink(href, say){
+   host is the relay ("<SimBench>/onshape"); the page's own when not given
+   (the engine worker has no page address, so it passes one). */
+async function onshapeFromLink(href, say, host){
   const ref=onshapeRef(href);
   if(!ref) throw new Error("that isn't an Onshape document link. Open your assembly in Onshape and copy the whole address from the address bar");
-  const host=new URL("onshape",location.href).href.replace(/\/$/,"");
+  host=host||new URL("onshape",location.href).href.replace(/\/$/,"");
   const denied="Onshape says you can't read it: sign in again, and make sure the document is yours or shared with you";
   let name="";
   try{ const r=await fetch(host+"/api/documents/"+ref.did,{credentials:"same-origin",headers:{Accept:"application/json"}}); if(r.ok) name=String((await r.json()).name||""); }catch(e){}
-  const r=await onshapeRead(host, ref, {cred:"same-origin", say, denied});
-  return {format:ONSHAPE_FORMAT, v:2, name:name||"Onshape assembly", url:String(href).trim(), asm:r.asm, features:r.features, featuresBy:r.featuresBy, noLimits:r.noLimits, geom:r.geom};
+  const r=await onshapeRead(host, ref, {cred:"same-origin", say, denied, cache:onshapeGeomCache()});
+  return {format:ONSHAPE_FORMAT, v:3, name:name||"Onshape assembly", url:String(href).trim(), asm:r.asm, features:r.features, featuresBy:r.featuresBy, noLimits:r.noLimits, geom:r.geom};
 }
 
-/* ---- the SimBench side: the #onshape= fragment, back into the two JSON documents ---- */
-function onshapeBytes(s){
-  s=String(s||"").replace(/-/g,"+").replace(/_/g,"/");
-  if(!/^[A-Za-z0-9+/]*$/.test(s)) throw new Error("the link is damaged");
-  while(s.length%4) s+="=";
-  const bin=atob(s), u=new Uint8Array(bin.length);
-  for(let i=0;i<bin.length;i++) u[i]=bin.charCodeAt(i);
-  return u;
-}
-async function readOnshapeHash(h){
-  if(typeof DecompressionStream!=="function") throw new Error("this browser can't unpack it; use the manual steps below");
-  const bytes=onshapeBytes(h);
-  if(bytes.length>20e6) throw new Error("the link is too big");
-  // gzip or nothing: some decompressors never finish on data that isn't
-  if(bytes.length<18||bytes[0]!==0x1f||bytes[1]!==0x8b) throw new Error("the link is damaged");
-  let text, timer;
-  try{
-    text=await Promise.race([
-      new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"))).text(),
-      new Promise((_,no)=>{ timer=setTimeout(()=>no(new Error("timeout")),15000); })]);
-  }catch(e){ throw new Error("the link is damaged"); }
-  finally{ clearTimeout(timer); }
-  let p; try{ p=JSON.parse(text); }catch(e){ throw new Error("the link is damaged"); }
-  return checkOnshapePayload(p);
-}
-/* What came in is untrusted: keep only the documents, the shapes, and a short name and address. */
+/* What came in is untrusted (a dropped .onshape.json, a relayed read): keep
+   only the documents, the shapes and masses, and a short name and address. */
 function checkOnshapePayload(p){
-  if(!p||typeof p!=="object"||p.format!==ONSHAPE_FORMAT) throw new Error("it isn't mates from the SimBench bookmark");
+  if(!p||typeof p!=="object"||p.format!==ONSHAPE_FORMAT) throw new Error("it isn't a robot read from Onshape");
   if(!p.asm||typeof p.asm!=="object"||!p.asm.rootAssembly||typeof p.asm.rootAssembly!=="object") throw new Error("it has no assembly definition");
   const isFeat=f=>!!f&&(Array.isArray(f)||(typeof f==="object"&&Array.isArray(f.features)));
   const features=isFeat(p.features)?p.features:null;
@@ -257,23 +242,29 @@ function checkOnshapePayload(p){
   }
   const str=v=>typeof v==="string"?v.slice(0,200):"";
   const url=/^https:\/\/([a-z0-9-]+\.)*onshape\.com\//i.test(str(p.url))?str(p.url):"";
-  // the shapes: part studio key -> {parts: id -> {name, tri (numbers), color}, mass}
+  const num=v=>Number.isFinite(+v)?+v:null, vec=(v,n)=>Array.isArray(v)&&v.length>=n&&v.slice(0,n).every(x=>Number.isFinite(+x))?v.slice(0,n).map(Number):null;
   let geom=null;
   if(p.geom&&typeof p.geom==="object"){
     geom={};
     let tris=0;
     for(const k of Object.keys(p.geom).slice(0,5000)){
       const g=p.geom[k]; if(!g||typeof g!=="object"||!g.parts||typeof g.parts!=="object") continue;
-      const parts={};
+      const parts={}, mass={};
       for(const id of Object.keys(g.parts).slice(0,2000)){
         const b=g.parts[id]; if(!b) continue;
         const t=b.tri; if(!(t instanceof Float32Array||Array.isArray(t))) continue;
         tris+=t.length/9; if(tris>8e6) throw new Error("the robot is too big to draw");
         parts[id]={name:str(b.name), tri:t, color:b.color==null?null:(typeof b.color==="object"||typeof b.color==="string"?b.color:null)};
       }
-      geom[k]={parts, mass:g.mass&&typeof g.mass==="object"?g.mass:{}};
+      if(g.mass&&typeof g.mass==="object") for(const id of Object.keys(g.mass).slice(0,2000)){
+        const m=g.mass[id]; if(!m||typeof m!=="object") continue;
+        if(m.surface===true){ mass[id]={kg:0, surface:true}; continue; }       // a surface: no mass, no volume
+        if(!(num(m.kg)>0)) continue;
+        mass[id]={kg:num(m.kg), com:vec(m.com,3), I:vec(m.I,9), vol:num(m.vol)};
+      }
+      geom[k]={parts, mass};
     }
   }
   const noLimits=Number.isFinite(+p.noLimits)?Math.max(0,Math.min(1e4,Math.round(+p.noLimits))):0;
-  return {name:str(p.name).trim()||"Onshape assembly", url, asm:p.asm, features, featuresBy, noLimits, geom};
+  return {format:ONSHAPE_FORMAT, name:str(p.name).trim()||"Onshape assembly", url, asm:p.asm, features, featuresBy, noLimits, geom};
 }

@@ -13,7 +13,11 @@
    solid's mechanism: the arm's exact meshes swing with the arm. The matching
    is pure and tested in Node against the corpus; only Tess touches the DOM.
    ============================================================ */
-const OCCT_CDN="https://cdn.jsdelivr.net/npm/occt-import-js@0.0.23/dist/";
+/* Where OpenCascade comes from, in order: the site's own copy (tools/build.mjs puts it in dist/vendor/,
+   absolute because the worker is a blob), then the CDN. It loads when the first STEP file is read, which
+   the default robot already is, so it is not on the page's critical path. */
+const OCCT_BASES=[typeof document!=="undefined"?new URL("vendor/occt-import-js-0.0.23/",document.baseURI).href:null,
+  "https://cdn.jsdelivr.net/npm/occt-import-js@0.0.23/dist/"].filter(Boolean);
 const OCCT_PARAMS={linearUnit:"meter", linearDeflectionType:"bounding_box_ratio", linearDeflection:0.001, angularDeflection:0.5};
 
 /* Which mechanism carries a point, the rule the view has always used: the
@@ -200,7 +204,7 @@ function tessAssign(cad,res,turretScale){
    steeper than 30 degrees on welded vertices. Shared meshes (one shape placed
    many times) are worked out once. */
 const EDGE_CACHE=new WeakMap();
-function meshEdgeSegs(m){
+function meshEdgeSegs(m,creaseDeg){
   const P=m.attributes&&m.attributes.position&&m.attributes.position.array, I=m.index&&m.index.array;
   if(!P||!P.length||!I||!I.length) return new Float32Array(0);
   const hit=EDGE_CACHE.get(P); if(hit) return hit;
@@ -226,14 +230,85 @@ function meshEdgeSegs(m){
     for(let t=0;t<I.length/3;t++) for(let e=0;e<3;e++){
       const a=id[I[3*t+e]], b=id[I[3*t+(e+1)%3]]; if(a===b) continue;
       const k=a<b?a+"_"+b:b+"_"+a; const r=edges.get(k); if(r) r.t.push(t); else edges.set(k,{a,b,t:[t]}); }
-    const cos30=Math.cos(Math.PI/6);
+    // a crease: the two faces meet at more than this (30 deg on a STEP's clean mesh; a thinned
+    // export mesh is faceted everywhere, so only its real corners count)
+    const cosC=Math.cos((creaseDeg||30)*Math.PI/180);
     for(const e of edges.values()){
       let keep=e.t.length!==2;
-      if(!keep){ const n1=nrm(e.t[0]), n2=nrm(e.t[1]); keep=n1[0]*n2[0]+n1[1]*n2[1]+n1[2]*n2[2]<cos30; }
+      if(!keep){ const n1=nrm(e.t[0]), n2=nrm(e.t[1]); keep=n1[0]*n2[0]+n1[1]*n2[1]+n1[2]*n2[2]<cosC; }
       if(keep) put(e.a,e.b);
     }
   }
   const segs=new Float32Array(out); EDGE_CACHE.set(P,segs); return segs;
+}
+/* Unindexed positions and normals for an indexed mesh, each corner's normal the
+   average of the faces round its vertex that lean less than creaseDeg from its own
+   face: smooth over a cylinder or a fillet, a clean edge at a corner. */
+function creaseNormals(P,I,creaseDeg){
+  const nf=I.length/3, cosC=Math.cos((creaseDeg||45)*Math.PI/180);
+  const fn=new Float32Array(nf*3), at=new Map();
+  for(let t=0;t<nf;t++){
+    const a=I[3*t],b=I[3*t+1],c=I[3*t+2];
+    const ux=P[3*b]-P[3*a],uy=P[3*b+1]-P[3*a+1],uz=P[3*b+2]-P[3*a+2], vx=P[3*c]-P[3*a],vy=P[3*c+1]-P[3*a+1],vz=P[3*c+2]-P[3*a+2];
+    const x=uy*vz-uz*vy,y=uz*vx-ux*vz,z=ux*vy-uy*vx; const L=Math.hypot(x,y,z)||1; fn[3*t]=x/L; fn[3*t+1]=y/L; fn[3*t+2]=z/L;
+    for(const vv of [a,b,c]){ let l=at.get(vv); if(!l){ l=[]; at.set(vv,l); } l.push(t); }
+  }
+  const pos=new Float32Array(nf*9), nor=new Float32Array(nf*9);
+  for(let t=0;t<nf;t++){
+    const nx=fn[3*t],ny=fn[3*t+1],nz=fn[3*t+2];
+    for(let e=0;e<3;e++){
+      const vv=I[3*t+e], o=9*t+3*e;
+      pos[o]=P[3*vv]; pos[o+1]=P[3*vv+1]; pos[o+2]=P[3*vv+2];
+      let sx=0,sy=0,sz=0;
+      for(const u of at.get(vv)){ const d=fn[3*u]*nx+fn[3*u+1]*ny+fn[3*u+2]*nz; if(d>=cosC){ sx+=fn[3*u]; sy+=fn[3*u+1]; sz+=fn[3*u+2]; } }
+      const L=Math.hypot(sx,sy,sz)||1; nor[o]=sx/L; nor[o+1]=sy/L; nor[o+2]=sz/L;
+    }
+  }
+  return {pos, nor};
+}
+/* Where each mechanism group's parts are drawn. A joint held as drawn (internal:
+   a motor shaft, a label, a bearing; or fixed) never moves, so its parts can go
+   in the group above it, and an export robot with 359 joints draws in a few
+   groups instead of one per joint. moving: ids that do move after all (a
+   device drives it, or it was seen to move). Returns id -> group id. */
+function tessFold(mechs,moving){
+  const byId=new Map(), led=new Set();
+  for(const m of mechs||[]){ byId.set(m.id,m); if(m.couple&&m.couple.to) led.add(m.couple.to); }
+  const held=m=>!!m&&(m.internal||m.kind==="fixed")&&!m.couple&&!m.passive&&!led.has(m.id)&&!m.q0&&!(moving&&moving.has(m.id));
+  const memo=new Map();
+  return id=>{
+    if(memo.has(id)) return memo.get(id);
+    let g=id;
+    for(let n=0;n<512&&g!=="chassis"&&held(byId.get(g));n++) g=byId.get(g).parent||"chassis";
+    memo.set(id,g); return g;
+  };
+}
+/* Copies of shapes merged into one mesh, so parts that appear once or twice
+   draw together instead of one draw call each. Each item is a shape's
+   triangles start..end (unindexed pos and nor, or indexed by idx) placed by m,
+   a column-major 4x4. Returns unindexed {pos, nor, ranges}: ranges are
+   [{start, j}] in triangles, sorted, for picking. */
+function tessBatch(items){
+  let n=0; for(const it of items) n+=Math.max(0,it.end-it.start);
+  const pos=new Float32Array(n*9), nor=new Float32Array(n*9), ranges=[];
+  let t=0;
+  for(const it of items){
+    const E=it.m, P=it.pos, N=it.nor, I=it.idx||null;
+    // a mirrored copy winds its triangles the other way, so its faces still face out
+    const det=E[0]*(E[5]*E[10]-E[9]*E[6])-E[4]*(E[1]*E[10]-E[9]*E[2])+E[8]*(E[1]*E[6]-E[5]*E[2]), order=det<0?[0,2,1]:[0,1,2];
+    if(!ranges.length||ranges[ranges.length-1].j!==it.j) ranges.push({start:t, j:it.j});
+    for(let f=it.start;f<it.end;f++,t++){
+      for(let k=0;k<3;k++){
+        const v=I?I[3*f+order[k]]:3*f+order[k], o=9*t+3*k;
+        const x=P[3*v], y=P[3*v+1], z=P[3*v+2];
+        pos[o]=E[0]*x+E[4]*y+E[8]*z+E[12]; pos[o+1]=E[1]*x+E[5]*y+E[9]*z+E[13]; pos[o+2]=E[2]*x+E[6]*y+E[10]*z+E[14];
+        const a=N[3*v], b=N[3*v+1], c=N[3*v+2];
+        const nx=E[0]*a+E[4]*b+E[8]*c, ny=E[1]*a+E[5]*b+E[9]*c, nz=E[2]*a+E[6]*b+E[10]*c, L=Math.hypot(nx,ny,nz)||1;
+        nor[o]=nx/L; nor[o+1]=ny/L; nor[o+2]=nz/L;
+      }
+    }
+  }
+  return {pos, nor, ranges};
 }
 /* The model's edges per mechanism group, in the canonical frame. */
 function tessEdges(cad,res,asg,hidden){
@@ -323,70 +398,9 @@ function tessBuckets(cad,res,asg,hidden){
   return list;
 }
 
-/* ---- big assemblies: one small STEP per shape ----
-   OpenCascade reads a whole 50 MB assembly, then fails to mesh any of it: a
-   real 773-part Onshape export came back as 773 empty meshes. Meshing each
-   shape on its own works, and a robot has far fewer shapes than parts (that
-   one has 99: a screw is one shape used 200 times). So the file is cut into
-   one small, complete STEP per shape, each meshed once, then placed at every
-   occurrence the parser recorded (cad.occs).
-
-   A unit is the part's representation (the one SHAPE_DEFINITION_REPRESENTATION
-   names), the geometry hanging off it by a plain SHAPE_REPRESENTATION_
-   RELATIONSHIP, and everything those reference, product records included, so
-   OpenCascade sees a proper part. Assembly links (the WITH_TRANSFORMATION
-   relationships, context-dependent representations, mapped items) are left
-   out, and nothing is pulled in backwards except the part's own definition,
-   its geometry relationship and its colours. Colours need a presentation
-   representation listing the styled items, which the whole file has once for
-   everything, so each unit gets its own. */
-function stepShapeUnits(text,occs){
-  const di=text.indexOf("DATA;"); if(di<0) return [];
-  const de=text.lastIndexOf("ENDSEC;");
-  const head=text.slice(0,di+5);
-  const recs=splitStepRecords(text.slice(di+5,de>di?de:text.length));
-  const byId=new Map(), headRe=/^\s*#(\d+)\s*=\s*/;
-  for(const r of recs){ const m=headRe.exec(r); if(m) byId.set(+m[1],r.trim()); }
-  // references after the "=", never inside a quoted name ("#25 Roller Chain Loop")
-  const refsOf=r=>{ const out=[], re=/#(\d+)/g, a=r.slice(r.indexOf("=")+1).replace(STEP_STR,"''"); let m; while((m=re.exec(a))) out.push(+m[1]); return out; };
-  // the few backward links a unit needs, found by type
-  const sdrOf=new Map(), srrOf=new Map(), styledOf=new Map();
-  let maxId=0;
-  for(const [id,r] of byId){
-    if(id>maxId) maxId=id;
-    if(/=\s*SHAPE_DEFINITION_REPRESENTATION\s*\(/.test(r)){ const k=refsOf(r); if(k.length>=2) sdrOf.set(k[1],id); }
-    else if(/SHAPE_REPRESENTATION_RELATIONSHIP/.test(r)&&!/WITH_TRANSFORMATION/.test(r)){
-      const k=refsOf(r); for(const x of k.slice(-2)){ if(!srrOf.has(x)) srrOf.set(x,[]); srrOf.get(x).push(id); } }
-    else if(/=\s*(OVER_RIDING_STYLED_ITEM|STYLED_ITEM)\s*\(/.test(r)){
-      const k=refsOf(r), item=k[k.length-(/OVER_RIDING/.test(r)?2:1)];
-      if(item!=null){ if(!styledOf.has(item)) styledOf.set(item,[]); styledOf.get(item).push(id); } }
-  }
-  const NOFOLLOW=/=\s*\(?\s*(MAPPED_ITEM|REPRESENTATION_MAP|CONTEXT_DEPENDENT_SHAPE_REPRESENTATION|NEXT_ASSEMBLY_USAGE_OCCURRENCE|MECHANICAL_DESIGN_GEOMETRIC_PRESENTATION_REPRESENTATION)\b/;
-  const units=[], seenRep=new Set();
-  for(const o of occs||[]){
-    if(o.rep==null||seenRep.has(o.rep)) continue;
-    seenRep.add(o.rep);
-    const seeds=[o.rep];
-    if(sdrOf.has(o.rep)) seeds.push(sdrOf.get(o.rep));
-    for(const srr of srrOf.get(o.rep)||[]){ seeds.push(srr); for(const x of refsOf(byId.get(srr)).slice(-2)) seeds.push(x); }
-    const keep=new Set(), stack=seeds.slice();
-    while(stack.length){
-      const id=stack.pop(); if(keep.has(id)) continue;
-      const r=byId.get(id); if(!r) continue;
-      if(keep.size&&NOFOLLOW.test(r)) continue;
-      keep.add(id);
-      for(const k of refsOf(r)) if(!keep.has(k)) stack.push(k);
-      for(const s of styledOf.get(id)||[]) if(!keep.has(s)) stack.push(s);
-    }
-    const styled=[...keep].filter(id=>/=\s*(OVER_RIDING_STYLED_ITEM|STYLED_ITEM)\s*\(/.test(byId.get(id)));
-    const ctx=/,\s*#(\d+)\s*\)\s*$/.exec(byId.get(o.rep)||"");
-    const body=[...keep].sort((a,b)=>a-b).map(id=>byId.get(id));
-    if(styled.length&&ctx) body.push("#"+(maxId+1)+"=MECHANICAL_DESIGN_GEOMETRIC_PRESENTATION_REPRESENTATION('',("+styled.map(i=>"#"+i).join(",")+"),#"+ctx[1]+")");
-    units.push({rep:o.rep, text:head+"\n"+body.join(";\n")+";\nENDSEC;\nEND-ISO-10303-21;\n"});
-  }
-  return units;
-}
-
+/* stepShapeUnits (one small STEP per shape) lives in src/step.js now, so the
+   engine worker can cut the file off the page thread; Tess.perShape takes the
+   units it made. */
 /* The meshed shapes, placed: one entry per occurrence per shape mesh, the
    shape's arrays shared and `T` placing the copy (placeM applies it wherever
    a whole-file mesh would just take the frame). `solidOf` says which parser
@@ -420,12 +434,17 @@ const Tess={
      tessellates without freezing the page. Typed arrays come back
      transferred, not copied. */
   makeWorker(){
-    const src=`importScripts(${JSON.stringify(OCCT_CDN+"occt-import-js.js")});
+    const src=`const BASES=${JSON.stringify(OCCT_BASES)};
 let ready=null;
+async function boot(){
+  let last=null;
+  for(const b of BASES){ try{ importScripts(b+"occt-import-js.js"); return await occtimportjs({locateFile:f=>b+f}); }catch(e){ last=e; } }
+  throw last||new Error("no copy of OpenCascade could be loaded");
+}
 onmessage=async e=>{
   const d=e.data;
   try{
-    ready=ready||occtimportjs({locateFile:f=>${JSON.stringify(OCCT_CDN)}+f});
+    ready=ready||boot(); ready.catch(()=>{ ready=null; });
     const oc=await ready, r=oc.ReadStepFile(new Uint8Array(d.buf),d.params), tr=[];
     if(r&&r.success) for(const m of r.meshes){
       const P=new Float32Array(m.attributes.position.array); m.attributes.position.array=P; tr.push(P.buffer);
@@ -435,8 +454,10 @@ onmessage=async e=>{
     postMessage({id:d.id, ok:!!(r&&r.success), res:r},tr);
   }catch(err){ postMessage({id:d.id, ok:false, error:String(err&&err.message||err)}); }
 };`;
-    const url=URL.createObjectURL(new Blob([src],{type:"text/javascript"}));
-    const w=new Worker(url);
+    // one blob URL for every worker this page starts: a new one per worker (four per
+    // robot, more after a stall) was never revoked, so each held its blob for good
+    this.workerUrl=this.workerUrl||URL.createObjectURL(new Blob([src],{type:"text/javascript"}));
+    const w=new Worker(this.workerUrl);
     w.onmessage=e=>{ w.done=(w.done||0)+1; w.job=null; const p=this.pending[e.data.id]; if(!p) return; delete this.pending[e.data.id];
       e.data.ok?p.resolve(e.data.res):p.reject(new Error(e.data.error||"OpenCascade couldn't read this STEP file")); };
     // one worker's error (a part too big for its memory, a hiccup loading OpenCascade)
@@ -454,12 +475,19 @@ onmessage=async e=>{
   /* No worker (a sandbox that forbids blob workers): the same library on the
      main thread, loaded by a script tag. */
   mainThread(buf,params){
-    const load=this.mod||(this.mod=new Promise((res,rej)=>{
-      if(typeof occtimportjs==="function"){ res(); return; }
-      const s=document.createElement("script"); s.src=OCCT_CDN+"occt-import-js.js"; s.async=true;
-      s.onload=()=>res(); s.onerror=()=>rej(new Error("couldn't load OpenCascade from the CDN"));
+    const script=u=>new Promise((res,rej)=>{
+      const s=document.createElement("script"); s.src=u; s.async=true;
+      s.onload=()=>res(); s.onerror=()=>{ s.remove(); rej(new Error("couldn't load OpenCascade from "+u)); };
       document.head.appendChild(s);
-    }).then(()=>occtimportjs({locateFile:f=>OCCT_CDN+f})));
+    });
+    const load=this.mod||(this.mod=(async()=>{
+      let last=null;
+      for(const b of OCCT_BASES){
+        try{ if(typeof occtimportjs!=="function") await script(b+"occt-import-js.js"); return await occtimportjs({locateFile:f=>b+f}); }
+        catch(e){ last=e; }
+      }
+      throw last||new Error("couldn't load OpenCascade");
+    })());
     load.catch(()=>{ this.mod=null; });
     return load.then(oc=>{ const r=oc.ReadStepFile(new Uint8Array(buf),params||OCCT_PARAMS);
       if(!r||!r.success) throw new Error("OpenCascade couldn't read this STEP file"); return r; });
@@ -472,11 +500,12 @@ onmessage=async e=>{
       try{ this.worker=this.worker||this.makeWorker(); }catch(e){ this.worker=null; this.noWorker=true; }
     }
     if(this.worker){
-      const id=++this.seq;
+      const id=++this.seq, w=this.worker;
       job=new Promise((resolve,reject)=>{ this.pending[id]={resolve,reject}; });
-      this.worker.postMessage({id, buf, params:OCCT_PARAMS},[buf]);
+      // the worker knows its job, so its onerror can fail this job at once
+      w.job=id; w.postMessage({id, buf, params:OCCT_PARAMS},[buf]);
       // a worker that dies on start (CSP, offline importScripts) falls back once
-      job=job.catch(e=>{ if(this.noWorker&&!/couldn't read/.test(e.message)) return this.mainThread(new TextEncoder().encode(text).buffer); throw e; });
+      job=job.catch(e=>{ if((this.noWorker||w.dead&&!w.done)&&!/couldn't read/.test(e.message)) return this.mainThread(new TextEncoder().encode(text).buffer); throw e; });
     }else job=this.mainThread(buf);
     const ms=timeoutMs||120000;
     let timer=null;
@@ -499,8 +528,9 @@ onmessage=async e=>{
     const late=new Promise((_,rej)=>{ timer=setTimeout(()=>{ delete this.pending[id]; rej(new Error("slow")); },ms); });
     return Promise.race([job,late]).finally(()=>clearTimeout(timer));
   },
-  async perShape(cad,text,onProgress){
-    const units=stepShapeUnits(text,cad.occs||[]);
+  async perShape(cad,text,onProgress,ready){
+    // the units the engine worker already cut (src/engineworker.js), else cut them here
+    const units=ready&&ready.length?ready:stepShapeUnits(text,cad.occs||[]);
     if(!units.length) throw new Error("no part shapes found to mesh");
     const b=cad.bbox, diag=Math.hypot(b.max[0]-b.min[0],b.max[1]-b.min[1],b.max[2]-b.min[2])||0.5;
     // one tolerance for the whole robot, as fine as a whole-file mesh: per shape,
@@ -549,10 +579,13 @@ onmessage=async e=>{
   /* The exact surfaces of a parsed STEP: per shape when the parser could list
      the shapes (every part in its own colour, and a 50 MB assembly meshes at
      all), else the whole file at once. */
-  exact(cad,text,onProgress){
+  exact(cad,text,onProgress,units){
     if(cad&&cad.occs&&cad.occs.length)
-      return this.perShape(cad,text,onProgress).catch(e=>{
+      return this.perShape(cad,text,onProgress,units).catch(e=>{
         if(text.length>30e6) throw e;                 // a big file won't do better whole
+        // no workers: perShape kept the page responsive on purpose, and run()
+        // would now mesh the whole file on the page thread instead
+        if(this.noWorker) throw e;
         return this.run(text);
       });
     return this.run(text);

@@ -22,6 +22,20 @@ const hub = (name, r = 0.012, h = 0.012) => part(name, [cyl(IDF, r, h)], COL.ste
 const bar = (name, s, kg = 0.05) => part(name, [box([0, 0, 0], s)], COL.alu, kg);
 const hexShaft = (name, len) => part(name, [prism(IDF, ngon(6, 0.0046), len)], COL.steel, 0.04);
 const post = (name, c, s) => inst(bar(name, s), frame(c));
+/* a gear rack lying along x, its teeth on top (+z): module 0.8 like goBILDA's, `teeth` of them from
+   the -x end and the rest plain, as a toothed profile extruded `w` across y, with a boss under its
+   far end where a gate screws on. Its points crowd the teeth and the boss, as a real rack's crowd
+   its teeth and the holes in one end (team 7831's leans its principal axis 2.3 degrees). */
+const rack = (name, len, w, h, teeth, o) => {
+  const p = 0.0008 * Math.PI, tip = -h / 2, root = tip + 0.0018, prof = [[-len / 2, tip]];
+  for (let k = 0; k < teeth; k++) { const x0 = -len / 2 + k * p;
+    if (k) prof.push([x0, tip]);
+    prof.push([x0 + 0.3 * p, tip], [x0 + 0.5 * p, root], [x0 + 0.8 * p, root]); }
+  prof.push([-len / 2 + teeth * p, tip], [len / 2, tip], [len / 2, h / 2], [-len / 2, h / 2]);
+  // extruded along +y from o's near face; local y = y x x points down, so the teeth (local -y) face up
+  return inst(part(name, [prism(frame([0, -w / 2, 0], Y, X), prof, w),
+    cyl(frame([len / 2 - 0.014, 0, -h / 2], [0, 0, -1]), 0.0025, 0.003)], COL.alu, 0.02), frame(o));
+};
 
 /* goBILDA 2000-style servo (case with its mounting ears) and its spline as its own part, output along local +z at x = +10 mm */
 const servoCase = (name) => part(name, [box([0, 0, 0], [0.040, 0.020, 0.037]), box([0, 0, 0.009], [0.0545, 0.020, 0.0025])], COL.black, 0.07);
@@ -146,6 +160,30 @@ export const MECHS = {
     for (const y of [-0.070, 0, 0.070]) kids.push(tag(inst(hub('Compliant Wheel 60A', 0.024, 0.020), along([0.110, y - 0.010, TOP + 0.070], Y)), 'roller'));
     return { kids, joints: [{ id: 'roller', kind: 'revolute', axis: Y, pivot: [0.110, -0.123, TOP + 0.070], actuator: 'motor' }] };
   },
+  /* an intake roller on a goBILDA 8 mm REX shaft with clamp spacers drawn cut into it between the
+     wheels (team 7831's intakes): a long thin part with short blocks cut into it looks like a rail
+     with carriage blocks, but the shaft turns with its motor and nothing slides */
+  'intake-spacers': () => {
+    const zs = TOP + 0.110, zm = TOP + 0.040, yb = -0.131, rm = 0.008, rs = 0.016, out = [0, -1, 0];
+    // the belt's two straight runs, each riding both pulley rims, outside the right side plate
+    const run = (sg) => { const a = [0.110 + sg * rm, yb, zm], b = [0.110 + sg * rs, yb, zs];
+      const d = [b[0] - a[0], 0, b[2] - a[2]], L = Math.hypot(d[0], d[2]);
+      return prism(frame(a, [d[0] / L, 0, d[2] / L], Y), [[-0.003, -0.00075], [0.003, -0.00075], [0.003, 0.00075], [-0.003, 0.00075]], L); };
+    const kids = [post('Intake Side Plate L', [0.110, 0.120, TOP + 0.065], [0.080, 0.006, 0.130]),
+      post('Intake Side Plate R', [0.110, -0.120, TOP + 0.065], [0.080, 0.006, 0.130]),
+      inst(motor5203('goBILDA 5203 Intake Motor 5203-2402-0005'), along([0.110, -0.117, zm], out)),
+      tag(inst(hub('GT2 Pulley 20T', rm, 0.010), along([0.110, -0.126, zm], out)), 'motor'),
+      tag(inst(hub('GT2 Pulley 40T', rs, 0.010), along([0.110, -0.126, zs], out)), 'roller'),
+      tag(inst(hexShaft('2106-4008-3120', 0.260), along([0.110, -0.136, zs], Y)), 'roller'),
+      inst(part('GT2 Timing Belt', [run(1), run(-1)], COL.black, 0.01), frame([0, 0, 0]))];
+    for (const y of [-0.070, 0.070]) kids.push(tag(inst(hub('Compliant Wheel 60A', 0.024, 0.020), along([0.110, y - 0.010, zs], Y)), 'roller'));
+    kids.push(tag(inst(hub('Flap Wheel 124mm', 0.062, 0.014), along([0.110, -0.007, zs], Y)), 'roller'));   // bigger than any hub
+    // spacers between the wheels, one against the flap wheel's face
+    for (const y of [-0.035, 0.015]) kids.push(tag(post('Spacer Top', [0.110, y, zs + 0.004], [0.012, 0.016, 0.010]), 'roller'));
+    return { kids, ignore: ['GT2 Timing Belt'], joints: [
+      { id: 'motor', kind: 'revolute', axis: out, pivot: [0.110, -0.117, zm], actuator: 'motor' },
+      { id: 'roller', kind: 'revolute', axis: out, pivot: [0.110, -0.126, zs], follows: 'motor', ratio: rm / rs }] };
+  },
   /* a parallel four-bar: the motor turns the lower link; the upper link swings on a pin in the
      tower; the coupler joins their ends on two more pins and carries the payload */
   'four-bar': () => {
@@ -162,6 +200,23 @@ export const MECHS = {
       { id: 'crank', kind: 'revolute', axis: Y, pivot: [0.10, 0.027, 0.200], actuator: 'motor' },
       { id: 'rocker', kind: 'revolute', axis: Y, pivot: [0.10, 0.052, 0.280], follows: 'crank', linkage: 'four-bar' },
       { id: 'coupler', kind: 'revolute', axis: Y, pivot: [0.25, 0.052, 0.200], follows: 'crank', linkage: 'four-bar', parent: 'crank' }] };
+  },
+  /* a rack and pinion: a servo on a bracket, a gear on its spline, a rack sliding in a holder under
+     the gear with a gate bar on its end. The rack doesn't turn with the gear: it slides. */
+  'rack-servo': () => {
+    const R = 0.0105, MESH = 0.0016, zr = 0.200 - R + MESH - 0.004;      // the rack's teeth reach 1.6 mm into the gear's
+    const kids = [post('Bracket Post', [0.10, 0, TOP + 0.052], [0.020, 0.020, 0.104]),
+      post('Servo Bracket', [0.10, 0, 0.187], [0.050, 0.030, 0.006]),
+      inst(servoCase('Servo Case 2000-0025-0002'), frame([0.10, 0, 0.200], Y, X)),
+      post('Rack Holder', [0.105, 0.0215, zr - 0.006], [0.030, 0.024, 0.004]),
+      tag(inst(spline('Servo Spline'), along([0.110, 0.0185, 0.200], Y)), 'pinion'),
+      tag(inst(hub('Servo Gear 24T', R, 0.006), along([0.110, 0.0245, 0.200], Y)), 'pinion'),
+      tag(rack('Gear Rack 35T', 0.108, 0.006, 0.008, 35, [0.140, 0.0275, zr]), 'rack'),
+      tag(inst(bar('Gate Bar', [0.006, 0.040, 0.030], 0.02), frame([0.197, 0.0275, zr + 0.011])), 'rack')];
+    return { kids, joints: [
+      { id: 'pinion', kind: 'revolute', axis: Y, pivot: [0.110, 0.0185, 0.200], actuator: 'servo' },
+      // turning the gear +Y carries its bottom tooth, and the rack under it, toward -x
+      { id: 'rack', kind: 'linear', axis: [-1, 0, 0], follows: 'pinion', ratio: R - MESH / 2 }] };
   },
   /* a joint on a joint: a servo wrist on the end of a gearmotor arm, a claw plate on its horn */
   'wrist-on-arm': () => {

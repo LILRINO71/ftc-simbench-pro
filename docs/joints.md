@@ -13,36 +13,29 @@ mechanism:
 There are four ways to get those. They all end up as the same mechanisms, so the sim, the
 Checks tab and the 3D view treat them alike.
 
-## 1. Onshape mates: exact
+## 0. Onshape's URDF export: exact, and the usual way
 
-If the robot is in Onshape, its assembly already has every mate. `src/mates.js` reads the
-assembly definition (`GET /api/assemblies/d/…/w/…/e/…?includeMateFeatures=true`). It groups parts
-fastened together into rigid bodies and walks the moving mates (revolute, slider, cylindrical,
-pin-slot) out from the chassis as a joint tree. Each joint gets its true axis and pivot, the parts
-it carries, its limits from the features list, and any gear, rack or screw relation to another
-joint.
+Since March 2026 Onshape exports an assembly as URDF (right-click the assembly tab → **Export** →
+format **URDF**, geometry **GLB**): the mates become joints with their limits, the mass
+properties become inertials, and every part comes as a mesh. Drop the zip on SimBench and
+`src/meshfiles.js` unzips and reads it on the page, `src/urdf.js` makes the robot, and
+`src/bind.js` sets aside the library's bearing and shaft turns and ties the code's devices to the
+real joints. No sign-in, no server, no API quota. The export drops mate *relations*, so a cascade's
+stages and a gear pair's followers are inferred as hints and coupled once the code says which is
+driven. See [robot-setup.md](robot-setup.md).
 
-**Sign in with Onshape** (`src/onshapelink.js`, `functions/onshape/`): in the **Get my robot from
-Onshape** pop-up, sign in through Onshape's own page once, then paste the assembly's address. It
-reads the same API calls as the bookmark below, through a small Cloudflare Pages Function, and works
-on school computers, which block bookmarks. Setting it up for a site is in `DEPLOY.md`.
+## 1. Onshape mates: exact, with relations
 
-**In one click** (`src/onshapelink.js`): drag **Send to SimBench** from the **Mates & joints**
-panel to the bookmarks bar once. Then, on the robot's assembly tab in Onshape, click the bookmark.
-It reads that assembly's definition and mate features from Onshape's API with the team's own
-sign-in (the same two pages as below) and opens SimBench with them packed into the address's
-`#fragment`. A fragment never leaves the browser, so no server sees the robot, and no API key is
-needed.
-- **Robot already open:** if the team's robot is open in another SimBench tab, that tab offers
-  **Apply**, and the new tab closes.
-- **Robot not open yet:** the mates wait for the STEP of the same assembly and apply as soon as it's
-  dropped. They never go onto the default robot.
-- **Very big assembly:** it doesn't fit in an address, so the bookmark saves one `.onshape.json`
-  file to drop instead.
-
-**By hand**, the same panel builds the two API links from an assembly URL. Open them in a browser
-that's signed in to Onshape, save the pages, and drop them on the panel. For scripting there's
-`tools/onshape-mates.mjs`.
+If the robot is in Onshape, its assembly already has every mate. A team pastes the assembly's
+address on the import card; `src/onshapelink.js` reads the assembly definition
+(`GET /api/assemblies/d/…/w/…/e/…?includeMateFeatures=true`), its features and each Part Studio's
+shapes and mass properties through the **Sign in with Onshape** relay (`functions/onshape/`, set
+up in `DEPLOY.md`). `src/mates.js` groups parts fastened together into rigid links and walks the
+moving mates (revolute, slider, cylindrical, pin-slot) out from the chassis as a joint tree. Each
+joint gets its true axis and pivot, the parts it carries, its limits from the features list, and
+any gear, rack or screw relation to another joint. The export zip (**Export → URDF**) gives the
+same joints through `src/urdf.js`, without the relations. Which of those joints are mechanisms,
+and what drives each, is the team's to say: [exact-joints.md](exact-joints.md).
 
 ## 2. A joint spec: written down once
 
@@ -100,8 +93,9 @@ the code sends goes up, after any `setDirection(REVERSE)` in the code.
 | Field | Meaning |
 |---|---|
 | `id`, `label` | Name in the UI and in `parent` / `follows`. |
-| `kind` | `slider` or `revolute`. |
+| `kind` | `slider` or `revolute`. `linear`, `prismatic` and `linear-slide` are read as `slider`. |
 | `axis`, `pivot` | Direction (unit or not) and a point on the axis, in mm. |
+| `dir` | `-1`: the device drives the joint the other way along `axis` (the rig panel's **±**); its `limits` still count along `axis`. Default `1`. |
 | `parent` | The joint this one rides on (default: the chassis). |
 | `device` | The code device or devices that drive it, by variable name or configuration name. |
 | `part` | The actuator's part number: speed, torque, ticks per revolution (e.g. `5203-2402-0051` = 50.9:1, 1425.1 ticks per turn). |

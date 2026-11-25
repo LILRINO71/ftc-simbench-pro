@@ -10,34 +10,45 @@ import { fileURLToPath } from 'node:url';
 import { buildRobot } from '../tools/stepgen.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const ENGINE = ['hardware', 'samples', 'step', 'hull', 'inertia', 'expr', 'jvm', 'jvmlib', 'jvmprelude', 'jvmrun', 'java', 'roadrunner', 'mapping', 'robotconfig', 'compare', 'analyze', 'drivetrain', 'frame', 'mates', 'onshapelink', 'onshapecad', 'urdf', 'jointspec', 'autorig-lib', 'autorig', 'robotcheck', 'dynamics', 'field', 'shots', 'match', 'robotlite', 'net', 'controllers', 'session', 'mathdoc', 'gitimport', 'onboarding', 'sim'];
+const ENGINE = ['hardware', 'samples', 'step', 'hull', 'inertia', 'expr', 'jvm', 'jvmlib', 'jvmprelude', 'jvmrun', 'java', 'roadrunner', 'mapping', 'robotconfig', 'compare', 'analyze', 'drivetrain', 'frame', 'mates', 'onshapelink', 'onshapecad', 'meshfiles', 'urdf', 'jointspec', 'jointsheet', 'pedrogen', 'partsdb', 'grader', 'autorig-lib', 'autorig', 'robotcheck', 'bind', 'dynamics', 'joltmech', 'field', 'ballphys', 'shots', 'match', 'payload', 'robotlite', 'net', 'netrelay', 'controllers', 'session', 'mathdoc', 'gitimport', 'onboarding', 'challenges', 'touch', 'sim', 'calibrate', 'montecarlo', 'tier', 'figures', 'shotfx'];
 const EXPORTS = [
-  'Field', 'Shots', 'IN', 'TIP_GRAMS', 'FRONTS', 'footprintOf', 'capsulePush', 'nearestMotorId', 'SHOOTER_JAVA',
+  'Field', 'Shots', 'IN', 'ballWorld', 'ballSpec', 'ballSpawn', 'ballBackspin', 'BALL_K', 'BALL_HZ', 'shotBall', 'ELEMENT_G', 'TIP_GRAMS', 'FRONTS', 'footprintOf', 'capsulePush', 'nearestMotorId', 'SHOOTER_JAVA',
   'convexHull', 'boxCorners', 'solidTriangles', 'thinPoints', 'solidKind', 'sampleSolids', 'robotBase', 'makeRng',
   'padFromGamepad', 'padName', 'padFor', 'busiestPad', 'PAD_BUTTONS',
-  'HW_PARTS', 'GENERIC', 'hwFromPart', 'specFor',
+  'HW_PARTS', 'GENERIC', 'hwFromPart', 'specFor', 'ticksPerRev',
   'SAMPLE_JAVA', 'DRIVE_JAVA', 'SAMPLE_CAD', 'synthGeometry',
-  'splitStepRecords', 'parseSTEP', 'classifyMechs', 'recomputeChain', 'rigCarries', 'rigRoots', 'mlabel',
+  'splitStepRecords', 'parseSTEP', 'stepShapeUnits', 'classifyMechs', 'recomputeChain', 'rigCarries', 'rigRoots', 'mlabel',
   'JOINT_KINDS', 'leverOf', 'holdTorque', 'armAngleDeg',
-  'jvParse', 'jvLex', 'JVM', 'JvProgram', 'jvCompile', 'jvAnalyze', 'jvProbeRun', 'jvProbeHost', 'netTrystero', 'NET_RELAYS', 'jvCodeFor', 'jvMaybe', 'jvPrelude',
-  'parseExpr', 'evalNode', 'parseJava', 'deriveBindings', 'travelRange', 'isCommanded',
-  'Match', 'MATCH_SKILL', 'MATCH_PTS', 'segCrossesBox', 'boxPush', 'Online', 'netLoopback', 'netGzip', 'netGunzip', 'netHash', 'netSample', 'netAB', 'netKeep', 'dtWheelGeom', 'dtCompositeWheels', 'dtRollerHand', 'dtFrame', 'dtBaseSet', 'dtSymmetricSet', 'dtDriveComposites', 'driveFromSpec', 'liteCluster', 'liteBuild', 'liteEncode', 'liteDecode', 'LITE_FORMAT', 'netCode', 'netSlotPose', 'netSlotY', 'netEl', 'netEls', 'NET_SLOTS', 'NET_PROTO', 'autoMap', 'wheelCorner', 'detectDrivetrain', 'analyze', 'checkRobot', 'setupAuto', 'isDriveDevice', 'isCommanded', 'Sim', 'driveProbe', 'driveVerdict', 'normalizeExpr', 'motorTpr',
+  'jvParse', 'jvLex', 'JVM', 'JvProgram', 'jvCompile', 'jvAnalyze', 'jvProbeRun', 'jvProbeHost', 'netTrystero', 'NET_RELAYS', 'jvCodeFor', 'jvMaybe', 'jvPrelude', 'jvSiblings', 'jvLostBase',
+  'parseExpr', 'evalNode', 'parseJava', 'javaOpModeTag', 'javaIsOpMode', 'javaDeclaresType', 'javaCodeMask', 'javaUnescape', 'javaSortSaved', 'deriveBindings', 'travelRange', 'isCommanded',
+  'Match', 'MATCH_SKILL', 'MATCH_PTS', 'MATCH_BOT', 'boxPush', 'footBox', 'Payload', 'SLEW', 'flyStep', 'Online', 'netRelay', 'netConnect', 'netPackBin', 'netUnpackBin', 'netRandomId', 'netLoopback', 'netGzip', 'netGunzip', 'netHash', 'netSample', 'netAB', 'netKeep', 'dtWheelGeom', 'dtCompositeWheels', 'dtWheelOfParts', 'dtRollerHand', 'dtFrame', 'dtBaseSet', 'dtSymmetricSet', 'dtDriveComposites', 'driveFromSpec', 'liteCluster', 'liteBuild', 'liteEncode', 'liteDecode', 'LITE_FORMAT', 'netCode', 'netSlotPose', 'netSlotY', 'netEl', 'netEls', 'NET_SLOTS', 'NET_PROTO', 'autoMap', 'wheelCorner', 'detectDrivetrain', 'analyze', 'checkRobot', 'setupAuto', 'isDriveDevice', 'Sim', 'lerpPose', 'driveProbe', 'driveVerdict', 'motorTpr', 'normalizeExpr',
   'AUTO_JAVA', 'coverage', 'lineAt', 'collectStaticFields',
   'parseRobotConfig', 'checkRobotConfig', 'configKind', 'codeKind', 'diffOpModes',
+  // grader, path links, size rules, parts by number
+  'gradePath', 'GRADER_DEFAULTS', 'pathLinkEncode', 'pathLinkDecode', 'robotSize', 'ROBOT_SIZE_RULES', 'partsParse', 'partsLookup', 'partsWheel', 'partsOfCad', 'dtIsWheel',
   // Pro
   'MATERIALS', 'hullVolume', 'partMass', 'massProps', 'inertiaOf',
   'driveFromCAD', 'DRIVE_KINDS', 'ikMatrix', 'fkFromIk', 'wheelSpeeds', 'chassisFromWheels',
-  'Dyn', 'tractionLimit', 'motorTorque', 'wheelLoads',
-  'onshapeApiLinks', 'mateQty', 'readOnshapePaste', 'onshapeLimitLinks', 'onshapeGrab', 'onshapeRead', 'onshapeRef', 'onshapeFromLink', 'onshapeSignInState', 'onshapeBookmarklet', 'readOnshapeHash', 'checkOnshapePayload', 'ONSHAPE_FORMAT', 'parseOnshapeAssembly', 'applyMateLimits', 'matchOnshapeParts', 'applyOnshapeMates', 'mateQty',
-  'cadFromOnshape', 'cadFromUrdf', 'urdfToPayload', 'urdfStl', 'urdfXml', 'onshapeGeomKey', 'osColor', 'osCompactTess', 'osCompactMass',
+  'Dyn', 'tractionLimit', 'motorTorque', 'wheelLoads', 'JoltMech', 'JOLT_LIB',
+  'onshapeRead', 'onshapeGeomCache', 'pedroToField', 'fieldToPedro', 'pedroNew', 'pedroCurves', 'bezierAt', 'pedroPolyline', 'pedroLength', 'pedroCheck', 'pedroHits', 'pedroClean', 'pedroToHash', 'pedroFromHash', 'pedroClass', 'pedroJava', 'PEDRO_CONSTANTS_JAVA', 'PEDRO_FORMAT', 'onshapeRef', 'onshapeFromLink', 'onshapeSignInState', 'checkOnshapePayload', 'onshapeLinks', 'ONSHAPE_FORMAT', 'parseOnshapeAssembly', 'applyMateLimits', 'matchOnshapeParts', 'applyOnshapeMates', 'mateQty',
+  'cadFromOnshape', 'urdfStl', 'urdfXml', 'urdfRobot', 'urdfRobotFromZip', 'urdfExact', 'urdfApplyHints', 'meshReduce', 'meshDecimate', 'stlTriangles', 'zipEntries', 'zipRead', 'gltfRead', 'objRead', 'meshRead', 'bindDevices', 'classifyJoints', 'BIND_RULES', 'onshapeGeomKey', 'osColor', 'osCompactTess', 'osCompactMass', 'osMeshCentroid', 'onshapeLaunch', 'onshapeLaunchStrip', 'onshapeBookmark',
   'rrDetect', 'rrParseHelpers', 'rrAttach', 'rrBuildPlan', 'rrSample', 'RRRuntime',
-  'autoRig', 'ARActuators', 'ARSlides', 'ARCarry',
+  'autoRig', 'actuatorsOf', 'ARActuators', 'ARSlides', 'ARCarry',
+  'JOINT_SHEET_FORMAT', 'jointTag', 'jointNameKey', 'onshapeMateName', 'sheetFromTags', 'applyJointSheet', 'clearJointSheet', 'mergeJointSheets', 'sheetBindings', 'checkJointSheet', 'tagFor', 'isExact',
   'JOINT_SPEC_FORMAT', 'applyJointSpec', 'jointSpecSelect', 'followQ', 'linkPin', 'sliderCrank', 'rodAngle', 'fourBarPin', 'jointValues', 'mateJointQ', 'specFromCad', 'suggestJoint',
   'robotFrame', 'frameUp', 'applyFrame', 'canonicalizeCAD', 'frontToRobot', 'robotToWorld', 'frontFromWheels', 'frontAcrossWheels', 'frameMatrix', 'FRAME_UP_ROWS', 'buildRig', 'ASSUMED_KG', 'findingHTML',
   'FTCSIM_MAGIC', 'packSession', 'unpackSession', 'sessionFromBench',
   'mathReport', 'mathText', 'mathMarkdown',
   'parseRepoRef', 'rawUrlsFor', 'pickOpModes', 'javaLooksLikeOpMode',
-  'TOUR', 'statusOf', 'STATUS_RANK',
+  // calibration + Monte Carlo (src/calibrate.js, src/montecarlo.js)
+  'CAL_FORMAT', 'CAL_SECONDS', 'CAL_BOUNDS', 'calCmd', 'calApplyToRig', 'calRun', 'calMeasure', 'calTicksPerIn', 'calGearFor', 'calSanitize', 'calSolve', 'calFit', 'calOpts', 'calJava',
+  'MC_RANGES', 'MC_MAX_RUNS', 'mcRng', 'mcSeedFor', 'mcVariation', 'mcExtremes', 'mcPathEnd', 'mcRunOne', 'mcRun', 'mcSummary', 'mcCadForWorker', 'mcPlain', 'mcPrepare', 'mcHistogram', 'mcWorkerBody', 'mcSetup', 'mcJudge', 'mcNominal', 'mcTarget', 'mcSim', 'MC_KEYS', 'MC_AUTO_SECONDS', 'MC_DEFAULT_RUNS',
+  'FX_LEVELS', 'fxLevel', 'fxPool', 'fxEaseOut', 'fxHop', 'trailFade', 'trailWidth', 'fxPathAt', 'popupState', 'popupSlot', 'fxSpinRate', 'fxSpinAxis', 'fxShakeAmp', 'ShotFx',
+  // the AI robots' and HUMAN PLAYERS' poses (src/figures.js)
+  'figTrack', 'humanPose', 'throwBallPhase', 'mecanumTurns', 'FIG_GRAB', 'FIG_RELEASE', 'FIG_IDLE', 'FIG_THROW', 'FIG_PEOPLE',
+  'TOUR', 'statusOf', 'STATUS_RANK', 'deviceTier', 'tierMobile', 'TIER_BUDGETS', 'dynResInit', 'dynResStep', 'refreshMs',
+  // phone controls and challenge cards
+  'touchStick', 'touchPhone', 'touchModel', 'touchWrite', 'TOUCH_DEAD', 'TOUCH_BUTTONS', 'CHALLENGES', 'chalSnapshot', 'chalNext', 'chalMark', 'chalLoad', 'chalFar', 'chalFace', 'chalMove', 'chalPark',
 ];
 
 function engineSource() {

@@ -1,0 +1,402 @@
+// Match rooms on the app's own origin (workers/room/room.js, functions/room,
+// src/netrelay.js): the room relays and refuses what it should, the Pages
+// Function routes and guards it, and a whole online match plays over it,
+// by WebSocket and by Server-Sent Events, with the real match protocol.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { loadEngine, loadWithField } from './load.mjs';
+import { RoomCore, RoomDO, packBin, unpackBin } from '../workers/room/room.js';
+import { handle } from '../functions/room/[[path]].js';
+
+const E = loadEngine();
+/* a connection the room can talk to, that records what it heard */
+const T = (id) => (id + 'secret-token-0123456789').slice(0, 24);
+const conn = (kind = 'ws') => { const heard = []; return { kind, heard, send: (d) => heard.push(typeof d === 'string' ? JSON.parse(d) : unpackBin(d)), close() {} }; };
+
+test('room: arrivals learn who is there, everyone hears arrivals and departures', () => {
+  const R = new RoomCore('m-ABCDE'), a = conn(), b = conn();
+  assert.equal(R.join('alice', a, T('alice')), null);
+  assert.equal(R.join('bobby', b, T('bobby')), null);
+  assert.deepEqual(a.heard[0].peers, []);
+  assert.deepEqual(b.heard[0].peers, ['alice']);
+  assert.deepEqual(a.heard[1], { t: 'join', id: 'bobby' });
+  R.leave('bobby');
+  assert.deepEqual(a.heard.at(-1), { t: 'leave', id: 'bobby' });
+});
+
+test('room: messages go to everyone else, or to the players named, from who really sent them', () => {
+  const R = new RoomCore('r'), a = conn(), b = conn(), c = conn();
+  R.join('aaaa', a, T('aaaa')); R.join('bbbb', b, T('bbbb')); R.join('cccc', c, T('cccc'));
+  R.text('aaaa', JSON.stringify({ t: 'm', d: { k: 'hi' }, from: 'cccc' }));
+  assert.deepEqual(b.heard.at(-1), { t: 'm', from: 'aaaa', d: { k: 'hi' } }, 'a sender can\'t pretend to be someone else');
+  assert.deepEqual(c.heard.at(-1), { t: 'm', from: 'aaaa', d: { k: 'hi' } });
+  assert.ok(!a.heard.some((m) => m.t === 'm'), 'not echoed');
+  R.text('bbbb', JSON.stringify({ t: 'm', to: ['cccc'], d: 1 }));
+  assert.equal(c.heard.at(-1).d, 1);
+  assert.notEqual(a.heard.at(-1).from, 'bbbb');
+  R.bin('aaaa', packBin({ to: ['bbbb'], meta: { k: 'mdl' } }, new Uint8Array([9, 8, 7])));
+  const got = b.heard.at(-1);
+  assert.deepEqual(got.header, { t: 'b', from: 'aaaa', meta: { k: 'mdl' } });
+  assert.deepEqual([...got.payload], [9, 8, 7]);
+});
+
+test('room: a taken id, a full room, a bad id, oversize, junk and floods are refused', () => {
+  const R = new RoomCore('r', { limits: { peers: 2, burst: 5, ratePerSec: 1, textBytes: 100 } });
+  const a = conn(), b = conn();
+  assert.equal(R.join('aaaa', a, T('aaaa')), null);
+  assert.equal(R.join('aaaa', conn(), 'someone-elses-secret-000'), 'taken', 'an id is its secret holder\'s');
+  assert.equal(R.join('dddd', conn(), 'short'), 'bad-token');
+  assert.equal(R.join('x', conn(), T('x')), 'bad-id');
+  assert.equal(R.join('bbbb', b, T('bbbb')), null);
+  assert.equal(R.join('cccc', conn(), T('cccc')), 'full');
+  R.text('aaaa', JSON.stringify({ t: 'm', d: 'x'.repeat(200) }));
+  assert.equal(a.heard.at(-1).why, 'too-big');
+  R.text('aaaa', '{nope');
+  assert.equal(a.heard.at(-1).why, 'bad-json');
+  for (let i = 0; i < 10; i++) R.text('aaaa', JSON.stringify({ t: 'm', d: i }));
+  assert.equal(a.heard.at(-1).why, 'slow-down');
+  assert.ok(b.heard.filter((m) => m.t === 'm').length <= 5, 'a flood is cut off at the burst');
+  R.bin('aaaa', new Uint8Array([255, 255, 255, 255, 1]));
+  assert.ok(['bad-frame', 'slow-down'].includes(a.heard.at(-1).why));
+});
+
+test('room: the clock', () => {
+  let t = 5000; const R = new RoomCore('r', { now: () => t }), a = conn(), b = conn();
+  R.join('aaaa', a, T('aaaa')); R.join('bbbb', b, T('bbbb'));
+  R.text('aaaa', JSON.stringify({ t: 'time', echo: 42 }));
+  assert.deepEqual(a.heard.at(-1), { t: 'time', now: 5000, echo: 42 });
+});
+
+/* The room kept a lockstep command ledger no page used, and one player could push another's
+   commands out of it by sending ticks ever further ahead (audit F7). It is gone: a room relays
+   and keeps nothing about the match, so a flood of 'cmd' or 'replay' reaches nobody and stays
+   nowhere. */
+test('room: no command ledger: cmd and replay messages are neither relayed nor kept', () => {
+  const R = new RoomCore('r'), a = conn(), b = conn();
+  R.join('aaaa', a, T('aaaa')); R.join('bbbb', b, T('bbbb'));
+  const before = b.heard.length;
+  for (let k = 0; k < 200; k += 1) R.text('aaaa', JSON.stringify({ t: 'cmd', tick: 1000 + k * 120, d: 'x' }));
+  R.text('bbbb', JSON.stringify({ t: 'replay', from: 0 }));
+  assert.equal(b.heard.length, before, 'nothing reached the other player, and no replay came back');
+  assert.ok(!('ledger' in R) && typeof R.command !== 'function' && typeof R.replay !== 'function');
+  R.text('aaaa', JSON.stringify({ t: 'm', d: 'still here' }));
+  assert.deepEqual(b.heard.at(-1), { t: 'm', from: 'aaaa', d: 'still here' }, 'ordinary messages still go through');
+});
+
+/* What a browser on the site's own page sends: a WebSocket and a POST carry Origin; a
+   same-origin GET (EventSource, fetch) carries no Origin, only Sec-Fetch-Site. */
+const OWN = { WS: { Origin: 'https://sb.example', 'Sec-Fetch-Site': 'same-origin' }, GET: { 'Sec-Fetch-Site': 'same-origin' } };
+
+test('pages function: health, TURN, routing, and another site can\'t borrow the rooms', async () => {
+  const req = (path, init) => new Request('https://sb.example' + path, init);
+  let r = await handle(req('/room/health'), {});
+  assert.deepEqual(await r.json(), { ready: false, turn: false });
+  r = await handle(req('/room/m-AAAAA/ws?id=abcd1234', { headers: OWN.WS }), {});
+  assert.equal(r.status, 501, 'no rooms bound: the page keeps using WebRTC');
+  const seen = [];
+  const ROOMS = { idFromName: (n) => 'id:' + n, get: (id) => ({ fetch: (q) => { seen.push([id, new URL(q.url).pathname]); return new Response('ok'); } }) };
+  r = await handle(req('/room/m-AAAAA/ws?id=abcd1234', { headers: OWN.WS }), { ROOMS });
+  assert.deepEqual(seen, [['id:m-AAAAA', '/room/m-AAAAA/ws']]);
+  r = await handle(req('/room/m-AAAAA/ws?id=abcd1234', { headers: { Origin: 'https://evil.example' } }), { ROOMS });
+  assert.equal(r.status, 403);
+  r = await handle(req('/room/..%2Fx/ws?id=abcd1234', { headers: OWN.WS }), { ROOMS });
+  assert.equal(r.status, 400);
+  r = await handle(req('/room/turn', { headers: OWN.GET }), {});
+  assert.equal((await r.json()).turn, false);
+  const fetchImpl = async (u, init) => { assert.match(u, /keys\/KEY\/credentials\/generate-ice-servers$/); assert.equal(init.headers.Authorization, 'Bearer TOK');
+    return new Response(JSON.stringify({ iceServers: [{ urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.cloudflare.com:53'] }, { urls: ['turns:turn.cloudflare.com:443?transport=tcp', 'turn:turn.cloudflare.com:53?transport=udp'], username: 'u', credential: 'c' }] }), { status: 201 }); };
+  r = await handle(req('/room/turn', { headers: OWN.GET }), { TURN_KEY_ID: 'KEY', TURN_KEY_API_TOKEN: 'TOK' }, fetchImpl);
+  const j = await r.json();
+  assert.equal(j.turn, true);
+  assert.deepEqual(j.iceServers[1].urls, ['turns:turn.cloudflare.com:443?transport=tcp'], 'port 53 dropped, TURN over 443 kept');
+});
+
+/* TURN credentials and Durable Object time are billed to the site. The Origin check used to
+   run only when a request had one, so anything that left the header out (curl, a bot, a
+   server) got fresh TURN credentials and opened rooms (audit F3). Now a request must come
+   from the site's own page: an Origin of this site, or no Origin and Sec-Fetch-Site:
+   same-origin. A non-browser client can still forge both headers; this keeps the site's
+   rooms and TURN key from being used by another site or by a client that doesn't try. */
+test('pages function: TURN and rooms only for the site\'s own pages, not for a request with no Origin', async () => {
+  const req = (path, init) => new Request('https://sb.example' + path, init);
+  let minted = 0, opened = 0;
+  const fetchImpl = async () => { minted++; return new Response(JSON.stringify({ iceServers: [{ urls: ['turns:turn.cloudflare.com:443?transport=tcp'], username: 'u', credential: 'c' }] }), { status: 201 }); };
+  const ROOMS = { idFromName: (n) => n, get: () => ({ fetch: () => { opened++; return new Response('ok'); } }) };
+  const env = { TURN_KEY_ID: 'KEY', TURN_KEY_API_TOKEN: 'TOK', ROOMS };
+  const refused = [
+    ['no headers at all', {}],
+    ['another site', { Origin: 'https://evil.example' }],
+    ['another site, said by Sec-Fetch-Site', { 'Sec-Fetch-Site': 'cross-site' }],
+    ['a sibling subdomain', { 'Sec-Fetch-Site': 'same-site' }],
+    ['typed into the address bar', { 'Sec-Fetch-Site': 'none' }],
+    ['a sandboxed frame', { Origin: 'null' }],
+    ['this site over http', { Origin: 'http://sb.example' }],
+    ['own Origin, but the browser says cross-site', { Origin: 'https://sb.example', 'Sec-Fetch-Site': 'cross-site' }],
+    // Referer is only the second way in for a browser that sends no Sec-Fetch-Site
+    ['a Referer of another site', { Referer: 'https://evil.example/page' }],
+    ['a Referer that only starts like this site', { Referer: 'https://sb.example.evil.example/' }],
+    ['a Referer of this site over http', { Referer: 'http://sb.example/' }],
+    ['a Referer that is not an address', { Referer: 'sb.example' }],
+    ['own Referer, but the browser says cross-site', { Referer: 'https://sb.example/', 'Sec-Fetch-Site': 'cross-site' }],
+    ['own Referer, but another site\'s Origin', { Referer: 'https://sb.example/', Origin: 'https://evil.example' }],
+  ];
+  for (const [what, headers] of refused) {
+    for (const [path, method] of [['/room/turn', 'GET'], ['/room/r1abcd/sse?id=bot1abcd', 'GET'], ['/room/r1abcd/ws?id=bot1abcd', 'GET'], ['/room/r1abcd/send?id=bot1abcd', 'POST']]) {
+      const r = await handle(req(path, { method, headers, body: method === 'POST' ? '[]' : undefined }), env, fetchImpl);
+      assert.equal(r.status, 403, `${what}: ${method} ${path}`);
+    }
+  }
+  assert.equal(minted, 0, 'no TURN credentials minted for any of them');
+  assert.equal(opened, 0, 'no room reached by any of them');
+  // the site's own page: an EventSource and fetch (no Origin), a WebSocket and a POST (Origin)
+  for (const [path, method, headers] of [['/room/turn', 'GET', OWN.GET], ['/room/r1abcd/sse?id=me1abcd', 'GET', OWN.GET],
+    ['/room/r1abcd/ws?id=me1abcd', 'GET', OWN.WS], ['/room/r1abcd/send?id=me1abcd', 'POST', { Origin: 'https://sb.example' }]]) {
+    const r = await handle(req(path, { method, headers, body: method === 'POST' ? '[]' : undefined }), env, fetchImpl);
+    assert.equal(r.status, 200, `own page: ${method} ${path}`);
+  }
+  assert.equal(minted, 1);
+  assert.equal(opened, 3);
+  // A browser that sends no Sec-Fetch-Site (Safari before 16.4, any page on plain http): its plain
+  // GET names the site's own page in Referer. That used to be a 403: no TURN, and no way into a
+  // room for a network that strips WebSockets.
+  const OLD = { Referer: 'https://sb.example/?robot=demo' };
+  for (const path of ['/room/turn', '/room/r1abcd/sse?id=old1abcd']) {
+    const r = await handle(req(path, { method: 'GET', headers: OLD }), env, fetchImpl);
+    assert.equal(r.status, 200, `a browser with no Sec-Fetch-Site: GET ${path}`);
+  }
+  assert.equal(minted, 2); assert.equal(opened, 4);
+  // but a WebSocket and a POST always carry Origin: a Referer alone does not open those
+  for (const [path, init] of [['/room/r1abcd/ws?id=old1abcd', { method: 'GET', headers: Object.assign({ Upgrade: 'websocket' }, OLD) }],
+    ['/room/r1abcd/send?id=old1abcd', { method: 'POST', headers: OLD, body: '[]' }]]) {
+    assert.equal((await handle(req(path, init), env, fetchImpl)).status, 403, `a Referer alone: ${init.method} ${path}`);
+  }
+  assert.equal(opened, 4);
+  // /room/health costs nothing and tells nothing secret: anyone may ask
+  assert.equal((await handle(req('/room/health'), env)).status, 200);
+});
+
+/* ---- the client, against rooms running in this process ----
+   FakeWS and FakeES stand in for the browser's WebSocket and EventSource;
+   everything they send goes through a queue the test flushes. */
+function relayHub(opts = {}) {
+  const rooms = new Map(), queue = [], timers = [];
+  const room = (n) => rooms.get(n) || rooms.set(n, new RoomCore(n)).get(n);
+  const parse = (u) => { const x = new URL(u); const m = /^\/room\/([^/]+)\/(ws|sse|send)$/.exec(x.pathname); return { name: decodeURIComponent(m[1]), id: x.searchParams.get('id'), tok: x.searchParams.get('tok') }; };
+  class FakeWS {
+    constructor(url) {
+      this.readyState = 0; const { name, id } = parse(url.replace(/^ws/, 'http')); this.name = name; this.id = id;
+      if (opts.blockWs) { queue.push(() => { this.readyState = 3; this.onclose && this.onclose({}); }); return; }
+      const { tok } = parse(url.replace(/^ws/, 'http'));
+      if (opts.stallWs) return;                  // a proxy that holds the upgrade: never opens, never closes
+      queue.push(() => { this.readyState = 1; const why = room(name).join(id, this.conn = { kind: 'ws', close: () => {}, send: (d) => queue.push(() => this.onmessage && this.onmessage({ data: typeof d === 'string' ? d : d.buffer.slice(d.byteOffset, d.byteOffset + d.byteLength) })) }, tok);
+        if (why) { this.readyState = 3; this.onclose && this.onclose({}); } });
+    }
+    send(d) { queue.push(() => { const R = room(this.name); if (typeof d === 'string') R.text(this.id, d); else R.bin(this.id, d); }); }
+    close() { if (this.readyState === 3) return; this.readyState = 3; hub.closed.push('ws'); queue.push(() => { this.onclose && this.onclose({}); room(this.name).leave(this.id, this.conn); }); }
+  }
+  class FakeES {
+    constructor(url) { const { name, id, tok } = parse(url); this.name = name; this.id = id; hub.streams++;
+      queue.push(() => { const why = room(name).join(id, this.conn = { kind: 'sse', close: () => {}, send: (s) => queue.push(() => this.onmessage && this.onmessage({ data: s })) }, tok); if (why) queue.push(() => this.onerror && this.onerror({})); }); }
+    close() { queue.push(() => room(this.name).leave(this.id, this.conn)); }
+  }
+  const fetch = async (u, init) => { const { name, id, tok } = parse(u); hub.posts.push(init.headers['Content-Type']);
+    if (!room(name).owns(id, tok)) return { ok: false, status: 403, json: async () => ({}) };
+    queue.push(() => { if (/octet-stream/.test(init.headers['Content-Type'])) room(name).bin(id, init.body); else room(name).text(id, init.body); });
+    return { ok: true, json: async () => ({}) }; };
+  const setTimeout = (f, ms) => { const t = { f, ms, alive: true }; timers.push(t); return t; };
+  const clearTimeout = (t) => { if (t) t.alive = false; };
+  const hub = {
+    rooms, queue, streams: 0, posts: [], closed: [],
+    endpoint(id, tok) { return E.netRelay({ base: 'https://sb.example', self: id, tok, WebSocket: FakeWS, EventSource: FakeES, fetch, setTimeout, clearTimeout, sse: opts.sse }); },
+    // deliver everything, firing timers that are due as if their time had come
+    flush() { for (let g = 0; g < 2000; g++) { if (queue.length) { queue.shift()(); continue; } const t = timers.find((x) => x.alive); if (!t) break; t.alive = false; t.f(); } },
+  };
+  return hub;
+}
+
+for (const mode of ['WebSocket', 'SSE', 'SSE after a stripped WebSocket']) {
+  test('relay (' + mode + '): a host and a guest meet in the lobby, take places, start, and see each other drive', () => {
+    const hub = relayHub({ sse: mode === 'SSE', blockWs: mode === 'SSE after a stripped WebSocket' });
+    const mk = (id) => { const X = loadWithField(), clock = { t: 1_000_000 }; X.Online.now = () => clock.t; X.Online.use(hub.endpoint(id));
+      const sim = { chassis: { x: 0, y: 0, h: 0 }, footprint: { hx: 0.2286, hy: 0.2286, ox: 0, oy: 0 }, obstacles: X.Field.obstacles(0.4), vel: { x: 0, y: 0 } };
+      return { E: X, O: X.Online, clock, sim, id }; };
+    const H = mk('host1'), G = mk('guest1');
+    G.O.browse();
+    H.O.host({ name: 'Team 111', pub: true, period: 'TeleOp' });
+    hub.flush();
+    const open = G.O.openMatches();
+    assert.equal(open.length, 1, 'the lobby works over the relay');
+    assert.ok(G.O.join(open[0].code, { name: 'Team 222', hid: open[0].hid }));
+    hub.flush();
+    assert.equal(G.O.state, 'room');
+    G.O.pick('blue1'); hub.flush();
+    H.O.setReady(true, 'TeleOp'); G.O.setReady(true, 'TeleOp'); hub.flush();
+    assert.ok(H.O.start(), H.O.waitingFor().join('; '));
+    hub.flush();
+    for (const pc of [H, G]) { const s = pc.O.mySlot(), p = pc.E.netSlotPose(s, pc.sim.footprint); pc.sim.chassis = { x: p.x, y: p.y, h: p.h }; }
+    for (let i = 0; i < 250; i++) { for (const pc of [H, G]) { pc.clock.t += 20; pc.O.step(0.02, pc.sim); } G.sim.chassis.x += 0.002; hub.flush(); }
+    assert.equal(H.O.state, 'playing');
+    const buf = H.O.remote[G.id] && H.O.remote[G.id].buf, seen = buf && buf[buf.length - 1];
+    assert.ok(seen && Math.abs(seen.x - G.sim.chassis.x) < 0.05, 'the host hears the guest where the guest is: ' + (seen && seen.x) + ' vs ' + G.sim.chassis.x);
+  });
+}
+
+test('relay: the room\'s clock reaches the page', async () => {
+  const hub = relayHub();
+  const A = hub.endpoint('aaaa1').join('r1'), B = hub.endpoint('bbbb1').join('r1');
+  const msgs = [];
+  B.onMessage((m, from) => msgs.push([from, m]));
+  hub.flush();
+  const t = A.time(); hub.flush();
+  const got = await t;
+  assert.ok(Number.isFinite(got.now) && got.rtt >= 0);
+  A.send('x'); A.send('y'); hub.flush();
+  assert.deepEqual(msgs, [['aaaa1', 'x'], ['aaaa1', 'y']]);
+  assert.equal(A.via(), 'ws');
+  assert.equal(typeof A.command, 'undefined', 'no ledger calls: the room has no ledger');
+});
+
+test('relay: nobody can post as another player, even knowing their id', async () => {
+  const D = new RoomDO({ getWebSockets: () => [] }, {});
+  const core = D.room('r2'), heard = [];
+  core.join('alice1', { kind: 'sse', send() {}, close() {} }, T('alice1'));
+  core.join('bobby1', { kind: 'sse', send: (m) => heard.push(JSON.parse(m)), close() {} }, T('bobby1'));
+  const post = (tok, body) => D.fetch(new Request('https://sb.example/room/r2/send?id=alice1&tok=' + tok, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body }));
+  const forged = await post('guessed-secret-000000000', JSON.stringify({ t: 'm', d: 'forged' }));
+  assert.equal(forged.status, 403);
+  const real = await post(T('alice1'), JSON.stringify({ t: 'm', d: 'real' }));
+  assert.equal(real.status, 200);
+  assert.deepEqual(heard.filter((m) => m.t === 'm').map((m) => m.d), ['real'], 'only her own message counts');
+  const huge = await D.fetch(new Request('https://sb.example/room/r2/send?id=alice1&tok=' + T('alice1'), { method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': '9999999' }, body: '[]' }));
+  assert.equal(huge.status, 413, 'an oversize body is refused before it is read');
+});
+
+test('relay: a WebSocket a proxy holds open falls back to one SSE stream, and leaving leaves', () => {
+  const hub = relayHub({ stallWs: true });
+  const A = hub.endpoint('aaaa2').join('r3'), B = hub.endpoint('bbbb2').join('r3');
+  hub.flush();
+  assert.equal(hub.streams, 2, 'one stream each, not two');
+  assert.equal(A.via(), 'sse');
+  assert.deepEqual([...hub.rooms.get('r3').peers.keys()].sort(), ['aaaa2', 'bbbb2']);
+  A.leave(); hub.flush();
+  assert.deepEqual([...hub.rooms.get('r3').peers.keys()], ['bbbb2'], 'really gone');
+});
+
+test('relay: a big binary from an SSE client goes up on its own and arrives, and the batch with it', () => {
+  const hub = relayHub({ sse: true });
+  const A = hub.endpoint('aaaa3').join('r4'), B = hub.endpoint('bbbb3').join('r4');
+  const bins = [], msgs = [];
+  B.onBin((buf, meta, from) => bins.push([buf.byteLength, meta.k, from])); B.onMessage((m) => msgs.push(m));
+  hub.flush();
+  A.send({ k: 'state' }); A.sendBin(new Uint8Array(200000).fill(7).buffer, { k: 'mdl' }, ['bbbb3']); A.send({ k: 'after' });
+  hub.flush();
+  assert.deepEqual(bins, [[200000, 'mdl', 'aaaa3']]);
+  assert.deepEqual(msgs, [{ k: 'state' }, { k: 'after' }]);
+  assert.ok(hub.posts.includes('application/octet-stream'));
+});
+
+test('relay: a dropped player comes back with its secret and takes its place, not refused as taken', () => {
+  const R = new RoomCore('r5'), a = conn(), a2 = conn(), b = conn();
+  R.join('alice', a, T('alice')); R.join('bobby', b, T('bobby'));
+  assert.equal(R.join('alice', a2, T('alice')), null, 'the same secret: back in');
+  assert.equal(a2.heard[0].t, 'hello'); assert.equal(a2.heard[0].back, true);
+  R.leave('alice', a);                               // the old socket's close comes late
+  assert.ok(R.peers.has('alice'), 'an old connection closing can\'t take the new one out');
+  assert.ok(!b.heard.some((m) => m.t === 'leave'), 'nobody saw her leave');
+});
+
+test('room: rebuilt after hibernating, the players in it still reach each other', () => {
+  // the sockets survive hibernation, with what was kept on them; the room in memory doesn't
+  const sock = (att) => { const s = { sent: [], att, deserializeAttachment: () => s.att, serializeAttachment: (v) => { s.att = v; }, send: (d) => s.sent.push(d), close() {} }; return s; };
+  const sa = sock({ id: 'alice1', tok: T('alice1'), room: 'r8' }), sb = sock({ id: 'bobby1', tok: T('bobby1'), room: 'r8' });
+  const D = new RoomDO({ getWebSockets: () => [sa, sb] }, {});
+  D.webSocketMessage(sa, JSON.stringify({ t: 'm', d: 'before' }));
+  assert.deepEqual(sb.sent.map((s) => JSON.parse(s)).filter((m) => m.t === 'm').map((m) => m.d), ['before']);
+  assert.equal(sa.att.tok, T('alice1'), 'what was kept on the socket stays');
+  // hibernation: a new object, the same sockets
+  const D2 = new RoomDO({ getWebSockets: () => [sa, sb] }, {});
+  sb.sent.length = 0;
+  D2.webSocketMessage(sa, JSON.stringify({ t: 'm', d: 'after' }));
+  assert.deepEqual(sb.sent.map((s) => JSON.parse(s)).filter((m) => m.t === 'm').map((m) => m.d), ['after']);
+  assert.ok(D2.room('r8').owns('alice1', T('alice1')), 'and her secret is still hers');
+});
+
+test('relay: a POST with no length is cut off at the cap while it is read, and an oversize binary says 413', async () => {
+  const D = new RoomDO({ getWebSockets: () => [] }, {});
+  const core = D.room('r10'), heard = [];
+  core.join('alice1', { kind: 'sse', send() {}, close() {} }, T('alice1'));
+  core.join('bobby1', { kind: 'sse', send: (m) => heard.push(JSON.parse(m)), close() {} }, T('bobby1'));
+  let pulled = 0;
+  const stream = (chunks, size) => new ReadableStream({ pull(c) { if (pulled >= chunks) { c.close(); return; } pulled++; c.enqueue(new Uint8Array(size).fill(32)); } });
+  const post = (type, body) => D.fetch(new Request('https://sb.example/room/r10/send?id=alice1&tok=' + T('alice1'), { method: 'POST', headers: { 'Content-Type': type }, body, duplex: 'half' }));
+  const r = await post('application/json', stream(1000, 16384));
+  assert.equal(r.status, 413);
+  assert.ok(pulled < 20, 'stopped reading at the cap, not after 16 MB: ' + pulled + ' chunks');
+  const big = await post('application/octet-stream', new Uint8Array(core.L.binBytes + 5000));
+  assert.equal(big.status, 413, 'not a 200 for a frame that was dropped');
+  const ok = await post('application/json', JSON.stringify({ t: 'm', d: 'hi' }));
+  assert.equal(ok.status, 200);
+  assert.deepEqual(heard.filter((m) => m.t === 'm').map((m) => m.d), ['hi']);
+});
+
+/* an SSE client on its own: a stream the test drives by hand, POSTs that wait until the test answers them */
+function sseClient() {
+  const streams = [], posts = [], timers = [], errors = [];
+  class ES { constructor(url) { this.url = url; this.readyState = 0; streams.push(this); } close() { this.readyState = 2; this.closed = true; } }
+  const fetch = (u, init) => new Promise((ok) => posts.push({ init, bytes: typeof init.body === 'string' ? new TextEncoder().encode(init.body).length : init.body.length, answer: () => ok({ ok: true, json: async () => ({}) }) }));
+  const setTimeout = (f, ms) => { const t = { f, ms, alive: true }; timers.push(t); return t; };
+  const R = E.netRelay({ base: 'https://sb.example', self: 'alice1', tok: T('alice1'), sse: true, EventSource: ES, fetch, setTimeout, clearTimeout: (t) => { if (t) t.alive = false; } });
+  R.onError = (e) => errors.push(e);
+  const room = R.join('r11');
+  const hello = (s) => s.onmessage({ data: JSON.stringify({ t: 'hello', peers: [] }) });
+  const fire = () => { for (let g = 0; g < 100; g++) { const t = timers.find((x) => x.alive); if (!t) break; t.alive = false; t.f(); } };
+  return { R, room, streams, posts, errors, hello, fire };
+}
+
+test('relay: an SSE stream that drops mid-match gets the browser\'s retries, not a fatal error on the second one', () => {
+  const c = sseClient(), s = c.streams[0];
+  c.hello(s);
+  s.onerror({});                                   // wifi drops: the browser starts retrying
+  s.onerror({});                                   // its first retry fails too, while the wifi is still down
+  assert.deepEqual(c.errors, [], 'still in the match');
+  c.hello(s);                                      // back: the room says hello again
+  for (let i = 0; i < 5; i++) s.onerror({});
+  assert.deepEqual(c.errors, [], 'five failures in a row are still retried');
+  s.onerror({});
+  assert.equal(c.errors.at(-1).error, 'unreachable', 'a sixth is given up on');
+  // a stream that never got in is reported at once
+  const d = sseClient(); d.streams[0].onerror({});
+  assert.equal(d.errors.at(-1).error, 'unreachable');
+});
+
+test('relay: an SSE stream the browser gave up on (an error answer) is opened again', () => {
+  const c = sseClient(), s = c.streams[0];
+  c.hello(s);
+  s.readyState = 2; s.onerror({});                 // a 502 while the site redeploys: EventSource stops for good
+  assert.deepEqual(c.errors, []);
+  c.fire();
+  assert.equal(c.streams.length, 2, 'a new stream');
+  assert.ok(s.closed && !c.streams[1].closed);
+  c.hello(c.streams[1]);
+  c.room.send({ k: 'state' }); c.fire();
+  assert.equal(c.posts.length, 1, 'and it talks again');
+});
+
+test('relay: an SSE client\'s batches stay under the room\'s 64 KB in UTF-8 bytes, chat in any script', () => {
+  const c = sseClient(); c.hello(c.streams[0]);
+  for (let i = 0; i < 30; i++) c.room.send({ k: 'chat', text: '中'.repeat(2000) });
+  c.fire(); c.posts.forEach((p) => p.answer()); c.fire();
+  assert.ok(c.posts.length >= 3);
+  for (const p of c.posts) assert.ok(p.bytes <= 64 * 1024, p.bytes + ' bytes is over the room\'s cap');
+});
+
+test('relay: keepalive is only asked for while the 64 KB a browser allows in flight has room', async () => {
+  const c = sseClient(); c.hello(c.streams[0]);
+  for (let i = 0; i < 3; i++) c.room.send({ k: 'big', text: 'x'.repeat(50000) });
+  c.fire();
+  assert.equal(c.posts.length, 3);
+  assert.deepEqual(c.posts.map((p) => p.init.keepalive), [true, false, false], 'a second keepalive POST in flight would be refused');
+  c.posts[0].answer(); await new Promise((r) => setImmediate(r));
+  c.room.send({ k: 'small' }); c.fire();
+  assert.equal(c.posts.at(-1).init.keepalive, true, 'room again once the first is answered');
+});

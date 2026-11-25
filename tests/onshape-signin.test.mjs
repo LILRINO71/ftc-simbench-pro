@@ -1,9 +1,7 @@
 // Sign in with Onshape (functions/onshape/[[path]].js and onshapeFromLink in
-// src/onshapelink.js). School Chromebooks block bookmarklets (their admins list
-// javascript: URLs as blocked: a click does nothing, a drop shows
-// about:blank#blocked), so the bookmark can't get a team's robot there. This is
-// the way that needs no bookmark: OAuth with Onshape through a small Pages
-// Function, then the page reads the same API calls through it.
+// src/onshapelink.js): the import route. Onshape's API answers no cross-site
+// call from a browser and the sign-in needs the app's secret, so a small Pages
+// Function does OAuth with Onshape and passes the robot reader's calls through.
 // Here Onshape (its OAuth server and its API) is a stand-in serving the
 // `mated` robot; the page side and the function run for real.
 import test from 'node:test';
@@ -33,8 +31,10 @@ const R = (() => {
 })();
 
 /* Onshape: the token endpoint and the API, answering only with the right bearer token */
-function onshape({ expiresIn = 3600 } = {}) {
-  const o = { calls: [], tokenForms: [], issued: 0, live: new Set() };
+// rotate: a refresh token works once, as Onshape's do. tokenDown: the token
+// endpoint answers renewals with that status, or 'network' for no answer at all.
+function onshape({ expiresIn = 3600, rotate = false } = {}) {
+  const o = { calls: [], tokenForms: [], issued: 0, live: new Set(), usedRt: new Set(), tokenDown: null };
   const issue = () => { const a = 'at-' + (++o.issued); o.live.add(a); return { access_token: a, refresh_token: 'rt-' + o.issued, expires_in: expiresIn, token_type: 'Bearer' }; };
   o.fetch = async (u, init = {}) => {
     u = String(u);
@@ -43,7 +43,10 @@ function onshape({ expiresIn = 3600 } = {}) {
       o.tokenForms.push(f);
       if (f.client_id !== ENV.ONSHAPE_CLIENT_ID || f.client_secret !== ENV.ONSHAPE_CLIENT_SECRET) return new Response('{}', { status: 401 });
       if (f.grant_type === 'authorization_code' && f.code === 'good-code' && f.redirect_uri === SITE + '/onshape/callback') return Response.json(issue());
-      if (f.grant_type === 'refresh_token' && /^rt-/.test(f.refresh_token)) return Response.json(issue());
+      if (f.grant_type === 'refresh_token' && o.tokenDown === 'network') throw new TypeError('fetch failed');
+      if (f.grant_type === 'refresh_token' && o.tokenDown) return new Response('<html>busy</html>', { status: o.tokenDown });
+      if (f.grant_type === 'refresh_token' && rotate && o.usedRt.has(f.refresh_token)) return Response.json({ error: 'invalid_grant' }, { status: 400 });
+      if (f.grant_type === 'refresh_token' && /^rt-/.test(f.refresh_token)) { o.usedRt.add(f.refresh_token); return Response.json(issue()); }
       return new Response('{}', { status: 400 });
     }
     assert.ok(u.startsWith('https://cad.onshape.com/api/'), 'only Onshape\'s API: ' + u);
@@ -108,7 +111,7 @@ async function onPage(b, f) {
   try { return await f(); } finally { g.fetch = was.fetch; Object.defineProperty(g, 'location', { value: was.location, configurable: true, writable: true }); }
 }
 
-test('sign in with Onshape: pasting the assembly\'s address brings the whole robot, no bookmark', async () => {
+test('sign in with Onshape: pasting the assembly\'s address brings the whole robot', async () => {
   const os = onshape(), b = browser(os);
   assert.deepEqual(await onPage(b, () => E.onshapeSignInState()), { ready: true, signedIn: false });
   const back = await b.signIn();
@@ -126,7 +129,7 @@ test('sign in with Onshape: pasting the assembly\'s address brings the whole rob
   assert.deepEqual(p.asm, R.onshape.assembly);
   assert.ok(os.calls.every((c) => c.auth === 'Bearer at-1'));
   assert.ok(said.some((t) => /part studios/.test(t)), 'progress for the pop-up');
-  // the same robot the bookmark brings: every part with its colour, every joint from a mate
+  // the whole robot: every part with its colour, every joint from a mate
   const cad = E.cadFromOnshape(p);
   assert.equal(cad.solids.length, R.truth.leafParts);
   assert.equal(cad.mechs.filter((m) => m.fromMate).length, R.truth.joints.length);
@@ -175,6 +178,57 @@ test('sign in with Onshape: a token that ran out is renewed without signing in a
   assert.deepEqual(os2.calls.map((c) => c.auth), ['Bearer at-1', 'Bearer at-2']);
 });
 
+test('sign in with Onshape: calls side by side with a token about to run out: one renews it, the rest still go through, and the team stays signed in', async () => {
+  const os = onshape({ expiresIn: 30, rotate: true }), b = browser(os);
+  await b.signIn();
+  const paths = [`documents/${D}`, `assemblies/d/${D}/w/${W}/e/${EL}`, `assemblies/d/${D}/w/${W}/e/${EL}/features`];
+  // the page reads four part studios at once, every one carrying the same cookie
+  const res = await Promise.all(paths.map((p) => b.go('/onshape/api/' + p)));
+  assert.deepEqual(res.map((r) => r.status), [200, 200, 200], 'no call is refused because another one renewed the token first');
+  assert.equal(os.tokenForms.filter((f) => f.grant_type === 'refresh_token').length, 3, 'each tried to renew');
+  assert.equal(os.usedRt.size, 1, 'one renewal worked; Onshape refused the reused refresh token');
+  assert.ok(b.jar.sb_os, 'still signed in');
+  assert.equal((await b.go(`/onshape/api/documents/${D}`)).status, 200, 'and the next call works');
+  // the whole robot, read the way the page reads it, with a token that keeps running out
+  const p = E.checkOnshapePayload(await onPage(b, () => E.onshapeFromLink(LINK, () => {})));
+  assert.equal(E.cadFromOnshape(p).solids.length, R.truth.leafParts);
+  assert.ok(b.jar.sb_os);
+});
+
+test('sign in with Onshape: Onshape\'s token server down or unreachable never signs the team out', async () => {
+  for (const down of [503, 'network']) {
+    const os = onshape({ expiresIn: 30 }), b = browser(os);
+    await b.signIn();
+    const cookie = b.jar.sb_os;
+    os.tokenDown = down;
+    // the token hasn't run out yet: the call goes through with it
+    const r1 = await b.go(`/onshape/api/documents/${D}`);
+    assert.equal(r1.status, 200, down + ': the token still works');
+    assert.equal(b.jar.sb_os, cookie, down + ': the sign-in is kept');
+    // Onshape refuses it and it can't be renewed: try again later, still signed in
+    os.live.clear();
+    const r2 = await b.go(`/onshape/api/documents/${D}`);
+    assert.equal(r2.status, 503, down + ': the page is told to try again, not to sign in again');
+    assert.ok(+r2.headers.get('Retry-After') > 0);
+    assert.equal(b.jar.sb_os, cookie, down + ': the sign-in is kept');
+    // back up: renewed, and on with the new token
+    os.tokenDown = null;
+    assert.equal((await b.go(`/onshape/api/documents/${D}`)).status, 200);
+    assert.notEqual(b.jar.sb_os, cookie);
+  }
+});
+
+test('sign in with Onshape: a renewal refused while the token is refused too: the page asks to sign in again, but a sign-in another call just renewed is not wiped', async () => {
+  const os = onshape({ rotate: true }), b = browser(os);
+  await b.signIn();
+  const cookie = b.jar.sb_os;
+  os.live.clear(); os.usedRt.add('rt-1');      // the token and its refresh token both refused
+  const r = await b.go(`/onshape/api/documents/${D}`);
+  assert.equal(r.status, 401);
+  assert.equal((await r.json()).error, 'signed-out');
+  assert.equal(b.jar.sb_os, cookie, 'no Max-Age=0 that could land after, and wipe, a cookie another call just renewed');
+});
+
 test('sign in with Onshape: signed out, the page is told so (401) and the pop-up asks to sign in again', async () => {
   const os = onshape(), b = browser(os);
   await assert.rejects(onPage(b, () => E.onshapeFromLink(LINK, () => {})), (e) => e.status === 401);
@@ -194,7 +248,7 @@ test('sign in with Onshape: a Part Studio link or a link that isn\'t Onshape\'s 
   assert.equal(E.onshapeRef('https://cad.onshape.com.evil.example/documents/' + D + '/w/' + W + '/e/' + EL), null);
 });
 
-test('sign in with Onshape: not switched on (no app secrets), the page falls back to the bookmark', async () => {
+test('sign in with Onshape: not switched on (no app secrets), the page says so and offers the export', async () => {
   const os = onshape(), b = browser(os, {});
   assert.deepEqual(await onPage(b, () => E.onshapeSignInState()), { ready: false, signedIn: false });
   assert.equal((await b.go('/onshape/login')).status, 501);
@@ -203,4 +257,158 @@ test('sign in with Onshape: not switched on (no app secrets), the page falls bac
   const g = globalThis, was = g.fetch;
   g.fetch = async () => new Response('<!doctype html>', { status: 404 });
   try { assert.deepEqual(await E.onshapeSignInState(), { ready: false, signedIn: false }); } finally { g.fetch = was; }
+});
+
+test('sign in with Onshape: a kept copy of a Part Studio is only for a team that can open its document', async () => {
+  // the edge cache, as Cloudflare's caches.default
+  const kept = new Map(), was = globalThis.caches;
+  globalThis.caches = { default: { match: async (k) => { const r = kept.get(k.url); return r ? r.clone() : undefined; }, put: async (k, r) => { kept.set(k.url, r); } } };
+  try {
+    const [gk] = Object.keys(R.onshape.geom), [ps, config] = gk.split('|');
+    const shapes = `/onshape/api/partstudios/d/${ps.replace(/\/m\//, '/m/')}/tessellatedfaces?configuration=${encodeURIComponent(config)}`;
+    // team A owns the document: read from Onshape, and kept
+    const osA = onshape(), a = browser(osA);
+    await a.signIn();
+    const first = await a.go(shapes);
+    assert.equal(first.status, 200);
+    assert.equal(first.headers.get('X-SimBench-Cache'), 'miss');
+    assert.equal(kept.size, 1);
+    // team B's account can't open it (a private document): Onshape says 403, and the kept copy stays kept
+    const osB = onshape(), b = browser(osB);
+    await b.signIn();
+    const inner = osB.fetch;
+    osB.fetch = async (u, init) => (String(u).includes('/api/documents/' + D) ? new Response('{}', { status: 403 }) : inner(u, init));
+    const denied = await b.go(shapes);
+    assert.equal(denied.status, 403);
+    assert.equal(denied.headers.get('X-SimBench-Cache'), null);
+    assert.doesNotMatch(await denied.text(), /facets/);
+    // team C can open it: served from the copy, after one small check, never the shapes again
+    const osC = onshape(), c = browser(osC);
+    await c.signIn();
+    const hit = await c.go(shapes);
+    assert.equal(hit.status, 200);
+    assert.equal(hit.headers.get('X-SimBench-Cache'), 'hit');
+    assert.equal(hit.headers.get('Cache-Control'), 'no-store');
+    assert.match(await hit.text(), /facets/);
+    assert.deepEqual(osC.calls.map((x) => x.u), [`https://cad.onshape.com/api/documents/${D}`]);
+  } finally { globalThis.caches = was; }
+});
+
+test('sign in with Onshape: the yearly allowance used up mid-read stops the read and says so, instead of leaving parts out', async () => {
+  const os = onshape(), b = browser(os);
+  await b.signIn();
+  // Onshape answers 402 once the app owner's annual API calls are spent; every call after it too
+  const inner = os.fetch;
+  os.fetch = async (u, init) => (/\/partstudios\//.test(String(u)) ? new Response('{"message":"API limit reached"}', { status: 402 }) : inner(u, init));
+  await assert.rejects(onPage(b, () => E.onshapeFromLink(LINK, () => {})), (e) => e.status === 402 && /yearly allowance/.test(e.message));
+  // spent before the read starts: the assembly itself says so
+  os.fetch = async () => new Response('{}', { status: 402 });
+  await assert.rejects(onPage(b, () => E.onshapeFromLink(LINK, () => {})), (e) => e.status === 402);
+});
+
+test('sign in with Onshape: kept copies of a public library part cost the next team no call; a linked part and a spent allowance are read as Onshape says', async () => {
+  const kept = new Map(), was = globalThis.caches;
+  globalThis.caches = { default: { match: async (k) => { const r = kept.get(k.url); return r ? r.clone() : undefined; }, put: async (k, r) => { kept.set(k.url, r); } } };
+  const docSays = (os, answer) => { const inner = os.fetch; os.fetch = async (u, init) => (String(u).includes('/api/documents/' + D) ? (os.calls.push({ u: String(u) }), answer()) : inner(u, init)); };
+  try {
+    const [gk] = Object.keys(R.onshape.geom), [ps, config] = gk.split('|');
+    const shapes = `/onshape/api/partstudios/d/${ps}/tessellatedfaces?configuration=${encodeURIComponent(config)}`;
+    // a library anyone can open: team A reads it, team B's check hears "public", team C pays nothing
+    const osA = onshape(), a = browser(osA); await a.signIn();
+    assert.equal((await a.go(shapes)).headers.get('X-SimBench-Cache'), 'miss');
+    const osB = onshape(), b = browser(osB); await b.signIn();
+    docSays(osB, () => Response.json({ name: 'goBILDA parts', public: true }));
+    assert.equal((await b.go(shapes)).headers.get('X-SimBench-Cache'), 'hit');
+    assert.equal(osB.calls.length, 1, 'one check');
+    const osC = onshape(), c = browser(osC); await c.signIn();
+    const hit = await c.go(shapes);
+    assert.equal(hit.headers.get('X-SimBench-Cache'), 'hit');
+    assert.match(await hit.text(), /facets/);
+    assert.deepEqual(osC.calls, [], 'no call at all against the yearly allowance');
+    // a private document isn't remembered: every team still shows it can open it
+    kept.clear();
+    await a.go(shapes);
+    const osE = onshape(), e = browser(osE); await e.signIn();
+    await e.go(shapes); await e.go(shapes);
+    assert.equal(osE.calls.length, 2, 'a check each time');
+    // placed from the team's own document: the library itself is refused, but the read through the link is Onshape's to decide
+    const L = 'f'.repeat(24), linked = shapes + '&linkDocumentId=' + L;
+    await a.go(linked);
+    const osF = onshape(), f = browser(osF); await f.signIn();
+    docSays(osF, () => new Response('{}', { status: 403 }));
+    const viaLink = await f.go(linked);
+    assert.equal(viaLink.status, 200, 'not refused by the check that can\'t carry the link');
+    assert.match(await viaLink.text(), /facets/);
+    assert.ok(osF.calls.at(-1).u.includes('linkDocumentId=' + L), 'read fresh, through the link');
+    // the allowance spent: said as 402, not "your account can't open that document"
+    const osG = onshape(), g = browser(osG); await g.signIn();
+    docSays(osG, () => new Response('{"message":"API limit reached"}', { status: 402 }));
+    assert.equal((await g.go(shapes)).status, 402);
+  } finally { globalThis.caches = was; }
+});
+
+// ---- the live site, 2026-11-18: the client ID was saved without its last "=", and Onshape answered "Invalid request" to every sign-in ----
+test('sign-in: a client ID or secret saved one "=" short still signs in', async () => {
+  const ID = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABC=', SECRET = 'abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNO=';   // 40 and 52 characters, as Onshape's are
+  assert.equal(FN.padded(ID.slice(0, -1)), ID);
+  assert.equal(FN.padded(ID), ID, 'a whole one is left alone');
+  assert.equal(FN.padded('AAAAAA'), 'AAAAAA==');
+  assert.equal(FN.padded('AAAAA'), 'AAAAA', 'no base64 string is that long: left alone');
+  assert.equal(FN.padded('client-id'), 'client-id', 'not base64: left alone');
+  assert.equal(FN.padded(' ' + ID.slice(0, -1) + '\n'), ID, 'and a stray space or line end goes');
+  // Onshape's token endpoint, taking only the real pair
+  const forms = [];
+  const fetchImpl = async (u, init) => { const f = Object.fromEntries(new URLSearchParams(init.body)); forms.push(f);
+    return f.client_id === ID && f.client_secret === SECRET ? Response.json({ access_token: 'at', refresh_token: 'rt', expires_in: 3600 }) : Response.json({ error: 'invalid_client' }, { status: 401 }); };
+  for (const env of [{ ONSHAPE_CLIENT_ID: ID.slice(0, -1), ONSHAPE_CLIENT_SECRET: SECRET }, { ONSHAPE_CLIENT_ID: ID.slice(0, -1), ONSHAPE_CLIENT_SECRET: SECRET.slice(0, -1) }, { ONSHAPE_CLIENT_ID: ID, ONSHAPE_CLIENT_SECRET: SECRET }]) {
+    const login = await FN.handle(new Request(SITE + '/onshape/login'), env, fetchImpl);
+    const to = new URL(login.headers.get('Location'));
+    assert.equal(to.searchParams.get('client_id'), ID, 'Onshape is sent the whole ID');
+    assert.ok(/client_id=[A-Z0-9]+%3D(&|$)/.test(to.search), 'with its "=" encoded: ' + to.search.replace(/[A-Z0-9]{20,}/, '…'));
+    const state = to.searchParams.get('state');
+    const back = await FN.handle(new Request(`${SITE}/onshape/callback?code=c&state=${encodeURIComponent(state)}`, { headers: { Cookie: 'sb_os_state=' + state } }), env, fetchImpl);
+    assert.equal(back.status, 200, 'signed in with ' + JSON.stringify(Object.values(env).map((v) => v.length)));
+    assert.ok(back.headers.getSetCookie().some((c) => /^sb_os=[^;]+/.test(c)), 'and the sign-in is kept');
+  }
+  // a secret that is simply wrong is still refused, after one more try at most
+  forms.length = 0;
+  const wrong = { ONSHAPE_CLIENT_ID: ID, ONSHAPE_CLIENT_SECRET: 'wrongwrongwrong' };
+  const login = await FN.handle(new Request(SITE + '/onshape/login'), wrong, fetchImpl), state = new URL(login.headers.get('Location')).searchParams.get('state');
+  const back = await FN.handle(new Request(`${SITE}/onshape/callback?code=c&state=${encodeURIComponent(state)}`, { headers: { Cookie: 'sb_os_state=' + state } }), wrong, fetchImpl);
+  assert.equal(back.status, 400); assert.ok(forms.length <= 2, forms.length + ' tries');
+});
+
+// ---- the live site, 2026-11-18: the first real robot's largest Part Studio ended the function (error 1101) and 1,278 parts never arrived ----
+test('sign in with Onshape: a Part Studio too big to hold is passed straight on, whole and unkept; a small one is still kept at the edge', async () => {
+  const kept = new Map(), was = globalThis.caches;
+  globalThis.caches = { default: { match: async (k) => { const r = kept.get(k.url); return r ? r.clone() : undefined; }, put: async (k, r) => { kept.set(k.url, r); } } };
+  try {
+    const [gk] = Object.keys(R.onshape.geom), [ps, config] = gk.split('|');
+    const shapes = `/onshape/api/partstudios/d/${ps}/tessellatedfaces?configuration=${encodeURIComponent(config)}`;
+    // Onshape sending a long answer a piece at a time: 400 pieces of 1,000 bytes, counted as they are asked for
+    const N = 400, piece = (i) => new TextEncoder().encode(String(i).padStart(4, '0') + 'x'.repeat(996));
+    const os = onshape(), inner = os.fetch; let asked = 0;
+    os.fetch = async (u, init) => {
+      if (!/\/tessellatedfaces/.test(String(u))) return inner(u, init);
+      let i = 0;
+      return new Response(new ReadableStream({ pull(c) { if (i >= N) { c.close(); return; } asked++; c.enqueue(piece(i++)); } }, { highWaterMark: 0 }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    };
+    // the function holds at most 20,000 bytes here (16 MB live)
+    const b = browser(os, { ...ENV, ONSHAPE_KEEP_MAX: '20000' }); await b.signIn();
+    const big = await b.go(shapes);
+    assert.equal(big.status, 200);
+    assert.equal(big.headers.get('X-SimBench-Cache'), 'too-big');
+    assert.ok(asked < 60, 'answered while Onshape was still sending: ' + asked + ' of ' + N + ' pieces read so far');
+    const text = await big.text();
+    assert.equal(text.length, N * 1000, 'every byte arrives');
+    for (let i = 0; i < N; i++) assert.equal(text.slice(i * 1000, i * 1000 + 4), String(i).padStart(4, '0'), 'in order, none twice: piece ' + i);
+    assert.equal(kept.size, 0, 'and it is not kept at the edge');
+    // the same answer under the limit is kept whole, as before
+    const os2 = onshape(), b2 = browser(os2, { ...ENV, ONSHAPE_KEEP_MAX: '20000' }); await b2.signIn();
+    os2.fetch = ((inner2) => async (u, init) => (/\/tessellatedfaces/.test(String(u)) ? new Response('{"small":true}', { status: 200, headers: { 'Content-Type': 'application/json' } }) : inner2(u, init)))(os2.fetch);
+    const small = await b2.go(shapes);
+    assert.equal(small.headers.get('X-SimBench-Cache'), 'miss');
+    assert.equal(await small.text(), '{"small":true}');
+    assert.equal(kept.size, 1);
+  } finally { globalThis.caches = was; }
 });

@@ -41,13 +41,15 @@ function mecanumWheel(c, hand, { roll = 45, names = ['OR', 'IR', 'RollerCore'] }
 const CORNERS = { FL: [0.17, 0.19], FR: [0.17, -0.19], BL: [-0.17, 0.19], BR: [-0.17, -0.19] };
 /* A robot: a chassis plate and mecanum wheels at the corners given, each its own sub-assembly
    (or flattened: no assembly paths at all). */
-function robot({ corners = Object.keys(CORNERS), hands = XPAT, flat = false, roll = 45 } = {}) {
+function robot({ corners = Object.keys(CORNERS), hands = XPAT, flat = false, roll = 45, loose = [] } = {}) {
   // a chassis plate, and a tower on it: like any robot, most of it above the axles
   const solids = [{ name: 'Chassis Plate', kind: 'metal', pts: cyl([0, 0, 0.09], [0, 0, 1], 0.2, 0.004, 24, 2) },
     { name: 'Lift Tower', kind: 'metal', pts: cyl([0, 0, 0.25], [0, 0, 1], 0.05, 0.3, 8, 6) }];
   corners.forEach((k, i) => {
     const [x, y] = CORNERS[k];
-    for (const p of mecanumWheel([x, y, 0.048], hands[k], { roll })) solids.push(flat ? p : Object.assign(p, { asm: [{ k: 'base', n: 'Drive Base' }, { k: 'w' + i, n: 'Wheel Assembly' }] }));
+    // loose: this wheel's parts lie straight in the drive base's assembly, with no assembly of their own
+    const asm = loose.includes(k) ? [{ k: 'base', n: 'Drive Base' }] : [{ k: 'base', n: 'Drive Base' }, { k: 'w' + i, n: 'Wheel Assembly' }];
+    for (const p of mecanumWheel([x, y, 0.048], hands[k], { roll })) solids.push(flat ? p : Object.assign(p, { asm }));
   });
   return { solids, parts: [], mechs: [] };
 }
@@ -67,17 +69,96 @@ test('composite wheels: each wheel’s hand is read off its floor roller, the st
   assert.ok(d.why.some((s) => /read off each wheel's own rollers.*the standard X pattern/.test(s)));
 });
 
-test('composite wheels: the same robot built "O" (every wheel the other hand) is modelled as drawn, and said to be wrong', () => {
+test('composite wheels: the same robot built "O" (every wheel the other hand) is simulated as built, in the X pattern, and the CAD\'s wheels are pointed out', () => {
+  // no team drives an "O" base; a CAD with one has copies of one wheel at the wrong corners.
+  // The real REVIVER export read FR, FL and BL as the other hand: modelled as drawn it couldn't strafe.
   const O = Object.fromEntries(Object.entries(XPAT).map(([k, v]) => [k, -v]));
   const d = E.driveFromCAD(robot({ hands: O }), { front: '+x' });
-  for (const w of d.wheels) assert.equal(w.roller, O[w.corner]);
-  assert.ok(d.why.some((s) => /can't turn in place/.test(s)));
+  for (const w of d.wheels) assert.equal(w.roller, XPAT[w.corner], `${w.corner} in the X pattern`);
+  assert.ok(d.why.some((s) => /"O" pattern.*can't turn in place.*standard X pattern is used.*FL, FR, BL, BR|wheels at .* are the other hand/.test(s)), d.why.join(' | '));
+});
+
+test('composite wheels: one wheel the wrong hand (a mix that could not strafe) is simulated in the X pattern too, naming that wheel', () => {
+  const mix = Object.assign({}, XPAT, { FR: -XPAT.FR });
+  const d = E.driveFromCAD(robot({ hands: mix }), { front: '+x' });
+  for (const w of d.wheels) assert.equal(w.roller, XPAT[w.corner]);
+  assert.ok(d.why.some((s) => /not a mecanum pattern.*wheel at FR is the other hand/.test(s)), d.why.join(' | '));
 });
 
 test('composite wheels: a flattened file (no sub-assemblies) still has its four wheels', () => {
   const d = E.driveFromCAD(robot({ flat: true }), { front: '+x' });
   assert.equal(d.kind, 'mecanum'); assert.equal(d.wheels.length, 4);
   assert.ok(d.why.some((s) => /packed round one centre/.test(s)));
+});
+
+test('composite wheels: two wheels in assemblies of their own and two lying loose among the chassis parts: all four are found', () => {
+  // a team mirrors the left side of its base to make the right: the left wheels stay sub-assemblies,
+  // the right ones arrive as loose rollers and plates in the chassis assembly. With two wheels
+  // already found the loose ones were never looked for, and the robot loaded with no drivetrain.
+  const cad = robot({ loose: ['FR', 'BR'] });
+  const comps = E.dtCompositeWheels(cad.solids);
+  assert.equal(comps.length, 4, 'four wheels, not the two that have assemblies');
+  assert.equal(comps.filter((c) => c.packed).length, 2, 'two of them packed from loose parts');
+  const d = E.driveFromCAD(cad, { front: '+x' });
+  assert.equal(d.kind, 'mecanum', d.why.join(' | '));
+  assert.equal(d.wheels.length, 4);
+  for (const w of d.wheels) assert.equal(w.roller, XPAT[w.corner], `${w.corner} hand ${w.roller}`);
+  assert.ok(d.why.some((s) => /wheel assemblies \(2\) and wheel parts packed round one centre \(2\)/.test(s)), d.why.join(' | '));
+});
+
+test('composite wheels: a wheel in an assembly is not found a second time from its own parts', () => {
+  const comps = E.dtCompositeWheels(robot().solids);
+  assert.equal(comps.length, 4);
+  assert.equal(comps.filter((c) => c.packed).length, 0);
+});
+
+/* A mecanum TeleOp with the standard stick mix; `rev` lists the motors it reverses. */
+const TELEOP = (rev) => `package org.firstinspires.ftc.teamcode;
+import com.qualcomm.robotcore.eventloop.opmode.*;
+import com.qualcomm.robotcore.hardware.*;
+@TeleOp(name="Mix") public class Mix extends LinearOpMode { public void runOpMode() {
+  DcMotor fl = hardwareMap.get(DcMotor.class, "frontLeft"), bl = hardwareMap.get(DcMotor.class, "backLeft");
+  DcMotor fr = hardwareMap.get(DcMotor.class, "frontRight"), br = hardwareMap.get(DcMotor.class, "backRight");
+  ${rev.map((n) => n + '.setDirection(DcMotorSimple.Direction.REVERSE);').join(' ')}
+  waitForStart();
+  while (opModeIsActive()) { double y = -gamepad1.left_stick_y, x = gamepad1.left_stick_x, r = gamepad1.right_stick_x;
+    fl.setPower(y + x + r); bl.setPower(y - x + r); fr.setPower(y - x - r); br.setPower(y + x - r); } } }`;
+function verdict(cad, rev) {
+  const code = E.parseJava(TELEOP(rev));
+  assert.equal(code.engine, 'vm');
+  const pr = E.driveProbe(code, cad, {}, { front: '+x' });
+  assert.ok(pr, 'the probe ran');
+  let out = null; E.driveVerdict(pr, (k, sev, title, how) => { out = { sev, title, how, from: pr.mounts.map((m) => m.from) }; });
+  return out;
+}
+
+test('motor mounting: a base with no motor on its wheels\' axles takes the code\'s own forward, not the standard build', () => {
+  // a team's real robot drives straight with all four wheels reversed (its right side is wired or
+  // mounted the other way from the textbook). The CAD had its drive motors belted to the wheels,
+  // so nothing was measured, yet the standard build was used and reported as "from the CAD":
+  // the working code spun the robot here.
+  const cad = robot();
+  const all = verdict(cad, ['fl', 'bl', 'fr', 'br']);
+  assert.deepEqual(all.from, ['code', 'code', 'code', 'code']);
+  assert.equal(all.sev, 'pass', all.title);
+  assert.match(all.how, /your code's own forward/);
+  assert.doesNotMatch(all.how, /mounting from the CAD/);
+  // the textbook code on the same CAD is right too: either may be how the robot is built
+  assert.equal(verdict(robot(), ['fl', 'bl']).sev, 'pass');
+  assert.equal(verdict(robot(), []).sev, 'pass');
+});
+
+test('motor mounting: motors drawn inboard and belted across to the wheels are not a measurement either', () => {
+  const cad = robot();
+  // one motor per wheel, its shaft parallel to the axle but 90 mm off it: a belt drive
+  for (const [x, y] of Object.values(CORNERS)) cad.solids.push({ name: '5203-2402-0019 Yellow Jacket motor', kind: 'motor',
+    pts: cyl([x - Math.sign(x) * 0.09, y - Math.sign(y) * 0.07, 0.048], [0, 1, 0], 0.018, 0.1, 10, 4) });
+  const d = E.driveFromCAD(cad, { front: '+x' });
+  assert.ok(d.wheels.every((w) => w.mountHow === 'assumed'), d.wheels.map((w) => w.mountHow).join(' '));
+  assert.ok(d.why.some((s) => /motors aren't on the wheels' axles/.test(s)), d.why.join(' | '));
+  const all = verdict(cad, ['fl', 'bl', 'fr', 'br']);
+  assert.deepEqual(all.from, ['code', 'code', 'code', 'code']);
+  assert.equal(all.sev, 'pass', all.title);
 });
 
 test('composite wheels: one wheel drawn, the other three mirrored through the middle, in the X pattern', () => {
@@ -133,4 +214,19 @@ test('composite wheels: the frame finds up and the front from the same wheels', 
   const F = E.robotFrame({ solids: cad.solids, bbox: { min: lo, max: hi } }, {});
   assert.equal(F.up, '-y', F.upWhy);
   assert.equal(F.originWhy, 'wheels');
+});
+
+
+test('composite wheels: a joint on a drive wheel\'s axle (its shaft, hub or bearing) is the drive\'s business, not a mechanism', () => {
+  // a URDF export gives the wheel's shaft and its bearing races joints of their own
+  const cad = robot();
+  const d = E.driveFromCAD(cad, { front: '+x' });
+  const w = d.wheels[0];
+  const shaft = { name: '2106 4008 0800', kind: 'metal', size: 0.08, pts: [], mech: 'shaft_spin' };
+  for (let i = 0; i < 40; i++) shaft.pts.push([w.c[0] + (i / 40 - 0.5) * 0.08 * w.axis[0], w.c[1] + (i / 40 - 0.5) * 0.08 * w.axis[1], w.c[2] + (i % 2 ? 0.004 : -0.004)]);
+  cad.solids.push(shaft);
+  cad.mechs = [{ id: 'shaft_spin', kind: 'revolute-lift', axis: w.axis.slice(), pivot: w.c.slice(), parent: 'chassis', limits: null, fromMate: { name: 'Revolute 3' } }];
+  const C = E.classifyJoints(cad);
+  assert.equal(cad.mechs[0].internalWhy, 'axle');
+  assert.ok(C.why.some((s) => /drive wheels' axles/.test(s)), C.why.join(' | '));
 });

@@ -11,10 +11,55 @@ const store={
 };
 
 let CODE=null, CAD=null, MAP={}, FINDINGS=[], activePad=2;
+let JOLT=null;                     // Jolt Physics once loaded (Physics.loadJolt), for solved mechanisms
 const OPTS={payloadKg:0.180, duty:0.30, trust:"code", robotConfig:null, front:"+x", baseModel:"auto", shooterModel:"auto", shift:null};
-let IGNORED={};
-try{ IGNORED=JSON.parse(store.get("ftcbench.ignored","{}"))||{}; }catch(e){ IGNORED={}; }
+/* "Ignore" on a finding. A finding's key names the check (drive:feel), not what it was judged
+   on, so an ignore is kept for the robot and the OpMode it was given on, with the severity it
+   had: it hides that check there at that severity or milder, and never a worse one (an ignored
+   RISKY that turns WON'T WORK shows again). Stored as {JSON [robot, opmode, key]: sev}; the
+   rig carries one robot's as JSON [opmode, key, sev] strings. An entry in the old form (a
+   bare key, for no robot or OpMode in particular) is dropped: it can't be scoped, and
+   dropping it only shows a finding again. Pure: tests/ignores.test.mjs runs it from here. */
+const Ignores={
+  RANK:{pass:0, info:0, warn:1, fail:2},
+  id(robot,op,key){ return JSON.stringify([String(robot||""),String(op||""),String(key)]); },
+  parse(s,n){ try{ const a=JSON.parse(s); return Array.isArray(a)&&a.length===n&&a.every(x=>typeof x==="string")?a:null; }catch(e){ return null; } },
+  // what the page kept, with anything malformed or in the old form left out
+  load(raw){
+    const out={}; let o=null; try{ o=JSON.parse(raw||"{}"); }catch(e){}
+    if(!o||typeof o!=="object"||Array.isArray(o)) return out;
+    for(const k of Object.keys(o)) if(this.parse(k,3)&&Object.prototype.hasOwnProperty.call(this.RANK,o[k])) out[k]=o[k];
+    return out;
+  },
+  hides(map,robot,op,f){
+    const s=map[this.id(robot,op,f.key)];
+    return s!=null&&Object.prototype.hasOwnProperty.call(this.RANK,s)&&(this.RANK[f.sev]||0)<=this.RANK[s];
+  },
+  add(map,robot,op,f){ map[this.id(robot,op,f.key)]=Object.prototype.hasOwnProperty.call(this.RANK,f.sev)?f.sev:"info"; },
+  remove(map,robot,op,key){ delete map[this.id(robot,op,key)]; },
+  // "Restore all": this robot and OpMode's, not every robot's
+  clear(map,robot,op){ for(const k of Object.keys(map)){ const a=this.parse(k,3); if(a&&a[0]===String(robot||"")&&a[1]===String(op||"")) delete map[k]; } },
+  // one robot's, for its rig document
+  forRig(map,robot){
+    const out=[];
+    for(const k of Object.keys(map)){ const a=this.parse(k,3); if(a&&a[0]===String(robot||"")) out.push(JSON.stringify([a[1],a[2],map[k]])); }
+    return out;
+  },
+  // a rig's list replaces that robot's ignores; strings in the old form are dropped
+  fromRig(map,robot,list){
+    for(const k of Object.keys(map)){ const a=this.parse(k,3); if(!a||a[0]===String(robot||"")) delete map[k]; }
+    for(const s of list||[]){
+      const a=typeof s==="string"?this.parse(s,3):null;
+      if(a&&Object.prototype.hasOwnProperty.call(this.RANK,a[2])) map[this.id(robot,a[0],a[1])]=a[2];
+    }
+    return map;
+  }
+};
+let IGNORED=Ignores.load(store.get("ftcbench.ignored","{}"));
 function saveIgnored(){ store.set("ftcbench.ignored",JSON.stringify(IGNORED)); }
+// what an ignore is scoped to: the robot (as its rig is) and the OpMode (its class and its name)
+function ignoreRobot(){ return (CAD&&CAD.name)||"sample"; }
+function ignoreOp(){ return CODE?(CODE.cls||"")+"/"+(CODE.opmode||""):""; }
 let LIBRARY=[], CURRENT_ID=null;
 let USER_CHOSE=false;          // the user picked or edited an OpMode since the page opened (loadDefaultRobot leaves it be)
 let ROBOT_CFG_NAME=null;
@@ -104,8 +149,14 @@ function initRails(){
    OPMODE LIBRARY
    ============================================================ */
 function entry(id){ return LIBRARY.filter(e=>e.id===id)[0]||null; }
+/* What an OpMode is read with: the helper classes, and the team's other OpModes it extends or
+   names (jvSiblings): "Main TeleOp + encoders" is ten lines on top of the main TeleOp. */
+function libsFor(e){
+  const others=LIBRARY.filter(o=>o!==e&&typeof o.source==="string").map(o=>({file:o.file, src:o.source}));
+  return helperFiles().concat(jvSiblings(e.source,others));
+}
 function parseEntry(e){
-  try{ e.code=parseJava(e.source,{libs:helperFiles()}); e.error=null; }
+  try{ e.code=parseJava(e.source,{libs:libsFor(e)}); e.error=null; }
   catch(err){ e.code=null; e.error=err.message; }
   return e;
 }
@@ -115,7 +166,8 @@ function parseEntry(e){
 let USER_HELPERS=[], BUILTIN_HELPERS=[];
 function helperFiles(){
   const mine=new Set(USER_HELPERS.map(h=>h.file));
-  return USER_HELPERS.concat(BUILTIN_HELPERS.filter(h=>!mine.has(h.file)));
+  // the demo robot's classes go when the team's own robot comes in: they were written for another robot
+  return USER_HELPERS.concat(ownRobot()?[]:BUILTIN_HELPERS.filter(h=>!mine.has(h.file)));
 }
 function saveHelpers(){ store.set("ftcbench.helpers",JSON.stringify(USER_HELPERS.map(h=>({file:h.file, src:h.src})))); }
 function loadHelpers(){
@@ -126,7 +178,7 @@ function reparseAll(){
   LIBRARY.forEach(parseEntry);
   if(entry(CURRENT_ID)) selectOpMode(CURRENT_ID); else { renderOpList(); renderOpSelect(); }
 }
-const isOpModeSource=t=>/@(TeleOp|Autonomous)\b/.test(stripComments(t))||/\bextends\s+(LinearOpMode|OpMode)\b/.test(t);
+const isOpModeSource=t=>javaIsOpMode(t);            // src/java.js: the same rule the headless tools use
 function initLibrary(){
   loadHelpers();
   LIBRARY=[
@@ -136,8 +188,11 @@ function initLibrary(){
     {id:"sample-shooter", file:"ShooterTeleOp.java", source:SHOOTER_JAVA, builtin:true}
   ];
   try{
-    const saved=JSON.parse(store.get("ftcbench.library","[]"))||[];
-    for(const s of saved) if(s&&s.id&&s.source) LIBRARY.push({id:s.id, file:s.file||"OpMode.java", source:s.source, builtin:false});
+    const saved=(JSON.parse(store.get("ftcbench.library","[]"))||[]).filter(s=>s&&s.id&&s.source);
+    // a helper an older page kept as an OpMode (an enum, an interface) goes back with the helpers
+    const S=javaSortSaved(saved.map(s=>({id:s.id, file:s.file||"OpMode.java", source:s.source})),USER_HELPERS);
+    for(const s of S.opmodes) LIBRARY.push({id:s.id, file:s.file, source:s.source, builtin:false});
+    if(S.moved){ USER_HELPERS=S.helpers; saveHelpers(); saveLibrary(); }
   }catch(e){}
   LIBRARY.forEach(parseEntry);
 }
@@ -147,6 +202,23 @@ function saveLibrary(){
 const opName=e=> e.code&&e.code.opmode ? e.code.opmode : e.file.replace(/\.java$/,"");
 const opKind=e=> e.code&&e.code.kind==="Autonomous" ? "Auto" : "TeleOp";
 
+/* What the lists show: the team's own OpModes, the demo robot's while the demo robot is on the
+   field, and the one that is selected. The built-in samples and the demo team's OpModes were
+   written for robots the team doesn't have; listed beside the team's code they were in the way. */
+function listedOps(){
+  const own=ownRobot();
+  return LIBRARY.filter(e=>!e.builtin||e.id===CURRENT_ID||(!!e.team&&!own&&!!LAST_STEP));
+}
+/* The robot on the field changed hands (the demo's, or the team's own): the lists follow, the
+   helper classes with them, and the team's own OpMode comes back in place of a sample. */
+let OWN_SHOWN=null;
+function robotChangedHands(){
+  const own=ownRobot(); if(own===OWN_SHOWN) return; OWN_SHOWN=own;
+  if(Sim.phase==="running"||Online.playing()){ renderOpList(); renderOpSelect(); return; }
+  const cur=entry(CURRENT_ID), mine=LIBRARY.filter(e=>!e.builtin), last=entry(store.get("ftcbench.current.own",null));
+  if(own&&cur&&cur.builtin&&mine.length) CURRENT_ID=(last&&!last.builtin?last:mine[0]).id;
+  reparseAll();
+}
 /* TeleOp and Autonomous OpModes in their own lists. */
 function renderOpList(){
   const row=e=>`
@@ -154,7 +226,7 @@ function renderOpList(){
       <div><div class="on-name">${esc(opName(e))}</div><div class="on-file">${esc(e.file)}${e.builtin?" · "+esc(e.team||"sample"):""}</div></div>
       ${e.builtin?"<span></span>":`<button class="rm" data-oprm="${esc(e.id)}" title="Remove ${esc(e.file)}" aria-label="Remove ${esc(e.file)}">×</button>`}
     </div>`;
-  const tele=LIBRARY.filter(e=>opKind(e)==="TeleOp"), auto=LIBRARY.filter(e=>opKind(e)==="Auto");
+  const L=listedOps(), tele=L.filter(e=>opKind(e)==="TeleOp"), auto=L.filter(e=>opKind(e)==="Auto");
   $("#opListTele").innerHTML=tele.map(row).join("")||`<div class="op-empty">No TeleOp yet — drop a <code>@TeleOp</code> .java here.</div>`;
   $("#opListAuto").innerHTML=auto.map(row).join("")||`<div class="op-empty">No autonomous yet — an <code>@Autonomous</code> .java lands here.</div>`;
   $("#teleCount").textContent=tele.length||""; $("#autoCount").textContent=auto.length||"";
@@ -181,7 +253,7 @@ function renderOpList(){
 }
 function renderOpSelect(){
   const group=(k,label)=>{
-    const items=LIBRARY.filter(e=>opKind(e)===k);
+    const items=listedOps().filter(e=>opKind(e)===k);
     return items.length?`<optgroup label="${label}">`+items.map(e=>
       `<option value="${esc(e.id)}"${e.id===CURRENT_ID?" selected":""}>${esc(opName(e))}</option>`).join("")+`</optgroup>`:"";
   };
@@ -195,7 +267,7 @@ function selectOpMode(id){
   // online, mid-match: the robot could never START again, and the field isn't this bench's to reset
   if(Online.playing()&&CODE){ NetUI.say("The OpMode can't change during an online match. Leave the match first.","warn"); renderOpSelect(); return; }
   if(Sim.phase==="running") Sim.stop();
-  CURRENT_ID=id; store.set("ftcbench.current",id);
+  CURRENT_ID=id; store.set("ftcbench.current",id); if(!e.builtin) store.set("ftcbench.current.own",id);
   Editor.set(e.source); $("#srcName").textContent=e.file;
   CONFIG_OVR={};
   if(!e.code){
@@ -214,16 +286,23 @@ function selectOpMode(id){
   Shots.reset();
   Sim.load(CODE,CAD,MAP,withPose()); Physics.sync();
   applyConfigOverrides(); Sim.init(); applyConfigOverrides();    // like a DS: selected and INIT'd, waiting for START
+  Shots.adopt(CODE);                                           // first: whether the pieces go on the field depends on its roles
   resetMatch();
-  Shots.adopt(CODE); ShotUI.dirty=true; renderShotSetup();
+  ShotUI.dirty=true; renderShotSetup();
   setActivePad(busiestPad(CODE)); Pads.defaults();
-  buildGauges(); Graph.reset(); renderConfigVars(); renderLegend3D();
+  Graph.reset(); renderConfigVars(); renderLegend3D();
   renderOpList(); renderOpSelect(); renderCompareSelects(); updateDS();
   NetUI.opChanged();
+  if(typeof McUI!=="undefined") McUI.sync();               // the Monte Carlo panel follows the selected OpMode (src/mcui.js)
 }
 function addOpModeFromText(file,text){
-  if(!isOpModeSource(text)&&/\bclass\s+\w+/.test(text)){
+  // a file that declares a type and is not an OpMode is a helper: a class, and an enum, an
+  // interface or a record just the same (an enum used to be listed as an OpMode of its own)
+  if(!isOpModeSource(text)&&javaDeclaresType(text)){
     USER_HELPERS=USER_HELPERS.filter(h=>h.file!==file).concat([{file, src:text}]);
+    // the same file may still sit in the list as an OpMode, from a page that filed it so
+    const n=LIBRARY.length; LIBRARY=LIBRARY.filter(x=>x.builtin||x.file!==file);
+    if(LIBRARY.length!==n) saveLibrary();
     saveHelpers(); reparseAll();
     return;
   }
@@ -231,6 +310,9 @@ function addOpModeFromText(file,text){
   const e=existing||{id:"u"+Date.now().toString(36)+Math.random().toString(36).slice(2,6), file, builtin:false};
   e.source=text; parseEntry(e);
   if(!existing) LIBRARY.push(e);
+  // an OpMode that extends this one may have come in first: read it again now its parent is here
+  const me=[{file:e.file, src:text}];
+  for(const o of LIBRARY) if(o!==e&&typeof o.source==="string"&&jvSiblings(o.source,me).length) parseEntry(o);
   USER_CHOSE=true; saveLibrary(); selectOpMode(e.id);
 }
 
@@ -238,7 +320,7 @@ function addOpModeFromText(file,text){
    DRIVER STATION
    ============================================================ */
 const PERIOD={TeleOp:120, Autonomous:30};
-function withPose(){ OPTS.startPose=Object.assign({x:0,y:0,h:0},Sim.chassis||{}); return OPTS; }
+function withPose(){ OPTS.startPose=Object.assign({x:0,y:0,h:0},Sim.chassis||{}); if(typeof CalUI!=="undefined") CalUI.apply(); return OPTS; }   // CalUI: the saved calibration goes in with the pose (src/mcui.js)
 function applyConfigOverrides(){ for(const k in CONFIG_OVR) Sim.vars[k]=CONFIG_OVR[k]; }
 /* The INIT button. Online, the match INITs and STARTs everyone together (NetUI). */
 function dsInit(){ if(Online.inMatch()) return; initNow(); }
@@ -250,7 +332,7 @@ function initNow(){
   Sim.load(CODE,CAD,MAP,withPose());
   applyConfigOverrides(); Sim.init(); applyConfigOverrides();
   resetMatch();
-  buildGauges(); Graph.reset(); updateDS();
+  Graph.reset(); updateDS();
 }
 function dsStart(){
   if(!CODE||Online.inMatch()) return;
@@ -285,11 +367,12 @@ function updateClock(){
   const P=PERIOD[kind], practice=$("#practice").checked&&!Online.inMatch();
   const t=(Sim.phase==="running"||Sim.phase==="stopped")?Sim.t:0;
   const c=$("#dsClock");
-  if(practice){ c.textContent=clockText(t); $("#dsBar").style.width="0"; c.classList.remove("low"); return; }
+  if(practice){ c.textContent=clockText(t); $("#dsBar").style.width="0"; c.classList.remove("low"); Sounds.clock(t,0,false); return; }
   const rem=P-t;
   c.textContent=clockText(Math.ceil(rem-1e-6));
   $("#dsBar").style.width=Math.min(100,t/P*100).toFixed(1)+"%";
   c.classList.toggle("low",Sim.phase==="running"&&rem<=10);
+  Sounds.clock(t,P,Sim.phase==="running");              // the start, the last ten seconds, the buzzer (src/sounds.js)
   if(Sim.phase==="running"&&rem<=0) dsStop();          // the match period ended
 }
 
@@ -303,13 +386,64 @@ function resetMatch(){
   // online, the match is the one everyone plays: src/net.js staged it at START, and nothing here resets it
   if(Online.inMatch()){ renderMatchHud(true); return; }
   const box=$("#matchOn"), want=!!(box&&box.checked&&Field.ok&&OPTS.obstacles!=="walls");
-  Match.on=want;
-  if(!want){ Match.bots=[]; Match.floor=[]; Match.flying=[]; Match.events=[]; renderMatchHud(true); return; }
+  // no AI robots: the staged pieces still lie on the field for a robot that picks them up (src/payload.js)
+  const pc=$("#piecesOn"), solo=!want&&!!(pc&&pc.checked&&Field.ok&&OPTS.obstacles!=="walls")&&Payload.real();
+  Match.on=want||solo; Match.solo=solo;
+  if(!Match.on){ Match.bots=[]; Match.floor=[]; Match.flying=[]; Match.events=[]; renderMatchHud(true); return; }
   Match.reset({period:CODE&&CODE.kind==="Autonomous"?"Autonomous":"TeleOp", user:Shots.alliance, userPose:Sim.chassis,
-    seed:1+Math.floor(Math.random()*99999), skill:$("#matchSkill").value});
+    seed:1+Math.floor(Math.random()*99999), skill:$("#matchSkill").value, solo});
   renderMatchHud(true);
 }
-let HUD_T=0;
+/* The AI robots are switched off in a match that is running. What they held is left where they stood
+   and the loose pieces stay for a robot that can pick them up; with no such robot the field is
+   cleared, as it always was. Never a fresh field over the one in play: that doubled the pieces. */
+function matchAiOffNow(){
+  const pc=$("#piecesOn"), solo=!!(pc&&pc.checked&&Field.ok&&OPTS.obstacles!=="walls")&&Payload.real();
+  if(!solo){ Match.on=false; Match.solo=false; Match.bots=[]; Match.floor=[]; Match.flying=[]; Match.events=[]; renderMatchHud(true); return; }
+  for(const b of Match.bots) for(const e of b.hold) Match.drop(e.kind,e.color,b.x,b.y);
+  for(const e of Match.floor) if(e.hold&&e.hold.id!=="user"){ e.hold=null; e.sleep=false; }
+  Match.bots=[]; Match.solo=true; Match.len=Infinity; Match.version++;
+  renderMatchHud(true);
+}
+let HUD_T=0, LAST_SCORE=null;
+/* What a clip shows on top of the field (src/recorder.js), refreshed with the page's slow loop */
+let REC_HUD={};
+/* The match as it goes, for the clip, the sounds and the results: a run that starts may
+   start a clip; one that reaches its final buzzer shows the results (src/results.js) */
+const WATCH={phase:null, trace:[], ghost:null, hits:[], bump:null};
+function matchWatch(){
+  const ph=Sim.phase, kind=CODE&&CODE.kind==="Autonomous"?"Autonomous":"TeleOp", P=PERIOD[kind];
+  const practice=$("#practice").checked&&!Online.inMatch(), live=Match.live();
+  const t=(ph==="running"||ph==="stopped")?Sim.t:0;
+  const S=live?LAST_SCORE:null, final=(!practice&&ph==="stopped"&&t>=P-0.05)||Online.state==="done";
+  REC_HUD={match:!!S, red:S?S.red.total:0, blue:S?S.blue.total:0, period:kind, clock:$("#dsClock").textContent, final,
+    robot:CAD&&CAD.name, opmode:CODE&&CODE.opmode, site:/^(localhost|127[.]|\[)/.test(location.hostname)?null:location.hostname};
+  if(S&&ph==="running") Sounds.scored((S[Shots.alliance]||S.red).total); else Sounds.lastScore=null;
+  const was=WATCH.phase; WATCH.phase=ph;
+  const meta0={robot:CAD&&CAD.name, opmode:CODE&&CODE.opmode, period:kind, skill:Online.inMatch()?"online":live?$("#matchSkill").value:"solo"};
+  if(ph==="running"&&was!=="running"){
+    WATCH.trace=[]; WATCH.hits=[]; WATCH.bump=null;
+    // race your best: the ghost of the best run with this robot, OpMode, period and opponents
+    const g=$("#ghostOn"); WATCH.ghost=g&&g.checked&&!Online.inMatch()?ghostRead(store.get(bestKey(meta0)+".ghost",null)):null;
+  }
+  if(ph==="running"){
+    ghostRecord(WATCH.trace,Sim.t,Sim.chassis);
+    // each time the robot comes up against something, once per contact
+    if(Sim.bump&&Sim.bump!==WATCH.bump) WATCH.hits.push({t:+Sim.t.toFixed(1), what:Sim.bump});
+    WATCH.bump=Sim.bump||null;
+  }
+  if(ph==="running"&&was!=="running"&&!Recorder.on&&Recorder.wantsAuto()&&!Recorder.start(true)) $("#cadStatus").textContent=Recorder.why||"";
+  if(was==="running"&&ph!=="running"){
+    if(!final) Sounds.play("stop");
+    const meta=Object.assign({trace:WATCH.trace, hits:WATCH.hits},meta0);
+    const al=Online.inMatch()&&Online.myAl()?Online.myAl():Shots.alliance;
+    const auto=Recorder.on&&Recorder.auto;
+    // the score as the buzzer left it (the HUD's copy can be a fifth of a second old)
+    const Sf=live?(Online.guest()&&Online.score?Online.score:Match.score(Sim)):null;
+    const after=()=>{ if(final&&Sf) Results.show(Sf,al,meta); else if(Recorder.url&&auto) Recorder.show(); };
+    if(auto) setTimeout(()=>Recorder.stop().then(after),1500); else after();
+  }
+}
 function renderMatchHud(force){
   const hud=$("#matchHud"); if(!hud) return;
   const on=Match.live();
@@ -317,6 +451,7 @@ function renderMatchHud(force){
   const now=performance.now(); if(!force&&now-HUD_T<200) return; HUD_T=now;
   // online, the host keeps the score; a guest shows the host's
   const S=Online.guest()&&Online.score?Online.score:Match.score(Sim);
+  LAST_SCORE=S;
   $("#mhRed").textContent=S.red.total; $("#mhBlue").textContent=S.blue.total;
   const P=Match.period==="Autonomous"?"AUTO":"TELEOP";
   const cd=Online.playing()?Online.countdown():0;
@@ -452,53 +587,6 @@ function setActivePad(p){
 }
 
 /* ============================================================
-   ACTUATOR GAUGES
-   ============================================================ */
-const ARC_R=34, ARC_A0=Math.PI*0.78, ARC_A1=Math.PI*2.22;
-function arcPath(t0,t1){
-  const a0=ARC_A0+(ARC_A1-ARC_A0)*t0, a1=ARC_A0+(ARC_A1-ARC_A0)*t1;
-  const x0=48+ARC_R*Math.cos(a0), y0=44+ARC_R*Math.sin(a0), x1=48+ARC_R*Math.cos(a1), y1=44+ARC_R*Math.sin(a1);
-  return `M ${x0.toFixed(2)} ${y0.toFixed(2)} A ${ARC_R} ${ARC_R} 0 ${(a1-a0)>Math.PI?1:0} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`;
-}
-function buildGauges(){
-  if(!CODE){ $("#gauges").innerHTML=""; return; }
-  const acts=CODE.devices.filter(d=>Sim.dev[d.name]&&/Servo|DcMotor/i.test(d.type||""));
-  if(!acts.length){ $("#gauges").innerHTML=`<p class="hint" style="grid-column:1/-1">No servos or motors in this OpMode.</p>`; return; }
-  $("#gauges").innerHTML=acts.map(d=>{
-    const s=Sim.dev[d.name], isMotor=s.kind==="motor", r=travelRange(CODE,d.name);
-    const lo=r?r.lo:0, hi=r?r.hi:1;
-    return `<div class="gauge" data-dev="${esc(d.name)}" data-motor="${isMotor?1:0}">
-      <div class="stallflag" hidden>STALL</div>
-      <svg viewBox="0 0 96 74" aria-hidden="true">
-        <path class="g-track" d="${arcPath(0,1)}"/>
-        ${isMotor?"":`<path class="g-range" d="${arcPath(lo,hi)}"/>`}
-        <path class="g-fill" d="${arcPath(0,0.001)}" data-fill></path>
-        <line class="g-cmd" data-cmd x1="48" y1="44" x2="48" y2="12"></line>
-        <text x="48" y="45" text-anchor="middle" dominant-baseline="central" style="font-family:var(--mono);font-size:14px;font-weight:700;fill:var(--tx)" data-val>0.00</text>
-        <text x="48" y="60" text-anchor="middle" style="font-family:var(--mono);font-size:8.5px;fill:var(--tx-3)" data-deg>—</text>
-      </svg>
-      <div class="gname" title="${esc(d.name)}">${esc(d.name)}</div>
-      <div class="gsub">${esc(isMotor?(s.mode==="rtp"?"to position":"power"):(s.spec.role||"servo"))}</div>
-    </div>`;
-  }).join("");
-}
-function updateGauges(){
-  $$(".gauge").forEach(el=>{
-    const s=Sim.dev[el.dataset.dev]; if(!s) return;
-    const isMotor=el.dataset.motor==="1";
-    const t=isMotor?(s.act+1)/2:clamp01(s.act), tc=isMotor?(s.cmd+1)/2:clamp01(s.cmd);
-    el.querySelector("[data-fill]").setAttribute("d",arcPath(isMotor?0.5:0,Math.max(0.002,t)));
-    const a=ARC_A0+(ARC_A1-ARC_A0)*clamp01(tc), ln=el.querySelector("[data-cmd]");
-    ln.setAttribute("x2",(48+ARC_R*1.14*Math.cos(a)).toFixed(2));
-    ln.setAttribute("y2",(44+ARC_R*1.14*Math.sin(a)).toFixed(2));
-    el.querySelector("[data-val]").textContent=s.act.toFixed(2);
-    el.querySelector("[data-deg]").textContent=isMotor?Math.round(s.ticks)+" ticks":(s.act*s.travelDeg).toFixed(0)+"°";
-    el.classList.toggle("stalled",s.stalled);
-    el.querySelector(".stallflag").hidden=!s.stalled;
-  });
-}
-
-/* ============================================================
    TORQUE ANGLE (picture-in-picture)
    ============================================================ */
 function liftState(){
@@ -627,8 +715,8 @@ function renderTables(){
 /* ============================================================
    THE RIG DOCUMENT
    Detection only seeds this. Once written down it is the model
-   everything runs on, it survives reloads, and it can be pasted
-   into a repo so next season starts from last season's rig.
+   everything runs on; it survives reloads (per robot, in this browser)
+   and travels in a .ftcsim workspace and a setup file.
    ============================================================ */
 let HW_USER={};            // per-device spec overrides
 function rigKey(){ return "ftcbench.rig."+((CAD&&CAD.name)||"sample"); }
@@ -644,7 +732,7 @@ function exportRig(){
       axis:m.axis?m.axis.map(v=>+v.toFixed(4)):null,
       leverMm:m.leverOverride!=null?+(m.leverOverride*1000).toFixed(1):null,
       part:m.part||null, manual:!!m.manual, inferred:!!m.inferred })),
-    devices:Object.assign({},RIG_DEVICES,MAP), hardware:HW_USER, ignored:Object.keys(IGNORED),
+    devices:Object.assign({},RIG_DEVICES,MAP), hardware:HW_USER, ignored:Ignores.forRig(IGNORED,ignoreRobot()),
     // the robot setup (SetupUI): which way is up, where the drive base's middle is, the
     // drive base when set by hand, and which checks the team has been through
     up:OPTS.up||null, shift:OPTS.shift||null, drive:(CAD&&CAD.driveSpec)||null, setup:Object.assign({},SETUP.done)
@@ -681,7 +769,7 @@ function applyRig(r){
   }
   RIG_DEVICES=Object.assign({},r.devices||{});
   HW_USER=r.hardware||{};
-  if(r.ignored){ IGNORED={}; r.ignored.forEach(k=>IGNORED[k]=1); }
+  if(Array.isArray(r.ignored)){ Ignores.fromRig(IGNORED,ignoreRobot(),r.ignored); saveIgnored(); }
   recomputeChain(CAD.mechs);
   syncOptionControls();
   return true;
@@ -695,7 +783,6 @@ function applyDeviceMemory(){
 }
 function saveRig(){
   store.set(rigKey(),JSON.stringify(exportRig()));
-  const ta=$("#rigJson"); if(ta&&document.activeElement!==ta) ta.value=JSON.stringify(exportRig(),null,1);
 }
 function loadSavedRig(){
   try{ const s=store.get(rigKey(),null); if(!s) return false; return applyRig(JSON.parse(s)); }catch(e){ return false; }
@@ -728,18 +815,22 @@ function renderRig(){
     $("#rigChain").innerHTML=""; $("#rigPill").textContent="none"; $("#rigCount").textContent=""; $("#guessPill").textContent="—"; return; }
   RIG_SPOTS=rigSpots();
   const spotOpts=RIG_SPOTS.map((s,i)=>`<option value="${i}">${esc(s.name.slice(0,30))} (${s.loc.map(v=>(v*1000).toFixed(0)).join(",")})</option>`).join("");
+  // the "moves with" and "pivot at" lists fill when opened: every joint in every row's list
+  // was 130,000 options on a 359-joint export, most of a second each time the table drew
+  const parentOpts=m=>[`<option value="chassis"${m.parent==="chassis"?" selected":""}>chassis (frame)</option>`]
+    .concat(M.filter(x=>x.id!==m.id).map(x=>`<option value="${esc(x.id)}"${m.parent===x.id?" selected":""}>${esc(mlabel(x))}</option>`)).join("");
   t.innerHTML=`<tr><th>name</th><th>joint</th><th>moves with</th><th>pivot at</th><th>dir</th><th></th></tr>`+
     M.map(m=>{
       const kopts=Object.keys(JOINT_KINDS).map(k=>`<option value="${k}"${m.kind===k?" selected":""}>${JOINT_KINDS[k].label}</option>`).join("");
-      const popts=[`<option value="chassis"${m.parent==="chassis"?" selected":""}>chassis (frame)</option>`]
-        .concat(M.filter(x=>x.id!==m.id).map(x=>`<option value="${esc(x.id)}"${m.parent===x.id?" selected":""}>${esc(mlabel(x))}</option>`)).join("");
+      const pm=m.parent==="chassis"?null:M.filter(x=>x.id===m.parent)[0];
+      const popts=m.parent==="chassis"?`<option value="chassis" selected>chassis (frame)</option>`:`<option value="${esc(m.parent)}" selected>${esc(pm?mlabel(pm):m.parent)}</option>`;
       const dot=m.inferred?`<span class="guess" title="inferred — confirm or change it"></span>`:`<span class="guess set" title="you set this"></span>`;
       return `<tr class="${m.manual?"manual":""}">
         <td><input class="rigname" data-rigname="${esc(m.id)}" value="${esc(mlabel(m))}" aria-label="Name for ${esc(m.id)}">${dot}</td>
         <td><select data-rigkind="${esc(m.id)}" aria-label="Joint type for ${esc(mlabel(m))}">${kopts}</select></td>
         <td><select data-rigparent="${esc(m.id)}" aria-label="What ${esc(mlabel(m))} moves with">${popts}</select></td>
         <td><select data-rigspot="${esc(m.id)}" aria-label="Pivot location for ${esc(mlabel(m))}">
-          <option value="">as measured (${m.pivot?m.pivot.map(v=>(v*1000).toFixed(0)).join(","):"—"})</option>${spotOpts}</select></td>
+          <option value="">as measured (${m.pivot?m.pivot.map(v=>(v*1000).toFixed(0)).join(","):"—"})</option></select></td>
         <td><button class="dirbtn" data-rigdir="${esc(m.id)}" title="Flip which way this joint travels">${m.dir>0?"+":"−"}</button></td>
         <td>${m.manual?`<button class="rmbtn" data-rigrm="${esc(m.id)}" title="Remove this joint">×</button>`:""}</td></tr>`;
     }).join("");
@@ -751,6 +842,10 @@ function renderRig(){
       <div class="cc">mounted on ${esc(par)} — ${carries.length?"swings <b>"+carries.map(c=>esc(mlabel(M.filter(x=>x.id===c)[0]||{id:c}))).join("</b>, <b>")+"</b> with it":"carries nothing further"}</div></div>`;
   }).join("");
   $("#rigPill").textContent=M.length+" joint"+(M.length===1?"":"s");
+  const fill=(s,html)=>{ if(s.dataset.full) return; s.dataset.full="1"; const keep=s.value; s.insertAdjacentHTML("beforeend",html); s.value=keep; };
+  t.querySelectorAll("[data-rigparent]").forEach(s=>{ const go=()=>{ if(s.dataset.full) return; const m=byMech(s.dataset.rigparent); if(!m) return; s.innerHTML=""; fill(s,parentOpts(m)); };
+    s.addEventListener("pointerdown",go); s.addEventListener("focus",go); });
+  t.querySelectorAll("[data-rigspot]").forEach(s=>{ const go=()=>fill(s,spotOpts); s.addEventListener("pointerdown",go); s.addEventListener("focus",go); });
   t.querySelectorAll("[data-rigkind]").forEach(s=>s.addEventListener("change",()=>{ const m=byMech(s.dataset.rigkind); if(!m) return; m.kind=s.value; m.inferred=false; rigChanged(); }));
   t.querySelectorAll("[data-rigparent]").forEach(s=>s.addEventListener("change",()=>{ const m=byMech(s.dataset.rigparent); if(!m) return; m.parent=s.value; m.inferred=false; rigChanged(); }));
   t.querySelectorAll("[data-rigdir]").forEach(b=>b.addEventListener("click",()=>{ const m=byMech(b.dataset.rigdir); if(!m) return; m.dir=(m.dir>0?-1:1); m.inferred=false; renderRig(); saveRig(); }));
@@ -774,7 +869,8 @@ function rigChanged(){ recomputeChain(CAD.mechs); View.load(CAD); rebuild(); sav
    CHECKS (findings, with ignore)
    ============================================================ */
 function renderFindings(){
-  const live=FINDINGS.filter(f=>!IGNORED[f.key]), hidden=FINDINGS.filter(f=>IGNORED[f.key]);
+  const robot=ignoreRobot(), op=ignoreOp(), ign=f=>Ignores.hides(IGNORED,robot,op,f);
+  const live=FINDINGS.filter(f=>!ign(f)), hidden=FINDINGS.filter(ign);
   const cnt={fail:0,warn:0,pass:0,info:0}; live.forEach(f=>cnt[f.sev]++);
   $("#score").innerHTML=`<div class="s-fail"><div class="k">${cnt.fail}</div><div class="l">won't work</div></div>
      <div class="s-warn"><div class="k">${cnt.warn}</div><div class="l">risky</div></div>
@@ -794,9 +890,10 @@ function renderFindings(){
   $("#ignoredWrap").innerHTML=hidden.length
     ?`<div class="ignored-head"><h4>Ignored · ${hidden.length}</h4><span class="spacer"></span><button class="btn-sm" id="clearIgnored">Restore all</button></div>`+
       hidden.map(f=>`<div class="ign-row"><span class="t">${esc(f.title.replace(/<[^>]+>/g,""))}</span><button class="btn-sm" data-unig="${esc(f.key)}">Restore</button></div>`).join(""):"";
-  $$("[data-ig]").forEach(b=>b.addEventListener("click",()=>{ IGNORED[b.dataset.ig]=1; saveIgnored(); renderFindings(); saveRig(); }));
-  $$("[data-unig]").forEach(b=>b.addEventListener("click",()=>{ delete IGNORED[b.dataset.unig]; saveIgnored(); renderFindings(); saveRig(); }));
-  const ci=$("#clearIgnored"); if(ci) ci.addEventListener("click",()=>{ IGNORED={}; saveIgnored(); renderFindings(); saveRig(); });
+  $$("[data-ig]").forEach(b=>b.addEventListener("click",()=>{ const f=live.find(x=>x.key===b.dataset.ig); if(!f) return;
+    Ignores.add(IGNORED,robot,op,f); saveIgnored(); renderFindings(); saveRig(); }));
+  $$("[data-unig]").forEach(b=>b.addEventListener("click",()=>{ Ignores.remove(IGNORED,robot,op,b.dataset.unig); saveIgnored(); renderFindings(); saveRig(); }));
+  const ci=$("#clearIgnored"); if(ci) ci.addEventListener("click",()=>{ Ignores.clear(IGNORED,robot,op); saveIgnored(); renderFindings(); saveRig(); });
 }
 
 /* ============================================================
@@ -1056,7 +1153,7 @@ function setTheme(t){
   const next=t==="dark"?"light":"dark";
   b.innerHTML=t==="dark"?SUN:MOON;
   b.setAttribute("aria-label","Switch to "+next+" theme"); b.title="Switch to "+next+" theme";
-  Graph.draw();
+  Graph.draw(); if(typeof CadView!=="undefined"&&CadView.theme) CadView.theme();
 }
 
 /* ============================================================
@@ -1105,9 +1202,33 @@ const poseText=c=>Field.ok
   ? `x ${(c.x/IN).toFixed(1)} · y ${(c.y/IN).toFixed(1)} in · ${Math.round(wrap180(c.h*180/Math.PI))}°`
   : `x ${c.x.toFixed(2)} m · y ${c.y.toFixed(2)} m · ${Math.round(c.h*180/Math.PI)}°`;
 function setHTML(el,html){ if(el&&el.innerHTML!==html) el.innerHTML=html; }
+/* Where Reset pose puts the robot (the Start picker beside it): a spot on the alliance's
+   wall, or "My spot", a pose the driver saved, one per alliance, kept in this browser */
+function startSlot(){ const v=store.get("ftcbench.startSlot","centre"); return /^(centre|left|right|mine)$/.test(v)?v:"centre"; }
+function mySpot(al){ try{ const p=JSON.parse(store.get("ftcbench.mySpot."+al,"null")); return p&&isFinite(p.x)&&isFinite(p.y)&&isFinite(p.h)&&Math.abs(p.x)<2&&Math.abs(p.y)<2?p:null; }catch(e){ return null; } }
 function placeAtStart(){
-  const p=Field.ok?Field.startPose(Shots.alliance,footprintOf(CAD,OPTS.front)):{x:0,y:0,h:0};
-  Sim.chassis={x:p.x,y:p.y,h:p.h}; OPTS.startPose=Object.assign({},p);
+  const slot=startSlot(), mine=slot==="mine"?mySpot(Shots.alliance):null;
+  const p=mine||(Field.ok?Field.startPose(Shots.alliance,footprintOf(CAD,OPTS.front),slot):{x:0,y:0,h:0});
+  Sim.chassis={x:p.x,y:p.y,h:p.h};
+  if(mine&&Field.ok&&Sim.footprint) Field.collide(Sim.chassis,Sim.footprint,Sim.obstacles);
+  OPTS.startPose=Object.assign({},Sim.chassis);
+}
+function wireGhost(){ const g=$("#ghostOn"); if(!g) return; g.checked=store.get("ftcbench.ghost","1")!=="0"; g.addEventListener("change",()=>store.set("ftcbench.ghost",g.checked?"1":"0")); }
+function wireStartSel(){
+  const sel=$("#startSel"); if(!sel) return;
+  sel.value=startSlot();
+  sel.addEventListener("change",()=>{
+    if(sel.value==="save"){
+      if(Sim.phase==="running"){ sel.value=startSlot(); return; }
+      const c=Sim.chassis; store.set("ftcbench.mySpot."+Shots.alliance,JSON.stringify({x:+c.x.toFixed(4),y:+c.y.toFixed(4),h:+c.h.toFixed(4)}));
+      store.set("ftcbench.startSlot","mine"); sel.value="mine";
+      $("#cadStatus").textContent="Saved this spot as your "+Shots.alliance+" start. Reset pose comes back here.";
+      return;
+    }
+    store.set("ftcbench.startSlot",sel.value);
+    if(sel.value==="mine"&&!mySpot(Shots.alliance)){ $("#cadStatus").textContent="No spot saved for "+Shots.alliance+" yet: drag the robot where you start, then pick Save this spot."; return; }
+    if(Sim.phase!=="running"){ placeAtStart(); resetMatch(); }
+  });
 }
 /* online: the match deals the alliance (NetUI.begin passes dealt); nobody changes sides mid-match */
 function setAlliance(al,move,dealt){
@@ -1137,8 +1258,11 @@ function shotTick(now){
   const key=[(c.x/IN).toFixed(1),(c.y/IN).toFixed(1),Field.hive.red,Field.hive.blue,Shots.alliance,JSON.stringify(Shots.cfg)].join("|");
   if(key!==ShotUI.key){ ShotUI.key=key; ShotUI.still=now; ShotUI.dirty=true; ShotUI.full=false; }
   let fresh=false;
-  if(ShotUI.dirty&&now-ShotUI.t>=250){ shotEvaluate("coarse"); ShotUI.t=now; ShotUI.dirty=false; fresh=true; }
-  else if(!ShotUI.dirty&&!ShotUI.full&&now-ShotUI.still>=700&&(paneVisible("shot")||Shots.cfg.shooter)){ shotEvaluate("full"); ShotUI.full=true; fresh=true; }
+  // the verdict feeds the Shot tab, the arc and the flywheel's tick on the tab: with no flywheel in the
+  // code and the tab shut nobody reads it (~7 ms each time), so it waits (dirty stays set) until one does
+  const seen=!!Shots.cfg.shooter||paneVisible("shot");
+  if(ShotUI.dirty&&seen&&now-ShotUI.t>=250){ shotEvaluate("coarse"); ShotUI.t=now; ShotUI.dirty=false; fresh=true; }
+  else if(!ShotUI.dirty&&!ShotUI.full&&now-ShotUI.still>=700&&seen){ shotEvaluate("full"); ShotUI.full=true; fresh=true; }
   // what would happen if the robot fired right now: the shot on aim, and the
   // share of real, scattered shots that go in — with the robot's motion in both
   ShotUI.preview=null;
@@ -1258,15 +1382,85 @@ function renderShotSetup(){
   const wheels=Field.data.shooter.wheels;
   setHTML($("#wheelSel"),wheels.map(w=>`<option value="${w.diameterMm}|${esc(w.id)}"${w.diameterMm===cfg.wheelMm&&(!cfg.wheelId||cfg.wheelId===w.id)?" selected":""}>${esc(w.label)}</option>`).join(""));
   if(document.activeElement!==$("#gearIn")) $("#gearIn").value=cfg.gear;
+  renderPieceSetup();
   renderShotVerdict(); renderShotLive(); renderHives(); renderShotLog();
 }
 function shotChanged(){ ShotUI.dirty=true; ShotUI.t=0; saveRig(); renderShotSetup(); }
-/* Fire the robot's own shooter as it stands — no perfect test shots. */
+/* Fire the robot's own shooter as it stands — no perfect test shots. With real pieces it
+   launches the one waiting at the shooter, or says there is none (src/payload.js). */
 function shotFire(){
   if(!Field.ok||!Shots.cfg) return;
   if(!Shots.cfg.shooter) Shots.note("This OpMode has no flywheel — load one that shoots, or pick its motor in the Shot tab.");
+  else if(Payload.real()) Payload.release(Sim.chassis,"fired by hand");
   else Shots.fire(Sim.chassis,"fired by hand",Sim.vel);
   renderShotLog();
+}
+
+/* ---- game pieces through the robot (src/payload.js): the Shot tab's card and the readout's chip ---- */
+function pcCfg(){ const c=Shots.cfg; if(!c) return null; if(!c.payload||typeof c.payload!=="object") c.payload={}; return c.payload; }
+/* Four dots, filled for what the robot holds (POLLEN round, NECTAR square in its alliance's colour), and the supply. */
+function pieceChip(){
+  const S=Payload.supply();
+  if(S.mode==="none") return "";
+  if(S.mode==="unlimited") return `<em>unlimited supply</em>`;
+  const h=Payload.held, dots=[];
+  for(let i=0;i<MATCH_BOT.cap;i++){ const p=h[i]; dots.push(!p?"<i></i>":p.kind==="nectar"?`<i class="n ${p.color==="blue"?"blue":p.color==="red"?"red":""}"></i>`:`<i class="p"></i>`); }
+  return dots.join("")+`<em>${h.length} of ${MATCH_BOT.cap}</em>`;
+}
+function renderPieces(){
+  const S=Payload.supply(), html=pieceChip(), chip=$("#pcChip");
+  if(chip){ chip.hidden=!html||S.mode!=="real"; setIfChanged(chip,html); chip.title=S.mode==="real"?"Game pieces in the robot: "+S.why:""; }
+  const head=$("#pcHead"); if(head) setIfChanged(head,html||`<em>none</em>`);
+  const el=$("#pcLive"); if(!el||!paneVisible("shot")) return;
+  const out=[`<div>${S.mode==="real"?"Real pieces":S.mode==="unlimited"?"Unlimited supply":"No game pieces"}: ${esc(S.why)}.</div>`];
+  if(S.mode==="real"){
+    for(const m of Payload.mouths()){
+      const d=Payload.dirs[m.name]||{};
+      const way=d.sign?`<b>${d.sign>0?"positive":"negative"}</b> power is in (${esc(d.from==="pinned"?"set here":d.from==="first feed"?"the way it ran with the shooter up":d.from==="first ball"?"the way it ran at its first ball":"its first use")}${d.t!=null?" at "+d.t.toFixed(1)+" s":""})`
+        :"which way is in: the way it runs at its first ball will say";
+      out.push(`<div><code>${esc(m.name)}</code> at the ${esc(m.edge)} edge (${esc(m.from)}); ${way}</div>`);
+    }
+    const st=Payload.stats||{}, tr=Payload.transfer(), g=Payload.gate();
+    out.push(`<div>${tr?`<code>${esc(tr)}</code> carries pieces to the shooter; `:""}${g?`<code>${esc(g)}</code> lets them out`:"no feeder: the intake pushes a piece into the shooter once it turns"}.</div>`);
+    out.push(`<div>This run: ${st.picked||0} picked up${st.fromFlowers?" ("+st.fromFlowers+" from FLOWERs)":""} · ${st.fired||0} launched · ${st.scored||0} in · ${st.ejected||0} put out</div>`);
+  }
+  setIfChanged(el,out.join(""));
+}
+function renderPieceSetup(){
+  const P=pcCfg(); if(!P||!$("#pcIntake1")) return;
+  const devs=((CODE&&CODE.devices)||[]).filter(d=>/DcMotor|CRServo/i.test(d.type||""));
+  const opt=(sel,none)=>[`<option value="">${none}</option>`].concat(devs.map(d=>`<option value="${esc(d.name)}"${d.name===sel?" selected":""}>${esc(d.name)}</option>`)).join("");
+  const ins=Payload.intakes();
+  setHTML($("#pcIntake1"),opt(ins[0],"— none —"));
+  setHTML($("#pcIntake2"),opt(ins[1],"— none —"));
+  setHTML($("#pcTransfer"),opt(Payload.transfer(),"— none —"));
+  $$("#pcSupply button").forEach(b=>b.classList.toggle("on",b.dataset.sup===(P.supply||"auto")));
+  $("#pcPreload").value=P.preload==null?"":String(P.preload);
+  if(document.activeElement!==$("#pcRoller")) $("#pcRoller").value=P.rollerMm||48;
+  const sel=(name,what,val,list)=>`<select data-pc="${what}" data-dev="${esc(name)}" aria-label="${esc(name)} ${what}">`+list.map(([v,l])=>`<option value="${v}"${v===(val||"auto")?" selected":""}>${l}</option>`).join("")+`</select>`;
+  setHTML($("#pcRows"),ins.map(n=>`<div class="pc-row"><code>${esc(n)}</code>`+
+    sel(n,"edge",P.edges&&P.edges[n],[["auto","edge: auto"],["front","front edge"],["back","back edge"]])+
+    sel(n,"dir",P.dirs&&P.dirs[n],[["auto","in: at its first ball"],["positive","in: + power"],["negative","in: − power"]])+`</div>`).join(""));
+  renderPieces();
+}
+/* A setting changed: before START the pre-load and the pieces on the field follow it at once. */
+function pieceChanged(){
+  if(Sim.phase!=="running"){ Payload.primed=false; if(!Online.inMatch()) resetMatch(); }
+  shotChanged();
+}
+function wirePieces(){
+  const set=(id,f)=>$(id).addEventListener("change",e=>{ const P=pcCfg(); if(!P) return; f(P,e.target.value); pieceChanged(); });
+  const intake=(k)=>(P,v)=>{ const l=Payload.intakes().slice(); if(v) l[k]=v; else l.splice(k,1); P.intakes=l.filter((n,i)=>n&&l.indexOf(n)===i).slice(0,4); };
+  set("#pcIntake1",intake(0)); set("#pcIntake2",intake(1));
+  set("#pcTransfer",(P,v)=>{ P.transfer=v; });
+  set("#pcPreload",(P,v)=>{ P.preload=v===""?null:Math.max(0,Math.min(4,+v)); });
+  set("#pcRoller",(P,v)=>{ const n=parseFloat(v); if(isFinite(n)) P.rollerMm=Math.max(10,Math.min(150,n)); });
+  $("#pcSupply").addEventListener("click",e=>{ const b=e.target.closest("button"), P=pcCfg(); if(!b||!P) return; P.supply=b.dataset.sup; pieceChanged(); });
+  $("#pcRows").addEventListener("change",e=>{ const s=e.target.closest("select[data-pc]"), P=pcCfg(); if(!s||!P) return;
+    const k=s.dataset.pc==="edge"?"edges":"dirs", m=Object.assign({},P[k]||{});
+    if(s.value==="auto") delete m[s.dataset.dev]; else m[s.dataset.dev]=s.value;
+    P[k]=m; if(k==="dirs"&&Payload.dirs[s.dataset.dev]&&s.value==="auto") delete Payload.dirs[s.dataset.dev];
+    pieceChanged(); });
 }
 function wireShotTab(){
   $("#fireBtn").addEventListener("click",shotFire);
@@ -1286,6 +1480,7 @@ function wireShotTab(){
   $("#gearIn").addEventListener("change",e=>{ if(!Shots.cfg) return; const v=parseFloat(e.target.value); if(isFinite(v)&&v>0) Shots.cfg.gear=Math.max(0.25,Math.min(4,v)); shotChanged(); });
   $("#shotDev").addEventListener("change",e=>{ if(!Shots.cfg) return; Shots.cfg.shooter=e.target.value||null; Shots.cfg.motorId=nearestMotorId(Shots.deviceRpm()); shotChanged(); });
   $("#shotFeed").addEventListener("change",e=>{ if(!Shots.cfg) return; Shots.cfg.feeder=e.target.value||null; shotChanged(); });
+  wirePieces();
   // the drawn parts: which way the CAD faces, and whether to draw a base and a shooter
   const robotSeg=(id,apply)=>$(id).addEventListener("click",e=>{ const b=e.target.closest("button"); if(!b) return;
     apply(b); refitRobot(); syncOptionControls(); saveRig(); ShotUI.dirty=true; });
@@ -1321,7 +1516,7 @@ function analyzeAll(){
   if(!CODE||!CAD) return;
   FINDINGS=analyze(CODE,CAD,MAP,OPTS);
   renderFindings(); renderTables(); renderRig(); renderCoverage(); renderRobotCheck();
-  Status.render(); MathTab.invalidate();
+  Status.render(); MathTab.invalidate(); ImportFlow.render();
 }
 /* Rebuild the simulation after a rig or hardware change, keeping the Driver
    Station where it was — a running OpMode restarts, like re-deploying code. */
@@ -1329,9 +1524,11 @@ function reloadSim(){
   if(!CODE||!CAD) return;
   const phase=Sim.phase;
   Sim.load(CODE,CAD,MAP,withPose()); applyConfigOverrides(); Physics.sync();
+  // a rebuilt sim is a fresh robot: nothing held over from the last one, no feeder rest remembered
+  Payload.reset(); Shots.feedRest=null; Shots.feedName=null; Shots.feedWas=false;
   if(phase!=="stopped"){ Sim.init(); applyConfigOverrides(); resetMatch(); }
   if(phase==="running") Sim.start();
-  buildGauges(); renderPad(); renderLegend3D(); updateDS();
+  renderPad(); renderLegend3D(); updateDS();
 }
 function rebuild(){ analyzeAll(); reloadSim(); }
 function syncOptionControls(){
@@ -1339,10 +1536,9 @@ function syncOptionControls(){
   $("#trustNote").textContent=OPTS.trust==="code"
     ?"Servo and motor types come from your declarations and comments. The CAD is used for geometry only."
     :"Servo and motor types come from the part numbers in the STEP assembly.";
-  const g=Math.round(OPTS.payloadKg*1000), d=Math.round(OPTS.duty*100), t=Math.round((View.turretScale||0.55)*100);
+  const g=Math.round(OPTS.payloadKg*1000), d=Math.round(OPTS.duty*100);
   $("#massSlider").value=g; $("#massVal").textContent=g+" g";
   $("#dutySlider").value=d; $("#dutyVal").textContent=d+" %";
-  $("#turretSlider").value=t; $("#turretVal").textContent=t+" %";
   $$("#frontSeg button").forEach(b=>b.classList.toggle("on",b.dataset.front===OPTS.front));
   $$("#baseSeg button").forEach(b=>b.classList.toggle("on",b.dataset.mode===OPTS.baseModel));
   $$("#shooterSeg button").forEach(b=>b.classList.toggle("on",b.dataset.mode===OPTS.shooterModel));
@@ -1354,9 +1550,11 @@ function loadCAD(cad,label,cls){
   canonicalizeCAD(cad,{up:OPTS.up, shift:OPTS.shift});
   EXACT={state:"none", msg:null};            // a STEP's exactGeometry() sets it loading right after
   CAD=cad;
+  if(View.chassisG) View.chassisG.visible=true;   // boot() hides its stand-in until a robot is in
   $("#cadStatus").textContent=label; $("#cadDrop").className="drop "+(cls||"ok");
   const parts=cad.solids&&cad.solids.length?cad.solids.length+" parts":(cad.points?cad.points.length.toLocaleString():"0")+" pts";
-  $("#vpTitle").textContent=(cad.name||label)+" · "+parts+" · "+cad.mechs.length+" mechanism"+(cad.mechs.length===1?"":"s")+(Field.ok?" · BIOBUZZ field":"");
+  const nm=cad.mechs.filter(m=>!m.internal&&m.kind!=="fixed").length;
+  $("#vpTitle").textContent=(cad.name||label)+" · "+parts+" · "+nm+" mechanism"+(nm===1?"":"s")+(Field.ok?" · BIOBUZZ field":"");
   const b=cad.bbox, mm=v=>(v*1000).toFixed(0);
   $("#vpDims").textContent=`${mm(b.max[0]-b.min[0])} × ${mm(b.max[1]-b.min[1])} × ${mm(b.max[2]-b.min[2])} mm`;
   // the front defaults to the way the wheels roll; a saved rig can still say otherwise
@@ -1371,7 +1569,8 @@ function loadCAD(cad,label,cls){
   if(restored) $("#cadStatus").textContent=label+" · rig restored";
   syncOptionControls();
   DRIVE_CACHE={key:null,val:null}; Physics.sync(); MathTab.invalidate();
-  OnshapeHelp.chip();
+  robotChangedHands();
+  ImportFlow.render();
 }
 
 /* ============================================================
@@ -1384,295 +1583,138 @@ function readText(file,cb,err){
   r.readAsText(file);
 }
 let LAST_STEP=null;                 // the dropped file's text, for the Up override and the exact geometry
+let STEP_READS=0;                       // STEP files being read right now
 function takeCAD(file){
   $("#cadStatus").textContent="reading "+file.name+" …"; $("#cadDrop").className="drop";
-  readText(file,text=>{ LAST_STEP={name:file.name, text}; parseAndLoad(); },m=>{ $("#cadStatus").textContent=m; });
+  STEP_READS++;
+  readText(file,text=>{
+    STEP_READS=Math.max(0,STEP_READS-1);
+    LAST_STEP={name:file.name, text};
+    // a joint spec dropped with this STEP (see takeMates) is this robot's, ahead of joints saved for it before
+    const P=JOINTS.pending; JOINTS.pending=null;
+    if(P){ MATES.asm=MATES.features=MATES.name=MATES.report=null; JOINTS.spec=P.spec; JOINTS.name=P.name; JOINTS.step=JOINTS.dropped=file.name; }
+    parseAndLoad();
+  },m=>{ STEP_READS=Math.max(0,STEP_READS-1); if(!STEP_READS) JOINTS.pending=null; $("#cadStatus").textContent=m; });
 }
-/* The whole robot from Onshape (src/onshapecad.js): parts, colours, mass and
-   the mates as joints, no STEP and nothing to answer. */
-function loadOnshapeRobot(p,reparse){
-  let cad;
-  const from=p.from==="urdf"?"URDF":"Onshape";
-  try{ cad=cadFromOnshape(p,{up:OPTS.up, shift:OPTS.shift}); }
-  catch(e){ onshapeNote("Your robot came from "+from+", but it couldn't be built: "+esc(e.message)+(p.from==="urdf"?".":". Try again; if it keeps failing, export a STEP and drop it."),"bad");
-    if(p.from!=="urdf") OnshapeHelp.fail("Your robot arrived but couldn't be built: "+e.message+". Try again; if it keeps failing, export a STEP from Onshape and use Open a file.");
-    return false; }
-  if(p.from==="urdf"){ cad.source="urdf"; if(p.notes&&p.notes.length) cad.onshape.why=p.notes.concat(cad.onshape.why||[]); }
-  LAST_STEP={name:p.name, text:"", onshape:p, label:p.name+" · from "+from};
+/* A robot read whole from Onshape (src/onshapelink.js, src/onshapecad.js), built
+   again off the page: the first time from the link (ImportFlow.fromLink), and
+   again with a new up or centre (parseAndLoad). p is the payload the read gave. */
+async function loadOnshapeRobot(p,reparse){
+  ImportFlow.last=null;
+  ImportFlow.start(reparse?"Placing "+p.name+" again":"Building "+p.name, "The parts, where they sit, and the mates as joints.");
+  let r;
+  try{ r=await EngineWorker.onshape(p,{frame:{up:OPTS.up, shift:OPTS.shift}, onProgress:(t,d,n)=>ImportFlow.progress(t,d,n)}); }
+  catch(e){ ImportFlow.fail("Your robot came from Onshape, but it couldn't be built: "+(e&&e.message||e)+". Try again; if it keeps failing, export it (Export → URDF) and drop the zip."); return false; }
+  const cad=r.cad; cad.name=p.name||cad.name;
+  LAST_STEP={name:cad.name, text:"", onshape:p, label:cad.name+" · from Onshape"};
   // a new robot drops the last one's joints; the same one re-read (a new up, a new centre) keeps them
-  if(!reparse||JOINTS.step!==p.name){ JOINTS.spec=JOINTS.report=JOINTS.devices=null; JOINTS.name=JOINTS.step=null; }
-  MATES.asm=p.asm; MATES.features=p.features; MATES.featuresBy=p.featuresBy||null; MATES.name=p.name; MATES.url=p.url||null; MATES.fromLink=true; MATES.report=cad.onshape.report;
-  SetupUI.beforeParse&&SetupUI.beforeParse(p.name);
-  loadCAD(cad, p.name+" · from "+from+" · "+cad.solids.length+" parts · "+cad.mechs.filter(m=>m.fromMate).length+" joints", "ok");
-  recomputeChain(cad.mechs);
-  if(JOINTS.spec) applyJoints();
-  const rep=cad.onshape.report, n=cad.mechs.filter(m=>m.fromMate).length;
-  $("#mateStatus").textContent=p.name+" · whole robot from "+from+" · "+n+" joint"+(n===1?"":"s"); $("#mateDrop").className="drop ok";
-  $("#mateNote").innerHTML=(cad.onshape.why||[]).map(w=>"<li>"+esc(w)+"</li>").join("");
-  const pill=$("#matePill"); if(pill){ pill.textContent=n+" joint"+(n===1?"":"s"); pill.className="pill ok"; }
-  if(p.from!=="urdf"&&(!reparse||OnshapeHelp.mode==="busy")) OnshapeHelp.done(p.name, cad.solids.length, cad.mechs.filter(m=>m.fromMate).length, cad.onshape&&cad.onshape.kg);
-  onshapeNote("<b>"+esc(p.name)+"</b> loaded "+(p.from==="urdf"?"from its URDF":"straight from Onshape")+": "+cad.solids.length+" parts with their colours"+
-    (cad.onshape.kg?", "+cad.onshape.kg.toFixed(1)+" kg from your materials":"")+", and "+n+" joint"+(n===1?"":"s")+" from your "+(p.from==="urdf"?"joints":"mates")+". Load your code and press INIT.","ok");
-  renderFrameNote&&renderFrameNote();
-  Status.render&&Status.render();
-  void rep;
+  if(!reparse||JOINTS.step!==cad.name){ JOINTS.spec=JOINTS.report=JOINTS.devices=null; JOINTS.name=JOINTS.step=null; }
+  SetupUI.beforeParse&&SetupUI.beforeParse(cad.name);
+  ImportFlow.robotIn(cad,"Onshape");
   return true;
-}
-/* ============================================================
-   ONSHAPE, STEP BY STEP: the pop-up that gets the robot. The main way is
-   Sign in with Onshape (functions/onshape) and a pasted assembly address,
-   which works on school computers; the "Send to SimBench" bookmark is the
-   fold below it, for browsers that still run bookmarklets. The same pop-up
-   shows the progress either way (waitForOnshape for the bookmark).
-   ============================================================ */
-const OnshapeHelp={
-  mode:null, via:null, signin:{ready:false, signedIn:false},
-  init(){
-    const ov=$("#osOverlay"); if(!ov) return;
-    const mac=/Mac|iPhone|iPad/i.test((navigator.userAgentData&&navigator.userAgentData.platform)||navigator.platform||navigator.userAgent);
-    for(const id of ["osKey1","osKey2","osKey3"]){ const k=$("#"+id); if(k) k.textContent=mac?"⌘ Cmd":"Ctrl"; }
-    for(const k of $$(".os-mod")) k.textContent=mac?"⌘ Cmd":"Ctrl";
-    const phone=matchMedia("(pointer:coarse)").matches&&!matchMedia("(any-pointer:fine)").matches;
-    $("#osPhone").hidden=!phone;
-    const href=onshapeBookmarklet(location.origin+location.pathname);
-    for(const a of $$(".bm-link")){
-      a.href=href;
-      // clicking it here does nothing useful: say so, right where they clicked
-      a.addEventListener("click",e=>{ e.preventDefault(); this.tip("Drag it, don't click it here: press and hold the yellow button, move it up onto your bookmarks bar and let go. It only works when you click it on your Onshape tab."); });
-      a.addEventListener("dragend",e=>{ const ok=e.dataTransfer&&e.dataTransfer.dropEffect!=="none";
-        if(ok){ store.set("ftcbench.bookmark","1"); this.tip("✓ If you see Send to SimBench on your bookmarks bar, you're set. Now steps 3 and 4."); } });
-    }
-    $("#osCopy").addEventListener("click",async()=>{
-      let ok=false;
-      try{ await navigator.clipboard.writeText(href); ok=true; }catch(e){
-        const t=document.createElement("textarea"); t.value=href; document.body.appendChild(t); t.select();
-        try{ ok=document.execCommand("copy"); }catch(x){} t.remove(); }
-      $("#osCopied").textContent=ok?"Copied. Now paste it as the bookmark's URL.":"Your browser blocked copying; drag the button instead.";
-    });
-    for(const b of $$("[data-os-open]")) b.addEventListener("click",()=>this.open());
-    $("#cadPick").addEventListener("click",()=>$("#cadFile").click());
-    $("#osClose").addEventListener("click",()=>this.close());
-    $("#osDone").addEventListener("click",()=>this.close());
-    $("#osShowSteps").addEventListener("click",()=>this.open());
-    $("#osSeeRobot").addEventListener("click",()=>{ this.close(); const nav=$('.tabs[data-tabs="left"]'); if(nav) selectTab(nav,"robot"); });
-    // copy and paste: the STEP, the address, the pages of text
-    $("#osStepPick").addEventListener("click",()=>$("#cadFile").click());
-    $("#osPasteLink").value=store.get("ftcbench.onshapeLink","")||"";
-    $("#osPasteLink").addEventListener("input",()=>this.pasteLink());
-    $("#osPaste").addEventListener("input",()=>{ clearTimeout(this.pasteT); this.pasteT=setTimeout(()=>this.takePaste(),60); });
-    $("#osLimitLinks").addEventListener("click",e=>{ const a=e.target.closest("[data-lk]"); if(!a) return;
-      this.paste.pending=a.dataset.lk; this.say("osPasteTip","Now copy that page (Ctrl + A, Ctrl + C) and paste it in the box in step 3."); });
-    $("#osPasteSee").addEventListener("click",()=>{ this.close(); const nav=$('.tabs[data-tabs="left"]'); if(nav) selectTab(nav,"robot"); });
-    this.pasteLink();
-    $("#osSignIn").addEventListener("click",()=>this.signIn());
-    $("#osSignOut").addEventListener("click",()=>this.signOut());
-    $("#osLinkForm").addEventListener("submit",e=>{ e.preventDefault(); this.fromLink(); });
-    $("#osLink").value=store.get("ftcbench.onshapeLink","")||"";
-    // the sign-in window says how it went (functions/onshape callback page)
-    addEventListener("message",e=>{ if(e.origin===location.origin&&e.data&&e.data.type==="simbench-onshape-signin") this.signedIn(!!e.data.ok,String(e.data.msg||"")); });
-    ov.addEventListener("click",e=>{ if(e.target===ov&&this.mode!=="busy") this.close(); });
-    addEventListener("keydown",e=>{ if(e.key==="Escape"&&!ov.hidden&&this.mode!=="busy") this.close(); });
-    this.chip();
-  },
-  view(guide){ $("#osGuide").hidden=!guide; $("#osProgress").hidden=guide; $("#osOverlay").hidden=false; },
-  open(){ this.mode="guide"; $("#osBmTip").hidden=true; this.view(true); const s=$(".os-sheet"); if(s) s.scrollTop=0; this.refresh();
-    // the STEP parses after the file picker closes: keep the steps' ticks current while open
-    clearInterval(this.pasteIv); this.pasteIv=setInterval(()=>{ if($("#osOverlay").hidden||this.mode!=="guide") clearInterval(this.pasteIv); else this.pasteState(); },700);
-    this.pasteState(); },
-  /* ---- copy and paste ---- */
-  paste:{asm:false, limits:[], pending:"", got:{}},
-  pasteLink(){
-    const href=$("#osPasteLink").value.trim(), L=onshapeApiLinks(href), a=$("#osOpenJoints");
-    this.say("osPasteLinkTip",href&&!L?"That isn't an Onshape assembly address. In Onshape, click your Assembly tab, then copy the whole address from the address bar.":"");
-    if(L){ a.href=L.def; a.setAttribute("aria-disabled","false"); store.set("ftcbench.onshapeLink",href); }
-    else{ a.removeAttribute("href"); a.setAttribute("aria-disabled","true"); }
-    if(this.paste.asm&&MATES.asm) this.renderLimits();
-    this.pasteState();
-  },
-  takePaste(){
-    const box=$("#osPaste"), text=box.value;
-    if(!text.trim()) return;
-    let r; try{ r=readOnshapePaste(text); }catch(e){ this.say("osPasteTip",e.message+"."); return; }
-    box.value="";
-    if(r.kind==="assembly"){
-      MATES.asm=r.json; MATES.features=null; MATES.featuresBy={}; MATES.name="your Onshape assembly";
-      MATES.url=$("#osPasteLink").value.trim()||null; MATES.fromLink=true; MATES.report=null;
-      JOINTS.spec=JOINTS.report=null;
-      this.paste={asm:true, limits:[], pending:"", got:{}};
-      this.renderLimits();
-      this.say("osPasteTip","✓ Got your joints: "+r.mates+" mate"+(r.mates===1?"":"s")+"."+(this.paste.limits.length?" Limits are next (step 4), or skip them.":""));
-    }else{
-      if(!this.paste.asm||!MATES.asm){ this.say("osPasteTip","That's a limits page. Paste your joints page first (the button in step 3)."); return; }
-      const k=this.paste.pending||"", link=this.paste.limits.find(x=>x.key===k);
-      if(k==="") MATES.features=r.json; else MATES.featuresBy[k]=r.json;
-      this.paste.got[k]=true; this.paste.pending="";
-      this.renderLimits();
-      this.say("osPasteTip","✓ Got the limits for "+(link?link.name:"the main assembly")+".");
-    }
-    this.applyPaste();
-  },
-  renderLimits(){
-    const L=this.paste.limits=onshapeLimitLinks(MATES.asm,$("#osPasteLink").value.trim());
-    const box=$("#osLimitLinks");
-    if(!this.paste.asm){ box.innerHTML='<span class="dim">These show up after step 3.</span>'; return; }
-    if(!L.length){ box.innerHTML='<span class="dim">Paste your assembly\'s address in step 2 to get these links.</span>'; return; }
-    box.innerHTML=L.map(x=>'<a class="btn-sm" target="_blank" rel="noopener" data-lk="'+esc(x.key)+'" href="'+esc(x.url)+'">Open ↗ '+esc(x.name)+'</a>'+
-      (this.paste.got[x.key]?'<span class="got">✓</span>':'')).join("");
-  },
-  /* the STEP of their own robot is in and the joints came: put the joints on it */
-  applyPaste(){
-    if(this.paste.asm&&MATES.asm&&ownRobot()&&LAST_STEP&&!LAST_STEP.onshape&&!LAST_STEP.session) applyMates();
-    this.pasteState();
-  },
-  pasteState(){
-    const step=ownRobot()&&LAST_STEP&&!LAST_STEP.onshape&&!LAST_STEP.session;
-    const ok=$("#osStepOk"); ok.hidden=!step; if(step) ok.textContent="✓ "+LAST_STEP.name;
-    $("#osPs1").classList.toggle("done",!!step);
-    $("#osPs2").classList.toggle("done",!!onshapeApiLinks($("#osPasteLink").value.trim()));
-    $("#osPs3").classList.toggle("done",this.paste.asm&&!!MATES.asm);
-    $("#osPs4").classList.toggle("done",Object.keys(this.paste.got).length>0);
-    const rep=MATES.report, show=!!(step&&this.paste.asm&&MATES.asm&&rep);
-    $("#osPasteResult").hidden=!show;
-    if(show){
-      const nl=Object.keys(this.paste.got).length;
-      $("#osPasteResultText").textContent="✓ "+LAST_STEP.name+": "+rep.joints+" joint"+(rep.joints===1?"":"s")+" from your mates, "+
-        rep.matched+" of "+rep.parts+" parts matched"+(nl?", limits from "+nl+" page"+(nl===1?"":"s"):"")+".";
-    }
-    else if(step&&this.paste.asm&&MATES.asm&&!rep){ const t=$("#mateStatus").textContent; if(/Couldn't|line up/.test(t)) this.say("osPasteTip",t); }
-  },
-  /* whether this site can sign in to Onshape (it needs functions/onshape), and whether it has */
-  async refresh(){
-    const st=this.signin=await onshapeSignInState();
-    // signing in is the quicker way where it's switched on (functions/onshape) and the account allows it
-    $("#osSignWay").hidden=!st.ready;
-    $("#osSignIn").hidden=st.signedIn; $("#osSignedIn").hidden=!st.signedIn;
-    $("#osStep1").classList.toggle("done",st.signedIn);
-    return st;
-  },
-  say(id,t){ const p=$("#"+id); if(!p) return; p.textContent=t||""; p.hidden=!t; },
-  signIn(){
-    this.say("osSignTip","");
-    const w=window.open("onshape/login","sb_onshape_login","popup,width=560,height=760");
-    // no pop-up allowed: sign in in this tab; Onshape sends it back to #onshape-signed-in
-    if(!w){ location.href="onshape/login"; return; }
-    this.say("osSignTip","Finish in the Onshape window: sign in if it asks, then click Allow.");
-  },
-  async signedIn(ok,msg){
-    if(this.mode!=="guide") this.open();
-    const st=await this.refresh();
-    if(ok&&st.signedIn){ this.say("osSignTip",""); this.say("osLinkTip",$("#osLink").value?"Signed in. Click Get my robot.":"Signed in. Now steps 2 and 3."); if(!$("#osLink").value) $("#osLink").focus(); }
-    else this.say("osSignTip","Onshape sign-in didn't finish"+(msg?": "+msg:"")+". Click Sign in with Onshape to try again.");
-  },
-  async signOut(){
-    try{ await fetch("onshape/logout",{method:"POST",credentials:"same-origin"}); }catch(e){}
-    await this.refresh(); this.say("osLinkTip","");
-  },
-  /* step 3: the pasted address, read through the sign-in, the same robot the bookmark sends */
-  async fromLink(){
-    const href=$("#osLink").value.trim();
-    if(!onshapeRef(href)){ this.say("osLinkTip",href?"That isn't an Onshape assembly address. In Onshape, click your Assembly tab, then copy the whole address from the address bar.":"Paste your assembly's address first (step 2)."); return; }
-    if(!this.signin.signedIn&&!(await this.refresh()).signedIn){ this.say("osLinkTip","Sign in with Onshape first (step 1)."); return; }
-    store.set("ftcbench.onshapeLink",href); this.say("osLinkTip","");
-    this.via="link";
-    onshapeNote("Reading your robot from Onshape …");
-    this.progress("Reading the assembly …",null,null);
-    let p;
-    try{ p=checkOnshapePayload(await onshapeFromLink(href,(t,d,n)=>{ if(this.mode==="busy") this.progress(String(t),+d,+n); })); }
-    catch(e){
-      if(e&&e.status===401){ await this.refresh(); this.fail("Your Onshape sign-in has run out. Click Show the steps, then Sign in with Onshape and Get my robot again."); }
-      else this.fail("SimBench couldn't read your assembly: "+(e&&e.message||e)+".");
-      onshapeNote("Your robot didn't come from Onshape: "+esc(e&&e.message||String(e)),"bad");
-      return;
-    }
-    this.progress("Building your robot …",1,1);
-    setTimeout(()=>loadOnshapeRobot(p),30);
-  },
-  close(){ $("#osOverlay").hidden=true; this.mode=null; },
-  tip(t){ const p=$("#osBmTip"); if(!p) return; p.textContent=t; p.hidden=false; if($("#osOverlay").hidden) this.open(); },
-  meter(cls,frac){ const m=$("#osMeter"), f=$("#osMeterFill"); m.className="os-meter"+(cls?" "+cls:""); f.style.width=frac==null?"":Math.round(Math.max(.06,Math.min(1,frac))*100)+"%"; },
-  progress(text,done,total){
-    this.mode="busy"; this.view(false);
-    $("#osProgTitle").textContent="Getting your robot from Onshape";
-    $("#osProgText").textContent=text;
-    $("#osProgHint").textContent=this.via==="link"?"Reading through your Onshape sign-in. A big robot takes a minute or two.":"Keep your Onshape tab open until your robot appears.";
-    $("#osSeeRobot").hidden=true; $("#osShowSteps").hidden=true;
-    const known=Number.isFinite(done)&&Number.isFinite(total)&&total>0;
-    this.meter(known?"":"busy",known?done/total:null);
-    clearTimeout(this.timer);
-    // the bookmark always answers (the robot, or an alert on the Onshape tab): if it goes quiet, say what to check
-    if(this.via!=="link") this.timer=setTimeout(()=>{ if(this.mode==="busy") this.fail("Nothing has come from Onshape for 3 minutes. Check your Onshape tab for a message, then click the bookmark again."); },180000);
-  },
-  done(name,parts,joints,kg){
-    clearTimeout(this.timer); this.mode="done"; this.view(false);
-    $("#osProgTitle").textContent="✓ "+name+" is here";
-    $("#osProgText").textContent=parts+" parts with their colours, "+joints+" joint"+(joints===1?"":"s")+" from your mates"+(kg?", "+kg.toFixed(1)+" kg":"")+".";
-    $("#osProgHint").textContent=this.via==="link"?"Changed the robot in Onshape? Open this again and click Get my robot.":"You can close the Onshape tab. Next time, just click the bookmark again on your assembly.";
-    this.meter("ok",1); $("#osSeeRobot").hidden=false; $("#osShowSteps").hidden=true;
-  },
-  fail(msg){
-    clearTimeout(this.timer); this.mode="fail"; this.view(false);
-    $("#osProgTitle").textContent="Your robot didn't come through";
-    $("#osProgText").textContent=msg;
-    $("#osProgHint").textContent="The steps have a list of fixes under \u201cIt didn't work?\u201d.";
-    this.meter("bad",1); $("#osSeeRobot").hidden=true; $("#osShowSteps").hidden=false;
-  },
-  // the field's chip: while the sample robot is on the field, offer the team's own
-  chip(){ const c=$("#vpOnshape"); if(!c) return; let own=true; try{ own=ownRobot()||!!(CAD&&CAD.source==="onshape"); }catch(e){} c.hidden=own; },
-};
-/* This tab was opened by the bookmark: say we're ready, then take the robot.
-   A second click reuses this tab and only changes its #hash: wait again then. */
-let ONSHAPE_WAIT=null, ONSHAPE_PING=null;
-addEventListener("hashchange",()=>{ if(/^#onshape-wait/.test(location.hash)) waitForOnshape(); });
-function waitForOnshape(){
-  try{ history.replaceState(null,"",location.pathname+location.search); }catch(e){}
-  OnshapeHelp.via="bookmark";
-  onshapeNote("Reading your robot from Onshape … keep the Onshape tab open.");
-  OnshapeHelp.progress("Waiting for your Onshape tab …",null,null);
-  if(ONSHAPE_WAIT) removeEventListener("message",ONSHAPE_WAIT);
-  let got=false;
-  const okOrigin=o=>/^https:\/\/([a-z0-9-]+\.)*onshape\.com$/i.test(o);
-  addEventListener("message",ONSHAPE_WAIT=e=>{
-    if(!okOrigin(e.origin)||!e.data) return;
-    const d=e.data;
-    if(d.type==="simbench-progress"){ if(!got){ const t=String(d.text||"").slice(0,160); onshapeNote(esc(t)); OnshapeHelp.progress(t,+d.done,+d.total); } return; }
-    if(d.format!==ONSHAPE_FORMAT||got) return;
-    got=true;
-    let p; try{ p=checkOnshapePayload(d); }catch(x){ onshapeNote("What came from Onshape couldn't be read: "+esc(x.message),"bad"); OnshapeHelp.fail("What came from Onshape couldn't be read: "+x.message); return; }
-    removeEventListener("message",ONSHAPE_WAIT); ONSHAPE_WAIT=null;
-    OnshapeHelp.progress("Building your robot …",1,1);
-    // let the pop-up draw before the build takes the main thread
-    setTimeout(()=>{ if(p.geom) loadOnshapeRobot(p); else { holdOnshape(p); OnshapeHelp.close(); } },30);
-  });
-  clearTimeout(ONSHAPE_PING);
-  const ping=()=>{ if(got) return; try{ if(window.opener) window.opener.postMessage({type:"simbench-ready"},"*"); }catch(e){} ONSHAPE_PING=setTimeout(ping,600); };
-  ping();
 }
 function parseAndLoad(done){
   if(!LAST_STEP) return;
-  if(LAST_STEP.onshape){ loadOnshapeRobot(LAST_STEP.onshape,true); if(done&&CAD) done(CAD); return; }
+  if(LAST_STEP.onshape){ loadOnshapeRobot(LAST_STEP.onshape,true).then(()=>{ if(done&&CAD) done(CAD); }); return; }
+  if(LAST_STEP.urdfZip||LAST_STEP.kept) return;  // the zip's bytes went to the worker (or it came back from last time): placed once
   // a workspace keeps the robot it was saved with, not its CAD: there's nothing to read again
   if(LAST_STEP.session){ $("#cadStatus").textContent=LAST_STEP.name+" came from a workspace, so it can't be re-read. Drop its STEP to change how it's read."; if(done&&CAD) done(CAD); return; }
   const {name,text}=LAST_STEP, mb=(text.length/1048576).toFixed(1);
   SetupUI.beforeParse(name);
   $("#cadStatus").textContent="parsing "+mb+" MB …";
-  setTimeout(()=>{
+  const own=name!==DEFAULT_ROBOT.step;
+  if(own) ImportFlow.start("Reading "+name, mb+" MB of STEP: the parts, where they sit, and what moves.");
+  // off the page's thread (src/engineworker.js): the joints are found there too, and the
+  // file is cut into one small STEP per shape for the exact surfaces
+  const job=EngineWorker.parseStep(text,name,{frame:{up:OPTS.up, shift:OPTS.shift}, rig:true, front:OPTS.front, units:true,
+    onProgress:m=>{ $("#cadStatus").textContent=m; ImportFlow.progress(m); }});
+  job.then(r=>{
+    if(!LAST_STEP||LAST_STEP.name!==name||LAST_STEP.text!==text) return;      // another robot was dropped meanwhile
+    PARSED={rig:r.rig, units:r.units};         // promises: the joints and the shape units follow the robot
     try{
-      const cad=parseSTEP(text,msg=>{ $("#cadStatus").textContent=msg; },{up:OPTS.up, shift:OPTS.shift});
+      const cad=r.cad;
       cad.name=name;
       // a joint spec belongs to the file it was written for; another robot drops it
       if(JOINTS.spec&&JOINTS.step!==name){ JOINTS.spec=JOINTS.report=JOINTS.devices=null; JOINTS.name=JOINTS.step=null; }
-      // joints fixed by hand for this file before, in this browser
-      const mine=savedJoints(name);
+      // joints fixed by hand for this file before, in this browser (unless a spec was just dropped with it)
+      const mine=JOINTS.dropped===name&&JOINTS.spec?null:savedJoints(name);
+      JOINTS.dropped=null;
       if(mine&&(!JOINTS.spec||!JOINTS.spec.edited)){ JOINTS.spec=mine; JOINTS.step=name; JOINTS.name="your joints"; }
       loadCAD(cad, (LAST_STEP.label||name+" · "+mb+" MB")+" · "+cad.mechs.length+" mechanism"+(cad.mechs.length===1?"":"s"), cad.mechs.length?"ok":"bad");
-      if(MATES.asm) applyMates();
-      else if(JOINTS.spec) applyJoints();
-      else findJoints(cad,true);                  // no mates, no spec: find them from the geometry
-      exactGeometry(cad,text);
+      if(JOINTS.spec) applyJoints();
+      else findJoints(cad,true);                  // no mates, no spec: the joints the worker found from the geometry
+      exactGeometry(cad,text,PARSED.units);
+      if(own) RobotStore.keep({kind:"step", name, text, label:LAST_STEP.label||null});
       if(done) done(cad);
-    }catch(e){ $("#cadStatus").textContent="couldn't parse this STEP file — "+e.message; $("#cadDrop").className="drop bad"; }
+    }catch(e){ $("#cadStatus").textContent="couldn't read this STEP file: "+e.message; $("#cadDrop").className="drop bad"; if(own) ImportFlow.fail("Couldn't read "+name+": "+e.message); return; }
     renderFrameNote();
-  },30);
+    if(own) ImportFlow.finish();
+  }).catch(e=>{ $("#cadStatus").textContent="couldn't parse this STEP file: "+(e&&e.message||e); $("#cadDrop").className="drop bad"; if(own) ImportFlow.fail("Couldn't read "+name+": "+(e&&e.message||e)); });
+}
+let PARSED={rig:null, units:null};               // what the engine worker found alongside the parse
+
+/* ============================================================
+   THE TEAM'S ROBOT, KEPT IN THIS BROWSER
+   A robot the team brought in is here again on the next visit, with no
+   file to find and nothing to read from Onshape a second time. It is kept
+   in IndexedDB (a robot is tens of megabytes; localStorage holds five):
+     whole    the robot as the engine built it from the link or the export
+              zip, its thinned shapes included, so it is placed at once
+     step     the STEP file's text, read again the way a drop reads it
+     session  a .ftcsim workspace's text
+   One robot, the last one brought in. The OpModes, the helper classes,
+   the joints fixed by hand and the hardware map were already kept
+   (localStorage, by the robot's name). Nothing leaves the computer.
+   "Forget my robot" in the menu clears it.
+   ============================================================ */
+const RobotStore={
+  sig:null,
+  db(){ return this._db||(this._db=new Promise((ok,no)=>{
+    if(typeof indexedDB==="undefined"){ no(new Error("no IndexedDB")); return; }
+    const r=indexedDB.open("simbench-robot",1);
+    r.onupgradeneeded=()=>{ if(!r.result.objectStoreNames.contains("robot")) r.result.createObjectStore("robot"); };
+    r.onsuccess=()=>ok(r.result); r.onerror=()=>no(r.error||new Error("IndexedDB wouldn't open")); })); },
+  tx(mode,fn){ return this.db().then(db=>new Promise((ok,no)=>{ const t=db.transaction("robot",mode), q=fn(t.objectStore("robot"));
+    t.oncomplete=()=>ok(q&&q.result); t.onerror=t.onabort=()=>no(t.error||new Error("IndexedDB write failed")); })); },
+  /* keep this robot; the same one twice is written once. Never throws: a private window or a
+     full disk only means the robot isn't here next time */
+  keep(rec){
+    const sig=[rec.kind,rec.name,rec.text?rec.text.length:(rec.cad&&rec.cad.solids?rec.cad.solids.length:0)].join("|");
+    if(sig===this.sig&&rec.kind!=="whole") return Promise.resolve(false);
+    this.sig=sig;
+    // copied now: the write happens later, and by then the view has hung its own objects on the robot
+    let copy; try{ copy=structuredClone(Object.assign({savedISO:new Date().toISOString()},rec)); }catch(e){ return Promise.resolve(false); }
+    return this.tx("readwrite",s=>s.put(copy,"last")).then(()=>true).catch(()=>false);
+  },
+  get(){ return this.tx("readonly",s=>s.get("last")).catch(()=>null); },
+  clear(){ this.sig=null; return this.tx("readwrite",s=>s.delete("last")).catch(()=>null); },
+};
+/* The robot from last time, back on the field. False when there is none or it won't load. */
+async function restoreRobot(){
+  const rec=await RobotStore.get(); if(!rec||LAST_STEP) return false;
+  const when=rec.savedISO?" · kept "+String(rec.savedISO).slice(0,10):"";
+  try{
+    if(rec.kind==="whole"&&rec.cad&&rec.cad.solids){
+      RobotStore.sig=["whole",rec.name,rec.cad.solids.length].join("|");
+      LAST_STEP={name:rec.name, text:"", kept:true, label:(rec.label||rec.name)+when};
+      JOINTS.spec=JOINTS.report=JOINTS.devices=null; JOINTS.name=JOINTS.step=null;
+      ImportFlow.robotIn(rec.cad,rec.from||"URDF",{kept:true});
+      return true;
+    }
+    if(rec.kind==="step"&&rec.text){
+      RobotStore.sig=["step",rec.name,rec.text.length].join("|");
+      LAST_STEP={name:rec.name, text:rec.text, label:rec.label||undefined};
+      parseAndLoad();
+      return true;
+    }
+    if(rec.kind==="session"&&rec.text){
+      const r=unpackSession(rec.text); if(!r.ok) return false;
+      RobotStore.sig=["session",rec.name,rec.text.length].join("|");
+      Session.apply(r.session,rec.name);
+      return true;
+    }
+  }catch(e){ LAST_STEP=null; }
+  return false;
 }
 
 /* ============================================================
@@ -1720,7 +1762,7 @@ async function loadDefaultRobot(){
       selectOpMode(mine&&(!mine.builtin||mine.team)?saved:R.opmodes[0].id);
     });
   }catch(e){
-    if(!LAST_STEP) st.textContent="couldn't load the default robot ("+e.message+") — this is the built-in sample";
+    if(!LAST_STEP){ st.textContent="couldn't load the default robot ("+e.message+") — this is the built-in sample"; if(View.chassisG) View.chassisG.visible=true; }
   }
 }
 /* The real surfaces, the way Onshape draws them. OpenCascade loads from the
@@ -1728,13 +1770,13 @@ async function loadDefaultRobot(){
    it can't (offline, blocked) — the robot stays drawn as simplified shapes,
    never blank. */
 let EXACT={state:"none", msg:null};        // the exact surfaces for the CAD panel: none (sample), loading, ok, failed
-function exactGeometry(cad,text){
+function exactGeometry(cad,text,units){
   const note=$("#exactNote"); if(note){ note.textContent="loading exact geometry (OpenCascade) …"; note.className="hint"; }
   EXACT={state:"loading", msg:null}; if(CadView.on) CadView.renderTree();
   const t0=performance.now();
   // one shape at a time across a few workers (src/tessellate.js Tess.exact)
   const progress=(done,total)=>{ if(CAD===cad&&note) note.textContent="exact geometry: "+done+" of "+total+" part shapes meshed …"; };
-  Tess.exact(cad,text,progress).then(res=>{
+  Promise.resolve(units).then(u=>Tess.exact(cad,text,progress,u||null)).then(res=>{
     if(CAD!==cad) return;                     // another file was dropped meanwhile
     EXACT={state:res&&res.meshes&&res.meshes.length?"ok":"failed", msg:"the file has no solid surfaces to mesh"};
     const n=View.setExact(cad,res);
@@ -1775,115 +1817,38 @@ function setRobotConfig(text,name){
 }
 function takeRobotConfig(file){ readText(file,text=>setRobotConfig(text,file.name)); }
 /* ============================================================
-   ONSHAPE MATES — src/mates.js does the work; this is the panel.
-   The two JSON files come from Onshape's own API, opened in a tab that's
-   signed in to Onshape: no keys, nothing sent anywhere but Onshape.
+   JOINTS — where this robot's joints came from, and the files that say so
+   A robot read from Onshape (the link or the export zip) brings its mates as
+   joints (src/mates.js); MATES only remembers that. A joint spec
+   (src/jointspec.js) is the joints written down by hand; it belongs to one
+   STEP file and comes back each time that file is parsed.
    ============================================================ */
-const MATES={asm:null, features:null, featuresBy:null, name:null, report:null, url:null};
-/* ---- mates from the "Send to SimBench" bookmark (src/onshapelink.js) ----
-   They arrive in this page's #onshape= fragment. If the team already has
-   their own robot open in another SimBench tab, that tab is offered them
-   and this one steps aside; otherwise they wait here for the STEP. */
-const SB_CHANNEL=(()=>{ try{ return typeof BroadcastChannel==="function"?new BroadcastChannel("ftc-simbench"):null; }catch(e){ return null; } })();
-let ONSHAPE_OFFER=null;
+const MATES={name:null, url:null, report:null};
 const ownRobot=()=>!!(LAST_STEP&&CAD&&LAST_STEP.name!==DEFAULT_ROBOT.step);
-function onshapeNote(html,kind){
-  const n=$("#onshapeNote"); if(!n) return;
-  n.hidden=!html; n.className="onshape-note"+(kind?" "+kind:""); n.innerHTML=html||"";
-  const nav=$('.tabs[data-tabs="left"]'); if(html&&nav) selectTab(nav,"robot");
-}
-async function takeOnshapeHash(){
-  const h=location.hash.slice("#onshape=".length);
-  try{ history.replaceState(null,"",location.pathname+location.search); }catch(e){}
-  onshapeNote("Unpacking the mates from Onshape …");
-  let p;
-  try{ p=await readOnshapeHash(h); }
-  catch(e){ onshapeNote("The link from Onshape couldn't be read: "+esc(e.message)+". Click the bookmark again, or use the steps under <b>Or by hand</b>.","bad"); return; }
-  // their robot is already open in another tab: that one takes the mates
-  if(SB_CHANNEL){
-    const id=Math.random().toString(36).slice(2);
-    const taken=await new Promise(res=>{
-      const on=e=>{ const d=e.data; if(d&&d.type==="onshape-taken"&&d.id===id){ clearTimeout(t); SB_CHANNEL.removeEventListener("message",on); res(d); } };
-      const t=setTimeout(()=>{ SB_CHANNEL.removeEventListener("message",on); res(null); },900);
-      SB_CHANNEL.addEventListener("message",on);
-      SB_CHANNEL.postMessage({type:"onshape", id, p:Object.assign({format:ONSHAPE_FORMAT},p)});
-    });
-    if(taken){
-      onshapeNote("Sent the mates of <b>"+esc(p.name)+"</b> to your open SimBench tab with <b>"+esc(taken.robot)+"</b>. Switch to it and click <b>Apply</b>. You can close this tab.","ok");
-      setTimeout(()=>{ try{ window.close(); }catch(e){} },2500);
-      return;
-    }
-  }
-  holdOnshape(p);
-}
-/* Use them: on the team's robot straight away, or when its STEP is dropped
-   (parseAndLoad applies MATES by itself), never on the default robot. */
-function holdOnshape(p){
-  if(p.geom&&loadOnshapeRobot(p)) return;
-  MATES.asm=p.asm; MATES.features=p.features; MATES.featuresBy=p.featuresBy||null; MATES.name=p.name; MATES.url=p.url||null; MATES.report=null; MATES.fromLink=true;
-  JOINTS.spec=null; JOINTS.report=null; ONSHAPE_OFFER=null;
-  if(ownRobot()) applyMates();
-  else{
-    $("#mateStatus").textContent="Got the mates of "+p.name+". Drop the STEP of the same assembly and they apply to it.";
-    onshapeNote("Got the mates of <b>"+esc(p.name)+"</b> from Onshape. Now drop the STEP you exported from that assembly "+
-      "(Onshape: right-click the assembly tab, <b>Export</b>, STEP) into <b>Robot CAD</b> below, and every joint is exact.","ask");
-  }
-}
-if(SB_CHANNEL) SB_CHANNEL.addEventListener("message",e=>{
-  const d=e.data; if(!d||d.type!=="onshape"||!ownRobot()) return;
-  let p; try{ p=checkOnshapePayload(d.p); }catch(x){ return; }
-  ONSHAPE_OFFER=p;
-  SB_CHANNEL.postMessage({type:"onshape-taken", id:d.id, robot:LAST_STEP.name});
-  onshapeNote("Mates from Onshape (<b>"+esc(p.name)+"</b>) arrived. <button class='btn-sm primary' id='onshapeApply'>Apply to "+esc(LAST_STEP.name)+"</button> <button class='btn-sm' id='onshapeLater'>Not now</button>","ask");
-  $("#onshapeApply").addEventListener("click",()=>{ if(ONSHAPE_OFFER) holdOnshape(ONSHAPE_OFFER); });
-  $("#onshapeLater").addEventListener("click",()=>{ ONSHAPE_OFFER=null; onshapeNote(""); });
-});
-/* A joint spec (src/jointspec.js): the joints written down by hand. It
-   belongs to one STEP file and comes back each time that file is parsed. */
-const JOINTS={spec:null, name:null, step:null, report:null, devices:null};
-function takeMates(file){
+// pending: a spec that came while a STEP was still being read; dropped: the STEP it was given to
+const JOINTS={spec:null, name:null, step:null, report:null, devices:null, pending:null, dropped:null};
+/* a .json dropped anywhere: a saved Onshape read, a setup file, a joint sheet or a joint spec */
+function takeJson(file){
   readText(file,text=>{
-    let j; try{ j=JSON.parse(text); }catch(e){ $("#mateStatus").textContent=file.name+" isn't JSON — save the page Onshape shows as a .json file."; $("#mateDrop").className="drop bad"; return; }
+    let j; try{ j=JSON.parse(text); }catch(e){ ImportFlow.last={bad:file.name+" isn't JSON."}; ImportFlow.open(); return; }
     if(j&&j.format===ONSHAPE_FORMAT){
-      let p; try{ p=checkOnshapePayload(j); }catch(e){ $("#mateStatus").textContent=file.name+": "+e.message; $("#mateDrop").className="drop bad"; return; }
-      holdOnshape(p); return;
+      let p; try{ p=checkOnshapePayload(j); }catch(e){ ImportFlow.last={bad:file.name+": "+e.message}; ImportFlow.open(); return; }
+      if(!p.geom){ ImportFlow.last={bad:file.name+" has the mates but no shapes; paste the assembly's address instead."}; ImportFlow.open(); return; }
+      loadOnshapeRobot(p); return;
     }
     if(j&&j.format===SETUP_FORMAT){ SetupUI.take(j,file.name); return; }
+    if(j&&j.format===PEDRO_FORMAT){ PathEdit.take(text); return; }
+    if(j&&j.format===JOINT_SHEET_FORMAT){ ImportFlow.takeSheet(j,file.name); return; }
     if(j&&j.format===JOINT_SPEC_FORMAT){
-      MATES.asm=MATES.features=MATES.name=MATES.report=null;
+      // dropped together with its STEP, the small spec is read first: it waits for
+      // that robot (takeCAD), not the one on the bench, which would then drop it
+      if(STEP_READS>0){ JOINTS.pending={spec:j, name:file.name}; $("#mateStatus").textContent=file.name+" is waiting for its robot"; return; }
+      MATES.name=MATES.url=MATES.report=null;
       JOINTS.spec=j; JOINTS.name=file.name; JOINTS.step=LAST_STEP?LAST_STEP.name:null;
       applyJoints(); return;
     }
-    if(j&&j.rootAssembly){ MATES.asm=j; MATES.name=file.name; MATES.fromLink=false; JOINTS.spec=null; JOINTS.report=null; }
-    else if(j&&(Array.isArray(j.features)||Array.isArray(j))) MATES.features=j;
-    else { $("#mateStatus").textContent=file.name+" isn't an Onshape assembly definition or features list."; $("#mateDrop").className="drop bad"; return; }
-    applyMates();
+    ImportFlow.last={bad:file.name+" isn't a setup file, a joint sheet or a joint spec."}; ImportFlow.open();
   });
-}
-function applyMates(){
-  const st=$("#mateStatus"), drop=$("#mateDrop"), note=$("#mateNote"), pill=$("#matePill");
-  if(!MATES.asm){ st.textContent=MATES.features?"Got the mate limits. Now drop the assembly definition.":"Drop the assembly definition, and the features file too if you want limits."; return; }
-  if(!CAD||!(CAD.solids||[]).some(s=>s.occT)){
-    st.textContent="Got "+MATES.name+". Load the STEP of the same assembly and the mates apply to it."; drop.className="drop"; return;
-  }
-  try{
-    const rep=applyOnshapeMates(CAD,MATES.asm,{features:MATES.features, featuresBy:MATES.featuresBy||null});
-    MATES.report=rep;
-    recomputeChain(CAD.mechs);
-    View.hiddenParts=View.hiddenParts||new Set();
-    View.load(CAD); if(View.exact) View.applyExact();
-    if(CadView.on) CadView.renderTree();
-    if(CODE){ mapDevices(); rebuild(); }
-    pill.textContent=rep.joints+" joint"+(rep.joints===1?"":"s"); pill.className="pill ok";
-    st.textContent=MATES.name+" · "+rep.matched+" of "+rep.parts+" parts matched"+(MATES.features?" · limits":"");
-    drop.className="drop ok"; $("#mateClear").hidden=false;
-    note.innerHTML=rep.why.map(w=>"<li>"+esc(w)+"</li>").join("");
-    if(MATES.fromLink) onshapeNote("Joints from your Onshape mates (<b>"+esc(MATES.name)+"</b>) are on <b>"+esc(LAST_STEP?LAST_STEP.name:"this robot")+"</b>: "+
-      rep.joints+" joint"+(rep.joints===1?"":"s")+", "+rep.matched+" of "+rep.parts+" parts matched. The Robot check below says if anything still needs you.",rep.matched<rep.parts*0.5?"bad":"ok");
-  }catch(e){
-    st.textContent="Couldn't apply the mates — "+e.message; drop.className="drop bad"; pill.textContent="error"; pill.className="pill bad";
-  }
-  Status.render&&Status.render();
 }
 /* The joint spec onto the loaded CAD: the same panel, the same rebuild as mates. */
 function applyJoints(){
@@ -1895,7 +1860,7 @@ function applyJoints(){
     if(R.front&&FRONTS[R.front]!==undefined) OPTS.front=R.front;
     recomputeChain(CAD.mechs);
     View.hiddenParts=View.hiddenParts||new Set();
-    View.load(CAD); if(View.exact) View.applyExact();
+    View.load(CAD);                             // it puts the exact surfaces back itself (buildRobot)
     if(CadView.on) CadView.renderTree();
     if(Sim.phase!=="running") placeAtStart();
     if(CODE){ mapDevices(); rebuild(); }
@@ -1906,7 +1871,8 @@ function applyJoints(){
     // the headline counted the joints the parser guessed; these replace them
     const J=R.report.joints+" joint"+(R.report.joints===1?"":"s");
     for(const el of [$("#vpTitle"),$("#cadStatus")]) el.textContent=el.textContent.replace(/\d+ mechanisms?/,J);
-    drop.className="drop ok"; $("#mateClear").hidden=false;
+    // a robot that arrived whole keeps its mates whatever is removed: no Remove for it
+    drop.className="drop ok"; $("#mateClear").hidden=!!(LAST_STEP&&(LAST_STEP.onshape||LAST_STEP.urdfZip));
     note.innerHTML=(JOINTS.spec.review||[]).map(w=>"<li><b>Check:</b> "+esc(w)+"</li>").join("")+
       R.report.why.map(w=>"<li>"+esc(w)+"</li>").join("")+
       JOINTS.spec.joints.filter(j=>j.note).map(j=>"<li><b>"+esc(j.label||j.id)+"</b>: "+esc(j.note)+"</li>").join("");
@@ -1931,7 +1897,7 @@ function editableSpec(){
     // the joints as they are: guessed, or from mates, each with its exact parts
     const groups=typeof solidGroups==="function"?solidGroups(CAD,View.turretScale):[];
     JOINTS.spec=specFromCad(CAD,groups,MAP); JOINTS.name="your joints"; JOINTS.step=LAST_STEP?LAST_STEP.name:(CAD.name||null);
-    MATES.asm=MATES.features=MATES.name=MATES.report=null;
+    MATES.name=MATES.url=MATES.report=null;
   }
   return JOINTS.spec;
 }
@@ -2024,7 +1990,7 @@ const SetupUI={
     const A=this.auto(), done=k=>this.isDone(k,A);
     const F=CAD.frame||{}, n=SETUP_STEPS.filter(done).length, def=this.isDefault();
     pill.textContent=def?"ready":n===4?"set up":n+" of 4 checked"; pill.className="pill"+(def||n===4?" ok":"");
-    chip.hidden=def||n===4||!LAST_STEP||this.chipGone===CAD;
+    chip.hidden=true;                           // the review card's own chip (ImportFlow.chip) says when there is something to review
     const seg=(attr,vals,cur)=>`<div class="seg">${vals.map(([v,t])=>`<button type="button" data-${attr}="${v}" class="${v===cur?"on":""}">${t}</button>`).join("")}</div>`;
     const ok=k=>done(k)?"":`<button class="btn-sm primary" type="button" data-su-ok="${k}">Looks right</button>`;
     // a step that's done folds to one line; click it to change it
@@ -2125,6 +2091,7 @@ function renderRobotCheckNow(){
     }else if(it.ask==="drop-joint") acts=btn("show",it.joint,"show")+btn("drop",it.joint,"remove it","primary");
     else if(it.ask==="look"&&it.joint) acts=btn("show",it.joint,"show");
     else if(it.ask==="mates") acts=btn("mates","","Use my Onshape mates");
+    else if(it.ask==="declare") acts=btn("declare","","Declare the joints");
     return `<div class="rc-item ${it.sev}"><div class="rc-head"><span class="rc-sev">${SEV[it.sev]}</span><span class="rc-text">${esc(it.text)}</span></div>${acts?`<div class="rc-acts">${acts}</div>`:""}</div>`;
   };
   // nothing to ask: say so, and say when there would be (joints the bench had to guess)
@@ -2159,13 +2126,21 @@ function showJoint(id){
 }
 function robotCheckAct(act,a){
   if(act==="show") return showJoint(a);
-  if(act==="pair"){ const [dev,joint]=a.split("|"); changeJoint(joint,{device:dev}); return; }
+  // declared joints (src/jointsheet.js) change on the joint sheet, never by turning into a joint spec
+  if(act==="declare") return ImportFlow.openSheet();
+  // "device|joint": a joint id (a mate's or a part's name) may have a "|" of its own
+  const pair=()=>{ const i=a.indexOf("|"); return [a.slice(0,i), a.slice(i+1)]; };
+  if(CAD&&isExact(CAD)){
+    if(act==="pair"){ const [dev,joint]=pair(); return ImportFlow.sheetPair(dev,joint); }
+    if(act==="drop") return ImportFlow.sheetDrop(a);
+    if(act==="click") return ImportFlow.openSheet();
+  }
+  if(act==="pair"){ const [dev,joint]=pair(); changeJoint(joint,{device:dev}); return; }
   if(act==="drop"){ removeJoint(a); return; }
   if(act==="click"){ CadView.pendingDevice=a; if(!CadView.on) CadView.enter();
     const h=document.querySelector(".cad-hint"); if(h){ h.textContent="Click the part "+a+" moves, then 'New joint from this part'"; h.classList.add("ask"); } return; }
   if(act==="guess"){ const f=$("#jointsFind"); if(f) f.click(); return; }
-  if(act==="mates"){ const nav=$('.tabs[data-tabs="left"]'); if(nav) selectTab(nav,"robot");
-    OnshapeHelp.open(); }
+  if(act==="mates") ImportFlow.open();
 }
 
 /* The automatic joint finder (src/autorig.js): a joint spec from the STEP's
@@ -2176,13 +2151,17 @@ function findJoints(cad,quiet){
   st.textContent="finding the joints from the geometry …";
   setTimeout(()=>{
     if(CAD!==cad) return;
-    let R=null;
-    try{ R=autoRig(cad,{front:OPTS.front}); }catch(e){ st.textContent="The joint finder stopped: "+e.message; return; }
+    const ready=quiet&&PARSED.rig?PARSED.rig:null; PARSED.rig=null;
+    Promise.resolve(ready).then(found=>{
+    if(CAD!==cad) return;
+    let R=found||null;
+    if(!R){ try{ R=autoRig(cad,{front:OPTS.front}); }catch(e){ st.textContent="The joint finder stopped: "+e.message; return; } }
     if(!R||!R.spec){ st.textContent=quiet?"No joints found from the geometry, so they're guessed. Add Onshape mates or a joint spec, or make them in the CAD view."
       :((R&&R.review[0])||"No joints found."); return; }
-    MATES.asm=MATES.features=MATES.name=MATES.report=null;
+    MATES.name=MATES.url=MATES.report=null;
     JOINTS.spec=R.spec; JOINTS.name="found automatically"; JOINTS.step=LAST_STEP?LAST_STEP.name:(cad.name||null);
     applyJoints();
+    });
   },40);
 }
 /* these parts (solid indices) ride this joint ("chassis": the frame) */
@@ -2232,7 +2211,11 @@ function downloadJoints(){
    decide. Either way, what the user picked by hand in the table stays. */
 function mapDevices(){
   if(!CODE||!CAD) return;
-  MAP=autoMap(CODE.devices,CAD.mechs,{cad:CAD});
+  // names, the actuator on each joint's axis, the code's travel, and what's left over (src/bind.js);
+  // a joint spec's own device names are taken as read
+  const explicit=(JOINTS.report&&CAD.mates&&CAD.mates.source==="spec"&&JOINTS.devices)||{};
+  let B=null; try{ B=bindDevices(CODE,CAD,{explicit, isCommanded:n=>isCommanded(CODE,n)}); }catch(e){ B=null; }
+  MAP=B?B.map:autoMap(CODE.devices,CAD.mechs,{cad:CAD});
   applyDeviceMemory();
   const J=JOINTS.report&&CAD.mates&&CAD.mates.source==="spec"?JOINTS.devices:null;
   if(J) for(const d of CODE.devices){
@@ -2243,27 +2226,24 @@ function mapDevices(){
   }
 }
 function clearMates(){
+  if(LAST_STEP&&(LAST_STEP.onshape||LAST_STEP.urdfZip)) return;   // the mates are the robot: nothing to remove
   if(JOINTS.spec){ JOINTS.spec=JOINTS.report=JOINTS.devices=null; JOINTS.name=JOINTS.step=null; }
-  MATES.asm=MATES.features=MATES.name=MATES.report=MATES.url=null; MATES.fromLink=false; onshapeNote("");
+  MATES.name=MATES.url=MATES.report=null;
   $("#matePill").textContent="none"; $("#matePill").className="pill"; $("#mateClear").hidden=true;
   $("#mateNote").innerHTML=""; $("#mateDrop").className="drop";
-  $("#mateStatus").textContent="Drop the assembly definition, and the features file too if you want limits.";
+  $("#mateStatus").textContent="Drop a joint sheet, a joint spec or a setup file.";
   if(LAST_STEP) parseAndLoad();                 // back to the joints the STEP alone suggests
 }
 function wireMates(){
   const drop=$("#mateDrop"), input=$("#mateFile");
-  const many=list=>[].forEach.call(list||[],takeMates);
+  const many=list=>[].forEach.call(list||[],takeJson);
   drop.addEventListener("click",()=>input.click());
   drop.addEventListener("keydown",e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); input.click(); } });
   ["dragenter","dragover"].forEach(ev=>drop.addEventListener(ev,e=>{ e.preventDefault(); e.stopPropagation(); drop.classList.add("armed"); document.body.classList.remove("dragging"); }));
   ["dragleave","drop"].forEach(ev=>drop.addEventListener(ev,e=>{ e.preventDefault(); drop.classList.remove("armed"); }));
   drop.addEventListener("drop",e=>{ e.stopPropagation(); document.body.classList.remove("dragging"); many(e.dataTransfer.files); });
   input.addEventListener("change",e=>{ many(e.target.files); input.value=""; });
-  $("#mateUrl").addEventListener("input",e=>{
-    const L=onshapeApiLinks(e.target.value), box=$("#mateLinks");
-    box.hidden=!L; if(!L) return;
-    $("#mateDefLink").href=L.def; $("#mateFeatLink").href=L.features;
-  });
+  $("#jointsOnshape").addEventListener("click",()=>ImportFlow.open());
   $("#mateClear").addEventListener("click",clearMates);
   $("#jointsDownload").addEventListener("click",downloadJoints);
   $("#jointsFind").addEventListener("click",()=>{ if(CAD) findJoints(CAD,false); });
@@ -2273,35 +2253,14 @@ function wireMates(){
     if(JOINTS.spec) applyJoints(); else if(LAST_STEP) parseAndLoad();
   });
 }
-/* A URDF and its STL meshes, dropped together (src/urdf.js): gathered as they
-   are read, then built once into the robot, joints and all. */
-const URDF_IN={text:null,name:null,files:{},timer:null};
-function takeUrdfPart(file){
-  const r=new FileReader();
-  const isUrdf=/\.urdf$/i.test(file.name);
-  r.onload=()=>{
-    if(isUrdf){ URDF_IN.text=r.result; URDF_IN.name=file.name.replace(/\.urdf$/i,""); }
-    else URDF_IN.files[file.name]=r.result;
-    clearTimeout(URDF_IN.timer);
-    URDF_IN.timer=setTimeout(()=>{
-      if(!URDF_IN.text){ $("#cadStatus").textContent=Object.keys(URDF_IN.files).length+" mesh file(s) waiting for their .urdf"; return; }
-      let p;
-      try{ p=urdfToPayload(URDF_IN.text,URDF_IN.files,URDF_IN.name); }
-      catch(e){ $("#cadStatus").textContent="couldn't read this URDF — "+e.message; $("#cadDrop").className="drop bad"; return; }
-      // gathered once: a lone .stl dropped later waits for its own .urdf, it doesn't rebuild this one
-      const nm=URDF_IN.name; URDF_IN.text=null; URDF_IN.name=null; URDF_IN.files={};
-      if(loadOnshapeRobot(p)) $("#cadStatus").textContent=nm+" · from URDF · "+CAD.solids.length+" parts · "+CAD.mechs.filter(m=>m.fromMate).length+" joints";
-    },200);
-  };
-  if(isUrdf) r.readAsText(file); else r.readAsArrayBuffer(file);
-}
 function routeFile(file){
   const n=file.name.toLowerCase();
-  if(/\.(urdf|stl)$/.test(n)) takeUrdfPart(file);
+  if(/\.zip$/.test(n)) ImportFlow.takeZip(file);                       // Onshape's URDF export, or a zip of the team's code
+  else if(/\.(urdf|stl|glb|gltf|obj|bin|mtl)$/.test(n)){ ImportFlow.last={bad:"Drop the URDF and its meshes as one zip: zip the folder they are in and drop that."}; ImportFlow.open(); }
   else if(/\.(step|stp)$/.test(n)) takeCAD(file);
   else if(/\.ftcsim$/.test(n)) Session.take(file);
   else if(/\.xml$/.test(n)) takeRobotConfig(file);
-  else if(/\.json$/.test(n)) takeMates(file);
+  else if(/\.json$/.test(n)) takeJson(file);
   else takeCode(file);
 }
 function wireDrop(dropEl,inputEl,handler,all){
@@ -2422,7 +2381,7 @@ const Pads={
   },
   padOf(p){ return this.list().filter(g=>this.assign[g.index]===p)[0]||null; },
   poll(){
-    const gps=this.list();
+    const gps=this.cur=this.list();                  // mirror() reads this frame's list too, not a second one
     for(const g of gps){
       if(this.assign[g.index]==null) this.connect(g);        // some browsers skip the connect event
       const p=this.assign[g.index]; if(!p) continue;
@@ -2434,7 +2393,7 @@ const Pads={
   },
   /* The on-screen gamepad mirrors a real controller on the pad it shows. */
   mirror(){
-    if(!this.padOf(activePad)) return;
+    if(!this.cur||!this.cur.some(g=>this.assign[g.index]===activePad)) return;
     const st=Sim.pad[activePad];
     $$("#padwrap [data-btn]").forEach(el=>{ const v=st[el.dataset.btn]; el.classList.toggle("down",typeof v==="number"?v>0.2:!!v); });
     for(const k of STICKS){ const knob=$(`[data-knob="${k.id}"]`); if(!knob) continue;
@@ -2552,7 +2511,9 @@ const NetUI={
     $("#onpHost").addEventListener("click",()=>this.hostNow(false));
     $("#onpJoinForm").addEventListener("submit",e=>{ e.preventDefault(); this.joinCode($("#onpCode").value); });
     $("#onpCode").addEventListener("input",e=>{ e.target.value=e.target.value.toUpperCase().replace(/[^A-Z0-9]/g,""); });
-    $("#onpCopy").addEventListener("click",()=>this.copyInvite());
+    $("#onpCopy").addEventListener("click",()=>this.copyInvite(false));
+    $("#onpCopyWatch").addEventListener("click",()=>this.copyInvite(true));
+    $("#onpWatchBtn").addEventListener("click",()=>this.joinCode($("#onpCode").value,null,true));
     $("#onpGo").addEventListener("click",()=>{ if(!Online.start()) this.render(); });
     $("#onpAgain").addEventListener("click",()=>Online.again());
     $("#onpLeave").addEventListener("click",()=>{ Online.leave(); if(Online.lobby==null) Online.browse(); resetMatch(); this.say(""); this.render(); });
@@ -2564,13 +2525,13 @@ const NetUI={
     $("#onpSay").addEventListener("submit",e=>{ e.preventDefault(); const t=$("#onpText"); Online.say(t.value,$("#onpTo").value==="team"); t.value=""; });
     $("#onpSlots").addEventListener("click",e=>{ const b=e.target.closest("button[data-slot]"); if(b) Online.pick(b.dataset.slot==="none"?null:b.dataset.slot); });
     $("#onpReady").addEventListener("click",e=>{ const b=e.target.closest("button[data-ready]"); if(b) Online.setReady(b.dataset.ready==="1",this.kind()); });
-    $("#onpList").addEventListener("click",e=>{ const b=e.target.closest("button[data-code]"); if(b) this.joinCode(b.dataset.code,b.dataset.hid); });
+    $("#onpList").addEventListener("click",e=>{ const b=e.target.closest("button[data-code]"); if(b) this.joinCode(b.dataset.code,b.dataset.hid,b.dataset.watch==="1"); });
     Online.onChange((what,data)=>this.on(what,data));
     View.onLite=L=>this.modelReady(L); if(View.lite) this.modelReady(View.lite);
     Online.jointsOf=()=>View.lite&&View.lite===this.packed?View.segJoints():null;
     View.onLoad=()=>Perf.quiet();
     // an invite link opened in a tab that already has SimBench open only changes the fragment
-    addEventListener("hashchange",()=>{ if(/^#join=/i.test(location.hash)) this.invited(location.hash.slice(6)); });
+    addEventListener("hashchange",()=>{ const iv=Online.parseInvite(location.hash); if(iv) this.invited(iv.code,iv.watch); });
   },
   show(o){ $("#onlinePanel").hidden=!o; $("#onlineBtn").setAttribute("aria-expanded",String(!!o)); if(o) this.render(); },
   async toggle(){
@@ -2579,18 +2540,22 @@ const NetUI={
     if(await this.connect()&&Online.state==="off") Online.browse();
     this.render();
   },
-  /* Trystero, the first time: from jsDelivr, pinned to one version */
+  /* The network, the first time (src/netrelay.js netConnect): this site's own
+     match rooms over HTTPS when it has them, which school filters let through;
+     else WebRTC between the browsers, through TURN on port 443 when the site
+     has TURN, else as it always was. */
   connect(){
     if(Online.T) return Promise.resolve(true);
-    if(!this.loading) this.loading=netTrystero().then(T=>{
-      Online.use(T);
+    if(!this.loading) this.loading=netConnect().then(({T,via})=>{
+      Online.use(T); this.via=via;
       T.onError=d=>{
+        if(d&&d.fatal&&via==="room"){ this.say("Lost the connection to the match room. Check the internet connection and try again.","warn"); return; }
         if(!d||!Online.code||d.room!=="m-"+Online.code) return;       // a stranger in the lobby, not this match
         this.say("A player couldn't connect: "+String((d.error&&d.error.message)||d.error||"no reason given")+
-          ". Some school and company networks block direct connections between browsers.","warn");
+          (via==="room"?".":". Some school and company networks block direct connections between browsers."),"warn");
       };
       return true;
-    }).catch(e=>{ this.loading=null; this.say("Couldn't load the online library ("+String(e&&e.message||e)+"). Check the internet connection and try again.","fail"); return false; });
+    }).catch(e=>{ this.loading=null; this.say("Couldn't go online ("+String(e&&e.message||e)+"). Check the internet connection and try again.","fail"); return false; });
     return this.loading;
   },
   say(text,kind){ const m=$("#onpMsg"); m.hidden=!text; m.textContent=text||""; m.className="onp-msg"+(kind?" "+kind:""); },
@@ -2602,12 +2567,12 @@ const NetUI={
     this.say("");
     Online.host({name:n, pub, period:this.kind(), skill:$("#matchSkill").value});
   },
-  async joinCode(code,hid){
+  async joinCode(code,hid,watch){
     const n=this.needName(); if(!n||!await this.connect()) return;
     code=String(code||"").toUpperCase();
     if(!/^[A-HJ-NP-Z2-9]{5}$/.test(code)){ this.say("A match code is 5 letters and numbers, like K7QMX.","warn"); return; }
     this.say(""); this.joinT=performance.now();
-    Online.join(code,{name:n, hid:hid||null});
+    Online.join(code,{name:n, hid:hid||null, watch:!!watch});
   },
   /* Quick match: the fullest open match there is, or a new listed one if there's none. */
   async quick(){
@@ -2624,16 +2589,21 @@ const NetUI={
     };
     this.quickT=setInterval(look,400); look();
   },
-  invited(code){
+  /* An invite link opens straight into the join box: the code filled in, the cursor where the
+     next thing is (the team name, or Join/Watch when this browser already knows it). */
+  invited(code,watch){
     try{ history.replaceState(null,"",location.pathname+location.search); }catch(e){}
     code=String(code||"").toUpperCase().replace(/[^A-Z0-9]/g,"").slice(0,5);
+    if(Online.state!=="off") return;
     this.show(true); $("#onpCode").value=code;
-    this.say("You were invited to match "+code+". Put your team in and press Join.");
+    const known=!!netStr($("#onpName").value,24);
+    this.say("You were invited "+(watch?"to watch ":"to ")+"match "+code+". "+(known?"Press "+(watch?"Watch":"Join")+".":"Put your team name in first, then press "+(watch?"Watch":"Join")+"."));
+    const f=known?(watch?$("#onpWatchBtn"):$("#onpJoinForm button[type=submit]")):$("#onpName"); if(f) try{ f.focus(); }catch(e){}
     this.connect();
   },
-  copyInvite(){
-    const url=location.origin+location.pathname+"#join="+Online.code;
-    const done=()=>{ const b=$("#onpCopy"); b.textContent="Copied"; setTimeout(()=>{ b.textContent="Copy invite link"; },1500); };
+  copyInvite(watch){
+    const url=Online.inviteLink(location.origin+location.pathname,watch), b=$(watch?"#onpCopyWatch":"#onpCopy"), was=b.textContent;
+    const done=()=>{ b.textContent="Copied"; setTimeout(()=>{ b.textContent=was; },1500); };
     try{ navigator.clipboard.writeText(url).then(done,()=>prompt("The invite link:",url)); }catch(e){ prompt("The invite link:",url); }
   },
   /* This robot's light copy, packed for the other teams (they each fetch it once). */
@@ -2679,8 +2649,9 @@ const NetUI={
       if(Online.mySlot()&&Sim.phase==="init"){ Sim.start(); updateDS(); }
     }
     if(Online.state==="joining"&&this.joinT&&performance.now()-this.joinT>15000){
-      this.joinT=0; Online.leave();
-      this.say("Nobody answered. Check the code; the host may have closed the room, or a network between you blocks direct connections.","warn");
+      // a "no" heard before the host was known is the answer, if there was one
+      this.joinT=0;
+      if(!Online.giveUp()) this.say("Nobody answered. Check the code; the host may have closed the room, or a network between you blocks direct connections.","warn");
     }
   },
   slow(){
@@ -2714,31 +2685,32 @@ const NetUI={
   renderList(){
     const L=Online.T?Online.openMatches():null;
     const html=!Online.T?`<li class="onp-empty">Opens when you go online</li>`:!L.length?`<li class="onp-empty">None right now. Host one, or use Quick match.</li>`:
-      L.map(a=>`<li><div><b>${esc(a.name)}</b><small>${a.period==="Autonomous"?"Auto 0:30":"TeleOp 2:00"} · ${a.n} in the room · ${a.open} place${a.open===1?"":"s"} free</small></div>`+
-        `<button class="btn-sm" type="button" data-code="${esc(a.code)}" data-hid="${esc(a.hid)}">Join</button></li>`).join("");
+      L.map(a=>`<li><div><b>${esc(a.name)}</b><small>${a.period==="Autonomous"?"Auto 0:30":"TeleOp 2:00"} · ${a.n} in the room · ${a.open} place${a.open===1?"":"s"} free${a.w?" · "+a.w+" watching":""}</small></div>`+
+        `<button class="btn-sm" type="button" data-code="${esc(a.code)}" data-hid="${esc(a.hid)}">Join</button>`+
+        `<button class="btn-sm" type="button" data-code="${esc(a.code)}" data-hid="${esc(a.hid)}" data-watch="1">Watch</button></li>`).join("");
     setHTML($("#onpList"),html);
   },
   renderRoom(){
     const st=Online.state, me=Online.me(), host=Online.role==="host";
     $("#onpCodeShow").textContent=Online.code||"—";
-    $("#onpCopy").hidden=st==="joining";
+    $("#onpCopy").hidden=st==="joining"; $("#onpCopyWatch").hidden=st==="joining"; $("#onpKeep").hidden=!(host&&st==="room");
     if(st==="joining"){ setHTML($("#onpSlots"),`<p class="onp-watch">Asking the host's browser to let you in…</p>`); $("#onpReady").innerHTML=""; $("#onpHostCtl").hidden=true; $("#onpWatch").textContent=""; return; }
     const cards=NET_SLOTS.map(s=>{
       const id=Online.holder(s), p=id&&Online.players[id], al=netAl(s), mine=id===Online.self;
       const bot=mine?(Online.model?"":" · packing robot…"):(Online.modelFor(id)?" · robot here":" · robot coming");
       const who=p?`<b>${esc(p.name)}${mine?" (you)":""}</b><span class="st${p.ready?" ok":""}">${p.ready?"ready":"getting ready"}${p.host?" · host":""}${bot}</span>`:
         `<b class="ai">AI robot</b>`;
-      const act=!p&&me?`<button class="btn-sm" type="button" data-slot="${s}">Take this place</button>`:mine?`<button class="btn-sm" type="button" data-slot="none">Just watch</button>`:"";
+      const act=me&&me.watch?"":!p&&me?`<button class="btn-sm" type="button" data-slot="${s}">Take this place</button>`:mine?`<button class="btn-sm" type="button" data-slot="none">Just watch</button>`:"";
       return `<div class="onp-slot ${al}${mine?" me":""}"><small>${al.toUpperCase()} ${s.slice(-1)}</small>${who}${act}</div>`;
     });
     // red on the left, blue on the right, place 1 above place 2
     setHTML($("#onpSlots"),[cards[0],cards[2],cards[1],cards[3]].join(""));
     const watch=Object.values(Online.players).filter(p=>!p.slot).map(p=>esc(p.name)+(p.id===Online.self?" (you)":""));
-    setHTML($("#onpWatch"),watch.length?"Watching: "+watch.join(", "):"");
+    setHTML($("#onpWatch"),(me&&me.watch?"You are watching: no robot, no controls. ":"")+(watch.length?"Watching: "+watch.join(", "):""));
     // this robot: the right kind of OpMode, then ready
     const want=Online.settings.period, have=CODE?this.kind():null;
     let r="";
-    if(me&&me.slot){
+    if(me&&me.slot&&!me.watch){
       if(!CODE||!CAD) r=`<span class="bad">Load a robot and an OpMode first.</span>`;
       else if(have!==want) r=`<span class="bad">This match is ${want==="Autonomous"?"an Auto":"a TeleOp"}: pick ${want==="Autonomous"?"an Autonomous":"a TeleOp"} OpMode in the OpMode menu.</span>`;
       else r=`<span>“${esc(CODE.opmode||"OpMode")}”</span>`+(me.ready?`<button class="btn-sm" type="button" data-ready="0">Not ready</button>`:`<button class="btn-sm primary" type="button" data-ready="1">I'm ready</button>`);
@@ -2755,8 +2727,9 @@ const NetUI={
   renderLive(){
     const slot=Online.mySlot(), cd=Online.countdown(), al=slot?netAl(slot):null, left=Math.max(0,Match.len-Match.t);
     const who=Object.values(Online.players).filter(p=>p.slot).map(p=>`<span class="${netAl(p.slot)}">${esc(p.name)}</span>`).join(" ");
+    const nw=Online.watchers().length;
     setHTML($("#onpLive"),(slot?`<b class="${al}">${al.toUpperCase()} ${slot.slice(-1)}</b>`:`<b>Watching</b>`)+
-      `<span>${cd>0?"starts in "+Math.ceil(cd):clockText(Math.ceil(left))+" left"}</span>`+who);
+      `<span>${cd>0?"starts in "+Math.ceil(cd):clockText(Math.ceil(left))+" left"}</span>`+who+(nw?`<span class="onp-nw">${nw} watching</span>`:""));
     $("#onpMarkSeg").hidden=!slot;
     $("#onpPing").textContent=Online.role==="guest"&&Online.rtt?Math.round(Online.rtt)+" ms to the host":"";
   },
@@ -2767,7 +2740,8 @@ const NetUI={
     const rows=F.stats.map(s=>`<tr class="${netAl(s.slot)}"><td>${esc(s.name)}</td><td class="n">${s.fired}</td><td class="n">${s.scored}</td></tr>`).join("");
     setHTML($("#onpFinal"),`<div class="onp-final"><div class="red"><b>${r}</b><small>RED</small></div><div class="blue"><b>${b}</b><small>BLUE</small></div></div>`+
       `<p class="onp-verdict">${esc(verdict)}</p><table class="onp-stats"><tr><th>Robot</th><th class="n">Shots</th><th class="n">In</th></tr>${rows}</table>`+
-      (Online.role==="host"?"":`<p class="onp-wait">The host can start another match with everyone in the same places.</p>`));
+      (Online.role==="host"?"":Online.hostGone?`<p class="onp-wait">The host has left, so there's no next match here. Leave the match to drive on your own.</p>`:
+        `<p class="onp-wait">The host can start another match with everyone in the same places.</p>`));
     $("#onpAgain").hidden=Online.role!=="host";
   },
   renderChat(){
@@ -2836,17 +2810,21 @@ const Perf={ema:16.7, t:0, pr:Math.min(devicePixelRatio||1,2), downAt:-1e9, quie
     if(!(fd>0&&fd<250)||now<this.quietTo) return;
     this.ema+=(fd-this.ema)*0.05;
     if(now-this.t<2000) return; this.t=now;
-    const cap=Math.min(devicePixelRatio||1,2), min=Math.min(cap,0.75);
+    const cap=Math.min(devicePixelRatio||1,View.tier?View.tier.budget.pixelRatio:2), min=Math.min(cap,0.75);
     if(this.ema>26){
-      if(this.pr>min+0.01){ this.pr=Math.max(min,this.pr-0.25); this.set(); this.downAt=now; }
+      // the passes (ambient occlusion above all) cost the most and are missed least: off first,
+      // then fewer pixels, then the robot's light copy
+      if(View.post&&View.postOn){ View.postOn=false; this.downAt=now; }
+      else if(this.pr>min+0.01){ this.pr=Math.max(min,this.pr-0.25); this.set(); this.downAt=now; }
       else if(!View.lowGfx){ View.lowGfx=true; View.applyQuality(); }
     }else if(this.ema<18.5&&now-this.downAt>20000){
       // room to spare: the full robot back once (a computer that can't keep up goes back to light for good)
       if(View.lowGfx&&!this.recovered){ View.lowGfx=false; this.recovered=true; this.downAt=now; View.applyQuality(); }
       else if(this.pr<cap-0.01){ this.pr=Math.min(cap,this.pr+0.25); this.set(); }
+      else if(!View.postOn&&!this.postBack){ View.postOn=true; this.postBack=true; this.downAt=now; }
     }
   },
-  set(){ if(View.ren){ View.ren.setPixelRatio(this.pr); View.resize(); } }
+  set(){ if(View.ren){ if(View.setPixelRatio) View.setPixelRatio(this.pr); else { View.ren.setPixelRatio(this.pr); View.resize(); } } }
 };
 /* innerHTML only when the markup differs: an identical string still costs a layout */
 function setIfChanged(el,html){ if(el&&el.__html!==html){ el.__html=html; el.innerHTML=html; } }
@@ -2861,16 +2839,21 @@ function frame(now){
     acc+=dt;
     stepFixed(8);
     NetUI.tick();
-    View.update(); View.render(); updateGauges(); Pads.mirror();
+    View.setGhost(WATCH.ghost&&Sim.phase==="running"?ghostAt(WATCH.ghost,Sim.t):null, Sim.footprint);
+    Interp.apply(acc/0.02);
+    try{ View.update(); View.render(); Recorder.frame(REC_HUD); }finally{ Interp.restore(); }
+    Pads.mirror();
   });
   slowAcc+=dt;
   if(slowAcc>=0.05){ slowAcc=0; guarded(()=>{
-    Pads.meters();
+    // measured before anything below writes the page: a layout read after a write flushes the layout
+    const dsOn=shown("#dsPanel");
+    Pads.meters(); bgSync();
     // 20 times a second: only what's on screen, and only when it changed (each
     // innerHTML is a layout; a folded or hidden panel needs none)
     Graph.sample(); Graph.draw(); Graph.updateLegendValues();          // draw() skips itself off screen
-    if(shown("#dsPanel")) setIfChanged($("#dsPanel"),renderDS());
-    updateClock(); updateConfigValues(); renderMatchHud();
+    if(dsOn) setIfChanged($("#dsPanel"),renderDS());
+    updateClock(); updateConfigValues(); renderMatchHud(); renderPieces();
     const pip=$("#pip");
     if(pip&&!pip.hidden&&!pip.classList.contains("closed")){ const m=renderMech();
       if(m){ setIfChanged($("#mech"),m.svg); $("#pipDeg").textContent=m.deg+"° off level"; } }
@@ -2878,13 +2861,13 @@ function frame(now){
     const zone=Field.ok?Field.zoneAt(c.x/IN,c.y/IN):null;
     $("#vpPose").textContent=poseText(c)+(Sim.bump?` · against the ${Sim.bump}`:zone&&/LOADING|HIVE/.test(zone)?` · ${zone}`:"");
     shotTick(now);
-    const anyDown=Object.keys(Sim.pad[activePad]).some(k=>Sim.pad[activePad][k]);
-    const tp=$("#tickPill");
-    tp.textContent=Sim.phase==="running"?(anyDown?"commanding":"holding"):Sim.phase==="init"?"init positions":"idle";
     const lp=$("#loopPill");
-    lp.textContent=Sim.phase==="running"?Sim.t.toFixed(1)+" s · 50 Hz":Sim.phase; lp.className="pill"+(Sim.phase==="running"?" live":"");
+    lp.textContent=Sim.phase==="running"?Sim.t.toFixed(1)+" s · 50 Hz"+LoopTime.text():Sim.phase; lp.className="pill"+(Sim.phase==="running"?(LoopTime.slow()?" warnp":" live"):"");
+    lp.title=LoopTime.slow()?"Each 20 ms tick takes "+Math.round(LoopTime.ms)+" ms on this computer, so the robot runs slower than real time. Lighter graphics (fewer shadows) or closing other tabs helps.":"";
     $$(".bindrow").forEach(r=>r.classList.toggle("active",!!Sim.pad[activePad][r.dataset.btn]));
     MathTab.tick(); if(slowN++%5===0) Status.render(); NetUI.slow();
+    matchWatch(); Recorder.tick(); Minimap.tick();
+    TouchUI.tick(); QuickStart.tick(); Challenges.tick(now);
   }); }
   requestAnimationFrame(frame);
 }
@@ -2894,11 +2877,49 @@ function frame(now){
 // the frames are gone: a worker's timers aren't slowed that way. The mechanisms
 // the others see are posed ten times a second meanwhile.
 let bgViewT=0;
+/* How long one 20 ms tick of the team's code and the physics takes on this
+   computer, like the loop time a Control Hub reports: past ~12 ms a slow
+   machine starts to fall behind real time. */
+const LoopTime={ms:0, add(v){ if(Number.isFinite(v)) this.ms=this.ms?this.ms+(v-this.ms)*0.05:v; },
+  text(){ return this.ms>=0.05?" · loop "+(this.ms<10?this.ms.toFixed(1):Math.round(this.ms))+" ms":""; }, slow(){ return this.ms>12; }};
 /* The sim and the online match in fixed 20 ms steps, as many as are due (at most max). */
 function stepFixed(max){
-  let n=0; while(acc>=0.02&&n++<max){ Sim.tick(0.02); Online.step(0.02,Sim); acc-=0.02; }
+  let n=0; while(acc>=0.02&&n++<max){ Interp.snap(); const t0=performance.now(); Sim.tick(0.02); LoopTime.add(performance.now()-t0); Online.step(0.02,Sim); acc-=0.02; }
   if(acc>0.5) acc=0;
 }
+/* The picture between two steps. The sim moves in 20 ms steps and the screen shows 60, 120 or 144 frames a
+   second, so a frame with no step in it (and the next with two) made the robot judder. The robot and the AI
+   robots are drawn k of the way from where the last step began to where it ended, so every frame moves a
+   little, at the price of showing the robot up to one step (20 ms) late. Only while running, and never
+   across a jump. Sim state itself is only ever the real one: View.update reads the blended pose and it is
+   put back right after (restore). */
+const Interp={ ok:false, pc:{x:0,y:0,h:0}, sc:{x:0,y:0,h:0}, hit:false, bots:[], nb:0, sb:[],
+  snap(){
+    const c=Sim.chassis; this.ok=Sim.phase==="running"&&!!c;
+    if(!this.ok) return;
+    this.pc.x=c.x; this.pc.y=c.y; this.pc.h=c.h;
+    const B=Match.on?Match.bots:[]; this.nb=B.length;
+    while(this.bots.length<B.length) this.bots.push({o:null,x:0,y:0,h:0});
+    for(let i=0;i<B.length;i++){ const p=this.bots[i], b=B[i]; p.o=b; p.x=b.x; p.y=b.y; p.h=b.h; }
+  },
+  apply(k){
+    this.hit=false;
+    if(!this.ok||Sim.phase!=="running"||!(k>0)) return;
+    if(k>1) k=1;
+    const c=Sim.chassis, s=this.sc; s.x=c.x; s.y=c.y; s.h=c.h;
+    this.hit=lerpPose(c,this.pc,s,k);
+    const B=Match.on?Match.bots:[];
+    for(let i=0;i<B.length&&i<this.nb;i++){
+      const b=B[i], p=this.bots[i], q=this.sb[i]||(this.sb[i]={x:0,y:0,h:0,on:false});
+      q.on=false; if(p.o!==b) continue;
+      q.x=b.x; q.y=b.y; q.h=b.h; q.on=lerpPose(b,p,q,k);
+    }
+  },
+  restore(){
+    if(this.hit){ const c=Sim.chassis, s=this.sc; c.x=s.x; c.y=s.y; c.h=s.h; this.hit=false; }
+    const B=Match.on?Match.bots:[];
+    for(let i=0;i<B.length&&i<this.sb.length;i++){ const q=this.sb[i]; if(q&&q.on){ const b=B[i]; b.x=q.x; b.y=q.y; b.h=q.h; q.on=false; } }
+  } };
 function backgroundStep(){
   if(Online.state==="off"||performance.now()-frameAt<300) return;
   guarded(()=>{
@@ -2908,11 +2929,16 @@ function backgroundStep(){
     NetUI.tick();
   });
 }
-(()=>{
+/* The worker's 20 ms timer runs only while an online match is on (it wakes the page 50 times a second
+   to find nothing to do otherwise); the slow loop starts and stops it. */
+let BG_TIMER=null;
+function bgSync(){
+  const want=Online.state!=="off";
+  if(want===!!BG_TIMER) return;
+  if(!want){ if(BG_TIMER.terminate) BG_TIMER.terminate(); else clearInterval(BG_TIMER); BG_TIMER=null; return; }
   try{ const w=new Worker(URL.createObjectURL(new Blob(["setInterval(function(){postMessage(0)},20)"],{type:"text/javascript"})));
-    w.onmessage=backgroundStep; return; }catch(e){}
-  setInterval(backgroundStep,200);
-})();
+    w.onmessage=backgroundStep; BG_TIMER=w; }catch(e){ BG_TIMER=setInterval(backgroundStep,200); }
+}
 
 /* ============================================================
    PRO — one status light, the walkthrough, .ftcsim workspaces,
@@ -2923,9 +2949,17 @@ function backgroundStep(){
 /* ---------- the one light -------------------------------- */
 const Status={
   cur:null,
+  /* whether the front is set across the wheels: measuring the wheels is ~10 ms, so once per robot and front, not 4 times a second */
+  across(){
+    if(!CAD) return false;
+    const n=(CAD.solids||[]).length, c=this.ac;
+    if(c&&c.cad===CAD&&c.front===OPTS.front&&c.n===n) return c.v;
+    const v=!!frontAcrossWheels(CAD,OPTS.front);
+    this.ac={cad:CAD,front:OPTS.front,n,v};
+    return v;
+  },
   compute(){
-    const rt={ stalled:[], missing:[], blocked:!!(Sim&&Sim.blocked), slipping:!!(Sim&&Sim.slipping),
-               frontAcross:!!(CAD&&frontAcrossWheels(CAD,OPTS.front)) };
+    const rt={ stalled:[], missing:[], blocked:!!(Sim&&Sim.blocked), slipping:!!(Sim&&Sim.slipping), frontAcross:this.across() };
     return statusOf(FINDINGS,rt);
   },
   render(){
@@ -3043,6 +3077,7 @@ const Session={
     const text=packSession(sessionFromBench({
       cad:CAD, code:CODE, java:e?e.source:"", opName:e?e.file:"", map:MAP, opts:OPTS,
       chassis:Sim.chassis, alliance:Shots.alliance, rig:exportRig(),
+      shots:{seed:Shots.seed, spreadScale:Shots.spreadScale, fired:Shots.fired, scored:Shots.scored, cfg:Shots.cfg},
       savedISO:new Date().toISOString(),
     }));
     download(this.name(),text,"application/json");
@@ -3053,6 +3088,7 @@ const Session={
       const r=unpackSession(text);
       if(!r.ok){ this.toast("that .ftcsim wouldn't open — "+r.error); return; }
       this.apply(r.session,file.name);
+      if(r.session.cad) RobotStore.keep({kind:"session", name:file.name, text});
     },m=>this.toast(m));
   },
   apply(s,fileName){
@@ -3064,18 +3100,29 @@ const Session={
         JOINTS.spec=JOINTS.report=JOINTS.devices=null; JOINTS.name=JOINTS.step=null;
         MATES.asm=MATES.features=MATES.name=MATES.report=null;
         loadCAD(cad,(cad.name||fileName)+" · from workspace","ok");
+        // the rig panel as it was saved (devices, hardware, drive base, setup), but not its
+        // joints: the workspace's own CAD carries those, and more exactly
+        if(s.rig&&applyRig(Object.assign({},s.rig,{joints:[]}))) saveRig();
       }
       // the file name if the workspace kept one, else what the OpMode calls itself
       if(s.java) addOpModeFromText(s.opName||((s.code&&s.code.opmode)||"Workspace").replace(/[^\w.-]+/g,"")+".java",s.java);
-      if(s.map&&Object.keys(s.map).length) { MAP=s.map; rebuild(); }
-      if(s.opts){ for(const k of ["payloadKg","duty","trust","front","baseModel","shooterModel","mu","physics"]) if(s.opts[k]!==undefined) OPTS[k]=s.opts[k]; syncOptionControls(); Physics.sync(); }
+      // mu and physics are null in a workspace that didn't say: the bench keeps its own
+      if(s.opts){ for(const k of ["payloadKg","duty","trust","front","baseModel","shooterModel","mu","physics"]) if(s.opts[k]!=null) OPTS[k]=s.opts[k]; syncOptionControls(); }
+      if(s.map&&Object.keys(s.map).length) MAP=s.map;
+      // the shooter as it was set up
+      if(s.shots){
+        const S=s.shots; if(S.cfg) Shots.cfg=Object.assign(Shots.defaults(),S.cfg);
+        Shots.seed=S.seed; Shots.spreadScale=S.spreadScale; Shots.fired=S.fired; Shots.scored=S.scored;
+        shotChanged();
+      }
+      rebuild(); Physics.sync();                       // the simulation on all of the above
       if(s.alliance) setAlliance(s.alliance,false);
       if(s.chassis&&isFinite(s.chassis.x)){
         Sim.chassis={x:s.chassis.x,y:s.chassis.y,h:s.chassis.h||0};
         if(Field.ok&&Sim.footprint) Field.collide(Sim.chassis,Sim.footprint,Sim.obstacles);
         OPTS.startPose=Object.assign({},Sim.chassis);
       }
-      this.toast("opened "+(fileName||"workspace")+(s.saved?" · saved "+String(s.saved).slice(0,10):""));
+      this.toast("opened "+(fileName||"workspace")+(s.savedISO?" · saved "+String(s.savedISO).slice(0,10):""));
     }catch(e){ this.toast("that workspace didn't load — "+e.message); }
   },
   toast(msg){
@@ -3146,6 +3193,7 @@ const Physics={
   },
   sync(){
     $$("#physSeg button").forEach(b=>b.classList.toggle("on",b.dataset.phys===(OPTS.physics||"rigid")));
+    $$("#mechSeg button").forEach(b=>b.classList.toggle("on",b.dataset.mech===(OPTS.mechanisms==="jolt"?"jolt":"posed")));
     const mu=OPTS.mu==null?0.9:OPTS.mu;
     $("#muSlider").value=mu; $("#muVal").textContent=mu.toFixed(2);
     this.recompute();
@@ -3165,7 +3213,33 @@ const Physics={
       (p.confidence!=null&&!p.assumed)?`<span><i>mass confidence ${Math.round(p.confidence*100)} %</i></span>`:"",
     ].join(""));
   },
+  /* Jolt Physics for the mechanisms (src/joltmech.js): loaded the first time
+     it's chosen, from this site's own copy, else jsDelivr */
+  async loadJolt(){
+    if(typeof JOLT!=="undefined"&&JOLT) return JOLT;
+    if(!this.joltLoading) this.joltLoading=(async()=>{
+      const urls=[typeof SIMBENCH_VENDOR!=="undefined"&&SIMBENCH_VENDOR&&SIMBENCH_VENDOR.jolt, JOLT_LIB.self, JOLT_LIB.cdn].filter(Boolean);
+      let last=null;
+      for(const u of urls){ try{ const mod=await import(u); JOLT=await mod.default(); return JOLT; }catch(e){ last=e; } }
+      throw last||new Error("no copy of Jolt Physics could be loaded");
+    })().catch(e=>{ this.joltLoading=null; throw e; });
+    return this.joltLoading;
+  },
+  async mechanisms(mode){
+    OPTS.mechanisms=mode==="jolt"?"jolt":"posed"; store.set("ftcbench.mechanisms",OPTS.mechanisms); this.sync();
+    const note=$("#mechNote");
+    if(OPTS.mechanisms==="jolt"){
+      if(note) note.textContent="Loading Jolt Physics …";
+      try{ await this.loadJolt(); }
+      catch(e){ OPTS.mechanisms="posed"; this.sync(); if(note) note.textContent="Jolt Physics couldn't load ("+String(e&&e.message||e)+"); the mechanisms stay posed."; return; }
+    }
+    reloadSim();
+    if(note) note.textContent=OPTS.mechanisms==="jolt"
+      ?(Sim.mechWorld?"Solved: Jolt Physics moves "+Sim.mechWorld.joints.size+" joint"+(Sim.mechWorld.joints.size===1?"":"s")+" with the CAD's masses, the motors' curves, the joints' limits and their gears and linkages."+(Sim.mechWorld.notes.length?" "+Sim.mechWorld.notes.join(" "):""):"Solved: Jolt Physics is ready; it runs once a robot and an OpMode are loaded.")
+      :"Posed: each joint goes where its motor's turns put it. Solved: Jolt Physics works out what the motors can actually do against gravity, the joints' limits, gears and linkages.";
+  },
   wire(){
+    $("#mechSeg").addEventListener("click",e=>{ const b=e.target.closest("button"); if(b) this.mechanisms(b.dataset.mech); });
     $("#physSeg").addEventListener("click",e=>{ const b=e.target.closest("button"); if(!b) return;
       OPTS.physics=b.dataset.phys; store.set("ftcbench.physics",OPTS.physics); this.sync(); reloadSim(); });
     $("#muSlider").addEventListener("input",e=>{ OPTS.mu=+e.target.value; $("#muVal").textContent=OPTS.mu.toFixed(2);
@@ -3242,11 +3316,15 @@ const MathTab={
 /* ---------- Pro boot ------------------------------------- */
 function proBoot(){
   OPTS.physics=store.get("ftcbench.physics","rigid")==="kinematic"?"kinematic":"rigid";
+  OPTS.mechanisms=store.get("ftcbench.mechanisms","posed")==="jolt"?"jolt":"posed";
+  if(OPTS.mechanisms==="jolt") setTimeout(()=>Physics.mechanisms("jolt"),0);   // loads Jolt, then reloads the sim with it
   OPTS.mu=+store.get("ftcbench.mu","0.9")||0.9;
   Status.wire(); Tour.wire(); GH.wire(); Physics.wire(); MathTab.wire();
+  CalUI.wire(); McUI.wire();                                // calibration and Monte Carlo panels (src/mcui.js)
   $("#sessionBtn").addEventListener("click",()=>Menu.open());
   $("#saveSession").addEventListener("click",()=>{ Menu.open(false); Session.save(); });
   $("#openSession").addEventListener("click",()=>{ Menu.open(false); $("#sessionFile").click(); });
+  $("#forgetRobot").addEventListener("click",()=>{ Menu.open(false); RobotStore.clear().then(()=>location.reload()); });
   $("#sessionFile").addEventListener("change",e=>{ const f=e.target.files[0]; if(f) Session.take(f); e.target.value=""; });
   addEventListener("keydown",e=>{
     if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="s"){ e.preventDefault(); Session.save(); }
@@ -3266,8 +3344,8 @@ function proBoot(){
 /* ============================================================
    BOOT
    ============================================================ */
-(function boot(){
-  setTheme(store.get("ftcbench.theme","dark")==="light"?"light":"dark");
+function boot(){
+  setTheme(document.documentElement.getAttribute("data-theme")==="dark"?"dark":"light");
   $("#themeBtn").addEventListener("click",()=>setTheme(currentTheme()==="dark"?"light":"dark"));
   // the BIOBUZZ field and shot physics, from the vendored Shot Sim
   Field.init(window.ShotEngine,window.SHOT_DATA);
@@ -3276,6 +3354,8 @@ function proBoot(){
   Shots.alliance=View.alliance=al==="blue"?"blue":"red";
   ShotUI.arc=store.get("ftcbench.arc","1")!=="0"; $("#arcToggle").checked=ShotUI.arc;
   View.init($("#viewport"));
+  Perf.pr=Math.min(devicePixelRatio||1,View.tier.budget.pixelRatio);
+  OPTS.substeps=View.tier.budget.substeps;          // the solver's substeps per 20 ms tick, by tier
   View.setView("iso");
   initTabs(); initCollapsibles(); initRails();
   Editor.init(); Pads.init();
@@ -3296,6 +3376,10 @@ function proBoot(){
   sample.solids=sampleSolids();
   classifyMechs(sample.mechs);
   loadCAD(sample,"sample: fulll.step (measured)","ok");
+  // the sample is only what the bench runs on until a robot is in: the team's own from last
+  // time, else the demo. Drawn meanwhile, it was a robot nobody asked for (?robot=sample asks)
+  const wantSample=new URLSearchParams(location.search).get("robot")==="sample";
+  if(!wantSample){ if(View.chassisG) View.chassisG.visible=false; $("#cadStatus").textContent="getting your robot …"; $("#vpTitle").textContent="getting your robot …"; }
 
   const saved=store.get("ftcbench.current",null);
   selectOpMode(entry(saved)?saved:"sample-claw");
@@ -3315,14 +3399,24 @@ function proBoot(){
   addEventListener("keydown",e=>{ if(e.key==="Escape"&&!mm.hidden) openMatch(false); });
   $("#matchOn").addEventListener("change",matchDot); matchDot();
   $("#matchSkill").value=store.get("ftcbench.matchSkill","typical");
-  $("#matchOn").addEventListener("change",e=>{ store.set("ftcbench.match",e.target.checked?"1":"0"); if(Online.inMatch()) return; if(Sim.phase!=="running") resetMatch(); else { Match.on=e.target.checked; if(!Match.on) resetMatch(); } });
+  $("#matchOn").addEventListener("change",e=>{ store.set("ftcbench.match",e.target.checked?"1":"0"); if(Online.inMatch()) return; if(Sim.phase!=="running") resetMatch(); else if(e.target.checked) Match.on=true; else matchAiOffNow(); });
+  // the game pieces without the AI robots (src/payload.js): on or off at once, a match with AI robots left alone
+  $("#piecesOn").checked=store.get("ftcbench.pieces","1")==="1";
+  $("#piecesOn").addEventListener("change",e=>{ store.set("ftcbench.pieces",e.target.checked?"1":"0"); if(Online.inMatch()||Match.live()) return;
+    if(Sim.phase!=="running"){ resetMatch(); return; }
+    // mid-run: off takes the loose pieces away at once; on waits for the next INIT (a fresh field over the
+    // one in play would add to what the robot already holds)
+    if(!e.target.checked&&Match.solo){ Match.on=false; Match.solo=false; Match.floor=[]; Match.flying=[]; Match.events=[]; renderMatchHud(true); }
+  });
   $("#matchSkill").addEventListener("change",e=>{ store.set("ftcbench.matchSkill",e.target.value); if(Online.inMatch()) return; if(Sim.phase!=="running") resetMatch(); else Match.skill=e.target.value; });
   $("#practice").addEventListener("change",e=>{ store.set("ftcbench.practice",e.target.checked?"1":"0"); updateClock(); });
-  NetUI.init(); SetupUI.init(); OnshapeHelp.init();
+  NetUI.init(); SetupUI.init(); ImportFlow.init(); Recorder.init(); Sounds.init(); Results.init(); Minimap.init(); PathEdit.init(); KeyBinds.init();
+  // phone controls, the first-visit card, the challenge cards (src/touch.js, src/challenges.js)
+  TouchUI.init(); Challenges.init(); QuickStart.init();
 
   // code
   $("#addOpMode").addEventListener("click",()=>$("#codeFile").click());
-  $("#codeFile").addEventListener("change",e=>{ [].forEach.call(e.target.files,takeCode); e.target.value=""; });
+  $("#codeFile").addEventListener("change",e=>{ [].forEach.call(e.target.files,f=>/\.zip$/i.test(f.name)?ImportFlow.takeZip(f):takeCode(f)); e.target.value=""; });
   $("#reparse").addEventListener("click",()=>{
     const e=entry(CURRENT_ID); if(!e) return;
     e.source=$("#srcbox").value; parseEntry(e);
@@ -3331,8 +3425,8 @@ function proBoot(){
   });
 
   // hardware
-  // the robot: a STEP, an Onshape .onshape.json, or a URDF with its meshes
-  wireDrop($("#cadDrop"),$("#cadFile"),f=>/\.(urdf|stl|json)$/i.test(f.name)?routeFile(f):takeCAD(f),true);
+  // the robot: an export zip, a STEP, or a saved Onshape read
+  wireDrop($("#cadDrop"),$("#cadFile"),f=>/\.(step|stp)$/i.test(f.name)?takeCAD(f):routeFile(f),true);
   wireDrop($("#cfgDrop"),$("#cfgFile"),takeRobotConfig);
   wireMates();
   wirePageDrop();
@@ -3345,26 +3439,16 @@ function proBoot(){
     OPTS.trust=b.dataset.trust; syncOptionControls(); rebuild(); saveRig(); });
 
   // rig
-  $("#turretSlider").addEventListener("input",e=>{ View.turretScale=+e.target.value/100; $("#turretVal").textContent=e.target.value+" %"; View.load(CAD); saveRig(); });
   $("#addJoint").addEventListener("click",addManualJoint);
-  $("#rigCopy").addEventListener("click",()=>{
-    const txt=JSON.stringify(exportRig(),null,1); $("#rigJson").value=txt;
-    const done=ok=>{ const b=$("#rigCopy"); b.textContent=ok?"Copied":"Select & copy"; setTimeout(()=>{ b.textContent="Copy"; },1400); };
-    if(navigator.clipboard&&navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(()=>done(true),()=>{ $("#rigJson").select(); done(false); });
-    else { $("#rigJson").select(); done(false); }
-  });
-  $("#rigApply").addEventListener("click",()=>{
-    const b=$("#rigApply");
-    try{
-      const r=JSON.parse($("#rigJson").value);
-      if(r.format!=="ftc-sim-bench.rig") throw new Error("not a rig document");
-      applyRig(r); applyDeviceMemory(); View.load(CAD); rebuild(); saveRig();
-      b.textContent="Applied"; setTimeout(()=>{ b.textContent="Apply"; },1400);
-    }catch(err){ b.textContent="Not a rig"; setTimeout(()=>{ b.textContent="Apply"; },1800); }
-  });
   $("#rigReset").addEventListener("click",()=>{
     store.del(rigKey()); HW_USER={}; RIG_DEVICES={};
-    if(MATES.report){ applyMates(); return; }   // the mates are the rig
+    // the mates are the rig: a link robot is read again; a zip robot's bytes are gone, so its hand edits are dropped and it is rebuilt
+    if(MATES.report){
+      if(LAST_STEP&&LAST_STEP.onshape){ parseAndLoad(); return; }
+      for(const m of CAD.mechs){ m.leverOverride=null; m.label=null; }
+      CAD.mechs=CAD.mechs.filter(m=>!m.manual);
+      classifyJoints(CAD); if(CODE) mapDevices(); rigChanged(); return;
+    }
     if(JOINTS.report){ applyJoints(); return; } // and so is a joint spec
     for(const m of CAD.mechs){ m.kind=m.hasActuator===false?"fixed":null; m.leverOverride=null; m.label=null; }
     CAD.mechs=CAD.mechs.filter(m=>!m.manual);
@@ -3381,7 +3465,7 @@ function proBoot(){
   $("#viewSeg").addEventListener("click",e=>{ const b=e.target.closest("button"); if(!b) return;
     $$("#viewSeg button").forEach(x=>x.classList.toggle("on",x===b));
     if(b.dataset.v==="cad") CadView.enter(); else { CadView.exit(); View.setView(b.dataset.v); } });
-  $("#resetPose").addEventListener("click",placeAtStart);
+  $("#resetPose").addEventListener("click",placeAtStart); wireStartSel(); wireGhost();
   wireShotTab();
   $("#padSeg").addEventListener("click",e=>{ const b=e.target.closest("button"); if(b) setActivePad(+b.dataset.pad); });
 
@@ -3410,7 +3494,7 @@ function proBoot(){
       OPTS.startPose=Object.assign({},Sim.chassis);
     }
     const v=q.get("view");
-    if(v&&/^(iso|front|side|top|field|cad)$/.test(v)){ if(v==="cad") CadView.enter(); else View.setView(v); $$("#viewSeg button").forEach(x=>x.classList.toggle("on",x.dataset.v===v)); }
+    if(v&&/^(iso|front|side|top|field|chase|pov|cad)$/.test(v)){ if(v==="cad") CadView.enter(); else View.setView(v); $$("#viewSeg button").forEach(x=>x.classList.toggle("on",x.dataset.v===v)); }
     ["left","right"].forEach(side=>{ const t=TAB_RENAMED[q.get(side)]||q.get(side), nav=$(`.tabs[data-tabs="${side}"]`);
       if(t&&nav&&nav.querySelector(`button[data-tab="${t}"]`)) selectTab(nav,t); });
     if(q.get("start")==="1") dsStart();
@@ -3421,14 +3505,21 @@ function proBoot(){
   RAILS_READY=true;
   requestAnimationFrame(frame);
   try{
-    if(/^#join=/i.test(location.hash)) NetUI.invited(location.hash.slice(6));
-    if(/^#onshape=/.test(location.hash)) takeOnshapeHash();
-    else if(/^#onshape-wait/.test(location.hash)) waitForOnshape();
-    else{
-      // back from signing in to Onshape in this tab (no pop-up allowed): carry on at step 3
-      const back=/^#onshape-(signed-in|signin-failed)/.exec(location.hash);
-      if(back){ try{ history.replaceState(null,"",location.pathname+location.search); }catch(e){} OnshapeHelp.signedIn(back[1]==="signed-in",""); }
-      if(new URLSearchParams(location.search).get("robot")!=="sample") loadDefaultRobot();
-    }
+    { const iv=Online.parseInvite(location.hash); if(iv) NetUI.invited(iv.code,iv.watch); }
+    if(/^#(p\d+|path)=/i.test(location.hash)&&PathEdit.fromHash) setTimeout(()=>PathEdit.fromHash(),800);   // a shared path, once the robot is in
+    // back from signing in to Onshape in this tab (no pop-up allowed): the card carries on with the pasted address
+    const back=/^#onshape-(signed-in|signin-failed)/.exec(location.hash);
+    if(back){ try{ history.replaceState(null,"",location.pathname+location.search); }catch(e){} ImportFlow.signedIn(back[1]==="signed-in",""); }
+    // the team's own robot from last time; else the demo (?robot=demo asks for the demo anyway)
+    const which=new URLSearchParams(location.search).get("robot");
+    // opened from inside Onshape, or by a link that carries the assembly (onshapeLaunch): it is read with
+    // nothing to paste, once the robot from last time is back (the one that lands last is the one on the field)
+    const launch=onshapeLaunch(location.search);
+    if(launch){ try{ history.replaceState(null,"",location.pathname+onshapeLaunchStrip(location.search)+location.hash); }catch(e){} }
+    if(which!=="sample"||launch) (which==="demo"||which==="sample"?Promise.resolve(false):restoreRobot().catch(()=>false)).then(back=>{
+      if(launch) return ImportFlow.launch(launch);
+      if(!back&&!LAST_STEP) loadDefaultRobot(); });
   }catch(e){}
-})();
+}
+// three.js arrives as an ES module (tools/build.mjs): boot once it has
+if(typeof THREE!=="undefined"&&THREE.WebGLRenderer) boot(); else addEventListener("three-ready",boot,{once:true});
